@@ -62,3 +62,41 @@ def test_complex_pattern_penalised_more_than_simple():
     simple = GaussianPattern(mu=np.zeros(2), sigma=np.eye(2))
     complex_ = GaussianPattern(mu=np.zeros(16), sigma=np.eye(16))
     assert ev.evaluate(complex_) < ev.evaluate(simple)
+
+
+from hpm.config import AgentConfig
+from hpm.agents.agent import Agent
+
+
+def test_agent_unaffected_when_delta_cost_zero():
+    """delta_cost=0.0 (default): e_cost_mean present but contributes nothing to weights."""
+    config = AgentConfig(agent_id="test", feature_dim=4, delta_cost=0.0)
+    agent = Agent(config)
+    result = agent.step(np.zeros(4))
+    assert 'e_cost_mean' in result
+    assert result['e_cost_mean'] == pytest.approx(0.0)
+
+
+def test_agent_step_includes_e_cost_mean():
+    """Agent with delta_cost > 0 returns negative e_cost_mean under high pressure."""
+    config = AgentConfig(agent_id="test", feature_dim=4, delta_cost=1.0, lambda_cost=1.0)
+    agent = Agent(config)
+    _set_pressure(agent.resource_cost, mem_percent=80.0, cpu_percent=80.0)
+    result = agent.step(np.zeros(4))
+    assert 'e_cost_mean' in result
+    assert result['e_cost_mean'] < 0.0
+
+
+def test_high_pressure_reduces_total_vs_no_pressure():
+    """Under high resource pressure with delta_cost > 0, e_cost_mean is more negative than under low pressure."""
+    config = AgentConfig(agent_id="test", feature_dim=4, delta_cost=2.0, lambda_cost=1.0)
+
+    agent_high = Agent(config)
+    _set_pressure(agent_high.resource_cost, mem_percent=95.0, cpu_percent=95.0)
+    result_high = agent_high.step(np.zeros(4))
+
+    agent_low = Agent(config)
+    _set_pressure(agent_low.resource_cost, mem_percent=5.0, cpu_percent=5.0)
+    result_low = agent_low.step(np.zeros(4))
+
+    assert result_high['e_cost_mean'] < result_low['e_cost_mean']

@@ -4,6 +4,7 @@ from ..patterns.gaussian import GaussianPattern
 from ..evaluators.epistemic import EpistemicEvaluator
 from ..evaluators.affective import AffectiveEvaluator
 from ..evaluators.social import SocialEvaluator
+from ..evaluators.resource_cost import ResourceCostEvaluator
 from ..dynamics.meta_pattern_rule import MetaPatternRule
 from ..store.memory import InMemoryStore
 
@@ -43,6 +44,11 @@ class Agent:
             alpha_r=config.alpha_r,
         )
         self.social = SocialEvaluator(rho=config.rho)
+        self.resource_cost = ResourceCostEvaluator(
+            lambda_cost=config.lambda_cost,
+            w_mem=config.w_mem,
+            w_cpu=config.w_cpu,
+        )
         self.dynamics = MetaPatternRule(
             eta=config.eta,
             beta_c=config.beta_c,
@@ -105,9 +111,16 @@ class Agent:
 
         e_socs = self.social.evaluate_all(freq_totals)
 
+        # Guard: only compute e_costs if delta_cost is non-zero (avoids psutil import for default agents)
+        if self.config.delta_cost != 0.0:
+            e_costs = [self.resource_cost.evaluate(p) for p in patterns]
+        else:
+            e_costs = [0.0] * len(patterns)
+
         totals = np.array([
             epi + self.config.beta_aff * e_aff + self.config.gamma_soc * e_soc
-            for epi, e_aff, e_soc in zip(epistemic_accs, e_affs, e_socs)
+            + self.config.delta_cost * e_cost
+            for epi, e_aff, e_soc, e_cost in zip(epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
         new_weights = self.dynamics.step(patterns, weights, totals)
@@ -134,4 +147,5 @@ class Agent:
             'max_weight': float(new_weights.max()),
             'e_soc_mean': float(np.mean(e_socs)) if len(e_socs) > 0 else 0.0,
             'ext_field_freq': float(np.mean(ext_freqs)),
+            'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
         }

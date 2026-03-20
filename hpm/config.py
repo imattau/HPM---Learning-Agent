@@ -23,3 +23,8 @@ class AgentConfig:
     alpha_int: float = 0.8       # internal/external field blend (1.0 = agents only, §3.8)
     # Pattern initialisation
     init_sigma: float = 1.0      # initial covariance scale
+    # Resource cost evaluator
+    delta_cost: float = 0.0     # weight of E_cost in J_i (0 = off, backward compatible)
+    lambda_cost: float = 1.0    # penalty scale inside ResourceCostEvaluator
+    w_mem: float = 0.5          # memory weight in pressure scalar
+    w_cpu: float = 0.5          # CPU weight in pressure scalar
