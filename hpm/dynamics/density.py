@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class PatternDensity:
     """
     Computes pattern density D(h_i) in [0, 1].
@@ -46,9 +49,9 @@ class PatternDensity:
         loss_norm = loss / (1.0 + loss)
         saturation = (1.0 - loss_norm) * capacity
 
-        D = (
+        density = (
             self.alpha_conn * structural
             + self.alpha_sat * saturation
             + self.alpha_amp * field_freq
         )
-        return float(max(0.0, min(1.0, D)))
+        return float(max(0.0, min(1.0, density)))
