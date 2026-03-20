@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-20
 **Author:** Matt Thomson
-**Status:** Draft v2 (post spec-review)
+**Status:** Draft v3 (added PatternStore + ExternalSubstrate)
 
 ---
 
@@ -21,29 +21,33 @@ This document specifies the architecture for a multi-agent learning system groun
 The system has five layers:
 
 ```
-+-----------------------------------------------------+
-|                   Domain Plugin                      |
-|          (Concept Learning, Seq. Prediction, RL)    |
-|               generates x_{1:T} streams             |
-+----------------------+------------------------------+
-                       |
-+----------------------v------------------------------+
-|                    Agent                             |
-|   PatternLibrary --> EvaluatorPipeline --> Dynamics  |
-|   (pattern substrate)  (selectors)    (Meta Pattern  |
-|                                           Rule)      |
-+----------------------+------------------------------+
-                       |
-+----------------------v------------------------------+
-|                  Pattern Field                       |
-|    (shared social/env structure across agents)       |
-|    Modes: Observational | Communicative | Competitive|
-+----------------------+------------------------------+
-                       |
-+----------------------v------------------------------+
-|              Metrics & Instrumentation               |
-|         (tracks HPM predictions 9.1, 9.4, 9.5)     |
-+-----------------------------------------------------+
++---------------------------+   +---------------------------+
+|     External Substrate    |   |       Domain Plugin        |
+|  (internet, web, APIs)    |   | (Concept Learning, RL...) |
+|  pattern field + source   |   |  generates x_{1:T} streams|
++-------------+-------------+   +-------------+-------------+
+              |                               |
+              +---------------+---------------+
+                              |
++-----------------------------v-----------------------------+
+|                           Agent                           |
+|   PatternLibrary --> EvaluatorPipeline --> Dynamics       |
+|         |          (selectors)        (Meta Pattern Rule) |
+|         v                                                 |
+|   PatternStore  (in-memory | SQLite | PostgreSQL)         |
++-----------------------------+-----------------------------+
+                              |
++-----------------------------v-----------------------------+
+|                       Pattern Field                       |
+|       (shared social/env structure across agents)         |
+|   Modes: Observational | Communicative | Competitive      |
+|   Sources: agent population + ExternalSubstrate           |
++-----------------------------+-----------------------------+
+                              |
++-----------------------------v-----------------------------+
+|                 Metrics & Instrumentation                 |
+|            (tracks HPM predictions 9.1, 9.4, 9.5)       |
++-----------------------------------------------------------+
 ```
 
 **Package structure:**
@@ -55,6 +59,8 @@ hpm/
   field/        # Pattern field (D6), interaction modes
   agents/       # Single agent + multi-agent orchestrator
   domains/      # Domain interface + concept learning
+  store/        # PatternStore interface + backends (memory, SQLite, PostgreSQL)
+  substrate/    # ExternalSubstrate interface + web/API implementations
   metrics/      # HPM prediction validators
 ```
 
@@ -233,6 +239,80 @@ Replaces `Total_i(t)` when hierarchical patterns are active (Phase 3+).
 | Insight efficacy weight | `alpha_eff` | Weight of performance in I(h*) |
 | Entry weight scale | `kappa_0` | Initial weight of recombined pattern (E5) |
 
+### 3.7 PatternStore — Persistent Pattern Substrate
+
+The paper (§2.5.1) treats external symbolic systems as legitimate pattern substrates. A database-backed PatternStore implements this: patterns are not only held in working memory but persist across sessions, accumulate over time, and can be shared across agents.
+
+**Interface:**
+
+```python
+class PatternStore(Protocol):
+    def save(self, pattern: Pattern, weight: float, agent_id: str) -> None
+    def load(self, pattern_id: str) -> tuple[Pattern, float]          # (pattern, weight)
+    def query(self, agent_id: str) -> list[tuple[Pattern, float]]     # all patterns for agent
+    def query_all(self) -> list[tuple[Pattern, float, str]]           # all agents (for field)
+    def delete(self, pattern_id: str) -> None
+    def update_weight(self, pattern_id: str, weight: float) -> None
+```
+
+Patterns must implement serialisation for persistence:
+```python
+class Pattern(Protocol):
+    ...
+    def to_dict(self) -> dict        # serialise to JSON-compatible dict
+    @classmethod
+    def from_dict(cls, d: dict) -> 'Pattern'   # deserialise
+```
+
+**Backends (selectable at runtime):**
+
+| Backend | Use case |
+|---------|----------|
+| `InMemoryStore` | Default; ephemeral; fast for experiments |
+| `SQLiteStore` | Single-machine persistence; no infrastructure required |
+| `PostgreSQLStore` | Multi-agent production deployments; concurrent writes |
+
+**PatternLibrary** uses `PatternStore` as its backing store. On agent initialisation, it loads existing patterns from the store (resuming prior learning). On each dynamics step, updated weights are flushed to the store.
+
+**Cross-agent pattern pool:** In communicative and observational modes, a shared `PatternStore` instance acts as a communal substrate — agents can query patterns learned by other agents in prior sessions, not just the current run. This models the paper's notion of patterns persisting in external substrates beyond any individual learner.
+
+### 3.8 ExternalSubstrate — Internet and External Sources
+
+Maps directly to §2.5.1: "external symbolic systems such as spoken and written language, diagrams, maps, mathematical notation and code" and "artefacts and tools, from notebooks and smartphones to software systems."
+
+The ExternalSubstrate plays two roles:
+
+1. **As a Domain plugin** — fetches real-world content as observation streams `x_{1:T}`, grounding agent learning in actual external structure rather than synthetic data
+2. **As a PatternField component** — the internet acts as a social pattern field: how frequently a pattern appears in external content influences its `freq_i(t)` score and therefore its social evaluator signal
+
+**Interface:**
+
+```python
+class ExternalSubstrate(Protocol):
+    def fetch(self, query: str) -> list[np.ndarray]    # retrieve observations matching query
+    def field_frequency(self, pattern: Pattern) -> float  # how common is this pattern externally?
+    def stream(self) -> Iterator[np.ndarray]            # continuous observation stream
+```
+
+**Implementations:**
+
+| Implementation | Source | Use |
+|----------------|--------|-----|
+| `WebSearchSubstrate` | Search API (e.g. SerpAPI, Brave) | Fetch concept examples from web |
+| `WikipediaSubstrate` | Wikipedia API | Structured knowledge as pattern source |
+| `RSSSubstrate` | RSS/Atom feeds | Streaming real-world observation source |
+| `LocalFileSubstrate` | Local files/dirs | Offline external substrate for testing |
+
+**Field frequency computation:** `field_frequency(pattern)` queries the external substrate for content matching the pattern's generative model and returns a normalised frequency score. This augments the agent-population-based `freq_i(t)` with an external signal:
+
+```
+freq_i_total(t) = alpha_int * freq_i_agents(t) + (1 - alpha_int) * field_frequency(h_i)
+```
+
+Where `alpha_int` (internal weight, default 0.8) controls the balance between social learning from agents vs external pattern availability. Setting `alpha_int = 1.0` disables external substrate influence on the field.
+
+**Rate limiting and caching:** All external substrate implementations must implement a response cache and configurable rate limits to prevent excessive API calls during training loops.
+
 ---
 
 ## 4. Concept Learning Domain
@@ -316,36 +396,44 @@ All metrics emitted as structured JSON logs per timestep.
 
 ## 7. Data Flow — Phase 1/2 (Single Timestep)
 
-1. Domain emits `x_t`
+1. Domain (or ExternalSubstrate stream) emits `x_t`
 2. Each pattern `h_i` computes `ell_i(t) = -log p(x_t | h_i)`
 3. EMA updates `L_i(t)` → `A_i(t) = -L_i(t)`
 4. AffectiveEvaluator computes `E_aff_i(t)` from `Delta_A_i(t)` and `description_length(h_i)`
-5. PatternField provides `freq_i(t)` (0 if single-agent) → SocialEvaluator computes `E_soc_i(t)`
+5. PatternField provides `freq_i_total(t)` = blend of agent population + ExternalSubstrate frequencies (0 if single-agent, no external substrate) → SocialEvaluator computes `E_soc_i(t)`
 6. `J_i(t) = beta_aff * E_aff_i(t) + gamma_soc * E_soc_i(t)`
 7. `Total_i(t) = A_i(t) + J_i(t)`
 8. Meta Pattern Rule updates `w_i(t+1)` (D5)
 9. Floor check: if all `w_i < epsilon`, retain highest-scoring pattern at weight 1.0
 10. Prune patterns with `w_i < epsilon`
-11. PatternField updated (broadcast UUID + weight per pattern per agent)
-12. Metrics recorded (JSON)
+11. PatternStore flushed with updated weights
+12. PatternField updated (broadcast UUID + weight per pattern per agent)
+13. Metrics recorded (JSON)
 
 ---
 
 ## 8. Implementation Phases
 
-**Phase 1 — Single agent, concept learning:**
+**Phase 1 — Single agent, concept learning, in-memory:**
 - GaussianPattern, EpistemicEvaluator, AffectiveEvaluator
 - Meta Pattern Rule dynamics (no recombination)
 - Concept learning domain with deep/surface features and transfer probes
+- InMemoryStore (PatternStore default)
 - Metrics for §9.1 and §9.4
 
-**Phase 2 — Multi-agent, pattern field:**
+**Phase 2 — Persistence + external substrate:**
+- SQLiteStore backend for PatternStore (cross-session pattern accumulation)
+- LocalFileSubstrate for offline external substrate testing
+- WebSearchSubstrate or WikipediaSubstrate for live external pattern field
+- `alpha_int` blending of agent vs external field frequencies
+
+**Phase 3 — Multi-agent, pattern field:**
 - SocialEvaluator + PatternField (observational mode first)
-- Multi-agent orchestrator
+- Multi-agent orchestrator with shared PatternStore (PostgreSQL for concurrent writes)
 - Metrics for §9.5
 - Communicative and competitive modes
 
-**Phase 3 — Recombination + hierarchical patterns:**
+**Phase 4 — Recombination + hierarchical patterns:**
 - Full recombination operator (Appendix E) with defined trigger conditions
 - Hierarchical total score (D7)
 - Pattern density and stability (A8)
