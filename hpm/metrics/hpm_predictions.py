@@ -61,3 +61,25 @@ def curiosity_complexity_profile(
         diffs = np.abs(np.diff(accuracies))
         profile[complexity] = float(np.mean(diffs)) if len(diffs) > 0 else 0.0
     return profile
+
+
+def social_field_convergence(quality_history: list[dict]) -> float:
+    """
+    §9.5: linear regression slope of field diversity over time.
+
+    Negative = converging (social field pulling agents toward shared patterns).
+    Positive = diverging. Near-zero = stable diversity.
+
+    quality_history: list of dicts from PatternField.field_quality(), one per step.
+    Returns: slope (diversity/step).
+    Raises ValueError if fewer than 2 steps provided.
+    """
+    if len(quality_history) < 2:
+        raise ValueError("social_field_convergence requires at least 2 steps of history")
+    diversities = np.array([q["diversity"] for q in quality_history], dtype=float)
+    t = np.arange(len(diversities), dtype=float)
+    t_mean, d_mean = t.mean(), diversities.mean()
+    slope = float(
+        np.sum((t - t_mean) * (diversities - d_mean)) / np.sum((t - t_mean) ** 2)
+    )
+    return slope
