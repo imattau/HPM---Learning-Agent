@@ -29,6 +29,7 @@ structural_i = (pattern.connectivity() + pattern.compress()) / 2
 `connectivity()` returns mean absolute off-diagonal correlation of sigma (feature interdependence).
 `compress()` returns ratio of largest eigenvalue to total variance (dominant structure).
 Both methods exist on `GaussianPattern` (`hpm/patterns/gaussian.py`, lines 29 and 40) and return values in [0, 1].
+Edge case: for 1-D patterns, `connectivity()` returns 0.0 (no off-diagonal elements) and `compress()` returns 1.0 (single eigenvalue = total variance), giving `structural_i = 0.5` regardless of the covariance value.
 
 **Evaluator saturation:**
 ```
@@ -42,9 +43,10 @@ Low loss × high stability = high saturation. A pattern that fits well AND isn't
 
 **Field amplification:**
 ```
-field_freq_i = field.freq(pattern_id) if field else 0.0
+field_freq_i = field_freqs[i]  # pre-computed by Agent.step() via field.freqs_for()
+               if field else 0.0
 ```
-Social field frequency from PatternField (already computed in Agent.step).
+`field_freq_i` is a pre-computed value passed into `PatternDensity.compute()` — not a live lookup. `Agent.step()` already calls `self.field.freqs_for([p.id for p in patterns])` to batch-fetch field frequencies; those values are forwarded to `compute()`.
 `PatternField.freqs_for()` returns `pattern_weight / total_field_mass` — guaranteed in [0, 1] because individual pattern weights are non-negative and their sum cannot exceed total mass.
 
 ### Weight Update (D5 + Density Bias)
@@ -67,6 +69,7 @@ Followed by the existing renormalisation step (`w_i /= sum(w_j)`) which already 
 Class `PatternDensity(alpha_conn, alpha_sat, alpha_amp)`:
 
 - `compute(pattern, loss, capacity, field_freq) -> float` — returns `D(h_i)` in [0, 1]; `loss` is the running loss L_i (non-negative)
+- `loss` input is defensively clamped to `max(loss, 0.0)` at the start of `compute()` to guard against any floating-point edge case where the EMA could momentarily produce a tiny negative value
 - Stateless: called once per pattern per step
 - Clamps output to [0, 1] in case floating-point drift produces values slightly outside range
 
@@ -140,6 +143,8 @@ Note: `last_capacity()` uses the capacity computed during step 1 (the `update()`
 | `alpha_sat` | 0.33 | Weight of evaluator saturation in D(h) |
 | `alpha_amp` | 0.34 | Weight of field amplification in D(h) |
 
+The three alpha values are intended to sum to 1.0 (weighted average). Custom values that don't sum to 1.0 are valid — `D(h_i)` is clamped to [0, 1] regardless — but the output loses the weighted-average interpretation.
+
 ## Backward Compatibility
 
 - `kappa_D = 0.0` default: density bias contributes 0 to weight updates
@@ -160,7 +165,7 @@ Note: `last_capacity()` uses the capacity computed during step 1 (the `update()`
 
 ### Unit tests: `tests/evaluators/test_affective_capacity.py` (add to existing test file)
 
-- `test_last_capacity_returns_zero_on_first_step` — unknown pattern_id → 0.0
+- `test_last_capacity_returns_zero_for_unknown_pattern_id` — pattern_id never passed to `update()` → 0.0
 - `test_last_capacity_reflects_current_step` — after one update, returns capacity for that step
 - `test_capacity_is_one_minus_novelty` — verify relationship
 
