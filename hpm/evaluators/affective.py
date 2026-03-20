@@ -27,6 +27,7 @@ class AffectiveEvaluator:
         self.sigma_c = sigma_c
         self.alpha_r = alpha_r
         self._prev_accuracy: dict[str, float] = {}
+        self._last_capacity: dict[str, float] = {}
 
     def _sigmoid(self, x: float) -> float:
         return 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
@@ -41,8 +42,14 @@ class AffectiveEvaluator:
 
         novelty = self._sigmoid(self.k * delta_A)
         capacity = 1.0 - novelty
+        self._last_capacity[pattern.id] = capacity
         c = pattern.description_length()
 
         e_aff = novelty * capacity * self._g(c)
         e_aff += self.alpha_r * reward
         return float(max(e_aff, 0.0))
+
+    def last_capacity(self, pattern_id: str) -> float:
+        """Return the most recently computed capacity (1 - novelty) for pattern_id.
+        Returns 0.0 if pattern_id has never been passed to update()."""
+        return self._last_capacity.get(pattern_id, 0.0)

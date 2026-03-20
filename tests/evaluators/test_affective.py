@@ -45,3 +45,33 @@ def test_external_reward_added(dim):
     s1 = aff_no_reward.update(pattern, current_accuracy=-1.0, reward=2.0)
     s2 = aff_reward.update(pattern, current_accuracy=-1.0, reward=2.0)
     assert s2 > s1
+
+
+def test_last_capacity_returns_zero_for_unknown_pattern_id():
+    """ID never passed to update() returns 0.0 (dict default)."""
+    evaluator = AffectiveEvaluator()
+    assert evaluator.last_capacity("never_seen") == 0.0
+
+
+def test_last_capacity_reflects_current_step():
+    """After one update(), last_capacity() returns the capacity from that step."""
+    evaluator = AffectiveEvaluator(k=1.0)
+    pattern = GaussianPattern(mu=np.zeros(4), sigma=np.eye(4))
+    evaluator.update(pattern, current_accuracy=1.0)
+    cap = evaluator.last_capacity(pattern.id)
+    # First update: delta_A=0 -> novelty=sigmoid(0)=0.5 -> capacity=0.5
+    assert abs(cap - 0.5) < 1e-9
+
+
+def test_capacity_is_one_minus_novelty():
+    """last_capacity() == 1 - novelty for a given step."""
+    evaluator = AffectiveEvaluator(k=2.0)
+    pattern = GaussianPattern(mu=np.zeros(4), sigma=np.eye(4))
+    # First step
+    evaluator.update(pattern, current_accuracy=5.0)
+    # Second step with different accuracy to produce non-zero delta_A
+    evaluator.update(pattern, current_accuracy=3.0)
+    # delta_A = 3.0 - 5.0 = -2.0, novelty = sigmoid(k * delta_A) = sigmoid(2.0 * -2.0) = sigmoid(-4)
+    expected_novelty = 1.0 / (1.0 + np.exp(4.0))
+    expected_capacity = 1.0 - expected_novelty
+    assert abs(evaluator.last_capacity(pattern.id) - expected_capacity) < 1e-9
