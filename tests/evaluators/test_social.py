@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 from hpm.evaluators.social import SocialEvaluator
 
 
@@ -26,3 +27,17 @@ def test_evaluate_all_returns_one_value_per_pattern():
     assert result[0] == pytest.approx(0.0)
     assert result[1] == pytest.approx(0.3)
     assert result[2] == pytest.approx(0.7)
+
+
+def test_evaluate_all_empty_list_returns_empty():
+    ev = SocialEvaluator(rho=1.0)
+    result = ev.evaluate_all([])
+    assert len(result) == 0
+
+
+def test_evaluate_all_returns_numpy_array():
+    ev = SocialEvaluator(rho=2.0)
+    result = ev.evaluate_all([0.5, 1.0])
+    assert isinstance(result, np.ndarray)
+    assert result[0] == pytest.approx(1.0)
+    assert result[1] == pytest.approx(2.0)
