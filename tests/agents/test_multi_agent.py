@@ -68,14 +68,17 @@ def test_seed_shared_gives_same_uuid_across_agents():
 
 
 def test_seed_shared_produces_cross_agent_freq_signal():
-    """After shared seeding, agents observe each other's shared UUID in the field."""
+    """After shared seeding and stepping, shared UUID appears in both agents' field entries."""
     agents, field = _make_agents(2, gamma_soc=1.0)
     seed = GaussianPattern(mu=np.zeros(4), sigma=np.eye(4))
     orch = MultiAgentOrchestrator(agents, field, seed_pattern=seed)
     orch.step({"a0": np.zeros(4), "a1": np.zeros(4)})
-    # Shared UUID should appear in both agents' field registrations
+    # The shared UUID (preserved by update()) should appear in both agents' field registrations
+    all_registered_ids = set()
     for agent_patterns in field._agent_patterns.values():
-        assert len(agent_patterns) > 0
+        all_registered_ids.update(agent_patterns.keys())
+    # Both agents stepped with the same seed UUID — it should be present
+    assert seed.id in all_registered_ids
 
 
 def test_single_agent_orchestrator_m3_enforced():

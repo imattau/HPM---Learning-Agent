@@ -37,7 +37,6 @@ class MultiAgentOrchestrator:
     ):
         self.agents = agents
         self.field = field
-        self._agent_map = {a.agent_id: a for a in agents}
         if seed_pattern is not None:
             self._seed_shared(seed_pattern)
 
@@ -84,14 +83,17 @@ class MultiAgentOrchestrator:
                 # Detach field so freq signals are 0 during step (spec M3)
                 actual_field = agent.field
                 agent.field = None
-                step_metrics = agent.step(x, reward=r)
+                try:
+                    step_metrics = agent.step(x, reward=r)
+                finally:
+                    # Always restore field, even if step() raises (spec M3 — temporary detach only)
+                    agent.field = actual_field
                 # Re-register patterns with field for external observers
                 if actual_field is not None:
                     records = agent.store.query(agent.agent_id)
                     actual_field.register(
                         agent.agent_id, [(p.id, w) for p, w in records]
                     )
-                agent.field = actual_field
             else:
                 step_metrics = agent.step(x, reward=r)
             step_metrics["m3_active"] = m3_active
