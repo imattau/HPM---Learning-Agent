@@ -10,10 +10,11 @@ class GaussianPattern:
     fresh on recombination.
     """
 
-    def __init__(self, mu: np.ndarray, sigma: np.ndarray, id: str | None = None):
+    def __init__(self, mu: np.ndarray, sigma: np.ndarray, id: str | None = None, level: int = 1):
         self.id = id or str(uuid.uuid4())
         self.mu = np.array(mu, dtype=float)
         self.sigma = np.array(sigma, dtype=float)
+        self.level = level
         self._n_obs: int = 0
 
     def log_prob(self, x: np.ndarray) -> float:
@@ -48,7 +49,7 @@ class GaussianPattern:
     def update(self, x: np.ndarray) -> 'GaussianPattern':
         n = self._n_obs + 1
         new_mu = (self.mu * self._n_obs + x) / n
-        new_p = GaussianPattern(new_mu, self.sigma.copy(), id=self.id)
+        new_p = GaussianPattern(new_mu, self.sigma.copy(), id=self.id, level=self.level)
         new_p._n_obs = n
         return new_p
 
@@ -72,10 +73,12 @@ class GaussianPattern:
             'mu': self.mu.tolist(),
             'sigma': self.sigma.tolist(),
             'n_obs': self._n_obs,
+            'level': self.level,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> 'GaussianPattern':
-        p = cls(np.array(d['mu']), np.array(d['sigma']), id=d['id'])
+        p = cls(np.array(d['mu']), np.array(d['sigma']), id=d['id'],
+                level=d.get('level', 1))
         p._n_obs = d['n_obs']
         return p
