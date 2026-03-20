@@ -37,13 +37,14 @@ class MetaPatternRule:
     Floor: if all weights < epsilon, best pattern retained at 1.0.
     """
 
-    def __init__(self, eta: float = 0.01, beta_c: float = 0.1, epsilon: float = 1e-4):
+    def __init__(self, eta: float = 0.01, beta_c: float = 0.1, epsilon: float = 1e-4, kappa_D: float = 0.0):
         self.eta = eta
         self.beta_c = beta_c
         self.epsilon = epsilon
+        self.kappa_D = kappa_D
         self._rng = np.random.default_rng(0)
 
-    def step(self, patterns: list, weights: np.ndarray, totals: np.ndarray) -> np.ndarray:
+    def step(self, patterns: list, weights: np.ndarray, totals: np.ndarray, densities=None) -> np.ndarray:
         n = len(patterns)
         if n == 0:
             return weights.copy()
@@ -64,7 +65,8 @@ class MetaPatternRule:
         for i in range(n):
             replicator = self.eta * (totals[i] - total_bar) * weights[i]
             conflict = self.beta_c * float(np.dot(kappa[i], weights) * weights[i])
-            new_weights[i] = weights[i] + replicator - conflict
+            density_bias = self.kappa_D * densities[i] * weights[i] if densities is not None else 0.0
+            new_weights[i] = weights[i] + replicator - conflict + density_bias
 
         new_weights = np.maximum(new_weights, 0.0)
 
