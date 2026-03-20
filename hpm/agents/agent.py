@@ -93,6 +93,9 @@ class Agent:
         if self.substrate is None:
             # No external substrate: use field freq directly (no alpha_int attenuation)
             freq_totals = field_freqs
+        elif self.field is None:
+            # No field (single-agent substrate use): use ext_freqs directly
+            freq_totals = ext_freqs
         else:
             alpha = self.config.alpha_int
             freq_totals = [
