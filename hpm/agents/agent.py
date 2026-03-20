@@ -10,21 +10,24 @@ from ..store.memory import InMemoryStore
 class Agent:
     """
     Single HPM agent. Wires PatternLibrary, EvaluatorPipeline, and Dynamics.
-    Backed by a PatternStore (InMemoryStore by default).
+    Backed by a PatternStore (InMemoryStore by default; SQLiteStore for persistence).
+    Optionally connected to an ExternalSubstrate for external field frequency signals.
 
-    Data flow per step (Phase 1, §7):
+    Data flow per step (Phase 1/2, §7):
       1. Compute ell_i(t) for each pattern
       2. Update L_i(t) -> A_i(t) via EpistemicEvaluator
       3. Compute E_aff_i(t) via AffectiveEvaluator
       4. Total_i(t) = A_i(t) + beta_aff * E_aff_i(t)
       5. MetaPatternRule -> new weights
       6. Prune + update store
+      7. If substrate set: compute ext_field_freq (logged; blending into totals in Phase 3)
     """
 
-    def __init__(self, config: AgentConfig, store=None):
+    def __init__(self, config: AgentConfig, store=None, substrate=None):
         self.config = config
         self.agent_id = config.agent_id
         self.store = store or InMemoryStore()
+        self.substrate = substrate
         self.epistemic = EpistemicEvaluator(lambda_L=config.lambda_L)
         self.affective = AffectiveEvaluator(
             k=config.k,
@@ -78,10 +81,17 @@ class Agent:
                 updated = p.update(x)
                 self.store.save(updated, float(w), self.agent_id)
 
+        # External substrate: compute field frequencies (logged; not yet in totals — Phase 3)
+        ext_field_freq = 0.0
+        if self.substrate is not None:
+            freqs = [self.substrate.field_frequency(p) for p in patterns]
+            ext_field_freq = float(np.mean(freqs)) if freqs else 0.0
+
         self._t += 1
         return {
             't': self._t,
             'n_patterns': int(np.sum(new_weights >= self.config.epsilon)),
             'mean_accuracy': float(np.mean(accuracies)),
             'max_weight': float(new_weights.max()),
+            'ext_field_freq': ext_field_freq,
         }
