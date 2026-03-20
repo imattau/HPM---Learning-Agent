@@ -29,7 +29,7 @@ structural_i = (pattern.connectivity() + pattern.compress()) / 2
 `connectivity()` returns mean absolute off-diagonal correlation of sigma (feature interdependence).
 `compress()` returns ratio of largest eigenvalue to total variance (dominant structure).
 Both methods exist on `GaussianPattern` (`hpm/patterns/gaussian.py`, lines 29 and 40) and return values in [0, 1].
-Edge case: for 1-D patterns, `connectivity()` returns 0.0 (no off-diagonal elements) and `compress()` returns 1.0 (single eigenvalue = total variance), giving `structural_i = 0.5` regardless of the covariance value.
+Edge case: for a valid 1-D pattern (non-zero covariance), `connectivity()` returns 0.0 (no off-diagonal elements) and `compress()` returns 1.0 (single eigenvalue = total variance), giving `structural_i = 0.5`.
 
 **Evaluator saturation:**
 ```
@@ -78,6 +78,12 @@ Class `PatternDensity(alpha_conn, alpha_sat, alpha_amp)`:
 Add `last_capacity(pattern_id: str) -> float` method:
 - Returns the most recently computed `capacity = 1 - novelty` for the given pattern
 - Stored in a new `_last_capacity: dict[str, float]` internal dict, populated during `update()`
+- The store assignment goes **immediately after** `capacity = 1.0 - novelty` is computed in `update()`, before the `e_aff` expression:
+  ```python
+  capacity = 1.0 - novelty
+  self._last_capacity[pattern.id] = capacity   # ← add this line
+  c = pattern.description_length()
+  ```
 - Returns 0.0 for pattern IDs that have never been passed to `update()` (the dict default). In practice, `update()` is always called before `last_capacity()` in `Agent.step()`, so the actual returned value on step 1 is `0.5` (since `delta_A = 0` on first update → `novelty = sigmoid(0) = 0.5` → `capacity = 0.5`).
 - Backward compatible: `update()` signature unchanged
 
@@ -112,7 +118,7 @@ After evaluators are computed (epistemic_accs and e_affs available) and before M
 2. In `step()`: collect `capacity_i = self.affective.last_capacity(p.id)` and `field_freq_i` per pattern
 3. Compute `densities = [self.pattern_density.compute(p, -epi, cap, ff) for ...]` — note `-epi` converts accuracy A_i to loss L_i
 4. Pass `densities` to `self.dynamics.step()`
-5. Add `density_mean` to return dict
+5. Add `density_mean` to return dict: `float(np.mean(densities)) if len(densities) > 0 else 0.0` (same guard pattern as `e_soc_mean` and `e_cost_mean`)
 
 ### Modified: `hpm/dynamics/__init__.py` (if exists)
 
