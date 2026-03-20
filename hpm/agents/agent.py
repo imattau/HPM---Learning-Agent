@@ -7,6 +7,7 @@ from ..evaluators.social import SocialEvaluator
 from ..evaluators.resource_cost import ResourceCostEvaluator
 from ..dynamics.meta_pattern_rule import MetaPatternRule
 from ..dynamics.density import PatternDensity
+from ..patterns.classifier import HPMLevelClassifier
 from ..store.memory import InMemoryStore
 
 
@@ -54,6 +55,16 @@ class Agent:
             alpha_conn=config.alpha_conn,
             alpha_sat=config.alpha_sat,
             alpha_amp=config.alpha_amp,
+        )
+        self.level_classifier = HPMLevelClassifier(
+            l5_density=config.l5_density,
+            l5_conn=config.l5_conn,
+            l5_comp=config.l5_comp,
+            l4_conn=config.l4_conn,
+            l4_comp=config.l4_comp,
+            l3_conn=config.l3_conn,
+            l3_comp=config.l3_comp,
+            l2_conn=config.l2_conn,
         )
         self.dynamics = MetaPatternRule(
             eta=config.eta,
@@ -132,6 +143,11 @@ class Agent:
             for p, epi, ff in zip(patterns, epistemic_accs, field_freqs)
         ]
 
+        # Classify HPM level for each pattern and build per-pattern kappa_D list
+        for p, d in zip(patterns, densities):
+            p.level = self.level_classifier.compute_level(p, d)
+        kappa_d_per_pattern = [self.config.kappa_d_levels[p.level - 1] for p in patterns]
+
         # Guard: only compute e_costs if delta_cost is non-zero (avoids psutil import for default agents)
         if self.config.delta_cost != 0.0:
             e_costs = [self.resource_cost.evaluate(p) for p in patterns]
@@ -144,7 +160,11 @@ class Agent:
             for epi, e_aff, e_soc, e_cost in zip(epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
-        new_weights = self.dynamics.step(patterns, weights, totals, densities=densities)
+        new_weights = self.dynamics.step(
+            patterns, weights, totals,
+            densities=densities,
+            kappa_d_per_pattern=kappa_d_per_pattern,
+        )
 
         # Prune, update patterns (UUID preserved by GaussianPattern.update()), persist
         surviving = []
@@ -170,4 +190,6 @@ class Agent:
             'ext_field_freq': float(np.mean(ext_freqs)),
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
             'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
+            'level_mean': float(np.mean([p.level for p in patterns])) if patterns else 0.0,
+            'level_distribution': {lvl: sum(1 for p in patterns if p.level == lvl) for lvl in range(1, 6)},
         }
