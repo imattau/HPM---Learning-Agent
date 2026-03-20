@@ -33,7 +33,8 @@ def test_level_distribution_sums_to_pattern_count(agent):
     x = np.zeros(2)
     result = agent.step(x)
     total = sum(result['level_distribution'].values())
-    assert total >= 1
+    # level_distribution is computed from surviving (post-prune) patterns, same as n_patterns
+    assert total == result['n_patterns']
 
 
 def test_level_mean_is_between_1_and_5(agent):

@@ -168,12 +168,14 @@ class Agent:
 
         # Prune, update patterns (UUID preserved by GaussianPattern.update()), persist
         surviving = []
+        surviving_patterns = []
         for p, w in zip(patterns, new_weights):
             self.store.delete(p.id)
             if w >= self.config.epsilon:
                 updated = p.update(x)
                 self.store.save(updated, float(w), self.agent_id)
                 surviving.append((updated.id, float(w)))
+                surviving_patterns.append(updated)
 
         # Register with field using post-update UUIDs (preserved by update())
         if self.field is not None:
@@ -190,6 +192,6 @@ class Agent:
             'ext_field_freq': float(np.mean(ext_freqs)),
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
             'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
-            'level_mean': float(np.mean([p.level for p in patterns])) if patterns else 0.0,
-            'level_distribution': {lvl: sum(1 for p in patterns if p.level == lvl) for lvl in range(1, 6)},
+            'level_mean': float(np.mean([p.level for p in surviving_patterns])) if surviving_patterns else 0.0,
+            'level_distribution': {lvl: sum(1 for p in surviving_patterns if p.level == lvl) for lvl in range(1, 6)},
         }

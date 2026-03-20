@@ -62,6 +62,11 @@ class MetaPatternRule:
                 kappa[j, i] = k
         assert np.all(np.diag(kappa) == 0.0), "kappa diagonal must be zero (j!=i in D5)"
 
+        if kappa_d_per_pattern is not None:
+            assert len(kappa_d_per_pattern) == n, (
+                f"kappa_d_per_pattern length {len(kappa_d_per_pattern)} != n_patterns {n}"
+            )
+
         new_weights = weights.copy()
         for i in range(n):
             replicator = self.eta * (totals[i] - total_bar) * weights[i]
