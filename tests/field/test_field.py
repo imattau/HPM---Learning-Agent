@@ -74,3 +74,12 @@ def test_n_agents_property():
     assert field.n_agents == 1
     field.register("agent-2", [("uuid-2", 1.0)])
     assert field.n_agents == 2
+
+
+def test_field_quality_two_equal_patterns_exact_entropy():
+    import math
+    field = PatternField()
+    field.register("agent-1", [("uuid-1", 0.5)])
+    field.register("agent-2", [("uuid-2", 0.5)])
+    quality = field.field_quality()
+    assert quality["diversity"] == pytest.approx(math.log(2))

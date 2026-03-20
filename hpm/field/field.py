@@ -63,16 +63,14 @@ class PatternField:
         mass = self._total_mass()
         if mass <= 0.0:
             return [0.0] * len(pattern_ids)
-        result = []
-        for pid in pattern_ids:
-            weight_sum = sum(
-                agent_patterns.get(pid, 0.0)
-                for agent_patterns in self._agent_patterns.values()
-            )
-            result.append(weight_sum / mass)
-        return result
+        # Pre-aggregate all pattern weights in one pass
+        aggregated: dict[str, float] = {}
+        for agent_patterns in self._agent_patterns.values():
+            for pid, w in agent_patterns.items():
+                aggregated[pid] = aggregated.get(pid, 0.0) + w
+        return [aggregated.get(pid, 0.0) / mass for pid in pattern_ids]
 
-    def field_quality(self) -> dict:
+    def field_quality(self) -> dict[str, float]:
         """
         Field quality metrics (spec §5.2).
 
