@@ -24,11 +24,14 @@ pressure(t) = w_mem * (mem_percent / 100) + w_cpu * (cpu_percent / 100)
 - `E_cost_i` is negative — it lowers `Total_i` for complex patterns under pressure
 - `lambda_cost` controls the overall sensitivity of the penalty
 
-The total evaluator sum becomes:
+The evaluator sum is integrated into the existing two-level structure in `agent.py`:
 
 ```
-Total_i = A_i + beta_aff * E_aff_i + gamma_soc * E_soc_i + delta_cost * E_cost_i
+J_i = beta_aff * E_aff_i + gamma_soc * E_soc_i + delta_cost * E_cost_i
+Total_i = A_i + J_i
 ```
+
+(Expanded: `Total_i = A_i + beta_aff * E_aff_i + gamma_soc * E_soc_i + delta_cost * E_cost_i`)
 
 `delta_cost = 0.0` by default — the signal is off unless explicitly enabled. All existing agents are completely unaffected.
 
@@ -78,7 +81,7 @@ Re-export `ResourceCostEvaluator`.
 ## Backward Compatibility
 
 - `delta_cost = 0.0` default means `E_cost` contributes nothing to `Total_i` — no behaviour change for existing agents or tests.
-- All 115 existing tests continue to pass unchanged.
+- `psutil` import is deferred to first call of `pressure()`, so agents with `delta_cost=0.0` never import `psutil`. All 115 existing tests continue to pass unchanged even without `psutil` installed.
 
 ## Testing
 
@@ -87,7 +90,7 @@ Re-export `ResourceCostEvaluator`.
 - `test_pressure_zero_when_idle` — mock psutil to return 0% mem/CPU; assert `pressure() == 0.0`
 - `test_pressure_one_when_maxed` — mock psutil to return 100% both; assert `pressure() == 1.0`
 - `test_evaluate_returns_negative` — any non-zero pressure + non-trivial pattern gives negative output
-- `test_evaluate_zero_when_delta_cost_zero` — with `lambda_cost=0`, cost is always 0.0
+- `test_evaluate_zero_when_lambda_cost_zero` — with `lambda_cost=0`, cost is always 0.0
 - `test_complex_pattern_penalised_more_than_simple` — two patterns, same pressure; higher description_length → more negative E_cost
 - `test_agent_unaffected_when_delta_cost_zero` — agent step with `delta_cost=0.0` produces same metrics as before
 
@@ -98,7 +101,7 @@ Re-export `ResourceCostEvaluator`.
 
 ## Error Handling
 
-- `psutil` unavailable: `ResourceCostEvaluator.__init__` should raise `ImportError` with a clear message directing the user to `pip install psutil`
+- `psutil` unavailable: the `ImportError` is deferred to the first call of `pressure()`, not raised in `__init__`. This ensures existing agents that never enable `delta_cost > 0` can be constructed without `psutil` installed — all 115 existing tests continue to pass unchanged.
 - `psutil.cpu_percent()` returns `None` on first call on some platforms: treat as `0.0`
 
 ## What This Is Not
