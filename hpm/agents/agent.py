@@ -3,6 +3,7 @@ from ..config import AgentConfig
 from ..patterns.gaussian import GaussianPattern
 from ..evaluators.epistemic import EpistemicEvaluator
 from ..evaluators.affective import AffectiveEvaluator
+from ..evaluators.social import SocialEvaluator
 from ..dynamics.meta_pattern_rule import MetaPatternRule
 from ..store.memory import InMemoryStore
 
@@ -12,22 +13,28 @@ class Agent:
     Single HPM agent. Wires PatternLibrary, EvaluatorPipeline, and Dynamics.
     Backed by a PatternStore (InMemoryStore by default; SQLiteStore for persistence).
     Optionally connected to an ExternalSubstrate for external field frequency signals.
+    Optionally connected to a PatternField for social (observational) learning.
 
-    Data flow per step (Phase 1/2, §7):
+    Data flow per step (Phase 3, spec §7):
       1. Compute ell_i(t) for each pattern
       2. Update L_i(t) -> A_i(t) via EpistemicEvaluator
       3. Compute E_aff_i(t) via AffectiveEvaluator
-      4. Total_i(t) = A_i(t) + beta_aff * E_aff_i(t)
-      5. MetaPatternRule -> new weights
-      6. Prune + update store
-      7. If substrate set: compute ext_field_freq (logged; blending into totals in Phase 3)
+      4. freq_i_total = alpha_int * field_freq_i + (1-alpha_int) * ext_freq_i (§3.8)
+         (if no substrate: freq_i_total = field_freq_i, no attenuation)
+      5. E_soc_i = rho * freq_i_total via SocialEvaluator
+      6. J_i = beta_aff * E_aff_i + gamma_soc * E_soc_i
+      7. Total_i = A_i + J_i
+      8. MetaPatternRule -> new weights
+      9. Prune + update store (UUID preserved by GaussianPattern.update())
+      10. Register surviving patterns with field (if set)
     """
 
-    def __init__(self, config: AgentConfig, store=None, substrate=None):
+    def __init__(self, config: AgentConfig, store=None, substrate=None, field=None):
         self.config = config
         self.agent_id = config.agent_id
         self.store = store or InMemoryStore()
         self.substrate = substrate
+        self.field = field
         self.epistemic = EpistemicEvaluator(lambda_L=config.lambda_L)
         self.affective = AffectiveEvaluator(
             k=config.k,
@@ -35,6 +42,7 @@ class Agent:
             sigma_c=config.sigma_c,
             alpha_r=config.alpha_r,
         )
+        self.social = SocialEvaluator(rho=config.rho)
         self.dynamics = MetaPatternRule(
             eta=config.eta,
             beta_c=config.beta_c,
@@ -57,41 +65,70 @@ class Agent:
         patterns = [p for p, _ in records]
         weights = np.array([w for _, w in records])
 
-        accuracies = []
+        # Per-pattern epistemic + affective evaluation
+        epistemic_accs = []
         e_affs = []
+        accuracies = []
         for pattern in patterns:
-            instant_acc = -pattern.log_prob(x)
-            epistemic_acc = self.epistemic.update(pattern, x)
-            e_aff = self.affective.update(pattern, epistemic_acc, reward)
-            accuracies.append(instant_acc)
+            accuracies.append(-pattern.log_prob(x))
+            epi_acc = self.epistemic.update(pattern, x)
+            e_aff = self.affective.update(pattern, epi_acc, reward)
+            epistemic_accs.append(epi_acc)
             e_affs.append(e_aff)
 
+        # Per-pattern field frequency: blend agent population + external substrate (§3.8)
+        field_freqs = (
+            self.field.freqs_for([p.id for p in patterns])
+            if self.field is not None
+            else [0.0] * len(patterns)
+        )
+
+        # Compute ext_freqs once (reused for blend and metric)
+        ext_freqs = (
+            [self.substrate.field_frequency(p) for p in patterns]
+            if self.substrate is not None
+            else [0.0] * len(patterns)
+        )
+
+        if self.substrate is None:
+            # No external substrate: use field freq directly (no alpha_int attenuation)
+            freq_totals = field_freqs
+        else:
+            alpha = self.config.alpha_int
+            freq_totals = [
+                alpha * ff + (1.0 - alpha) * ef
+                for ff, ef in zip(field_freqs, ext_freqs)
+            ]
+
+        e_socs = self.social.evaluate_all(freq_totals)
+
         totals = np.array([
-            epistemic_acc + self.config.beta_aff * e_aff
-            for epistemic_acc, e_aff in zip([self.epistemic.accuracy(p.id) for p in patterns], e_affs)
+            epi + self.config.beta_aff * e_aff + self.config.gamma_soc * e_soc
+            for epi, e_aff, e_soc in zip(epistemic_accs, e_affs, e_socs)
         ])
 
         new_weights = self.dynamics.step(patterns, weights, totals)
 
-        # Prune and persist
-        for p in patterns:
-            self.store.delete(p.id)
+        # Prune, update patterns (UUID preserved by GaussianPattern.update()), persist
+        surviving = []
         for p, w in zip(patterns, new_weights):
+            self.store.delete(p.id)
             if w >= self.config.epsilon:
                 updated = p.update(x)
                 self.store.save(updated, float(w), self.agent_id)
+                surviving.append((updated.id, float(w)))
 
-        # External substrate: compute field frequencies (logged; not yet in totals — Phase 3)
-        ext_field_freq = 0.0
-        if self.substrate is not None:
-            freqs = [self.substrate.field_frequency(p) for p in patterns]
-            ext_field_freq = float(np.mean(freqs)) if freqs else 0.0
+        # Register with field using post-update UUIDs (preserved by update())
+        if self.field is not None:
+            self.field.register(self.agent_id, surviving)
 
         self._t += 1
+
         return {
             't': self._t,
-            'n_patterns': int(np.sum(new_weights >= self.config.epsilon)),
+            'n_patterns': len(surviving),
             'mean_accuracy': float(np.mean(accuracies)),
             'max_weight': float(new_weights.max()),
-            'ext_field_freq': ext_field_freq,
+            'e_soc_mean': float(np.mean(e_socs)) if len(e_socs) > 0 else 0.0,
+            'ext_field_freq': float(np.mean(ext_freqs)),
         }
