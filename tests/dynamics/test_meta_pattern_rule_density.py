@@ -71,3 +71,35 @@ def test_densities_none_behaves_identically():
     w2 = rule2.step(patterns, weights.copy(), totals, densities=None)
 
     np.testing.assert_allclose(w1, w2, atol=1e-12)
+
+
+from hpm.config import AgentConfig
+from hpm.agents.agent import Agent
+
+
+def test_agent_step_includes_density_mean():
+    """Agent with kappa_D > 0 returns density_mean in step dict."""
+    config = AgentConfig(agent_id="test", feature_dim=4, kappa_D=0.1)
+    agent = Agent(config)
+    result = agent.step(np.zeros(4))
+    assert "density_mean" in result
+    assert isinstance(result["density_mean"], float)
+    assert 0.0 <= result["density_mean"] <= 1.0
+
+
+def test_agent_step_includes_density_mean_with_kappa_d_zero():
+    """density_mean is present even when kappa_D=0 (default)."""
+    config = AgentConfig(agent_id="test2", feature_dim=4)
+    agent = Agent(config)
+    result = agent.step(np.zeros(4))
+    assert "density_mean" in result
+
+
+def test_kappa_d_zero_density_mean_in_range():
+    """Agent with kappa_D=0 (default) still computes and returns a valid density_mean."""
+    config = AgentConfig(agent_id="c", feature_dim=4, kappa_D=0.0)
+    agent = Agent(config)
+    result = agent.step(np.zeros(4))
+    assert "density_mean" in result
+    assert 0.0 <= result["density_mean"] <= 1.0
+    assert result["n_patterns"] >= 1

@@ -6,6 +6,7 @@ from ..evaluators.affective import AffectiveEvaluator
 from ..evaluators.social import SocialEvaluator
 from ..evaluators.resource_cost import ResourceCostEvaluator
 from ..dynamics.meta_pattern_rule import MetaPatternRule
+from ..dynamics.density import PatternDensity
 from ..store.memory import InMemoryStore
 
 
@@ -48,6 +49,11 @@ class Agent:
             lambda_cost=config.lambda_cost,
             w_mem=config.w_mem,
             w_cpu=config.w_cpu,
+        )
+        self.pattern_density = PatternDensity(
+            alpha_conn=config.alpha_conn,
+            alpha_sat=config.alpha_sat,
+            alpha_amp=config.alpha_amp,
         )
         self.dynamics = MetaPatternRule(
             eta=config.eta,
@@ -111,6 +117,17 @@ class Agent:
 
         e_socs = self.social.evaluate_all(freq_totals)
 
+        # Compute per-pattern density D(h_i) using current evaluator state
+        densities = [
+            self.pattern_density.compute(
+                p,
+                loss=-epi,          # loss L_i = -A_i (non-negative)
+                capacity=self.affective.last_capacity(p.id),
+                field_freq=ff,
+            )
+            for p, epi, ff in zip(patterns, epistemic_accs, field_freqs)
+        ]
+
         # Guard: only compute e_costs if delta_cost is non-zero (avoids psutil import for default agents)
         if self.config.delta_cost != 0.0:
             e_costs = [self.resource_cost.evaluate(p) for p in patterns]
@@ -123,7 +140,7 @@ class Agent:
             for epi, e_aff, e_soc, e_cost in zip(epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
-        new_weights = self.dynamics.step(patterns, weights, totals)
+        new_weights = self.dynamics.step(patterns, weights, totals, densities=densities)
 
         # Prune, update patterns (UUID preserved by GaussianPattern.update()), persist
         surviving = []
@@ -148,4 +165,5 @@ class Agent:
             'e_soc_mean': float(np.mean(e_socs)) if len(e_socs) > 0 else 0.0,
             'ext_field_freq': float(np.mean(ext_freqs)),
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
+            'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
         }
