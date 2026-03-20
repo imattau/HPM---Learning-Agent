@@ -28,3 +28,8 @@ class AgentConfig:
     lambda_cost: float = 1.0    # penalty scale inside ResourceCostEvaluator
     w_mem: float = 0.5          # memory weight in pressure scalar
     w_cpu: float = 0.5          # CPU weight in pressure scalar
+    # Pattern density (density bias in MetaPatternRule, §A.8)
+    kappa_D: float = 0.0     # density bias weight (0 = off, backward compatible)
+    alpha_conn: float = 0.33  # weight of structural connectivity in D(h)
+    alpha_sat: float = 0.33   # weight of evaluator saturation in D(h)
+    alpha_amp: float = 0.34   # weight of field amplification in D(h)
