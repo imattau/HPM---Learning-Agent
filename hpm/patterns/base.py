@@ -5,6 +5,7 @@ import numpy as np
 @runtime_checkable
 class Pattern(Protocol):
     id: str
+    level: int
 
     def log_prob(self, x: np.ndarray) -> float: ...
     def description_length(self) -> float: ...

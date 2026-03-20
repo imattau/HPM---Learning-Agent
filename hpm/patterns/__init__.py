@@ -1,4 +1,5 @@
 from .gaussian import GaussianPattern
+from .classifier import HPMLevelClassifier
 
 PATTERN_REGISTRY: dict[str, type] = {
     'gaussian': GaussianPattern,
