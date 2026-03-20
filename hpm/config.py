@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -33,3 +33,14 @@ class AgentConfig:
     alpha_conn: float = 0.33  # weight of structural connectivity in D(h)
     alpha_sat: float = 0.33   # weight of evaluator saturation in D(h)
     alpha_amp: float = 0.34   # weight of field amplification in D(h)
+    # Level classifier thresholds (Gap 2)
+    l5_density: float = 0.85
+    l5_conn: float = 0.80
+    l5_comp: float = 0.70
+    l4_conn: float = 0.70
+    l4_comp: float = 0.60
+    l3_conn: float = 0.50
+    l3_comp: float = 0.40
+    l2_conn: float = 0.30
+    # Per-level kappa_D table (index 0 = Level 1, index 4 = Level 5)
+    kappa_d_levels: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0, 0.0])
