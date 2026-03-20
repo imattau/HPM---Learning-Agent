@@ -1,4 +1,5 @@
 # tests/integration/test_phase3.py
+import math
 import numpy as np
 import pytest
 from hpm.config import AgentConfig
@@ -60,6 +61,7 @@ def test_field_quality_history_computable():
 
     slope = social_field_convergence(quality_history)
     assert isinstance(slope, float)
+    assert math.isfinite(slope)
 
 
 def test_m3_flag_set_for_single_agent():
