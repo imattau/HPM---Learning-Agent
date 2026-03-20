@@ -59,6 +59,7 @@ class Agent:
             eta=config.eta,
             beta_c=config.beta_c,
             epsilon=config.epsilon,
+            kappa_D=config.kappa_D,
         )
         self._t = 0
         self._seed_if_empty()
@@ -117,7 +118,10 @@ class Agent:
 
         e_socs = self.social.evaluate_all(freq_totals)
 
-        # Compute per-pattern density D(h_i) using current evaluator state
+        # Compute per-pattern density D(h_i) using current evaluator state.
+        # Uses field_freqs (agent population signal), not freq_totals (blended with
+        # external substrate), because density tracks pattern prevalence in the social
+        # field specifically — separate from the E_soc evaluator signal.
         densities = [
             self.pattern_density.compute(
                 p,

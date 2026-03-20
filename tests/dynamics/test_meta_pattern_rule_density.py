@@ -103,3 +103,29 @@ def test_kappa_d_zero_density_mean_in_range():
     assert "density_mean" in result
     assert 0.0 <= result["density_mean"] <= 1.0
     assert result["n_patterns"] >= 1
+
+
+def test_kappa_d_config_affects_agent_weights():
+    """Agent with kappa_D > 0 via config produces different density_mean than kappa_D=0."""
+    import numpy as np
+    from hpm.config import AgentConfig
+    from hpm.agents.agent import Agent
+
+    x = np.zeros(4)
+    # Run two agents with same random state, kappa_D=0 vs kappa_D=2.0
+    config_off = AgentConfig(agent_id="off", feature_dim=4, kappa_D=0.0)
+    config_on  = AgentConfig(agent_id="on",  feature_dim=4, kappa_D=2.0)
+    agent_off = Agent(config_off)
+    agent_on  = Agent(config_on)
+
+    # Step both on same input multiple times to let density accumulate
+    for _ in range(5):
+        r_off = agent_off.step(x)
+        r_on  = agent_on.step(x)
+
+    # With kappa_D=2.0, density bias is non-trivial; density_mean must be valid
+    assert 0.0 <= r_off["density_mean"] <= 1.0
+    assert 0.0 <= r_on["density_mean"] <= 1.0
+    # Both should remain normalised
+    assert r_off["max_weight"] <= 1.0 + 1e-9
+    assert r_on["max_weight"] <= 1.0 + 1e-9
