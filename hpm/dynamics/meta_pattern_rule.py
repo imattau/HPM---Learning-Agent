@@ -44,7 +44,8 @@ class MetaPatternRule:
         self.kappa_D = kappa_D
         self._rng = np.random.default_rng(0)
 
-    def step(self, patterns: list, weights: np.ndarray, totals: np.ndarray, densities=None) -> np.ndarray:
+    def step(self, patterns: list, weights: np.ndarray, totals: np.ndarray,
+             densities=None, kappa_d_per_pattern=None) -> np.ndarray:
         n = len(patterns)
         if n == 0:
             return weights.copy()
@@ -65,7 +66,11 @@ class MetaPatternRule:
         for i in range(n):
             replicator = self.eta * (totals[i] - total_bar) * weights[i]
             conflict = self.beta_c * float(np.dot(kappa[i], weights) * weights[i])
-            density_bias = self.kappa_D * densities[i] * weights[i] if densities is not None else 0.0
+            if densities is not None:
+                kappa_d_i = kappa_d_per_pattern[i] if kappa_d_per_pattern is not None else self.kappa_D
+                density_bias = kappa_d_i * densities[i] * weights[i]
+            else:
+                density_bias = 0.0
             new_weights[i] = weights[i] + replicator - conflict + density_bias
 
         new_weights = np.maximum(new_weights, 0.0)

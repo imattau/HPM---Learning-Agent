@@ -126,3 +126,57 @@ def test_kappa_d_config_affects_agent_weights():
     r_on  = agent_on.step(x)
     assert 0.0 <= r_off["density_mean"] <= 1.0
     assert 0.0 <= r_on["density_mean"] <= 1.0
+
+
+def test_kappa_d_per_pattern_overrides_scalar_kappa_D():
+    """When kappa_d_per_pattern is supplied, it takes precedence over scalar kappa_D."""
+    p1 = GaussianPattern(mu=np.random.default_rng(0).normal(size=2), sigma=np.eye(2))
+    p2 = GaussianPattern(mu=np.random.default_rng(1).normal(size=2), sigma=np.eye(2))
+    patterns = [p1, p2]
+    weights = np.array([0.5, 0.5])
+    totals = np.array([0.0, 0.0])
+    densities = np.array([0.8, 0.2])
+
+    # scalar kappa_D=1.0 but overridden by per-pattern [0.0, 0.0]
+    rule = MetaPatternRule(kappa_D=1.0)
+    w_overridden = rule.step(patterns, weights, totals,
+                             densities=densities,
+                             kappa_d_per_pattern=[0.0, 0.0])
+
+    # With kappa_D=0.0 (no density bias at all)
+    rule_zero = MetaPatternRule(kappa_D=0.0)
+    w_zero = rule_zero.step(patterns, weights, totals, densities=densities)
+
+    np.testing.assert_allclose(w_overridden, w_zero, atol=1e-10)
+
+
+def test_kappa_d_per_pattern_none_falls_back_to_scalar():
+    """Without kappa_d_per_pattern, scalar kappa_D is used (backward compat)."""
+    p = GaussianPattern(mu=np.random.default_rng(1).normal(size=2), sigma=np.eye(2))
+    patterns = [p]
+    weights = np.array([1.0])
+    totals = np.array([0.5])
+    densities = np.array([0.7])
+
+    rule = MetaPatternRule(kappa_D=0.5)
+    w_scalar = rule.step(patterns, weights, totals, densities=densities)
+    w_explicit = rule.step(patterns, weights, totals, densities=densities,
+                           kappa_d_per_pattern=None)
+    np.testing.assert_allclose(w_scalar, w_explicit, atol=1e-10)
+
+
+def test_high_kappa_d_per_pattern_increases_weight_faster():
+    """A pattern with high per-pattern kappa_d gains weight faster."""
+    p1 = GaussianPattern(mu=np.zeros(2), sigma=np.eye(2))
+    p2 = GaussianPattern(mu=np.ones(2) * 5, sigma=np.eye(2))
+    patterns = [p1, p2]
+    weights = np.array([0.5, 0.5])
+    totals = np.array([0.0, 0.0])
+    densities = np.array([0.9, 0.9])
+
+    # p1 gets high kappa_d, p2 gets zero
+    rule = MetaPatternRule(kappa_D=0.0)
+    w = rule.step(patterns, weights, totals,
+                  densities=densities,
+                  kappa_d_per_pattern=[2.0, 0.0])
+    assert w[0] > w[1]
