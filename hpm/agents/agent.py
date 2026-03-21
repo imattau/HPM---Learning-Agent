@@ -221,9 +221,12 @@ class Agent:
             e_costs = [0.0] * len(patterns)
 
         totals = np.array([
-            epi + self.config.beta_aff * e_aff + self.config.gamma_soc * e_soc
+            epi
+            + (self.config.beta_comp * p.compress() if self.config.beta_comp != 0.0 else 0.0)
+            + self.config.beta_aff * e_aff
+            + self.config.gamma_soc * e_soc
             + self.config.delta_cost * e_cost
-            for epi, e_aff, e_soc, e_cost in zip(epistemic_accs, e_affs, e_socs, e_costs)
+            for p, epi, e_aff, e_soc, e_cost in zip(patterns, epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
         step_result = self.dynamics.step(
@@ -305,6 +308,11 @@ class Agent:
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
             'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
             'level_mean': float(np.mean([p.level for p in report_patterns])) if report_patterns else 0.0,
+            'compress_mean': (
+                float(np.mean([p.compress() for p in report_patterns]))
+                if (report_patterns and self.config.beta_comp != 0.0)
+                else 0.0
+            ),
             'level_distribution': {lvl: sum(1 for p in report_patterns if p.level == lvl) for lvl in range(1, 6)},
             'total_conflict': float(total_conflict),
             'recombination_attempted': recomb_attempted,
