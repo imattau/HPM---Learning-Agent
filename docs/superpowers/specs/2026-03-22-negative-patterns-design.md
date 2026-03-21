@@ -77,7 +77,7 @@ Returns `list[(pattern, weight)]` in the same format as `query()`. Called by `en
 def negative_merge(
     self,
     context_id: str,
-    conflict_threshold: float = 0.7,
+    neg_conflict_threshold: float = 0.7,
     max_tier2_negative: int = 100,
 ) -> None:
 ```
@@ -89,14 +89,14 @@ def negative_merge(
 3. For each Tier 1 pattern `p1` (with mean vector `mu1`):
    a. Compute cosine similarity between `mu1` and each positive Tier 2 pattern `mu2`.
    b. Find `best_sim = max(cosine_similarity(mu1, mu2_j) for all j)`.
-   c. If `best_sim >= conflict_threshold` AND `len(_tier2_negative) < max_tier2_negative`:
+   c. If `best_sim >= neg_conflict_threshold` AND `len(_tier2_negative) < max_tier2_negative`:
       - Promote `p1` to `_tier2_negative` with weight `w1 * 0.5` (halved entry weight, matching `similarity_merge` convention).
    d. Else: discard (genuine noise, no conflict detected).
 4. Zero-norm vectors (norm < 1e-8) are skipped (same guard as `similarity_merge`).
 
-**Conflict rationale:** A Tier 1 pattern from a *failed* task that is highly similar (cosine ≥ 0.7) to an established *positive* Tier 2 pattern represents a structural confusion — the agent applied a known-good pattern to the wrong context. Promoting it to `_tier2_negative` encodes the taboo: "this pattern shape, in this context, was wrong."
+**Conflict rationale:** A Tier 1 pattern from a *failed* task that is highly similar (cosine ≥ `neg_conflict_threshold`) to an established *positive* Tier 2 pattern represents a structural confusion — the agent applied a known-good pattern to the wrong context. Promoting it to `_tier2_negative` encodes the taboo: "this pattern shape, in this context, was wrong."
 
-Patterns below `conflict_threshold` are discarded because they do not represent a specific conflict with known good patterns — they are just noise from a task that didn't work.
+Patterns below `neg_conflict_threshold` are discarded because they do not represent a specific conflict with known good patterns — they are just noise from a task that didn't work.
 
 ### 3.4 Updated `end_context`
 
@@ -152,13 +152,31 @@ This is a parallel channel to `self._agent_patterns` (the positive frequency reg
 
 ```python
 def broadcast_negative(self, pattern, weight: float, agent_id: str) -> None:
-    """Register a negative pattern from agent_id into the inhibitory channel."""
+    """
+    Register a negative pattern from agent_id into the inhibitory channel.
+    Replaces (not appends to) the agent's negative registration for this step,
+    exactly like register() replaces positive pattern registrations.
+    """
     if agent_id not in self._negative:
         self._negative[agent_id] = []
     self._negative[agent_id].append((pattern, weight))
 ```
 
-Called by `Agent.step()` after pulling its own `_tier2_negative` patterns.
+**Accumulation behaviour:** Unlike `_broadcast_queue` (which is drained after each orchestrator step), `_negative` is a *persistent registry* — it represents the current inhibitory state of each agent, not a one-shot queue. Each agent replaces its negative registration at the start of each step by clearing and re-broadcasting its full current `_tier2_negative` contents. This mirrors how `register()` replaces the positive `_agent_patterns` entry each step.
+
+**Clearing protocol:** `Agent.step()` clears the agent's entry in `_negative` before broadcasting, so the field always reflects the *current* (not cumulative) negative state:
+
+```python
+# In Agent.step(), Step B:
+if self.field is not None and hasattr(self.store, 'query_negative'):
+    self.field._negative[self.agent_id] = []   # reset before re-broadcasting
+    for pattern, weight in self.store.query_negative(self.agent_id):
+        self.field.broadcast_negative(pattern, weight, self.agent_id)
+```
+
+This means `pull_negative` always returns the broadcasting agent's *current* full negative store, attenuated. No unbounded accumulation occurs.
+
+Called by `Agent.step()` Step B, after Step A (pull).
 
 ### 4.3 New Method: `pull_negative`
 
@@ -184,12 +202,22 @@ def pull_negative(self, agent_id: str, gamma_neg: float) -> list[tuple]:
 Three new fields added to `AgentConfig` with defaults that preserve backward compatibility:
 
 ```python
-gamma_neg: float = 0.3        # social inhibition attenuation (0 = off)
-conflict_threshold: float = 0.7  # cosine sim threshold for negative_merge
-max_tier2_negative: int = 100    # cap on _tier2_negative store size
+gamma_neg: float = 0.3             # social inhibition attenuation (0 = off)
+neg_conflict_threshold: float = 0.7  # cosine sim threshold for negative_merge
+max_tier2_negative: int = 100      # cap on _tier2_negative store size
 ```
 
-Note: `conflict_threshold` already exists in `AgentConfig` (currently used for `RecombinationOperator` trigger logic). **The negative_merge `conflict_threshold` is a separate concept** and should be a distinct parameter name, e.g. `neg_conflict_threshold: float = 0.7`, to avoid shadowing the existing recombination trigger threshold.
+Note: `conflict_threshold: float = 0.1` already exists in `AgentConfig` for the `RecombinationOperator` trigger logic. The new field uses the distinct name `neg_conflict_threshold` to avoid collision. These are separate concepts: `conflict_threshold` fires recombination when `total_conflict > 0.1`; `neg_conflict_threshold` controls cosine similarity gating in `negative_merge`.
+
+**How `neg_conflict_threshold` flows to `negative_merge`:** `end_context` is called on the `TieredStore` directly (from `run_persistent` in the ARC benchmark), and the TieredStore does not have access to `AgentConfig`. Therefore `negative_merge` accepts `conflict_threshold` as a parameter (defaulting to 0.7), and the orchestrator or benchmark code passes `agent.config.neg_conflict_threshold` explicitly when calling `end_context`. The recommended call site:
+
+```python
+tiered.end_context(context_id, correct=correct,
+                   neg_conflict_threshold=agents[0].config.neg_conflict_threshold,
+                   max_tier2_negative=agents[0].config.max_tier2_negative)
+```
+
+This requires `end_context` to accept and forward these kwargs to `negative_merge`. Alternatively, `TieredStore` can store defaults in its constructor (e.g. `TieredStore(neg_conflict_threshold=0.7, max_tier2_negative=100)`) and `end_context` uses the stored values. The constructor approach is simpler for the persistent benchmark; the kwarg approach is simpler for testing. **Implementer decision: use constructor defaults, with kwargs available for override in tests.**
 
 ### 4.5 Agent.step() Changes
 
@@ -274,17 +302,12 @@ def ensemble_score(agents, vec: np.ndarray) -> float:
 
 The existing `evaluate_task` ranks candidates by `ensemble_score`: lower score = more probable = better candidate. The correct answer wins if `correct_score < min(distractor_scores)`.
 
-With the inhibitory term, consider a candidate `x` that strongly resembles a negative pattern (small `neg_NLL`):
+The inhibitory subtraction `total -= w * p.log_prob(vec)` works as follows:
 
-- `neg_NLL` is small → `-(w * neg_NLL)` is a small negative number
-- `total` is *less reduced* than for a candidate far from the negative pattern
+- `x` **close** to negative pattern μ → NLL is **low** → `w * NLL` is small → `total -= small` → total is barely reduced → **score stays high (worse rank)**
+- `x` **far** from negative pattern μ → NLL is **high** → `w * NLL` is large → `total -= large` → total is substantially reduced → **score is lower (better rank)**
 
-Wait — this is backwards. Let us re-examine carefully:
-
-- `x` close to negative pattern μ → NLL is **low** → `w * NLL` is small → `total -= small` → total is less affected → score stays higher (worse)
-- `x` far from negative pattern μ → NLL is **high** → `w * NLL` is large → `total -= large` → total is lower → score is better
-
-So: candidates close to taboo patterns retain a higher score (are penalised, ranked worse). Candidates far from taboo patterns get their score reduced (ranked better). This is the correct inhibitory direction: the correct answer, which should be *different* from failed-task patterns, benefits from the inhibitory term relative to distractors that happen to resemble taboo patterns.
+So: candidates close to taboo patterns are penalised (retain a higher score); candidates far from taboo patterns benefit (score is reduced). This is the correct inhibitory direction: the correct answer, which should be structurally *different* from failed-task patterns, benefits from the inhibitory term relative to distractors that happen to resemble taboo patterns.
 
 **Example walkthrough:**
 - Correct output: `correct_score = 50 + 5 * NLL_neg` (moderately far from negative pattern, NLL_neg = 10 → `-= 10`, net 40)
@@ -472,7 +495,7 @@ A cosine-similarity-based `taboo_overlap` would be more semantically accurate bu
 
 ### 8.4 Interaction with RecombinationOperator
 
-The `RecombinationOperator` uses `conflict_threshold` from `AgentConfig` to determine recombination eligibility. Section 3.4 notes that the `neg_conflict_threshold` for `negative_merge` should be a *distinct* config field. The spec uses `neg_conflict_threshold: float = 0.7` as the name. **Implementation must confirm there is no field-name collision** with the existing `conflict_threshold: float = 0.1` in `AgentConfig` (used for recombination trigger logic, a different concept).
+The `RecombinationOperator` uses `conflict_threshold: float = 0.1` from `AgentConfig` to fire the conflict-based recombination trigger. The new `neg_conflict_threshold: float = 0.7` field is distinct and serves a different purpose (cosine similarity gating in `negative_merge`). These are not in conflict but implementers should be careful not to confuse them when reading the config dataclass. The names are now sufficiently different to prevent accidental misuse.
 
 ### 8.5 Fear Reset and Asymmetric Agent Behaviour
 
@@ -487,7 +510,7 @@ During Fear Reset, `gamma_neg` is zeroed for all agents uniformly. If agents hav
 | Class | Method | Status |
 |-------|--------|--------|
 | `TieredStore` | `query_negative(agent_id)` | New |
-| `TieredStore` | `negative_merge(context_id, conflict_threshold, max_tier2_negative)` | New |
+| `TieredStore` | `negative_merge(context_id, neg_conflict_threshold, max_tier2_negative)` | New |
 | `TieredStore` | `query_tier2_negative_all()` | New |
 | `TieredStore` | `end_context(context_id, correct)` | Modified (elif branch) |
 | `PatternField` | `broadcast_negative(pattern, weight, agent_id)` | New |
