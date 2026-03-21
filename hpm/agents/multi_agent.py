@@ -37,6 +37,7 @@ class MultiAgentOrchestrator:
         groups: dict | None = None,   # agent_id -> group_id
         monitor=None,
         strategist=None,
+        bridge=None,
     ):
         self.agents = agents
         self._groups = groups
@@ -44,6 +45,7 @@ class MultiAgentOrchestrator:
         self._t = 0
         self.monitor = monitor
         self.strategist = strategist
+        self.bridge = bridge
 
         if groups is not None:
             # Create one PatternField per unique group and assign to agents
@@ -168,7 +170,13 @@ class MultiAgentOrchestrator:
             else {}
         )
 
-        return {**metrics, "field_quality": field_quality, "interventions": interventions}
+        bridge_report = (
+            self.bridge.step(self._t, field_quality)
+            if self.bridge is not None
+            else {}
+        )
+
+        return {**metrics, "field_quality": field_quality, "interventions": interventions, "bridge_report": bridge_report}
 
     def run(
         self,
