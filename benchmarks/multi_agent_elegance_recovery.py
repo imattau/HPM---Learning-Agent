@@ -2,13 +2,17 @@
 Multi-Agent Benchmark 1: Elegance Recovery
 ==========================================
 Same law-recovery task as elegance_recovery.py, but with two agents sharing
-a PatternField and StructuralLawMonitor. Both agents train on the same
-observations from y = x² / (1 + x).
+a PatternField. Each agent is seeded with a different subset of atomic
+algebraic building blocks:
 
-New output vs single-agent:
-  - Per-agent generalisation gap (do both recover the same law?)
-  - Field redundancy at end (do shared patterns converge?)
-  - Recombination counts per agent
+  agent_a: ["x", "x**2", "1+x"]      ← has the key recombination term
+  agent_b: ["1", "x**3", "1+x"]      ← has x**3 as alternative hypothesis
+
+"1+x" is shared — it's the term that appears in the true law y = x²/(1+x),
+so cross-agent communication should reinforce it.
+
+The benchmark tests whether the agents collectively recover the law faster
+and more reliably than if each agent worked from only its own subset.
 
 Run:
     python benchmarks/multi_agent_elegance_recovery.py
@@ -34,7 +38,13 @@ N_TEST = 200
 GAP_THRESHOLD = 0.0
 RNG_SEED = 42
 
-ATOMIC_EXPRESSIONS = ["x", "1", "x**2", "x**3", "1+x"]
+# Each agent starts with a different subset of atomic expressions.
+# "1+x" appears in both — it's the key term in y = x²/(1+x) and will be
+# reinforced when agents communicate via the shared PatternField.
+AGENT_EXPRESSIONS = {
+    "elegance_a": ["x", "x**2", "1+x"],
+    "elegance_b": ["1", "x**3", "1+x"],
+}
 
 
 def _sample_pairs(rng, n, fn):
@@ -56,13 +66,13 @@ def _distractor(x):
     return x ** 2
 
 
-def seed_atomic_patterns(agent) -> None:
-    """Pre-seed agent store with atomic algebraic building blocks."""
+def seed_agent_expressions(agent, expressions: list[str]) -> None:
+    """Pre-seed agent store with its assigned subset of atomic expressions."""
     records = agent.store.query(agent.agent_id)
     for p, _ in records:
         agent.store.delete(p.id)
-    init_weight = 1.0 / len(ATOMIC_EXPRESSIONS)
-    for expr in ATOMIC_EXPRESSIONS:
+    init_weight = 1.0 / len(expressions)
+    for expr in expressions:
         mu = hash_vectorise(expr, FEATURE_DIM)
         sigma = np.eye(FEATURE_DIM) * agent.config.init_sigma
         pattern = GaussianPattern(mu=mu, sigma=sigma, level=4, freeze_mu=True)
@@ -77,14 +87,14 @@ def run() -> dict:
         feature_dim=FEATURE_DIM,
         agent_ids=["elegance_a", "elegance_b"],
         with_monitor=True,
-        T_monitor=N_STEPS,  # heavy metrics only at end
+        T_monitor=50,
         min_recomb_level=1,
         init_sigma=0.1,
     )
 
-    # Seed each agent independently with the same atomic expressions
+    # Seed each agent with its assigned subset of atomic expressions
     for agent in agents:
-        seed_atomic_patterns(agent)
+        seed_agent_expressions(agent, AGENT_EXPRESSIONS[agent.agent_id])
 
     recomb_counts = {a.agent_id: 0 for a in agents}
 
@@ -109,22 +119,19 @@ def run() -> dict:
         if not records:
             agent_results.append({
                 "agent_id": agent.agent_id,
-                "gap": 0.0,
-                "nll_true": 0.0,
-                "nll_distractor": 0.0,
-                "top_weight": 0.0,
-                "recomb_count": recomb_counts[agent.agent_id],
+                "expressions": ", ".join(AGENT_EXPRESSIONS[agent.agent_id]),
+                "gap": 0.0, "nll_true": 0.0, "nll_distractor": 0.0,
+                "top_weight": 0.0, "recomb_count": recomb_counts[agent.agent_id],
             })
             continue
 
         top_pattern, top_weight = max(records, key=lambda pw: pw[1])
         nll_true = float(np.mean([-top_pattern.log_prob(v) for v in true_vecs]))
         nll_dist = float(np.mean([-top_pattern.log_prob(v) for v in dist_vecs]))
-        gap = nll_dist - nll_true
-
         agent_results.append({
             "agent_id": agent.agent_id,
-            "gap": gap,
+            "expressions": ", ".join(AGENT_EXPRESSIONS[agent.agent_id]),
+            "gap": nll_dist - nll_true,
             "nll_true": nll_true,
             "nll_distractor": nll_dist,
             "top_weight": top_weight,
@@ -152,8 +159,8 @@ def main():
         recovered = gap > GAP_THRESHOLD
         rows.append({
             "Agent": ar["agent_id"],
-            "Top Weight": f"{ar['top_weight']:.2f}",
-            "Recomb Count": str(ar["recomb_count"]),
+            "Seed Expressions": ar["expressions"],
+            "Recomb": str(ar["recomb_count"]),
             "NLL True": f"{ar['nll_true']:.2f}",
             "NLL Distractor": f"{ar['nll_distractor']:.2f}",
             "Gap": f"{gap:+.2f}",
@@ -161,8 +168,8 @@ def main():
         })
 
     print_results_table(
-        title="Multi-Agent Elegance Recovery (2 agents, shared field)",
-        cols=["Agent", "Top Weight", "Recomb Count", "NLL True", "NLL Distractor", "Gap", "Result"],
+        title="Multi-Agent Elegance Recovery (2 agents, partitioned atomic seeds, shared field)",
+        cols=["Agent", "Seed Expressions", "Recomb", "NLL True", "NLL Distractor", "Gap", "Result"],
         rows=rows,
     )
 

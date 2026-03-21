@@ -1,13 +1,19 @@
 """
 Multi-Agent Benchmark 3: Substrate Efficiency
 ===============================================
-Same 3-cluster data stream as substrate_efficiency.py, but run with two agents
-sharing a PatternField and StructuralLawMonitor.
+Same 3-cluster data stream as substrate_efficiency.py, but with two agents
+that observe different subsets of clusters (division of labour):
+
+  agent_a observes clusters {0, 1}
+  agent_b observes clusters {1, 2}
+
+Cluster 1 is the shared "bridge" — both agents see it, enabling cross-agent
+validation of patterns discovered in the other's exclusive cluster.
 
 New output vs single-agent:
-  - Per-agent pattern counts (do agents specialise to different clusters?)
-  - Field redundancy at end of run (shared patterns across agents)
-  - Combined Pareto comparison includes multi-agent HPM as a single model
+  - Per-agent pattern counts (specialisation by cluster)
+  - Field redundancy at end (shared patterns across agents)
+  - Combined Pareto comparison includes multi-agent HPM
 
 Run:
     python benchmarks/multi_agent_substrate_efficiency.py
@@ -33,6 +39,12 @@ CLUSTER_STD = 0.3
 GMM_SAMPLE_SIZE = 500
 GMM_K_VALUES = [1, 2, 3, 4, 5]
 RNG_SEED = 42
+
+# Cluster partitions: agent_a sees {0,1}, agent_b sees {1,2}
+AGENT_CLUSTERS = {
+    "efficiency_a": [0, 1],
+    "efficiency_b": [1, 2],
+}
 
 
 def make_cluster_means(rng, n, dim):
@@ -69,27 +81,28 @@ def run() -> dict:
         feature_dim=FEATURE_DIM,
         agent_ids=["efficiency_a", "efficiency_b"],
         with_monitor=True,
-        T_monitor=99999,   # suppress console output; redundancy computed at end
+        T_monitor=50,
+        agent_seeds=[42, 99],
     )
 
     eval_records = []
     hpm_nll_readings = []
-    final_field_quality = {}
 
     for step in range(1, N_STEPS + 1):
-        cluster_idx = rng.integers(0, N_CLUSTERS)
-        obs = rng.normal(loc=cluster_means[cluster_idx], scale=CLUSTER_STD, size=FEATURE_DIM)
+        # Each agent observes only its assigned clusters
+        observations = {}
+        for agent in agents:
+            allowed = AGENT_CLUSTERS[agent.agent_id]
+            cluster_idx = allowed[rng.integers(0, len(allowed))]
+            obs = rng.normal(loc=cluster_means[cluster_idx], scale=CLUSTER_STD, size=FEATURE_DIM)
+            observations[agent.agent_id] = obs
 
-        observations = {a.agent_id: obs for a in agents}
         result = orch.step(observations)
 
         if step % EVAL_EVERY == 0:
             nll_val = avg_metric(result, agents, "mean_accuracy")
             compress_val = avg_metric(result, agents, "compress_mean")
-            # Sum pattern counts across agents
-            total_patterns = sum(
-                result[a.agent_id].get("n_patterns", 0) for a in agents
-            )
+            total_patterns = sum(result[a.agent_id].get("n_patterns", 0) for a in agents)
             eval_records.append({
                 "step": step,
                 "mean_accuracy": nll_val,
@@ -103,18 +116,14 @@ def run() -> dict:
     final_redundancy = compute_redundancy(orch)
     final = eval_records[-1]
     max_gmm_k = max(GMM_K_VALUES)
-    # Complexity: total patterns across both agents, normalised to [0,1] vs max GMM k * 2
     hpm_complexity = min(final["n_patterns_total"], max_gmm_k * 2) / (max_gmm_k * 2)
 
     nll_min = min(hpm_nll_readings)
     nll_max = max(hpm_nll_readings)
     raw_nll = final["mean_accuracy"]
-    if nll_max > nll_min:
-        hpm_accuracy = (nll_max - raw_nll) / (nll_max - nll_min)
-    else:
-        hpm_accuracy = 0.5
+    hpm_accuracy = (nll_max - raw_nll) / (nll_max - nll_min) if nll_max > nll_min else 0.5
 
-    # GMM comparison
+    # GMM comparison (trained on full cluster distribution for fair baseline)
     gmm_samples = sample_clusters(rng, cluster_means, CLUSTER_STD, GMM_SAMPLE_SIZE)
     try:
         from sklearn.mixture import GaussianMixture
@@ -127,9 +136,7 @@ def run() -> dict:
         for k in GMM_K_VALUES:
             gmm = GaussianMixture(n_components=k, random_state=RNG_SEED, max_iter=200)
             gmm.fit(gmm_samples)
-            bic = float(gmm.bic(gmm_samples))
-            mean_ll = float(gmm.score(gmm_samples))
-            gmm_results.append({"k": k, "bic": bic, "mean_ll": mean_ll})
+            gmm_results.append({"k": k, "bic": float(gmm.bic(gmm_samples)), "mean_ll": float(gmm.score(gmm_samples))})
 
     if gmm_results:
         bics = [g["bic"] for g in gmm_results]
@@ -142,42 +149,25 @@ def run() -> dict:
 
     all_complexities = [hpm_complexity] + [g["norm_complexity"] for g in gmm_results]
     all_accuracies = [hpm_accuracy] + [g["norm_accuracy"] for g in gmm_results]
-
-    all_acc_min = min(all_accuracies)
-    all_acc_max = max(all_accuracies)
-    all_comp_min = min(all_complexities)
-    all_comp_max = max(all_complexities)
+    all_acc_min, all_acc_max = min(all_accuracies), max(all_accuracies)
+    all_comp_min, all_comp_max = min(all_complexities), max(all_complexities)
 
     def norm_val(v, lo, hi):
         return (v - lo) / (hi - lo) if hi > lo else 0.5
 
-    models = []
-    hpm_nc = norm_val(hpm_complexity, all_comp_min, all_comp_max)
-    hpm_na = norm_val(hpm_accuracy, all_acc_min, all_acc_max)
-    models.append({
-        "name": "HPM 2-agent (final)",
-        "complexity": hpm_complexity,
-        "accuracy": hpm_accuracy,
-        "norm_complexity": hpm_nc,
-        "norm_accuracy": hpm_na,
-    })
+    models = [{"name": "HPM 2-agent (final)", "complexity": hpm_complexity, "accuracy": hpm_accuracy,
+               "norm_complexity": norm_val(hpm_complexity, all_comp_min, all_comp_max),
+               "norm_accuracy": norm_val(hpm_accuracy, all_acc_min, all_acc_max)}]
     for g in gmm_results:
-        nc = norm_val(g["norm_complexity"], all_comp_min, all_comp_max)
-        na = norm_val(g["norm_accuracy"], all_acc_min, all_acc_max)
-        models.append({
-            "name": f"GMM k={g['k']}",
-            "complexity": g["norm_complexity"],
-            "accuracy": g["norm_accuracy"],
-            "norm_complexity": nc,
-            "norm_accuracy": na,
-        })
+        models.append({"name": f"GMM k={g['k']}", "complexity": g["norm_complexity"], "accuracy": g["norm_accuracy"],
+                        "norm_complexity": norm_val(g["norm_complexity"], all_comp_min, all_comp_max),
+                        "norm_accuracy": norm_val(g["norm_accuracy"], all_acc_min, all_acc_max)})
 
     all_nc = [m["norm_complexity"] for m in models]
     all_na = [m["norm_accuracy"] for m in models]
     for i, m in enumerate(models):
-        others_c = all_nc[:i] + all_nc[i+1:]
-        others_a = all_na[:i] + all_na[i+1:]
-        m["on_pareto"] = not is_pareto_dominated(m["norm_complexity"], m["norm_accuracy"], others_c, others_a)
+        m["on_pareto"] = not is_pareto_dominated(m["norm_complexity"], m["norm_accuracy"],
+                                                  all_nc[:i] + all_nc[i+1:], all_na[:i] + all_na[i+1:])
 
     assert any(m["on_pareto"] for m in models)
 
@@ -198,17 +188,12 @@ def main():
     if not result["sklearn_available"]:
         print("WARNING: scikit-learn not installed. GMM comparison skipped.")
 
-    rows = []
-    for m in models:
-        rows.append({
-            "Model": m["name"],
-            "Complexity": f"{m['complexity']:.2f}",
-            "Accuracy": f"{m['accuracy']:.2f}",
-            "On Pareto Frontier?": "✓" if m["on_pareto"] else "✗",
-        })
+    rows = [{"Model": m["name"], "Complexity": f"{m['complexity']:.2f}",
+             "Accuracy": f"{m['accuracy']:.2f}", "On Pareto Frontier?": "✓" if m["on_pareto"] else "✗"}
+            for m in models]
 
     print_results_table(
-        title="Multi-Agent Substrate Efficiency (2 agents, shared field)",
+        title="Multi-Agent Substrate Efficiency (2 agents, partitioned clusters {0,1} vs {1,2})",
         cols=["Model", "Complexity", "Accuracy", "On Pareto Frontier?"],
         rows=rows,
     )
@@ -216,11 +201,11 @@ def main():
     redundancy_str = f"{redundancy:.3f}" if redundancy is not None else "N/A"
     print_results_table(
         title="Agent Specialisation",
-        cols=["Agent", "Final Patterns"],
+        cols=["Agent", "Clusters", "Final Patterns"],
         rows=[
-            {"Agent": "efficiency_a", "Final Patterns": str(final["n_patterns_a"])},
-            {"Agent": "efficiency_b", "Final Patterns": str(final["n_patterns_b"])},
-            {"Agent": "Field Redundancy", "Final Patterns": redundancy_str},
+            {"Agent": "efficiency_a", "Clusters": "{0, 1}", "Final Patterns": str(final["n_patterns_a"])},
+            {"Agent": "efficiency_b", "Clusters": "{1, 2}", "Final Patterns": str(final["n_patterns_b"])},
+            {"Agent": "Field Redundancy", "Clusters": "", "Final Patterns": redundancy_str},
         ],
     )
 

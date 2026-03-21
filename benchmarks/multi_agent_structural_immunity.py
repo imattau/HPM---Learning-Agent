@@ -54,7 +54,8 @@ def run() -> dict:
         feature_dim=FEATURE_DIM,
         agent_ids=["immunity_a", "immunity_b"],
         with_monitor=True,
-        T_monitor=99999,   # suppress console output; redundancy computed via snapshots
+        T_monitor=50,
+        agent_seeds=[42, 99],   # different initial patterns → agents have complementary starts
         kappa_D=1.0,
         kappa_d_levels=[0.2, 0.4, 0.6, 0.8, 1.0],
     )

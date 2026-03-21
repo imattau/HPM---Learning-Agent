@@ -18,6 +18,7 @@ from hpm.config import AgentConfig
 from hpm.agents.agent import Agent
 from hpm.agents.multi_agent import MultiAgentOrchestrator
 from hpm.field.field import PatternField
+from hpm.patterns.gaussian import GaussianPattern
 from hpm.store.memory import InMemoryStore
 from hpm.monitor.structural_law import StructuralLawMonitor
 from hpm.monitor.recombination_strategist import RecombinationStrategist
@@ -31,6 +32,7 @@ def make_orchestrator(
     with_monitor: bool = True,
     with_strategist: bool = True,
     T_monitor: int = 50,
+    agent_seeds: list[int] | None = None,
     **overrides,
 ) -> tuple:
     """
@@ -41,8 +43,11 @@ def make_orchestrator(
     metrics to the strategist, which triggers recombination bursts to prevent
     convergence and encourage cross-agent learning.
 
-    All agents share the same store so the monitor observes the full population.
-    Each agent is namespaced by agent_id.
+    Args:
+        agent_seeds: Optional list of int seeds (one per agent). When provided,
+            each agent is pre-seeded with a distinct random GaussianPattern,
+            breaking symmetry so agents start from different positions in
+            pattern space and have something different to share via the field.
 
     Returns:
         (orch, agents, store)
@@ -61,6 +66,21 @@ def make_orchestrator(
         Agent(AgentConfig(agent_id=aid, **cfg_kwargs), store=store, field=field)
         for aid in agent_ids
     ]
+
+    # Pre-seed each agent with a distinct random pattern when agent_seeds provided.
+    # This breaks symmetry so agents start from different positions and have
+    # complementary patterns to share via the PatternField.
+    if agent_seeds is not None:
+        init_sigma = cfg_kwargs.get("init_sigma", 2.0)
+        for agent, seed in zip(agents, agent_seeds):
+            rng = np.random.default_rng(seed)
+            mu = rng.standard_normal(feature_dim)
+            norm = np.linalg.norm(mu)
+            if norm > 0:
+                mu /= norm
+            sigma = np.eye(feature_dim) * init_sigma
+            pattern = GaussianPattern(mu=mu, sigma=sigma)
+            agent.store.save(pattern, 1.0, agent.agent_id)
 
     monitor = (
         StructuralLawMonitor(store, T_monitor=T_monitor, verbose=False)

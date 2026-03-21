@@ -2,15 +2,19 @@
 Multi-Agent Benchmark 4: ARC (Abstraction and Reasoning Corpus)
 ================================================================
 Same ARC discrimination task as arc_benchmark.py, but each task uses two
-agents sharing a PatternField. Scoring uses an ensemble: the combined
-weighted NLL from both agents' pattern stores.
+agents with partitioned training pairs:
 
-Ensemble hypothesis: two independent HPM agents training on the same examples
-produce complementary pattern sets; their combined NLL scores should discriminate
-the correct answer more reliably than a single agent.
+  agent_a trains on even-indexed pairs (0, 2, 4, ...)
+  agent_b trains on odd-indexed pairs  (1, 3, 5, ...)
+
+Each agent sees fewer examples but learns from a different subset. Cross-agent
+pattern sharing via the PatternField lets them benefit from each other's examples.
+Scoring uses an ensemble: sum of per-agent weighted NLL scores.
+
+For tasks with only 1 training pair, both agents train on it (no split possible).
 
 Protocol:
-  - Train 2 agents on 3-5 (input, output) grid pairs (10 steps each)
+  - Train 2 agents on partitioned (input, output) grid pairs (10 steps each)
   - Test: identify correct output from 4 distractors drawn from other tasks
   - Scoring: ensemble NLL = sum of per-agent weighted NLL scores
   - Metric: accuracy vs 20% chance baseline
@@ -119,12 +123,20 @@ def evaluate_task(task, all_tasks, task_idx):
     """
     orch, agents, store = make_arc_orchestrator()
 
-    # Training phase — both agents see the same pairs
-    for pair in task["train"]:
-        obs = encode_pair(pair["input"], pair["output"])
-        observations = {a.agent_id: obs for a in agents}
-        for _ in range(TRAIN_REPS):
-            orch.step(observations)
+    # Partition training pairs between agents.
+    # agent_a gets even-indexed pairs, agent_b gets odd-indexed pairs.
+    # If only 1 pair exists, both agents train on it.
+    train_pairs = task["train"]
+    pairs_a = train_pairs[0::2] or train_pairs
+    pairs_b = train_pairs[1::2] or train_pairs
+
+    # Train each agent directly on its partition (they share the store,
+    # so learned patterns are visible to the ensemble scorer).
+    for agent, pairs in zip(agents, [pairs_a, pairs_b]):
+        for pair in pairs:
+            obs = encode_pair(pair["input"], pair["output"])
+            for _ in range(TRAIN_REPS):
+                agent.step(obs)
 
     # Evaluation phase
     test_pair = task["test"][0]
