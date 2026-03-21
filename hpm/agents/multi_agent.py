@@ -34,11 +34,38 @@ class MultiAgentOrchestrator:
         agents: list,
         field: PatternField,
         seed_pattern: GaussianPattern | None = None,
+        groups: dict | None = None,   # agent_id -> group_id
     ):
         self.agents = agents
-        self.field = field
+        self._groups = groups
+        self._group_fields: dict[str, PatternField] = {}
+
+        if groups is not None:
+            # Create one PatternField per unique group and assign to agents
+            for group_id in set(groups.values()):
+                self._group_fields[group_id] = PatternField()
+            for agent in agents:
+                agent.field = self._group_fields[groups[agent.agent_id]]
+            self.field = None   # ungrouped field unused when all agents are grouped
+        else:
+            self.field = field
+            for agent in agents:
+                if agent.field is None:
+                    agent.field = field
+
         if seed_pattern is not None:
             self._seed_shared(seed_pattern)
+
+    def group_field_quality(self) -> dict:
+        """
+        Returns field quality metrics per group, keyed by group_id.
+        Delegates to PatternField.field_quality() for each group field.
+        Returns {} when groups are not configured.
+        """
+        return {
+            gid: gfield.field_quality()
+            for gid, gfield in self._group_fields.items()
+        }
 
     def _seed_shared(self, seed: GaussianPattern) -> None:
         """Re-seed all agents with a common GaussianPattern (same UUID).
@@ -94,10 +121,31 @@ class MultiAgentOrchestrator:
                     actual_field.register(
                         agent.agent_id, [(p.id, w) for p, w in records]
                     )
+                    # Run sharing check that was suppressed during the M3 detach.
+                    # Overwrites communicated_out: 0 from agent.step() (field was None during step).
+                    patterns_post = [p for p, _ in records]
+                    step_metrics['communicated_out'] = agent._share_pending(actual_field, patterns_post)
             else:
                 step_metrics = agent.step(x, reward=r)
             step_metrics["m3_active"] = m3_active
             metrics[agent.agent_id] = step_metrics
+
+        # Communication phase -- within-group only when groups configured
+        if self._group_fields:
+            for group_id, gfield in self._group_fields.items():
+                broadcasts = gfield.drain_broadcasts()
+                group_agent_ids = {aid for aid, gid in self._groups.items() if gid == group_id}
+                for source_agent_id, pattern in broadcasts:
+                    for agent in self.agents:
+                        if agent.agent_id in group_agent_ids and agent.agent_id != source_agent_id:
+                            agent._accept_communicated(pattern, source_agent_id)
+        elif self.field is not None:
+            broadcasts = self.field.drain_broadcasts()
+            for source_agent_id, pattern in broadcasts:
+                for agent in self.agents:
+                    if agent.agent_id != source_agent_id:
+                        agent._accept_communicated(pattern, source_agent_id)
+
         return metrics
 
     def run(

@@ -59,3 +59,53 @@ def test_compress_between_zero_and_one(dim):
     p = GaussianPattern(mu=np.zeros(dim), sigma=np.eye(dim))
     c = p.compress()
     assert 0.0 <= c <= 1.0
+
+
+def test_source_id_defaults_to_none():
+    p = GaussianPattern(np.zeros(2), np.eye(2))
+    assert p.source_id is None
+
+
+def test_source_id_stored_from_constructor():
+    p = GaussianPattern(np.zeros(2), np.eye(2), source_id='abc-123')
+    assert p.source_id == 'abc-123'
+
+
+def test_to_dict_includes_source_id():
+    p = GaussianPattern(np.zeros(2), np.eye(2), source_id='abc-123')
+    d = p.to_dict()
+    assert 'source_id' in d
+    assert d['source_id'] == 'abc-123'
+
+
+def test_to_dict_source_id_none_when_not_set():
+    p = GaussianPattern(np.zeros(2), np.eye(2))
+    assert p.to_dict()['source_id'] is None
+
+
+def test_from_dict_restores_source_id():
+    p = GaussianPattern(np.zeros(2), np.eye(2), source_id='abc-123')
+    p2 = GaussianPattern.from_dict(p.to_dict())
+    assert p2.source_id == 'abc-123'
+
+
+def test_from_dict_without_source_id_key_defaults_none():
+    """Existing serialised patterns (no source_id key) round-trip cleanly."""
+    p = GaussianPattern(np.zeros(2), np.eye(2))
+    d = p.to_dict()
+    del d['source_id']
+    p2 = GaussianPattern.from_dict(d)
+    assert p2.source_id is None
+
+
+def test_update_preserves_source_id():
+    p = GaussianPattern(np.zeros(2), np.eye(2), source_id='abc-123')
+    p2 = p.update(np.ones(2))
+    assert p2.source_id == 'abc-123'
+
+
+def test_recombine_does_not_inherit_source_id():
+    pa = GaussianPattern(np.zeros(2), np.eye(2), source_id='parent-a')
+    pb = GaussianPattern(np.ones(2), np.eye(2), source_id='parent-b')
+    child = pa.recombine(pb)
+    assert child.source_id is None

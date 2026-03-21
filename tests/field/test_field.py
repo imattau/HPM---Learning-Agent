@@ -1,5 +1,11 @@
+import numpy as np
 import pytest
 from hpm.field.field import PatternField
+from hpm.patterns.gaussian import GaussianPattern
+
+
+def _pattern():
+    return GaussianPattern(np.zeros(2), np.eye(2))
 
 
 def test_empty_field_returns_zero_freq():
@@ -83,3 +89,36 @@ def test_field_quality_two_equal_patterns_exact_entropy():
     field.register("agent-2", [("uuid-2", 0.5)])
     quality = field.field_quality()
     assert quality["diversity"] == pytest.approx(math.log(2))
+
+
+def test_broadcast_appends_to_queue():
+    field = PatternField()
+    p = _pattern()
+    field.broadcast('agent_a', p)
+    queue = field.drain_broadcasts()
+    assert len(queue) == 1
+    assert queue[0][0] == 'agent_a'
+    assert queue[0][1] is p
+
+
+def test_drain_broadcasts_clears_queue():
+    field = PatternField()
+    field.broadcast('agent_a', _pattern())
+    field.drain_broadcasts()
+    assert field.drain_broadcasts() == []
+
+
+def test_drain_broadcasts_returns_independent_list():
+    field = PatternField()
+    field.broadcast('agent_a', _pattern())
+    result = field.drain_broadcasts()
+    result.append(('extra', _pattern()))
+    assert field.drain_broadcasts() == []
+
+
+def test_multiple_broadcasts_accumulated():
+    field = PatternField()
+    field.broadcast('a', _pattern())
+    field.broadcast('b', _pattern())
+    queue = field.drain_broadcasts()
+    assert len(queue) == 2

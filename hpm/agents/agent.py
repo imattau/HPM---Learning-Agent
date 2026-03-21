@@ -78,7 +78,67 @@ class Agent:
         self._obs_buffer: deque = deque(maxlen=config.obs_buffer_size)
         self._last_recomb_t: int = -config.recomb_cooldown
         self._recomb_op = RecombinationOperator(rng=np.random.default_rng(0))
+        self._shared_ids: set[str] = set()
         self._seed_if_empty()
+
+    def _share_pending(self, field, patterns: list) -> int:
+        """
+        Broadcast patterns that have newly reached Level 4+ to the field.
+        Precondition: field must not be None (caller's responsibility).
+        Returns count of patterns newly shared this call.
+        """
+        count = 0
+        for p in patterns:
+            if p.level >= 4 and p.id not in self._shared_ids:
+                shared_copy = GaussianPattern(
+                    mu=p.mu.copy(),
+                    sigma=p.sigma.copy(),
+                    source_id=p.id,
+                    # No id= -> fresh UUID. Communicative sharing transfers structure,
+                    # not UUID identity. source_id preserves provenance.
+                )
+                field.broadcast(self.agent_id, shared_copy)
+                self._shared_ids.add(p.id)
+                count += 1
+        return count
+
+    def _accept_communicated(self, pattern, source_agent_id: str) -> bool:
+        """
+        Evaluate an incoming communicated pattern and admit it if I(h*) > 0.
+        Returns True if admitted.
+
+        Sign convention: log_prob(x) returns NLL (positive). -log_prob(x) gives
+        log-likelihood (<= 0). Eff is therefore non-positive; I(h*) > 0 requires
+        novelty to offset negative efficacy.
+
+        Nov = max(sym_kl_normalised(pattern, p) for p in library)  [1.0 if empty]
+        Eff = mean(-pattern.log_prob(x) for x in obs_buffer)  <= 0  [0.0 if empty]
+        I   = beta_orig * (alpha_nov * Nov + alpha_eff * Eff)
+        """
+        from ..dynamics.meta_pattern_rule import sym_kl_normalised
+        records = self.store.query(self.agent_id)
+        existing = [p for p, _ in records]
+
+        nov = (
+            max(sym_kl_normalised(pattern, p) for p in existing)
+            if existing else 1.0
+        )
+        obs = list(self._obs_buffer)
+        eff = float(np.mean([-pattern.log_prob(x) for x in obs])) if obs else 0.0
+        insight = self.config.beta_orig * (
+            self.config.alpha_nov * nov + self.config.alpha_eff * eff
+        )
+        if insight <= 0:
+            return False
+
+        entry_weight = self.config.kappa_0 * insight
+        self.store.save(pattern, entry_weight, self.agent_id)
+        all_records = self.store.query(self.agent_id)
+        total_w = sum(w for _, w in all_records)
+        if total_w > 0:
+            for p, w in all_records:
+                self.store.update_weight(p.id, w / total_w)
+        return True
 
     def _seed_if_empty(self) -> None:
         if not self.store.query(self.agent_id):
@@ -231,6 +291,10 @@ class Agent:
         else:
             report_patterns = surviving_patterns
 
+        communicated_out = 0
+        if self.field is not None:
+            communicated_out = self._share_pending(self.field, report_patterns)
+
         return {
             't': self._t,
             'n_patterns': len(report_patterns),
@@ -251,4 +315,5 @@ class Agent:
                 (recomb_result.parent_a_id, recomb_result.parent_b_id)
                 if recomb_result else None
             ),
+            'communicated_out': communicated_out,
         }

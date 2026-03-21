@@ -10,12 +10,13 @@ class GaussianPattern:
     fresh on recombination.
     """
 
-    def __init__(self, mu: np.ndarray, sigma: np.ndarray, id: str | None = None, level: int = 1):
+    def __init__(self, mu: np.ndarray, sigma: np.ndarray, id: str | None = None, level: int = 1, source_id: str | None = None):
         self.id = id or str(uuid.uuid4())
         self.mu = np.array(mu, dtype=float)
         self.sigma = np.array(sigma, dtype=float)
         self.level = level
         self._n_obs: int = 0
+        self.source_id = source_id
 
     def log_prob(self, x: np.ndarray) -> float:
         return float(-multivariate_normal.logpdf(x, mean=self.mu, cov=self.sigma))
@@ -49,7 +50,7 @@ class GaussianPattern:
     def update(self, x: np.ndarray) -> 'GaussianPattern':
         n = self._n_obs + 1
         new_mu = (self.mu * self._n_obs + x) / n
-        new_p = GaussianPattern(new_mu, self.sigma.copy(), id=self.id, level=self.level)
+        new_p = GaussianPattern(new_mu, self.sigma.copy(), id=self.id, level=self.level, source_id=self.source_id)
         new_p._n_obs = n
         return new_p
 
@@ -74,11 +75,12 @@ class GaussianPattern:
             'sigma': self.sigma.tolist(),
             'n_obs': self._n_obs,
             'level': self.level,
+            'source_id': self.source_id,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> 'GaussianPattern':
         p = cls(np.array(d['mu']), np.array(d['sigma']), id=d['id'],
-                level=d.get('level', 1))
+                level=d.get('level', 1), source_id=d.get('source_id', None))
         p._n_obs = d['n_obs']
         return p

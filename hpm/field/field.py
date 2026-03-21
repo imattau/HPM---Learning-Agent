@@ -25,6 +25,7 @@ class PatternField:
     def __init__(self):
         # Maps agent_id -> {pattern_id: weight}
         self._agent_patterns: dict[str, dict[str, float]] = {}
+        self._broadcast_queue: list[tuple[str, object]] = []
 
     @property
     def n_agents(self) -> int:
@@ -69,6 +70,16 @@ class PatternField:
             for pid, w in agent_patterns.items():
                 aggregated[pid] = aggregated.get(pid, 0.0) + w
         return [aggregated.get(pid, 0.0) / mass for pid in pattern_ids]
+
+    def broadcast(self, source_agent_id: str, pattern) -> None:
+        """Enqueue a shared pattern copy. Called by Agent._share_pending() when level >= 4."""
+        self._broadcast_queue.append((source_agent_id, pattern))
+
+    def drain_broadcasts(self) -> list[tuple[str, object]]:
+        """Return and clear the broadcast queue. Called by orchestrator after all agents step."""
+        queue = list(self._broadcast_queue)
+        self._broadcast_queue = []
+        return queue
 
     def field_quality(self) -> dict[str, float]:
         """
