@@ -299,10 +299,21 @@ git commit -m "feat: arc benchmark scoring function and agent factory"
 
 - [ ] **Step 1: Add evaluate_task() function**
 
+Returns `tuple[bool, int]`: `(correct, rank)` where rank 1 = lowest (best) NLL score.
+
+Three fixes vs the first draft:
+- Returns `(correct: bool, rank: int)` so `main()` can track both metrics without duplicating logic (fixes DRY violation).
+- Rank computed with `sum(1 for s in distractor_scores if s <= correct_score)` — count-based, not sort-index-based, so ties are handled conservatively (correct does NOT benefit from ties).
+- Distractor selection skips tasks with empty `train` lists to avoid `IndexError`.
+
 ```python
-def evaluate_task(task: dict, all_tasks: list[dict], task_idx: int) -> bool:
+def evaluate_task(task: dict, all_tasks: list[dict], task_idx: int) -> tuple[bool, int]:
     """
-    Run one ARC task. Returns True if agent correctly identifies the test output.
+    Run one ARC task.
+
+    Returns:
+        (correct, rank): correct=True if agent picks right output; rank in [1,5]
+        (rank 1 = lowest NLL = most probable; ties broken against correct).
 
     Protocol:
     1. Train: for each training pair, call agent.step(encode_pair(...)) TRAIN_REPS times
@@ -324,9 +335,9 @@ def evaluate_task(task: dict, all_tasks: list[dict], task_idx: int) -> bool:
 
     correct_vec = encode_pair(test_input, correct_output)
 
-    # Sample N_DISTRACTORS other tasks (exclude self)
+    # Sample N_DISTRACTORS other tasks (exclude self; skip tasks with no train pairs)
     rng = np.random.default_rng(task_idx)
-    other_indices = [j for j in range(len(all_tasks)) if j != task_idx]
+    other_indices = [j for j in range(len(all_tasks)) if j != task_idx and all_tasks[j]["train"]]
     distractor_indices = rng.choice(other_indices, size=N_DISTRACTORS, replace=False)
     distractor_vecs = [
         encode_pair(test_input, all_tasks[j]["train"][0]["output"])
@@ -337,11 +348,16 @@ def evaluate_task(task: dict, all_tasks: list[dict], task_idx: int) -> bool:
     correct_score = score_candidate(agent, correct_vec)
     distractor_scores = [score_candidate(agent, v) for v in distractor_vecs]
 
-    # Correct wins if it has strictly the lowest score
-    return correct_score < min(distractor_scores)
+    # Rank: count how many distractors score <= correct (ties go against correct)
+    rank = 1 + sum(1 for s in distractor_scores if s <= correct_score)
+    correct = correct_score < min(distractor_scores)
+
+    return correct, rank
 ```
 
 - [ ] **Step 2: Add main() function**
+
+`main()` calls `evaluate_task()` — no logic duplication.
 
 ```python
 def main():
@@ -362,38 +378,10 @@ def main():
             pct = correct_count / (run_idx + 1) * 100
             print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy so far: {pct:.1f}%", flush=True)
 
-        agent = make_arc_agent()
-
-        # Training phase
-        for pair in task["train"]:
-            obs = encode_pair(pair["input"], pair["output"])
-            for _ in range(TRAIN_REPS):
-                agent.step(obs)
-
-        # Evaluation phase
-        test_pair = task["test"][0]
-        test_input = test_pair["input"]
-        correct_output = test_pair["output"]
-        correct_vec = encode_pair(test_input, correct_output)
-
-        rng = np.random.default_rng(task_idx)
-        other_indices = [j for j in range(len(all_tasks)) if j != task_idx]
-        distractor_indices = rng.choice(other_indices, size=N_DISTRACTORS, replace=False)
-        distractor_vecs = [
-            encode_pair(test_input, all_tasks[j]["train"][0]["output"])
-            for j in distractor_indices
-        ]
-
-        correct_score = score_candidate(agent, correct_vec)
-        distractor_scores = [score_candidate(agent, v) for v in distractor_vecs]
-
-        # Rank: 1 = best (lowest score)
-        all_scores = [correct_score] + distractor_scores
-        rank = sorted(all_scores).index(correct_score) + 1
-        rank_sum += rank
-
-        if correct_score < min(distractor_scores):
+        correct, rank = evaluate_task(task, all_tasks, task_idx)
+        if correct:
             correct_count += 1
+        rank_sum += rank
 
     n = len(eligible)
     accuracy = correct_count / n * 100 if n > 0 else 0.0
