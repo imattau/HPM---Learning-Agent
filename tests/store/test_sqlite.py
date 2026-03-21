@@ -67,3 +67,27 @@ def test_persistence_across_connections(db_path, pattern):
     results = store2.query("agent1")
     assert len(results) == 1
     assert results[0][0].id == pattern.id
+
+
+def test_level_persisted(tmp_path):
+    """Pattern.level is stored in JSON and recovered correctly."""
+    store = SQLiteStore(str(tmp_path / "test.db"))
+    p = GaussianPattern(mu=np.zeros(4), sigma=np.eye(4))
+    p.level = 3
+    store.save(p, 0.5, "agent_a")
+    records = store.query("agent_a")
+    assert len(records) == 1
+    recovered_pattern, _ = records[0]
+    assert recovered_pattern.level == 3
+
+
+def test_query_all_returns_agent_id(tmp_path):
+    """query_all() triples include the correct agent_id as third element."""
+    store = SQLiteStore(str(tmp_path / "test.db"))
+    p1 = GaussianPattern(mu=np.zeros(4), sigma=np.eye(4))
+    p2 = GaussianPattern(mu=np.ones(4), sigma=np.eye(4))
+    store.save(p1, 0.6, "agent_a")
+    store.save(p2, 0.4, "agent_b")
+    triples = store.query_all()
+    agent_ids = {aid for _, _, aid in triples}
+    assert agent_ids == {"agent_a", "agent_b"}
