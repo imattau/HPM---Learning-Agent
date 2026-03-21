@@ -83,6 +83,18 @@ def test_stream_yields_arrays():
         assert v.shape == (32,)
 
 
+def test_stream_warns_when_use_api_enabled():
+    import warnings
+    s = make_substrate(use_api=True)
+    gen = s.stream()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        next(gen)
+    runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+    assert len(runtime_warnings) >= 1
+    assert "use_api=False" in str(runtime_warnings[0].message)
+
+
 def test_lookuperror_if_wordnet_corpus_missing():
     import nltk
     with patch.object(nltk.data, 'find', side_effect=LookupError("Corpora not found")):

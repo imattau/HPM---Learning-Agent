@@ -1,4 +1,5 @@
 import itertools
+import warnings
 from typing import Iterator
 
 import numpy as np
@@ -56,7 +57,6 @@ class LinguisticSubstrate:
         self._use_api = use_api
         self._cache: dict[str, list[np.ndarray]] = {}
 
-        import warnings
         self._nlp = None
         if use_spacy:
             try:
@@ -150,7 +150,6 @@ class LinguisticSubstrate:
         Note: when use_api=True, each word triggers an HTTP request to the
         dictionary API. Use LinguisticSubstrate(use_api=False) for offline streaming.
         """
-        import warnings
         if self._use_api:
             warnings.warn(
                 "LinguisticSubstrate.stream() with use_api=True will make one HTTP "
