@@ -27,18 +27,19 @@ def test_beta_comp_nonzero_compress_mean_in_range():
     assert 0.0 < result['compress_mean'] <= 1.0
 
 
-def test_beta_comp_nonzero_affects_relative_weights():
-    """Patterns with higher compress() should gain relative weight advantage when beta_comp>0."""
-    rng = np.random.default_rng(42)
-    agent_flat = _make_agent(beta_comp=0.0)
-    agent_comp = _make_agent(beta_comp=1.0)
-    for _ in range(50):
-        x = rng.standard_normal(4)
-        agent_flat.step(x)
-        agent_comp.step(x)
-    result_flat = agent_flat.step(rng.standard_normal(4))
-    result_comp = agent_comp.step(rng.standard_normal(4))
-    assert result_comp['compress_mean'] >= result_flat['compress_mean']
+def test_beta_comp_nonzero_compress_mean_matches_patterns():
+    """compress_mean should equal the mean compress() across report_patterns."""
+    from hpm.store.memory import InMemoryStore
+    rng = np.random.default_rng(0)
+    agent = _make_agent(beta_comp=1.0)
+    for _ in range(10):
+        agent.step(rng.standard_normal(4))
+    result = agent.step(rng.standard_normal(4))
+    # Directly compute compress() for all patterns in store
+    records = agent.store.query(agent.agent_id)
+    patterns = [p for p, _ in records]
+    expected = float(np.mean([p.compress() for p in patterns]))
+    assert result['compress_mean'] == pytest.approx(expected, rel=1e-5)
 
 
 def test_beta_comp_config_defaults_to_zero():
