@@ -160,11 +160,13 @@ class Agent:
             for epi, e_aff, e_soc, e_cost in zip(epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
-        new_weights = self.dynamics.step(
+        step_result = self.dynamics.step(
             patterns, weights, totals,
             densities=densities,
             kappa_d_per_pattern=kappa_d_per_pattern,
         )
+        new_weights = step_result.weights
+        total_conflict = step_result.total_conflict
 
         # Prune, update patterns (UUID preserved by GaussianPattern.update()), persist
         surviving = []

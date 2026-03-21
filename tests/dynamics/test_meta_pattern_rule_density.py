@@ -22,8 +22,8 @@ def test_kappa_d_zero_unchanged_from_baseline():
     rule_baseline._rng = np.random.default_rng(42)
     rule_with._rng = np.random.default_rng(42)
 
-    w_baseline = rule_baseline.step(patterns, weights.copy(), totals)
-    w_with = rule_with.step(patterns, weights.copy(), totals, densities=[0.9, 0.1])
+    w_baseline = rule_baseline.step(patterns, weights.copy(), totals).weights
+    w_with = rule_with.step(patterns, weights.copy(), totals, densities=[0.9, 0.1]).weights
 
     np.testing.assert_allclose(w_baseline, w_with, atol=1e-12)
 
@@ -37,7 +37,7 @@ def test_density_bias_increases_high_density_pattern_weight():
 
     rule = MetaPatternRule(eta=0.1, beta_c=0.0, epsilon=1e-4, kappa_D=0.5)
     rule._rng = np.random.default_rng(0)
-    new_w = rule.step(patterns, weights.copy(), totals, densities=densities)
+    new_w = rule.step(patterns, weights.copy(), totals, densities=densities).weights
 
     assert new_w[0] > new_w[1]
 
@@ -51,7 +51,7 @@ def test_renormalisation_holds_after_density_bias():
 
     rule = MetaPatternRule(eta=0.05, beta_c=0.1, epsilon=1e-4, kappa_D=0.2)
     rule._rng = np.random.default_rng(1)
-    new_w = rule.step(patterns, weights.copy(), totals, densities=densities)
+    new_w = rule.step(patterns, weights.copy(), totals, densities=densities).weights
 
     assert abs(new_w.sum() - 1.0) < 1e-9
 
@@ -67,8 +67,8 @@ def test_densities_none_behaves_identically():
     rule1._rng = np.random.default_rng(5)
     rule2._rng = np.random.default_rng(5)
 
-    w1 = rule1.step(patterns, weights.copy(), totals)
-    w2 = rule2.step(patterns, weights.copy(), totals, densities=None)
+    w1 = rule1.step(patterns, weights.copy(), totals).weights
+    w2 = rule2.step(patterns, weights.copy(), totals, densities=None).weights
 
     np.testing.assert_allclose(w1, w2, atol=1e-12)
 
@@ -141,11 +141,11 @@ def test_kappa_d_per_pattern_overrides_scalar_kappa_D():
     rule = MetaPatternRule(kappa_D=1.0)
     w_overridden = rule.step(patterns, weights, totals,
                              densities=densities,
-                             kappa_d_per_pattern=[0.0, 0.0])
+                             kappa_d_per_pattern=[0.0, 0.0]).weights
 
     # With kappa_D=0.0 (no density bias at all)
     rule_zero = MetaPatternRule(kappa_D=0.0)
-    w_zero = rule_zero.step(patterns, weights, totals, densities=densities)
+    w_zero = rule_zero.step(patterns, weights, totals, densities=densities).weights
 
     np.testing.assert_allclose(w_overridden, w_zero, atol=1e-10)
 
@@ -159,9 +159,9 @@ def test_kappa_d_per_pattern_none_falls_back_to_scalar():
     densities = np.array([0.7])
 
     rule = MetaPatternRule(kappa_D=0.5)
-    w_scalar = rule.step(patterns, weights, totals, densities=densities)
+    w_scalar = rule.step(patterns, weights, totals, densities=densities).weights
     w_explicit = rule.step(patterns, weights, totals, densities=densities,
-                           kappa_d_per_pattern=None)
+                           kappa_d_per_pattern=None).weights
     np.testing.assert_allclose(w_scalar, w_explicit, atol=1e-10)
 
 
@@ -178,5 +178,5 @@ def test_high_kappa_d_per_pattern_increases_weight_faster():
     rule = MetaPatternRule(kappa_D=0.0)
     w = rule.step(patterns, weights, totals,
                   densities=densities,
-                  kappa_d_per_pattern=[2.0, 0.0])
+                  kappa_d_per_pattern=[2.0, 0.0]).weights
     assert w[0] > w[1]

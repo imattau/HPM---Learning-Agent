@@ -1,4 +1,7 @@
 import numpy as np
+from collections import namedtuple
+
+StepResult = namedtuple('StepResult', ['weights', 'total_conflict'])
 
 
 def sym_kl_normalised(p, q, n_samples: int = 200, rng=None) -> float:
@@ -48,7 +51,7 @@ class MetaPatternRule:
              densities=None, kappa_d_per_pattern=None) -> np.ndarray:
         n = len(patterns)
         if n == 0:
-            return weights.copy()
+            return StepResult(weights.copy(), 0.0)
 
         weights = np.array(weights, dtype=float)
         total_bar = float(np.dot(weights, totals))
@@ -61,6 +64,8 @@ class MetaPatternRule:
                 kappa[i, j] = k
                 kappa[j, i] = k
         assert np.all(np.diag(kappa) == 0.0), "kappa diagonal must be zero (j!=i in D5)"
+
+        total_conflict = float(self.beta_c * float(weights @ kappa @ weights))
 
         if kappa_d_per_pattern is not None:
             assert len(kappa_d_per_pattern) == n, (
@@ -85,9 +90,9 @@ class MetaPatternRule:
             best = int(np.argmax(totals))
             new_weights = np.zeros(n)
             new_weights[best] = 1.0
-            return new_weights
+            return StepResult(new_weights, total_conflict)
 
         total = new_weights.sum()
         if total > 0:
             new_weights /= total
-        return new_weights
+        return StepResult(new_weights, total_conflict)

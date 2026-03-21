@@ -13,7 +13,7 @@ def test_weights_sum_to_one_after_step(dim):
     ]
     weights = np.array([0.6, 0.4])
     totals = np.array([-1.0, -0.5])   # second pattern has higher total score
-    new_w = mpr.step(patterns, weights, totals)
+    new_w = mpr.step(patterns, weights, totals).weights
     assert new_w.sum() == pytest.approx(1.0, abs=1e-6)
 
 
@@ -26,7 +26,7 @@ def test_higher_total_gains_weight(dim):
     ]
     weights = np.array([0.5, 0.5])
     totals = np.array([-2.0, -0.5])   # pattern 1 has higher score
-    new_w = mpr.step(patterns, weights, totals)
+    new_w = mpr.step(patterns, weights, totals).weights
     assert new_w[1] > new_w[0]
 
 
@@ -36,7 +36,7 @@ def test_floor_prevents_empty_library(dim):
     patterns = [GaussianPattern(mu=np.zeros(dim), sigma=np.eye(dim))]
     weights = np.array([1.0])
     totals = np.array([-999.0])
-    new_w = mpr.step(patterns, weights, totals)
+    new_w = mpr.step(patterns, weights, totals).weights
     assert len(new_w) == 1
     assert new_w[0] == pytest.approx(1.0)
 
@@ -47,7 +47,7 @@ def test_conflict_excludes_self_inhibition(dim):
     patterns = [GaussianPattern(mu=np.zeros(dim), sigma=np.eye(dim))]
     weights = np.array([1.0])
     totals = np.array([-1.0])
-    new_w = mpr.step(patterns, weights, totals)
+    new_w = mpr.step(patterns, weights, totals).weights
     # Single pattern: no j != i pairs, so no conflict inhibition
     assert new_w[0] == pytest.approx(1.0, abs=1e-6)
 
