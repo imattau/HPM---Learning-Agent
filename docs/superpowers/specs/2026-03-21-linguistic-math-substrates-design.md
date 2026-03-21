@@ -176,7 +176,7 @@ If parse failed, treat `query` as a topic name:
 
 If SciPy constants are unavailable: cycle through `_TOPIC_EXPRS` topics indefinitely, calling `self.fetch(topic)` and yielding each vector in the result.
 
-If SciPy constants are available: alternate one-for-one — yield one vector from `self.fetch(topic)` (cycling through topics in `_TOPIC_EXPRS`), then yield one vector from `hash_vectorise(constant_name, self.feature_dim)` (cycling through `scipy.constants.physical_constants` keys), then repeat. Each call to `self.fetch(topic)` may return multiple vectors; yield them all before advancing to the next constant. All keys in `_TOPIC_EXPRS` are guaranteed to return non-empty fetch results; if a topic fetch returns empty (should not occur), skip that topic and advance.
+If SciPy constants are available: call `self.fetch(topic)` for the current topic (cycling through `_TOPIC_EXPRS` keys), yield all its vectors, then yield one constant vector (`hash_vectorise(constant_name, self.feature_dim)`, cycling through `scipy.constants.physical_constants` keys), then advance to the next topic and repeat. All keys in `_TOPIC_EXPRS` are guaranteed to return non-empty fetch results; if a topic fetch returns empty (should not occur), skip that topic and advance.
 
 ### 2.5 Caching
 
