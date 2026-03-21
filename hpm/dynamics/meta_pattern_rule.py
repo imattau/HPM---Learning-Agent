@@ -48,7 +48,7 @@ class MetaPatternRule:
         self._rng = np.random.default_rng(0)
 
     def step(self, patterns: list, weights: np.ndarray, totals: np.ndarray,
-             densities=None, kappa_d_per_pattern=None) -> np.ndarray:
+             densities=None, kappa_d_per_pattern=None) -> StepResult:
         n = len(patterns)
         if n == 0:
             return StepResult(weights.copy(), 0.0)
@@ -90,7 +90,7 @@ class MetaPatternRule:
             best = int(np.argmax(totals))
             new_weights = np.zeros(n)
             new_weights[best] = 1.0
-            return StepResult(new_weights, total_conflict)
+            return StepResult(new_weights, 0.0)
 
         total = new_weights.sum()
         if total > 0:
