@@ -1,6 +1,10 @@
 import numpy as np
 import pytest
 from hpm.agents.actor import DecisionalActor
+from hpm.agents.multi_agent import MultiAgentOrchestrator
+from hpm.agents.agent import Agent
+from hpm.config import AgentConfig
+from hpm.field.field import PatternField
 from hpm.patterns.gaussian import GaussianPattern
 
 
@@ -286,3 +290,33 @@ def test_actor_report_keys_always_present():
         _make_forecast(prediction=np.zeros(3), fragility_flag=True),
     )
     assert set(r2.keys()) == expected
+
+
+# ---------------------------------------------------------------------------
+# Integration Test 13: Orchestrator with no actor → actor_report == {}
+# ---------------------------------------------------------------------------
+
+def test_orchestrator_no_actor():
+    """actor=None -> actor_report == {}"""
+    field = PatternField()
+    agents = [Agent(AgentConfig(agent_id="a0", feature_dim=4), field=field)]
+    orch = MultiAgentOrchestrator(agents, field)  # no actor kwarg
+    obs = {"a0": np.zeros(4)}
+    result = orch.step(obs)
+    assert result["actor_report"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Integration Test 14: Orchestrator with actor wired in → all 4 keys present
+# ---------------------------------------------------------------------------
+
+def test_orchestrator_actor_integrated():
+    """actor wired in -> step returns actor_report with all 4 keys."""
+    field = PatternField()
+    agents = [Agent(AgentConfig(agent_id="a0", feature_dim=4), field=field)]
+    actor = DecisionalActor(action_vectors=np.eye(3))
+    orch = MultiAgentOrchestrator(agents, field, actor=actor)
+    obs = {"a0": np.zeros(4)}
+    result = orch.step(obs)
+    expected_keys = {"external_action", "internal_action", "external_q_values", "internal_q_values"}
+    assert set(result["actor_report"].keys()) == expected_keys
