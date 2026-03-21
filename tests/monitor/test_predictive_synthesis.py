@@ -273,3 +273,64 @@ def test_forecast_report_keys_always_present(tmp_path):
         field_quality={"level4plus_count": 1},
     )
     assert set(report_fallback.keys()) == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: MultiAgentOrchestrator + PredictiveSynthesisAgent
+# ---------------------------------------------------------------------------
+
+from hpm.agents.multi_agent import MultiAgentOrchestrator
+from hpm.agents.agent import Agent
+from hpm.field.field import PatternField
+
+
+def _make_agent(store, dim=4):
+    from hpm.config import AgentConfig
+    import uuid
+    agent_id = f"agent_{uuid.uuid4().hex[:8]}"
+    config = AgentConfig(feature_dim=dim, agent_id=agent_id)
+    return Agent(config, store=store)
+
+
+def test_orchestrator_no_forecaster(tmp_path):
+    """forecaster=None (default) -> forecast_report == {} in step result."""
+    store = SQLiteStore(str(tmp_path / "test.db"))
+    agent = _make_agent(store)
+    field = PatternField()
+    orch = MultiAgentOrchestrator([agent], field=field)  # no forecaster kwarg
+    obs = {agent.agent_id: np.zeros(4)}
+    result = orch.step(obs)
+    assert result.get("forecast_report") == {}
+
+
+def test_orchestrator_forecaster_integrated(tmp_path):
+    """With a forecaster wired in, step returns forecast_report with all 7 keys."""
+    store = SQLiteStore(str(tmp_path / "test.db"))
+    # Seed a Level 4 pattern so the gate passes
+    p = _make_pattern(level=4, mu=[1.0, 2.0, 3.0, 4.0])
+    store.save(p, 1.0, "a1")
+
+    agent = _make_agent(store)
+    field = PatternField()
+    from hpm.monitor.structural_law import StructuralLawMonitor
+    monitor = StructuralLawMonitor(store, T_monitor=1)
+    forecaster = PredictiveSynthesisAgent(store, probe_k=10)
+
+    orch = MultiAgentOrchestrator(
+        [agent], field=field, monitor=monitor, forecaster=forecaster
+    )
+    obs = {agent.agent_id: np.zeros(4)}
+    result = orch.step(obs)
+
+    assert "forecast_report" in result
+    fr = result["forecast_report"]
+    expected_keys = {
+        "prediction",
+        "prediction_error",
+        "fragility_score",
+        "delta_nll",
+        "fragility_flag",
+        "top_pattern_level",
+        "top_pattern_id",
+    }
+    assert set(fr.keys()) == expected_keys
