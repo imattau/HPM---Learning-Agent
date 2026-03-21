@@ -1,3 +1,4 @@
+from hpm.store.base import PatternStore
 from hpm.store.memory import InMemoryStore
 
 
@@ -10,6 +11,8 @@ class TieredStore:
 
     Weight updates (update_weight) only affect Tier 1. Tier 2 is updated
     exclusively via similarity_merge() and promote_to_tier2().
+
+    Implements the PatternStore protocol.
     """
 
     def __init__(self):
@@ -18,7 +21,14 @@ class TieredStore:
         self._current_context: str | None = None
 
     def begin_context(self, context_id: str) -> None:
-        """Start a new task context. Creates a fresh Tier 1 store."""
+        """Start a new task context. Creates a fresh Tier 1 store.
+
+        Raises RuntimeError if context_id is already active.
+        """
+        if context_id in self._tier1:
+            raise RuntimeError(
+                f"Context '{context_id}' already active; call end_context first"
+            )
         self._current_context = context_id
         self._tier1[context_id] = InMemoryStore()
 
@@ -37,9 +47,11 @@ class TieredStore:
             self._tier2.save(pattern, weight, agent_id)
 
     def load(self, pattern_id: str) -> tuple:
-        if self._current_context and pattern_id in self._tier1[self._current_context]._data:
+        if self._current_context and self._tier1[self._current_context].has(pattern_id):
             return self._tier1[self._current_context].load(pattern_id)
-        return self._tier2.load(pattern_id)
+        if self._tier2.has(pattern_id):
+            return self._tier2.load(pattern_id)
+        raise KeyError(f"Pattern '{pattern_id}' not found in Tier 1 or Tier 2")
 
     def query(self, agent_id: str) -> list:
         """Returns Tier 1 (current context) + Tier 2 patterns for agent."""
@@ -70,7 +82,7 @@ class TieredStore:
         """Only mutates Tier 1. Tier 2 is protected from task signal."""
         if self._current_context and self._current_context in self._tier1:
             t1 = self._tier1[self._current_context]
-            if pattern_id in t1._data:
+            if t1.has(pattern_id):
                 t1.update_weight(pattern_id, weight)
                 return
         # Pattern is in Tier 2 — do not mutate (protection invariant)
@@ -123,3 +135,11 @@ class TieredStore:
     def promote_to_tier2(self, pattern, weight: float, agent_id: str) -> None:
         """Directly promote a pattern to Tier 2."""
         self._tier2.save(pattern, weight, agent_id)
+
+
+# Verify protocol compliance at import time (structural subtyping check)
+def _check_protocol() -> None:
+    _: PatternStore = TieredStore()  # type: ignore[assignment]
+
+
+_check_protocol()

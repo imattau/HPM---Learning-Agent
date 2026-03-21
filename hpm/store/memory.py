@@ -25,6 +25,9 @@ class InMemoryStore:
     def delete(self, pattern_id: str) -> None:
         self._data.pop(pattern_id, None)
 
+    def has(self, pattern_id: str) -> bool:
+        return pattern_id in self._data
+
     def update_weight(self, pattern_id: str, weight: float) -> None:
         if pattern_id in self._data:
             p, _, aid = self._data[pattern_id]
