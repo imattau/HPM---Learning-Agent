@@ -33,6 +33,7 @@ def make_orchestrator(
     with_strategist: bool = True,
     T_monitor: int = 50,
     agent_seeds: list[int] | None = None,
+    store=None,
     **overrides,
 ) -> tuple:
     """
@@ -55,7 +56,7 @@ def make_orchestrator(
     if agent_ids is None:
         agent_ids = [f"agent_{i}" for i in range(n_agents)]
 
-    store = InMemoryStore()
+    store = store if store is not None else InMemoryStore()
     field = PatternField()
 
     cfg_kwargs = dict(BENCH_CONFIG)

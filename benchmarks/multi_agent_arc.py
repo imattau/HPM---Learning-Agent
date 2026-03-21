@@ -127,7 +127,7 @@ def make_arc_orchestrator():
     )
 
 
-def make_arc_persistent_orchestrator():
+def make_arc_persistent_orchestrator(store=None):
     """Single long-lived orchestrator for persistent cross-task learning.
 
     Full HPM stack enabled so patterns can level up across tasks:
@@ -136,6 +136,10 @@ def make_arc_persistent_orchestrator():
     - min_recomb_level=1 allows recombination before patterns reach L4
     - beta_comp rewards compression (encourages hierarchical abstraction)
     - kappa_d_levels active so density bias stabilises recurring patterns
+
+    Args:
+        store: Optional PatternStore to inject (e.g. TieredStore). If None,
+               defaults to InMemoryStore().
     """
     return make_orchestrator(
         n_agents=2,
@@ -151,6 +155,7 @@ def make_arc_persistent_orchestrator():
         min_recomb_level=1,
         kappa_d_levels=[0.1, 0.2, 0.3, 0.4, 0.5],
         kappa_D=0.5,
+        store=store,
     )
 
 
@@ -231,17 +236,26 @@ def _eval_worker(args):
 def run_persistent(eligible, all_tasks):
     """
     Persistent mode: single orchestrator across all tasks.
-    Agents accumulate patterns from every task — common ARC transformations
-    build up weight over time and influence future evaluations.
+    Uses TieredStore so task-specific patterns are ephemeral (Tier 1) and
+    successful cross-task meta-patterns are promoted to persistent Tier 2.
+    CrossTaskRecombinator runs every 10 tasks to build higher-level meta-patterns.
     Sequential (no parallelism — shared mutable store).
     """
-    orch, agents, store = make_arc_persistent_orchestrator()
+    from hpm.store.tiered_store import TieredStore
+    from hpm.monitor.cross_task_recombinator import CrossTaskRecombinator
+
+    tiered = TieredStore()
+    orch, agents, store = make_arc_persistent_orchestrator(store=tiered)
+    recombinator = CrossTaskRecombinator()
 
     correct_count = 0
     rank_sum = 0
 
     for run_idx, (task_idx, task) in enumerate(eligible):
-        # Train on this task's pairs (adds to accumulated store)
+        context_id = str(task_idx)
+        tiered.begin_context(context_id)
+
+        # Train on this task's pairs (adds to Tier 1 of TieredStore)
         train_pairs = task["train"]
         pairs_a = train_pairs[0::2] or train_pairs
         pairs_b = train_pairs[1::2] or train_pairs
@@ -274,14 +288,28 @@ def run_persistent(eligible, all_tasks):
         rank = 1 + sum(1 for s in distractor_scores if s <= correct_score)
         correct = correct_score < min(distractor_scores)
 
+        # End context: promotes patterns to Tier 2 only on correct tasks
+        tiered.end_context(context_id, correct=correct)
+
+        # Off-line cross-task recombination every 10 tasks
+        if (run_idx + 1) % 10 == 0:
+            for agent in agents:
+                recombinator.consolidate(tiered, agent.agent_id)
+
         if correct:
             correct_count += 1
         rank_sum += rank
 
         if (run_idx + 1) % 50 == 0:
             pct = correct_count / (run_idx + 1) * 100
+            t2_count = len(tiered.query_tier2_all())
             n_patterns = sum(len(agent.store.query(agent.agent_id)) for agent in agents)
-            print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy: {pct:.1f}%, patterns: {n_patterns}", flush=True)
+            t1_count = n_patterns - t2_count
+            print(
+                f"  {run_idx + 1}/{len(eligible)} — accuracy: {pct:.1f}%, "
+                f"tier1: {t1_count}, tier2_meta: {t2_count}",
+                flush=True,
+            )
 
     return correct_count, rank_sum
 
