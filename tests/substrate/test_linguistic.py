@@ -18,7 +18,7 @@ def test_fetch_returns_vectors_for_known_word():
     assert len(vecs) > 0
     for v in vecs:
         assert v.shape == (32,)
-        assert np.all(v >= 0)
+        assert np.all(v >= 0) and np.all(v <= 1)
 
 
 def test_fetch_unknown_word_returns_empty():
