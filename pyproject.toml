@@ -12,6 +12,8 @@ dependencies = [
     "requests>=2.31",
     "psutil>=5.9",
     "scikit-learn>=1.8.0",
+    "nltk>=3.9.3",
+    "sympy>=1.14.0",
 ]
 
 [tool.hatch.build.targets.wheel]
