@@ -38,9 +38,14 @@ from benchmarks.multi_agent_common import make_orchestrator, print_results_table
 # ---------------------------------------------------------------------------
 MAX_GRID_DIM = 20
 GRID_SIZE = MAX_GRID_DIM * MAX_GRID_DIM   # 400
-FEATURE_DIM = GRID_SIZE * 2               # 800
+RAW_DIM = GRID_SIZE * 2                   # 800 (full grid pair)
+FEATURE_DIM = 64                          # projected dimension (JL projection)
 TRAIN_REPS = 10
 N_DISTRACTORS = 4
+
+# Fixed random projection matrix: RAW_DIM → FEATURE_DIM
+# Same matrix across all tasks so distances are consistent.
+_PROJ = np.random.default_rng(0).standard_normal((RAW_DIM, FEATURE_DIM)) / np.sqrt(FEATURE_DIM)
 
 
 def encode_grid(grid):
@@ -53,7 +58,8 @@ def encode_grid(grid):
 
 
 def encode_pair(input_grid, output_grid):
-    return np.concatenate([encode_grid(input_grid), encode_grid(output_grid)])
+    raw = np.concatenate([encode_grid(input_grid), encode_grid(output_grid)])
+    return raw @ _PROJ  # project 800 → 64
 
 
 def grid_fits(grid):
@@ -114,6 +120,7 @@ def make_arc_orchestrator():
         agent_ids=["arc_a", "arc_b"],
         with_monitor=False,   # skip monitor for speed (per-task reset)
         beta_comp=0.0,
+        gamma_soc=0.0,        # no social overhead: fresh store per task
         T_recomb=5,
         recomb_cooldown=3,
         init_sigma=2.0,
@@ -211,7 +218,7 @@ def main():
     with multiprocessing.Pool(processes=n_workers,
                               initializer=_init_worker,
                               initargs=(all_tasks,)) as pool:
-        for run_idx, (correct, rank) in enumerate(pool.imap(_eval_worker, work)):
+        for run_idx, (correct, rank) in enumerate(pool.imap_unordered(_eval_worker, work)):
             if correct:
                 correct_count += 1
             rank_sum += rank
