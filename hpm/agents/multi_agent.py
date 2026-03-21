@@ -35,10 +35,13 @@ class MultiAgentOrchestrator:
         field: PatternField,
         seed_pattern: GaussianPattern | None = None,
         groups: dict | None = None,   # agent_id -> group_id
+        monitor=None,
     ):
         self.agents = agents
         self._groups = groups
         self._group_fields: dict[str, PatternField] = {}
+        self._t = 0
+        self.monitor = monitor
 
         if groups is not None:
             # Create one PatternField per unique group and assign to agents
@@ -101,6 +104,7 @@ class MultiAgentOrchestrator:
         """
         if rewards is None:
             rewards = {}
+        self._t += 1
         m3_active = len(self.agents) == 1
         metrics = {}
         for agent in self.agents:
@@ -146,7 +150,17 @@ class MultiAgentOrchestrator:
                     if agent.agent_id != source_agent_id:
                         agent._accept_communicated(pattern, source_agent_id)
 
-        return metrics
+        # Aggregate total_conflict across all agents
+        total_conflict_sum = sum(
+            metrics[aid].get("total_conflict", 0.0) for aid in metrics
+        )
+        field_quality = (
+            self.monitor.step(self._t, self.agents, total_conflict_sum)
+            if self.monitor is not None
+            else {}
+        )
+
+        return {**metrics, "field_quality": field_quality}
 
     def run(
         self,
