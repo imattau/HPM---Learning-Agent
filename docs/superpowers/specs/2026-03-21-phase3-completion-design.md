@@ -146,6 +146,9 @@ def _share_pending(self, field, patterns: list) -> int:
                 mu=p.mu.copy(),
                 sigma=p.sigma.copy(),
                 source_id=p.id,
+                # No id= passed → fresh UUID. Communicative sharing transfers
+                # structure (mu, Sigma), not UUID identity. The receiving agent
+                # tracks the copy under its own UUID; source_id preserves provenance.
             )
             field.broadcast(self.agent_id, shared_copy)
             self._shared_ids.add(p.id)
@@ -185,9 +188,14 @@ def _accept_communicated(self, pattern: GaussianPattern, source_agent_id: str) -
     relative to two specific parents while communicative novelty is relative to
     the full library. The shared kappa_0 default (0.1) is appropriate for both.
 
+    Sign convention: log_prob(x) returns the NLL — i.e. -log p(x|h), a positive value.
+    Therefore -log_prob(x) = log p(x|h) ≤ 0 (log-likelihood). Eff is non-positive,
+    matching the same convention used in RecombinationOperator. I(h*) > 0 requires
+    novelty to offset negative efficacy, so only novel and well-fitting patterns are admitted.
+
     Insight scoring:
       Nov = max(sym_kl_normalised(pattern, p) for p in library)  [1.0 if library empty]
-      Eff = mean(-pattern.log_prob(x) for x in obs_buffer)       [0.0 if buffer empty]
+      Eff = mean(-pattern.log_prob(x) for x in obs_buffer)  ≤ 0  [0.0 if buffer empty]
       I   = beta_orig * (alpha_nov * Nov + alpha_eff * Eff)
     Entry weight = kappa_0 * I, followed by global renormalisation.
     """
@@ -217,6 +225,8 @@ def _accept_communicated(self, pattern: GaussianPattern, source_agent_id: str) -
 ```
 
 `sym_kl_normalised` is imported from `hpm.dynamics.meta_pattern_rule`.
+
+**UUID collision note:** `update_weight` operates by primary key (`id`) regardless of `agent_id`. In a shared-store scenario, `query(self.agent_id)` ensures only this agent's patterns are renormalised. `_seed_shared` intentionally creates shared UUIDs across agents — in that case, both agents' rows have the same `id` but different `agent_id`. `SQLiteStore` and `PostgreSQLStore` use `id` as primary key, so only one row can exist per UUID across the whole table. Shared-UUID seeding is therefore safe only when agents use separate store instances (the standard single-agent and multi-agent orchestrator configurations both satisfy this).
 
 **Return dict addition:**
 
@@ -352,11 +362,13 @@ Same as SQLite:
 CREATE TABLE IF NOT EXISTS patterns (
     id           TEXT PRIMARY KEY,
     agent_id     TEXT NOT NULL,
-    weight       REAL NOT NULL,
-    pattern_json TEXT NOT NULL
+    pattern_json TEXT NOT NULL,
+    weight       REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_patterns_agent ON patterns(agent_id);
 ```
+
+Column order matches `SQLiteStore` exactly (`id, agent_id, pattern_json, weight`).
 
 #### `hpm/store/postgres.py`
 
@@ -421,11 +433,21 @@ class PostgreSQLStore:
         self._conn.commit()
 
     def update_weight(self, pattern_id: str, weight: float) -> None:
+        """Silent no-op if pattern_id does not exist — matches SQLiteStore behaviour."""
         with self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE patterns SET weight = %s WHERE id = %s", (weight, pattern_id)
             )
         self._conn.commit()
+
+    def query_all(self) -> list:
+        """Return all (pattern, weight) pairs across all agents. Matches SQLiteStore."""
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT pattern_json, weight FROM patterns")
+            return [
+                (GaussianPattern.from_dict(json.loads(row[0])), row[1])
+                for row in cur.fetchall()
+            ]
 
     def close(self) -> None:
         self._conn.close()
@@ -491,7 +513,7 @@ Same test suite as `test_sqlite.py` — save, query, delete, update_weight, cros
 - `test_shares_on_first_level4_promotion` — pattern promoted to Level 4 appears in queue
 - `test_no_resharing` — same pattern does not appear in queue on subsequent steps
 - `test_accept_novel_pattern_admitted` — novel incoming pattern with positive insight admitted to store
-- `test_accept_redundant_pattern_rejected` — incoming pattern identical to an existing pattern, obs_buffer empty (so Eff=0) and Nov≈0 → insight ≈ 0 → rejected. Note: with a non-empty buffer Eff < 0 (log-likelihood is negative) can offset small positive Nov; the test uses an empty buffer to isolate the novelty gate cleanly.
+- `test_accept_redundant_pattern_rejected` — incoming pattern identical to an existing pattern, obs_buffer empty (so Eff=0) and Nov=0 exactly (KL of identical Gaussians is 0) → insight=0 exactly → rejected by the `<= 0` guard.
 - `test_accept_empty_library_uses_nov_one` — when receiving agent library is empty, Nov=1.0 and admission depends on efficacy
 - `test_no_self_reception` — orchestrator loop skips `source_agent_id == agent.agent_id`
 - `test_communicated_out_in_return_dict` — key present every step, value is 0 when no sharing fires
