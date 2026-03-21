@@ -36,12 +36,14 @@ class MultiAgentOrchestrator:
         seed_pattern: GaussianPattern | None = None,
         groups: dict | None = None,   # agent_id -> group_id
         monitor=None,
+        strategist=None,
     ):
         self.agents = agents
         self._groups = groups
         self._group_fields: dict[str, PatternField] = {}
         self._t = 0
         self.monitor = monitor
+        self.strategist = strategist
 
         if groups is not None:
             # Create one PatternField per unique group and assign to agents
@@ -160,7 +162,13 @@ class MultiAgentOrchestrator:
             else {}
         )
 
-        return {**metrics, "field_quality": field_quality}
+        interventions = (
+            self.strategist.step(self._t, field_quality, self.agents)
+            if self.strategist is not None
+            else {}
+        )
+
+        return {**metrics, "field_quality": field_quality, "interventions": interventions}
 
     def run(
         self,
