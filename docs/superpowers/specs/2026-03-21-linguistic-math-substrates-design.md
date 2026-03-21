@@ -84,6 +84,7 @@ Same pattern as `WikipediaSubstrate`:
 - Cycle through this list indefinitely (use `itertools.cycle`)
 - For each word, call `self.fetch(word)` and yield each vector in the result
 - Skip words that return empty fetch results
+- **Note:** when `use_api=True`, each word triggers an HTTP request to the dictionary API. Callers consuming the stream continuously should be aware of this. Use `LinguisticSubstrate(use_api=False)` for offline streaming.
 
 ### 1.4 Caching
 
@@ -175,7 +176,7 @@ If parse failed, treat `query` as a topic name:
 
 If SciPy constants are unavailable: cycle through `_TOPIC_EXPRS` topics indefinitely, calling `self.fetch(topic)` and yielding each vector in the result.
 
-If SciPy constants are available: alternate one-for-one — yield one vector from `self.fetch(topic)` (cycling through topics in `_TOPIC_EXPRS`), then yield one vector from `hash_vectorise(constant_name, self.feature_dim)` (cycling through `scipy.constants.physical_constants` keys), then repeat. Each call to `self.fetch(topic)` may return multiple vectors; yield them all before advancing to the next constant.
+If SciPy constants are available: alternate one-for-one — yield one vector from `self.fetch(topic)` (cycling through topics in `_TOPIC_EXPRS`), then yield one vector from `hash_vectorise(constant_name, self.feature_dim)` (cycling through `scipy.constants.physical_constants` keys), then repeat. Each call to `self.fetch(topic)` may return multiple vectors; yield them all before advancing to the next constant. All keys in `_TOPIC_EXPRS` are guaranteed to return non-empty fetch results; if a topic fetch returns empty (should not occur), skip that topic and advance.
 
 ### 2.5 Caching
 
@@ -207,7 +208,7 @@ from .math import MathSubstrate
 
 - `test_fetch_returns_vectors_for_known_word`: `fetch("dog")` returns non-empty list; each vector shape `(32,)`, values in `[0, 1]`
 - `test_fetch_unknown_word_returns_empty`: `fetch("xyzzy123")` returns `[]`
-- `test_fetch_caches_results`: second call to `fetch("dog")` returns same object (no re-computation)
+- `test_fetch_caches_results`: second call to `fetch("dog")` returns the identical list object (`result1 is result2`, not just equality) confirming the cache is hit with no re-computation
 - `test_field_frequency_in_range`: `field_frequency(pattern)` returns float in `[0, 1]`
 - `test_api_component_skipped_on_network_error`: with `requests` mocked to raise `ConnectionError`, fetch still returns WordNet vectors
 - `test_spacy_disabled`: `LinguisticSubstrate(use_spacy=False)` works; fetch returns only WordNet + API vectors
@@ -222,7 +223,7 @@ from .math import MathSubstrate
 - `test_fetch_sympy_expression`: `fetch("x**2 + 1")` returns non-empty list; each vector shape `(32,)`
 - `test_fetch_topic_name`: `fetch("algebra")` returns non-empty list
 - `test_fetch_unknown_returns_empty`: `fetch("not_a_topic_xyzzy")` returns `[]`
-- `test_fetch_caches_results`: second call returns same object
+- `test_fetch_caches_results`: second call returns the identical list object (`result1 is result2`) confirming cache hit with no re-computation
 - `test_field_frequency_in_range`: returns float in `[0, 1]`
 - `test_wolfram_skipped_when_no_key`: with no `WOLFRAM_APP_ID` and `wolfram_app_id=None`, Wolfram component inactive; no HTTP call made
 - `test_wolfram_used_when_key_set`: with mocked `requests.get`, Wolfram result appended to vectors
