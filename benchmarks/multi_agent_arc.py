@@ -72,13 +72,19 @@ def task_fits(task):
     return True
 
 
+def _to_plain(obj):
+    """Recursively convert HuggingFace dataset objects to plain Python."""
+    if isinstance(obj, dict):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_plain(v) for v in obj]
+    return obj
+
+
 def load_tasks():
     from datasets import load_dataset
     ds = load_dataset("lordspline/arc-agi", split="training")
-    tasks = []
-    for item in ds:
-        tasks.append({"train": item["train"], "test": item["test"]})
-    return tasks
+    return [_to_plain({"train": item["train"], "test": item["test"]}) for item in ds]
 
 
 def ensemble_score(agents, vec: np.ndarray) -> float:
@@ -162,9 +168,17 @@ def evaluate_task(task, all_tasks, task_idx):
     return correct, rank
 
 
+_worker_all_tasks = None
+
+
+def _init_worker(all_tasks):
+    global _worker_all_tasks
+    _worker_all_tasks = all_tasks
+
+
 def _eval_worker(args):
-    task, all_tasks, task_idx = args
-    return evaluate_task(task, all_tasks, task_idx)
+    task, task_idx = args
+    return evaluate_task(task, _worker_all_tasks, task_idx)
 
 
 def main():
@@ -189,12 +203,14 @@ def main():
     )
     print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
 
-    work = [(task, all_tasks, task_idx) for task_idx, task in eligible]
+    work = [(task, task_idx) for task_idx, task in eligible]
 
     correct_count = 0
     rank_sum = 0
 
-    with multiprocessing.Pool(processes=n_workers) as pool:
+    with multiprocessing.Pool(processes=n_workers,
+                              initializer=_init_worker,
+                              initargs=(all_tasks,)) as pool:
         for run_idx, (correct, rank) in enumerate(pool.imap(_eval_worker, work)):
             if correct:
                 correct_count += 1
