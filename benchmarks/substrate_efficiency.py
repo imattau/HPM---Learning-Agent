@@ -67,6 +67,7 @@ def run() -> dict:
     agent = make_agent(feature_dim=FEATURE_DIM, agent_id="efficiency_bench")
 
     eval_records = []
+    hpm_nll_readings = []
 
     for step in range(1, N_STEPS + 1):
         cluster_idx = rng.integers(0, N_CLUSTERS)
@@ -74,17 +75,31 @@ def run() -> dict:
         result = agent.step(obs)
 
         if step % EVAL_EVERY == 0:
+            nll_val = result["mean_accuracy"]
             eval_records.append({
                 "step": step,
-                "mean_accuracy": result["mean_accuracy"],
+                "mean_accuracy": nll_val,
                 "compress_mean": result["compress_mean"],
                 "n_patterns": result["n_patterns"],
             })
+            hpm_nll_readings.append(nll_val)
 
     # Final HPM snapshot
     final = eval_records[-1]
-    hpm_complexity = 1.0 - final["compress_mean"]
-    hpm_accuracy = final["mean_accuracy"]
+    # Use pattern count as complexity proxy (comparable to GMM k / max_k).
+    # compress_mean reflects covariance structure, not model size; pattern count
+    # is the direct analogue of GMM number-of-components.
+    max_gmm_k = max(GMM_K_VALUES)
+    hpm_complexity = min(final["n_patterns"], max_gmm_k) / max_gmm_k
+
+    # Normalise HPM NLL to [0, 1]: lower NLL = better = higher normalised score
+    nll_min = min(hpm_nll_readings)
+    nll_max = max(hpm_nll_readings)
+    raw_nll = final["mean_accuracy"]
+    if nll_max > nll_min:
+        hpm_accuracy = (nll_max - raw_nll) / (nll_max - nll_min)
+    else:
+        hpm_accuracy = 0.5
 
     # GMM comparison
     gmm_samples = sample_clusters(rng, cluster_means, CLUSTER_STD, GMM_SAMPLE_SIZE)

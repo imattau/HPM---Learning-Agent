@@ -53,13 +53,15 @@ def seed_atomic_patterns(agent) -> None:
     for expr in ATOMIC_EXPRESSIONS:
         mu = hash_vectorise(expr, FEATURE_DIM)
         sigma = np.eye(FEATURE_DIM) * agent.config.init_sigma
-        pattern = GaussianPattern(mu=mu, sigma=sigma)
+        # level=4 placeholder (overridden by min_recomb_level=1 in config)
+        # freeze_mu=True: symbolic algebraic patterns must not converge toward observations
+        pattern = GaussianPattern(mu=mu, sigma=sigma, level=4, freeze_mu=True)
         agent.store.save(pattern, init_weight, agent.agent_id)
 
 
 def run() -> dict:
     rng = np.random.default_rng(RNG_SEED)
-    agent = make_agent(feature_dim=FEATURE_DIM, agent_id="elegance_bench")
+    agent = make_agent(feature_dim=FEATURE_DIM, agent_id="elegance_bench", min_recomb_level=1, init_sigma=0.1)
 
     # Pre-seed with atomic patterns
     seed_atomic_patterns(agent)

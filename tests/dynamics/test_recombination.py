@@ -129,26 +129,33 @@ def test_novelty_one_when_child_maximally_distant():
 
 # --- Empty buffer ---
 
-def test_empty_buffer_eff_is_zero():
+def test_empty_buffer_eff_is_neutral_prior():
     """
-    With obs_buffer=[], Eff=0.0 so insight = beta_orig * alpha_nov * Nov.
-    Verify: insight matches the expected formula (Eff contributes nothing).
+    With obs_buffer=[], the implementation uses eff=0.5 as a neutral prior
+    (not 0.0). Verify that the insight score reflects the formula:
+        insight = beta_orig * (alpha_nov * nov + alpha_eff * 0.5)
+
+    Both operators use identical seeds so they produce the same child and
+    novelty score, allowing us to isolate the alpha_eff contribution.
     """
-    op = make_op()
     p1 = make_pattern(0.0, level=4)
     p2 = make_pattern(0.5, level=4)
-    cfg = default_config(kappa_max=1.0, alpha_nov=0.8, alpha_eff=0.2, beta_orig=1.0)
+    cfg_with_eff = default_config(kappa_max=1.0, alpha_nov=0.8, alpha_eff=0.2, beta_orig=1.0)
+    cfg_no_eff   = default_config(kappa_max=1.0, alpha_nov=0.8, alpha_eff=0.0, beta_orig=1.0)
 
-    result_empty = op.attempt([p1, p2], np.array([0.5, 0.5]), [], cfg, 'time')
-    # With alpha_eff=0.2 and Eff=0: insight = beta_orig * (alpha_nov * Nov + 0)
-    # With alpha_eff=0.0 and same Nov: insight should match
-    cfg_no_eff = default_config(kappa_max=1.0, alpha_nov=0.8, alpha_eff=0.0, beta_orig=1.0)
+    # Use identical seeds so both operators generate the same child pattern
+    op1 = RecombinationOperator(rng=np.random.default_rng(42))
     op2 = RecombinationOperator(rng=np.random.default_rng(42))
-    result_no_eff = op2.attempt([p1, p2], np.array([0.5, 0.5]), [], cfg_no_eff, 'time')
 
-    # Both should yield same insight (Eff=0 in both cases)
-    if result_empty is not None and result_no_eff is not None:
-        assert abs(result_empty.insight_score - result_no_eff.insight_score) < 1e-9
+    result_with_eff = op1.attempt([p1, p2], np.array([0.5, 0.5]), [], cfg_with_eff, 'time')
+    result_no_eff   = op2.attempt([p1, p2], np.array([0.5, 0.5]), [], cfg_no_eff,   'time')
+
+    if result_with_eff is not None and result_no_eff is not None:
+        # eff=0.5 in both; alpha_eff difference should account for exactly 0.5*delta_alpha
+        delta_alpha = cfg_with_eff.alpha_eff - cfg_no_eff.alpha_eff  # 0.2
+        expected_diff = cfg_with_eff.beta_orig * delta_alpha * 0.5   # 0.1
+        actual_diff = result_with_eff.insight_score - result_no_eff.insight_score
+        assert abs(actual_diff - expected_diff) < 1e-9
 
 
 # --- Softmax temperature ---

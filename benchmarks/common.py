@@ -27,6 +27,8 @@ BENCH_CONFIG = dict(
     T_recomb=50,
     recomb_cooldown=25,
     kappa_0=0.5,
+    init_sigma=2.0,
+    conflict_threshold=0.1,
 )
 
 

@@ -96,7 +96,7 @@ def run() -> dict:
 
         if t_rec is None:
             top_w = result["max_weight"]
-            if acc >= ACC_RECOVERY_FRAC * b_acc and top_w >= TOP_WEIGHT_THRESHOLD:
+            if abs(acc - b_acc) <= (1.0 - ACC_RECOVERY_FRAC) * abs(b_acc) and top_w >= TOP_WEIGHT_THRESHOLD:
                 t_rec = step + 1  # 1-indexed steps into Phase 3
 
     # Sanity check
