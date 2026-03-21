@@ -84,6 +84,9 @@ class RecombinationOperator:
                 sym_kl_normalised(h_star, parent_b, rng=self._rng),
             )
             if obs_buffer:
+                # log_prob() returns NLL (positive); negating gives log-likelihood (≤ 0).
+                # Eff is therefore non-positive, so insight ≤ beta_orig * alpha_nov * 1.0.
+                # With defaults this caps entry_weight at kappa_0 * 0.5 = 0.05.
                 eff = float(np.mean([-h_star.log_prob(x) for x in obs_buffer]))
             else:
                 eff = 0.0

@@ -227,7 +227,7 @@ class Agent:
             't': self._t,
             'n_patterns': len(surviving),
             'mean_accuracy': float(np.mean(accuracies)),
-            'max_weight': float(new_weights.max()),
+            'max_weight': float(new_weights.max()) if len(new_weights) > 0 else 0.0,
             'e_soc_mean': float(np.mean(e_socs)) if len(e_socs) > 0 else 0.0,
             'ext_field_freq': float(np.mean(ext_freqs)),
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
