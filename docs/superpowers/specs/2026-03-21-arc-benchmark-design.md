@@ -87,14 +87,16 @@ Total training steps per task: 30–50 (3–5 pairs × 10 reps).
 For a candidate vector `v`, the agent's ensemble score is:
 
 ```python
-score(v) = sum(w_i * pattern_i.log_prob(v) for pattern_i, w_i in agent.store.query(agent_id))
+score(v) = sum(w_i * pattern_i.log_prob(v) for pattern_i, w_i in agent.store.query(agent.agent_id))
 ```
 
-This is the weighted log-probability across all surviving patterns.
+**Sign convention:** `GaussianPattern.log_prob(x)` returns the **negative log-likelihood** (NLL), i.e. `-logpdf(x)`. Lower score = more probable under the ensemble. The correct candidate wins if it has the **lowest** score (not highest).
+
+**Empty-store edge case:** If all patterns are pruned and the store is empty, `score()` returns `0.0` for all candidates. This is treated as a tie — the correct candidate loses (conservative tie-breaking: correct must strictly have the lowest score).
 
 ### Distractor selection
 
-For task at index `i`, sample 4 distractor tasks using `rng = np.random.default_rng(i)` (deterministic per task). For each distractor task, use the **first training pair's output grid**, encoded and padded to 10×10.
+For task at index `i`, sample 4 distractor tasks using `rng = np.random.default_rng(i)` (deterministic per task). Sample from all task indices **excluding `i`** (to avoid using the task's own output as a distractor). For each distractor task, use the **first training pair's output grid**, encoded and padded to 10×10.
 
 ### Candidate set (5 candidates)
 
@@ -107,7 +109,7 @@ All 5 candidates use the **same encoded test input**; only the output slot varie
 
 ### Decision rule
 
-The agent answers correctly if `score(correct_candidate) > score(all_distractor_candidates)`. Ties broken conservatively (correct must strictly lead).
+The agent answers correctly if `score(correct_candidate) < score(all_distractor_candidates)` (lowest NLL = most probable). Ties broken conservatively: correct must strictly have the lowest score.
 
 ---
 
