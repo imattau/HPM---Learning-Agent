@@ -74,9 +74,12 @@ def load_tasks() -> list[dict]:
     Load all ARC training tasks from HuggingFace.
     Returns list of task dicts with 'train' and 'test' keys.
     Downloads on first call (~5MB), cached in ~/.cache/huggingface/.
+
+    Dataset: lordspline/arc-agi (mirror of fchollet/ARC-AGI, split='training').
+    Each item has 'train': list of {input, output} dicts and 'test': same.
     """
     from datasets import load_dataset
-    ds = load_dataset("fchollet/arc-agi", split="train", trust_remote_code=True)
+    ds = load_dataset("lordspline/arc-agi", split="training")
     tasks = []
     for item in ds:
         tasks.append({
