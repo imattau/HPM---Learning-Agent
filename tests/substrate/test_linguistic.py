@@ -54,7 +54,7 @@ def test_field_frequency_zero_for_unknown_word():
 
 def test_api_component_skipped_on_network_error():
     s = make_substrate(use_api=True)
-    with patch('requests.get', side_effect=ConnectionError):
+    with patch('hpm.substrate.linguistic.requests.get', side_effect=ConnectionError):
         vecs = s.fetch("dog")
     # WordNet vecs still returned; API failure is silent
     assert len(vecs) > 0

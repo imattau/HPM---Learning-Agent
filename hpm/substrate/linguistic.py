@@ -44,7 +44,6 @@ class LinguisticSubstrate:
                 "nltk.download('wordnet'); nltk.download('words')"
             )
 
-        import nltk
         from nltk.corpus import wordnet, words as nltk_words
         self._wordnet = wordnet
         self._word_list = [
@@ -57,13 +56,19 @@ class LinguisticSubstrate:
         self._use_api = use_api
         self._cache: dict[str, list[np.ndarray]] = {}
 
+        import warnings
         self._nlp = None
         if use_spacy:
             try:
                 import spacy
                 self._nlp = spacy.load('en_core_web_sm')
-            except Exception:
-                pass
+            except (ImportError, OSError):
+                warnings.warn(
+                    "spaCy or en_core_web_sm model not available; POS vectors disabled. "
+                    "Install with: pip install spacy && python -m spacy download en_core_web_sm",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def fetch(self, query: str) -> list[np.ndarray]:
         if query in self._cache:
@@ -145,6 +150,14 @@ class LinguisticSubstrate:
         Note: when use_api=True, each word triggers an HTTP request to the
         dictionary API. Use LinguisticSubstrate(use_api=False) for offline streaming.
         """
+        import warnings
+        if self._use_api:
+            warnings.warn(
+                "LinguisticSubstrate.stream() with use_api=True will make one HTTP "
+                "request per word. Consider use_api=False for offline streaming.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         for word in itertools.cycle(self._word_list):
             vecs = self.fetch(word)
             for v in vecs:
