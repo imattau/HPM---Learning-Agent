@@ -34,3 +34,18 @@ def test_kappa_d_levels_instances_are_independent():
     cfg2 = AgentConfig(agent_id='b', feature_dim=4)
     cfg1.kappa_d_levels[0] = 99.0
     assert cfg2.kappa_d_levels[0] == 0.0   # no shared mutable default
+
+
+def test_recombination_config_defaults():
+    cfg = AgentConfig(agent_id='a', feature_dim=2)
+    assert cfg.T_recomb == 100
+    assert cfg.N_recomb == 3
+    assert cfg.kappa_max == 0.5
+    assert cfg.conflict_threshold == 0.1
+    assert cfg.recomb_cooldown == 10
+    assert cfg.obs_buffer_size == 50
+    assert cfg.beta_orig == 1.0
+    assert cfg.alpha_nov == 0.5
+    assert cfg.alpha_eff == 0.5
+    assert cfg.kappa_0 == 0.1
+    assert cfg.recomb_temp == 1.0
