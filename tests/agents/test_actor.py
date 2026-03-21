@@ -251,6 +251,25 @@ def test_explore_respects_lower_bound():
     assert forecaster.min_bridge_level == 2  # unchanged
 
 
+def test_exploit_respects_upper_bound():
+    """EXPLOIT at upper bound leaves min_bridge_level unchanged."""
+    forecaster = StubForecaster(min_bridge_level=6)  # already at upper bound
+    actor = DecisionalActor(
+        action_vectors=np.eye(3),
+        forecaster=forecaster,
+        alpha_int=1.0,
+        temperature=1e-9,
+        redundancy_threshold=0.0,
+        min_bridge_level_bounds=(2, 6),
+    )
+    # Force EXPLOIT (index 0) by setting q_values
+    actor._internal_head.q_values[:] = [10.0, 0.0, 0.0]
+    fq = _make_field_quality(redundancy=0.5)
+    fr = _make_forecast()
+    actor.step(0, fq, fr)
+    assert forecaster.min_bridge_level == 6  # clamped, not incremented to 7
+
+
 # ---------------------------------------------------------------------------
 # Test 11: REGROUND resets bridge._t
 # ---------------------------------------------------------------------------
