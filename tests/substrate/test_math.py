@@ -39,7 +39,7 @@ def test_fetch_unknown_returns_empty():
     s = make_substrate()
     # Use a string that SymPy cannot parse as an expression (invalid syntax)
     # AND does not match any known topic key
-    vecs = s.fetch("@@invalid_unknown_topic@@")
+    vecs = s.fetch("(((")
     assert vecs == []
 
 
@@ -70,7 +70,9 @@ def test_field_frequency_uses_algebra_default():
 
 
 def test_wolfram_skipped_when_no_key():
-    s = make_substrate(wolfram_app_id=None)
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop('WOLFRAM_APP_ID', None)
+        s = make_substrate(wolfram_app_id=None)
     with patch('hpm.substrate.math.requests.get') as mock_get:
         s.fetch("integral of sin(x)")
     mock_get.assert_not_called()
