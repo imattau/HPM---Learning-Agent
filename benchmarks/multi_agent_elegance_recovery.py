@@ -66,16 +66,54 @@ def _distractor(x):
     return x ** 2
 
 
+# Map expression names to numpy functions for semantic seed encoding
+_EXPR_FNS = {
+    "x":    lambda x: x,
+    "x**2": lambda x: x ** 2,
+    "1+x":  lambda x: 1.0 + x,
+    "1":    lambda x: np.ones_like(x),
+    "x**3": lambda x: x ** 3,
+}
+
+
+def _expr_mu(expr: str, n_samples: int = 400) -> np.ndarray:
+    """
+    Compute seed mu for an expression by evaluating it at many x values and
+    taking the mean hash vector of the resulting (x, y) pairs.
+
+    Puts expression seeds in the same encoding space as observations so that
+    pattern distances are mathematically meaningful rather than arbitrary
+    string-hash distances.
+    """
+    fn = _EXPR_FNS[expr]
+    rng = np.random.default_rng(0)
+    vecs = []
+    while len(vecs) < n_samples:
+        x = rng.uniform(-2.0, 2.0)
+        if abs(1.0 + x) < 0.1:
+            continue
+        y = float(fn(x))
+        if not np.isfinite(y) or abs(y) > 1e6:
+            continue
+        vecs.append(hash_vectorise(f"{x:.4f} {y:.4f}", FEATURE_DIM))
+    return np.mean(vecs, axis=0)
+
+
 def seed_agent_expressions(agent, expressions: list[str]) -> None:
-    """Pre-seed agent store with its assigned subset of atomic expressions."""
+    """Pre-seed agent store with its assigned subset of atomic expressions.
+
+    Seeds are placed at the centroid of hash-encoded (x, y) observations for
+    each expression, so patterns compete on mathematical similarity to the true
+    law rather than on arbitrary string-hash geometry.
+    """
     records = agent.store.query(agent.agent_id)
     for p, _ in records:
         agent.store.delete(p.id)
     init_weight = 1.0 / len(expressions)
     for expr in expressions:
-        mu = hash_vectorise(expr, FEATURE_DIM)
+        mu = _expr_mu(expr)
         sigma = np.eye(FEATURE_DIM) * agent.config.init_sigma
-        pattern = GaussianPattern(mu=mu, sigma=sigma, level=4, freeze_mu=True)
+        pattern = GaussianPattern(mu=mu, sigma=sigma, level=4, freeze_mu=False)
         agent.store.save(pattern, init_weight, agent.agent_id)
 
 
