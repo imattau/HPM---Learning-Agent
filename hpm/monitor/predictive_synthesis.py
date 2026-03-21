@@ -66,14 +66,14 @@ class PredictiveSynthesisAgent:
         # Filter to min_bridge_level (default 4)
         eligible = [
             (p, w) for p, w, _ in all_records
-            if p.level >= self.min_bridge_level
+            if getattr(p, "level", 1) >= self.min_bridge_level
         ]
 
         # Fallback to level 3 if no level 4+ found (timing discrepancy)
         if not eligible:
             eligible = [
                 (p, w) for p, w, _ in all_records
-                if p.level >= 3
+                if getattr(p, "level", 1) >= 3
             ]
 
         if not eligible:
@@ -81,7 +81,7 @@ class PredictiveSynthesisAgent:
 
         # Select the highest-weight pattern
         top_pattern, _ = max(eligible, key=lambda pw: pw[1])
-        top_level = top_pattern.level
+        top_level = getattr(top_pattern, "level", 1)
 
         # --- 3.3 Extract observation ---
         x_obs = next(iter(current_obs.values()))
@@ -94,6 +94,8 @@ class PredictiveSynthesisAgent:
 
         # --- 3.4 Predict and score ---
         prediction = top_pattern.mu.copy()
+        # log_prob returns NLL (positive cost; lower = better fit).
+        # delta_nll > 0 means perturbation raised the cost → pattern is fragile.
         prediction_error = float(top_pattern.log_prob(x_obs))
 
         # --- 3.5 Update obs history ---

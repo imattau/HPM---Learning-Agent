@@ -87,6 +87,8 @@ def test_fallback_to_level3(tmp_path):
     p3 = _make_pattern(level=3, mu=mu3)
     store.save(p3, 0.9, "a1")
 
+    # Simulate timing discrepancy: gate passes (level4plus_count=1) but
+    # store has no Level 4+ patterns yet — should silently fall back to Level 3.
     agent = PredictiveSynthesisAgent(store)
     report = agent.step(
         step_t=1,
