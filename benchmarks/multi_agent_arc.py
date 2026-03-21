@@ -120,7 +120,7 @@ def make_arc_orchestrator():
         agent_ids=["arc_a", "arc_b"],
         with_monitor=False,   # skip monitor for speed (per-task reset)
         beta_comp=0.0,
-        gamma_soc=0.0,        # no social overhead: fresh store per task
+        gamma_soc=0.5,        # enable social learning via shared field
         T_recomb=5,
         recomb_cooldown=3,
         init_sigma=2.0,
@@ -130,6 +130,11 @@ def make_arc_orchestrator():
 def evaluate_task(task, all_tasks, task_idx):
     """
     Run one ARC task with 2-agent ensemble scoring.
+
+    Training is interleaved through orch.step() so the PatternField
+    broadcasts patterns between agents as they learn from their
+    respective partitions. Each step both agents observe their current
+    pair simultaneously, with the shorter list cycled to match.
 
     Returns:
         (correct, rank)
@@ -143,13 +148,21 @@ def evaluate_task(task, all_tasks, task_idx):
     pairs_a = train_pairs[0::2] or train_pairs
     pairs_b = train_pairs[1::2] or train_pairs
 
-    # Train each agent directly on its partition (they share the store,
-    # so learned patterns are visible to the ensemble scorer).
-    for agent, pairs in zip(agents, [pairs_a, pairs_b]):
-        for pair in pairs:
-            obs = encode_pair(pair["input"], pair["output"])
-            for _ in range(TRAIN_REPS):
-                agent.step(obs)
+    # Build interleaved schedule: cycle shorter list to match longer.
+    # Each entry is (obs_a, obs_b) for one orch.step() call.
+    n = max(len(pairs_a), len(pairs_b))
+    schedule = [
+        (
+            encode_pair(pairs_a[i % len(pairs_a)]["input"], pairs_a[i % len(pairs_a)]["output"]),
+            encode_pair(pairs_b[i % len(pairs_b)]["input"], pairs_b[i % len(pairs_b)]["output"]),
+        )
+        for i in range(n)
+    ]
+
+    # Train via orchestrator so PatternField broadcasts fire between agents.
+    for _ in range(TRAIN_REPS):
+        for obs_a, obs_b in schedule:
+            orch.step({"arc_a": obs_a, "arc_b": obs_b})
 
     # Evaluation phase
     test_pair = task["test"][0]
