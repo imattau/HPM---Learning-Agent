@@ -2,3 +2,4 @@ nltk>=3.8          # LinguisticSubstrate core (run: nltk.download('wordnet'); nl
 sympy>=1.12        # MathSubstrate core
 spacy>=3.7         # LinguisticSubstrate optional (also: python -m spacy download en_core_web_sm)
 scipy>=1.11        # MathSubstrate optional
+scikit-learn>=1.3  # Benchmark 3: GaussianMixture, BIC
