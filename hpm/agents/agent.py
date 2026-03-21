@@ -77,7 +77,7 @@ class Agent:
         self._t = 0
         self._obs_buffer: deque = deque(maxlen=config.obs_buffer_size)
         self._last_recomb_t: int = -config.recomb_cooldown
-        self._recomb_op = RecombinationOperator()
+        self._recomb_op = RecombinationOperator(rng=np.random.default_rng(0))
         self._seed_if_empty()
 
     def _seed_if_empty(self) -> None:
@@ -200,6 +200,8 @@ class Agent:
         cooldown_ok = (self._t - self._last_recomb_t >= self.config.recomb_cooldown)
 
         if (time_trigger or conflict_trigger) and cooldown_ok:
+            # conflict_trigger takes priority when both fire simultaneously,
+            # so the return dict reflects the stronger signal (spec §Trigger Logic)
             recomb_trigger = "conflict" if conflict_trigger else "time"
             recomb_attempted = True
             post_prune_records = self.store.query(self.agent_id)
@@ -217,6 +219,8 @@ class Agent:
                 if total_w > 0:
                     for p, w in all_records:
                         self.store.update_weight(p.id, w / total_w)
+            # Cooldown resets unconditionally whether attempt() accepted or not.
+            # Intentional: prevents thrashing on an incompatible pattern population.
             self._last_recomb_t = self._t
 
         return {
