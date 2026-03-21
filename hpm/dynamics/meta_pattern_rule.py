@@ -4,25 +4,35 @@ from collections import namedtuple
 StepResult = namedtuple('StepResult', ['weights', 'total_conflict'])
 
 
+def _gaussian_kl(p, q) -> float:
+    """Closed-form KL(p||q) for multivariate Gaussians (numerically stable)."""
+    d = len(p.mu)
+    diff = q.mu - p.mu
+    trace_term = float(np.trace(np.linalg.solve(q.sigma, p.sigma)))
+    maha = float(diff @ np.linalg.solve(q.sigma, diff))
+    _, logdet_q = np.linalg.slogdet(q.sigma)
+    _, logdet_p = np.linalg.slogdet(p.sigma)
+    return max(0.0, 0.5 * (trace_term + maha - d + float(logdet_q - logdet_p)))
+
+
 def sym_kl_normalised(p, q, n_samples: int = 200, rng=None) -> float:
     """
-    Symmetrised KL divergence between two GaussianPatterns, normalised to [0,1].
+    Symmetrised KL divergence between two patterns, normalised to [0,1].
     kappa_{ij} in D5 — incompatibility measure.
-    Uses Monte Carlo approximation for generality.
 
-    Note: log_prob(x) returns -log p(x|h), so:
-      log p(x|h) = -log_prob(x)
-      KL(p||q) = E_p[log p - log q] = E_p[-p.log_prob(x) - (-q.log_prob(x))]
-               = E_p[q.log_prob(x) - p.log_prob(x)]
+    Uses closed-form solution for GaussianPatterns (exact, numerically stable).
+    Falls back to Monte Carlo for non-Gaussian patterns.
     """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    samples_p = rng.multivariate_normal(p.mu, p.sigma, n_samples)
-    kl_pq = float(np.mean([q.log_prob(s) - p.log_prob(s) for s in samples_p]))
-
-    samples_q = rng.multivariate_normal(q.mu, q.sigma, n_samples)
-    kl_qp = float(np.mean([p.log_prob(s) - q.log_prob(s) for s in samples_q]))
+    if hasattr(p, 'mu') and hasattr(p, 'sigma') and hasattr(q, 'mu') and hasattr(q, 'sigma'):
+        kl_pq = _gaussian_kl(p, q)
+        kl_qp = _gaussian_kl(q, p)
+    else:
+        if rng is None:
+            rng = np.random.default_rng()
+        samples_p = rng.multivariate_normal(p.mu, p.sigma, n_samples)
+        kl_pq = float(np.mean([q.log_prob(s) - p.log_prob(s) for s in samples_p]))
+        samples_q = rng.multivariate_normal(q.mu, q.sigma, n_samples)
+        kl_qp = float(np.mean([p.log_prob(s) - q.log_prob(s) for s in samples_q]))
 
     sym_kl = max((kl_pq + kl_qp) / 2.0, 0.0)
     return float(sym_kl / (sym_kl + 1.0))   # normalise to [0, 1]

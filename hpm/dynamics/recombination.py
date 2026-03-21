@@ -36,15 +36,16 @@ class RecombinationOperator:
     def __init__(self, rng=None):
         self._rng = rng if rng is not None else np.random.default_rng()
 
-    def attempt(self, patterns, weights, obs_buffer, config, trigger):
+    def attempt(self, patterns, weights, obs_buffer, config, trigger, total_conflict=0.0):
         """
         Parameters
         ----------
-        patterns     : list of GaussianPattern (post-prune population)
-        weights      : np.ndarray of corresponding weights
-        obs_buffer   : list of np.ndarray (recent observations)
-        config       : AgentConfig
-        trigger      : str ("time" | "conflict")
+        patterns        : list of GaussianPattern (post-prune population)
+        weights         : np.ndarray of corresponding weights
+        obs_buffer      : list of np.ndarray (recent observations)
+        config          : AgentConfig
+        trigger         : str ("time" | "conflict")
+        total_conflict  : float, current conflict tension (used for creative stress)
 
         Returns
         -------
@@ -55,11 +56,12 @@ class RecombinationOperator:
         if len(candidate_indices) < 2:
             return None
 
-        # 2. Pair sampling
+        # 2. Pair sampling — effective temperature rises with conflict (creative stress)
         weights = np.array(weights, dtype=float)
         pairs = list(itertools.combinations(candidate_indices, 2))
         pair_scores = np.array([weights[i] * weights[j] for i, j in pairs], dtype=float)
-        pair_probs = _softmax(pair_scores, config.recomb_temp)
+        effective_temp = config.recomb_temp * (1.0 + config.conflict_stress_scale * total_conflict)
+        pair_probs = _softmax(pair_scores, effective_temp)
 
         for _ in range(config.N_recomb):
             idx = int(self._rng.choice(len(pairs), p=pair_probs))

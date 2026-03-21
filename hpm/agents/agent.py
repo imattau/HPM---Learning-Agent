@@ -210,6 +210,7 @@ class Agent:
             recomb_result = self._recomb_op.attempt(
                 post_prune_patterns, post_prune_weights,
                 list(self._obs_buffer), self.config, recomb_trigger,
+                total_conflict=total_conflict,
             )
             if recomb_result is not None:
                 entry_weight = self.config.kappa_0 * recomb_result.insight_score
@@ -223,17 +224,24 @@ class Agent:
             # Intentional: prevents thrashing on an incompatible pattern population.
             self._last_recomb_t = self._t
 
+        # If recombination was accepted, re-query the store so level metrics include the new pattern
+        if recomb_result is not None:
+            final_records = self.store.query(self.agent_id)
+            report_patterns = [p for p, _ in final_records]
+        else:
+            report_patterns = surviving_patterns
+
         return {
             't': self._t,
-            'n_patterns': len(surviving),
+            'n_patterns': len(report_patterns),
             'mean_accuracy': float(np.mean(accuracies)),
             'max_weight': float(new_weights.max()) if len(new_weights) > 0 else 0.0,
             'e_soc_mean': float(np.mean(e_socs)) if len(e_socs) > 0 else 0.0,
             'ext_field_freq': float(np.mean(ext_freqs)),
             'e_cost_mean': float(np.mean(e_costs)) if len(e_costs) > 0 else 0.0,
             'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
-            'level_mean': float(np.mean([p.level for p in surviving_patterns])) if surviving_patterns else 0.0,
-            'level_distribution': {lvl: sum(1 for p in surviving_patterns if p.level == lvl) for lvl in range(1, 6)},
+            'level_mean': float(np.mean([p.level for p in report_patterns])) if report_patterns else 0.0,
+            'level_distribution': {lvl: sum(1 for p in report_patterns if p.level == lvl) for lvl in range(1, 6)},
             'total_conflict': float(total_conflict),
             'recombination_attempted': recomb_attempted,
             'recombination_accepted': recomb_result is not None,
