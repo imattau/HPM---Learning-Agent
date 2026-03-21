@@ -69,7 +69,7 @@ class MathSubstrate:
         try:
             expr = self._sympify(query)
             results.append(hash_vectorise(str(expr), self.feature_dim))
-        except (Exception,):
+        except self._SympifyError:
             # Treat as topic name
             normalised = query.lower().strip()
             topic_exprs = _TOPIC_EXPRS.get(normalised)
@@ -133,6 +133,7 @@ class MathSubstrate:
         topics = itertools.cycle(_TOPIC_EXPRS.keys())
         if self._scipy_constants is None:
             for topic in topics:
+                # All _TOPIC_EXPRS keys are guaranteed to return non-empty results
                 for v in self.fetch(topic):
                     yield v
         else:

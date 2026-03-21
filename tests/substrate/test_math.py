@@ -82,11 +82,11 @@ def test_wolfram_used_when_key_set():
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.text = "negative cosine of x plus constant"
-    with patch('hpm.substrate.math.requests.get', return_value=mock_resp):
+    with patch('hpm.substrate.math.requests.get', return_value=mock_resp) as mock_get:
         s = make_substrate(wolfram_app_id="FAKE_KEY")
         vecs = s.fetch("integral of sin(x)")
-    # Should have SymPy/topic vecs + Wolfram vec
     assert len(vecs) > 0
+    mock_get.assert_called_once()
 
 
 def test_wolfram_skipped_on_network_error():
