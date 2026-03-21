@@ -40,12 +40,14 @@ class StructuralLawMonitor:
         T_monitor: int = 50,
         log_path: str | None = None,
         conflict_threshold: float = 0.5,
+        verbose: bool = True,
     ):
         self._store = store
         self._field = field
         self._T_monitor = T_monitor
         self._log_path = log_path
         self._conflict_threshold = conflict_threshold
+        self._verbose = verbose
         self._t = 0
 
     def step(self, step_t: int, agents: list, total_conflict: float) -> dict:
@@ -69,7 +71,8 @@ class StructuralLawMonitor:
 
         if self._t % self._T_monitor == 0:
             heavy_diversity, heavy_redundancy = self._compute_heavy(patterns, weights)
-            self._print_table(step_t, light, heavy_diversity, heavy_redundancy)
+            if self._verbose:
+                self._print_table(step_t, light, heavy_diversity, heavy_redundancy)
             if self._log_path is not None:
                 self._log_json(step_t, light, heavy_diversity, heavy_redundancy)
 
