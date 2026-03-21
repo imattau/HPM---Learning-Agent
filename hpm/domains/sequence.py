@@ -22,7 +22,7 @@ class SequenceDomain:
         self,
         vocab_size: int = 8,
         order: int = 1,
-        seed=None,
+        seed: int | None = None,
         transition=None,
         label_map=None,
     ):
@@ -83,10 +83,12 @@ class SequenceDomain:
             label_map=new_label_map,
         )
 
-    def transfer_probe(self, near: bool) -> list:
+    def transfer_probe(self, near: bool) -> list[tuple[np.ndarray, int]]:
         """
         Generate 200 labelled (observation, internal_symbol) pairs without
-        mutating self._current or self._rng.
+        mutating self._current or self._rng. Note: advances self._perturb_rng
+        (the same stream used by deep_perturb and surface_perturb), so probe
+        calls affect the output of subsequent perturbation operations.
 
         near=True:  probe label_map = self._label_map.copy() (same surface as training)
         near=False: probe label_map = reshuffled permutation != self._label_map (far transfer)
