@@ -1,4 +1,5 @@
 import numpy as np
+from collections import deque
 from ..config import AgentConfig
 from ..patterns.gaussian import GaussianPattern
 from ..evaluators.epistemic import EpistemicEvaluator
@@ -7,6 +8,7 @@ from ..evaluators.social import SocialEvaluator
 from ..evaluators.resource_cost import ResourceCostEvaluator
 from ..dynamics.meta_pattern_rule import MetaPatternRule
 from ..dynamics.density import PatternDensity
+from ..dynamics.recombination import RecombinationOperator
 from ..patterns.classifier import HPMLevelClassifier
 from ..store.memory import InMemoryStore
 
@@ -73,6 +75,9 @@ class Agent:
             kappa_D=config.kappa_D,
         )
         self._t = 0
+        self._obs_buffer: deque = deque(maxlen=config.obs_buffer_size)
+        self._last_recomb_t: int = -config.recomb_cooldown
+        self._recomb_op = RecombinationOperator()
         self._seed_if_empty()
 
     def _seed_if_empty(self) -> None:
@@ -85,6 +90,7 @@ class Agent:
             self.store.save(init, 1.0, self.agent_id)
 
     def step(self, x: np.ndarray, reward: float = 0.0) -> dict:
+        self._obs_buffer.append(x)
         records = self.store.query(self.agent_id)
         patterns = [p for p, _ in records]
         weights = np.array([w for _, w in records])
@@ -185,6 +191,34 @@ class Agent:
 
         self._t += 1
 
+        recomb_result = None
+        recomb_attempted = False
+        recomb_trigger = None
+
+        time_trigger = (self._t % self.config.T_recomb == 0)
+        conflict_trigger = (total_conflict > self.config.conflict_threshold)
+        cooldown_ok = (self._t - self._last_recomb_t >= self.config.recomb_cooldown)
+
+        if (time_trigger or conflict_trigger) and cooldown_ok:
+            recomb_trigger = "conflict" if conflict_trigger else "time"
+            recomb_attempted = True
+            post_prune_records = self.store.query(self.agent_id)
+            post_prune_patterns = [p for p, _ in post_prune_records]
+            post_prune_weights = np.array([w for _, w in post_prune_records])
+            recomb_result = self._recomb_op.attempt(
+                post_prune_patterns, post_prune_weights,
+                list(self._obs_buffer), self.config, recomb_trigger,
+            )
+            if recomb_result is not None:
+                entry_weight = self.config.kappa_0 * recomb_result.insight_score
+                self.store.save(recomb_result.pattern, entry_weight, self.agent_id)
+                all_records = self.store.query(self.agent_id)
+                total_w = sum(w for _, w in all_records)
+                if total_w > 0:
+                    for p, w in all_records:
+                        self.store.update_weight(p.id, w / total_w)
+            self._last_recomb_t = self._t
+
         return {
             't': self._t,
             'n_patterns': len(surviving),
@@ -196,4 +230,13 @@ class Agent:
             'density_mean': float(np.mean(densities)) if len(densities) > 0 else 0.0,
             'level_mean': float(np.mean([p.level for p in surviving_patterns])) if surviving_patterns else 0.0,
             'level_distribution': {lvl: sum(1 for p in surviving_patterns if p.level == lvl) for lvl in range(1, 6)},
+            'total_conflict': float(total_conflict),
+            'recombination_attempted': recomb_attempted,
+            'recombination_accepted': recomb_result is not None,
+            'recombination_trigger': recomb_trigger,
+            'insight_score': recomb_result.insight_score if recomb_result else None,
+            'recomb_parent_ids': (
+                (recomb_result.parent_a_id, recomb_result.parent_b_id)
+                if recomb_result else None
+            ),
         }
