@@ -24,7 +24,7 @@ It makes two kinds of decisions, each with its own Q-value learning head:
 
 ```
 hpm/agents/actor.py              # new: DecisionalActor class (+ ExternalHead, InternalHead)
-tests/agents/test_actor.py       # new: 13 unit + integration tests
+tests/agents/test_actor.py       # new: 14 tests (12 unit + 2 integration)
 hpm/agents/multi_agent.py        # existing: add actor=None kwarg + call
 hpm/agents/__init__.py           # existing: add DecisionalActor export
 ```
@@ -87,8 +87,13 @@ Returns `actor_report` dict — all 4 keys always present:
 |-----|------|---------|
 | `external_action` | `int \| None` | Chosen external action index; None if prediction=None |
 | `internal_action` | `str \| None` | Name of meta-action taken; None if not triggered |
-| `external_q_values` | `list[float]` | Current Q-values for all external actions |
-| `internal_q_values` | `list[float]` | Current Q-values for all internal actions |
+| `external_q_values` | `list[float]` | Current Q-values for all external actions (`.tolist()` of internal ndarray) |
+| `internal_q_values` | `list[float]` | Current Q-values for all internal actions (`.tolist()` of internal ndarray) |
+
+**Step flow (ordered):**
+1. ExternalHead: select action (or None) using forecast_report + Q-values; apply Q-update on external_reward
+2. InternalHead: check trigger condition; if triggered, apply delayed reward from previous trigger, select new meta-action, execute it
+3. Return actor_report with all 4 keys
 
 ---
 
@@ -117,7 +122,14 @@ self._last_action = action
 
 If `prediction is None` (no top pattern): return `external_action=None`, skip update.
 
-**Fallback when no GaussianPattern is available:** logits = q_values only (no log_prob contribution).
+**Fallback when prediction is not None but GaussianPattern is unavailable** (should not occur in normal operation, but defensively handled):
+```python
+# No pattern object to call log_prob on — use Q-values only
+logits = self.q_values.copy()
+probs = softmax(logits / temperature)
+action = np.random.choice(n_actions, p=probs)
+```
+In practice, `prediction` is always a numpy array (top_pattern.mu.copy()); the fallback only applies if the caller passes a non-None prediction without a usable pattern object.
 
 ### 3.3 Q-Update
 
@@ -142,6 +154,8 @@ if self._last_action is not None:
 | 2 | `REGROUND` | `bridge._t = bridge.T_substrate - 1` (forces pass next step) |
 
 `EXPLOIT` and `EXPLORE` are no-ops if `forecaster is None`. `REGROUND` is a no-op if `bridge is None`.
+
+**Duck-typed access:** The implementation accesses `forecaster.min_bridge_level` and `bridge._t` / `bridge.T_substrate` directly. It does not guard against `AttributeError` — ensuring referenced objects have these attributes is the caller's responsibility. Stub objects in tests need only expose these attributes.
 
 ### 4.2 Trigger Condition
 
