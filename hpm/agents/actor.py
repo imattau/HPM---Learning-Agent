@@ -247,7 +247,8 @@ class DecisionalActor:
         external_action = self._external_head.select(
             self._action_vectors, prediction, self._forecaster, top_pattern_id
         )
-        self._external_head.update(external_reward)
+        if external_action is not None:
+            self._external_head.update(external_reward)
 
         # 2. InternalHead
         internal_action = self._internal_head.step(
