@@ -162,31 +162,46 @@ def evaluate_task(task, all_tasks, task_idx):
     return correct, rank
 
 
+def _eval_worker(args):
+    task, all_tasks, task_idx = args
+    return evaluate_task(task, all_tasks, task_idx)
+
+
 def main():
+    import multiprocessing
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Number of parallel workers (default: CPU count)")
+    args = parser.parse_args()
+
     print("Loading ARC dataset...", flush=True)
     all_tasks = load_tasks()
 
     eligible = [(i, t) for i, t in enumerate(all_tasks) if task_fits(t)]
     excluded = len(all_tasks) - len(eligible)
+    n_workers = args.workers or multiprocessing.cpu_count()
 
     print(
         f"Tasks: {len(all_tasks)} total, {excluded} excluded "
         f"(grid > {MAX_GRID_DIM}x{MAX_GRID_DIM}), {len(eligible)} evaluated"
     )
-    print("Running (2-agent ensemble)...", flush=True)
+    print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
+
+    work = [(task, all_tasks, task_idx) for task_idx, task in eligible]
 
     correct_count = 0
     rank_sum = 0
 
-    for run_idx, (task_idx, task) in enumerate(eligible):
-        if (run_idx + 1) % 50 == 0:
-            pct = correct_count / (run_idx + 1) * 100
-            print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy so far: {pct:.1f}%", flush=True)
-
-        correct, rank = evaluate_task(task, all_tasks, task_idx)
-        if correct:
-            correct_count += 1
-        rank_sum += rank
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        for run_idx, (correct, rank) in enumerate(pool.imap(_eval_worker, work)):
+            if correct:
+                correct_count += 1
+            rank_sum += rank
+            if (run_idx + 1) % 50 == 0:
+                pct = correct_count / (run_idx + 1) * 100
+                print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy so far: {pct:.1f}%", flush=True)
 
     n = len(eligible)
     accuracy = correct_count / n * 100 if n > 0 else 0.0
