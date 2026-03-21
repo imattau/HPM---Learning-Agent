@@ -1,7 +1,7 @@
 # Phase 5: Structural Law Monitor Design Specification
 
 **Date:** 2026-03-21
-**Status:** Draft v1
+**Status:** Draft v2 (post-review)
 
 ---
 
@@ -16,15 +16,16 @@ The monitor is implemented as a standalone `StructuralLawMonitor` class composed
 ## 1. File Structure
 
 ```
-hpm/store/sqlite.py                    # new: SQLiteStore (shared persistent PatternStore)
+hpm/store/sqlite.py                    # existing: SQLiteStore (already implemented — no changes needed)
 hpm/monitor/__init__.py                # new: exports StructuralLawMonitor
 hpm/monitor/structural_law.py          # new: StructuralLawMonitor class
-tests/store/test_sqlite_store.py       # new: SQLiteStore protocol compliance tests
+tests/store/test_sqlite.py             # existing: add test_level_persisted, test_query_all_returns_agent_id
+tests/monitor/__init__.py              # new: empty
 tests/monitor/test_structural_law.py   # new: monitor metric and cadence tests
 ```
 
 **Existing files modified:**
-- `hpm/agents/multi_agent.py` — add `monitor` parameter to `MultiAgentOrchestrator`
+- `hpm/agents/multi_agent.py` — add `monitor=None` keyword parameter to `MultiAgentOrchestrator`
 - `hpm/store/__init__.py` — export `SQLiteStore`
 
 ---
@@ -33,58 +34,57 @@ tests/monitor/test_structural_law.py   # new: monitor metric and cadence tests
 
 ### 2.1 Purpose
 
-Implements the existing `PatternStore` protocol using Python's stdlib `sqlite3` — no new dependencies. Enables all agents in a multi-agent run to share one persistent store, which the monitor can query globally.
+`hpm/store/sqlite.py` already implements the `PatternStore` protocol using Python's stdlib `sqlite3` — no new dependencies. It is already used in tests and the existing implementation is retained as-is. This section documents its actual interface for implementors of `StructuralLawMonitor`.
 
-### 2.2 Schema
+### 2.2 Schema (actual, already implemented)
 
 ```sql
 CREATE TABLE IF NOT EXISTS patterns (
-    pattern_id TEXT PRIMARY KEY,
-    agent_id   TEXT NOT NULL,
-    mu         BLOB NOT NULL,   -- numpy array serialised with np.save (BytesIO)
-    sigma      BLOB NOT NULL,   -- numpy array serialised with np.save (BytesIO)
-    weight     REAL NOT NULL,
-    level      INTEGER NOT NULL DEFAULT 1
+    id          TEXT PRIMARY KEY,
+    agent_id    TEXT NOT NULL,
+    pattern_json TEXT NOT NULL,   -- JSON via pattern.to_dict() / pattern_from_dict()
+    weight      REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_agent ON patterns(agent_id);
-CREATE INDEX IF NOT EXISTS idx_level ON patterns(level);
 ```
+
+`level` is embedded in `pattern_json` (via `GaussianPattern.to_dict()` which includes `"level": int`). No separate column or index is needed; `pattern.level` is accessed after deserialisation.
 
 ### 2.3 Constructor
 
 ```python
-def __init__(self, path: str):
+def __init__(self, db_path: str):
     """
-    path: file path for the SQLite database (e.g. "runs/experiment.db").
-    Use ":memory:" for in-process testing.
+    db_path: file path for the SQLite database (e.g. "runs/experiment.db").
+    Use a tmp_path fixture for testing.
     Creates the database and table if they do not exist.
     """
 ```
 
 ### 2.4 Protocol Methods
 
-Implements all methods of the `PatternStore` protocol:
+All `PatternStore` protocol methods are implemented:
 
 | Method | Behaviour |
 |--------|-----------|
 | `save(pattern, weight, agent_id)` | INSERT OR REPLACE into patterns table |
+| `load(pattern_id) -> tuple[GaussianPattern, float]` | SELECT by id; raises KeyError if not found |
 | `query(agent_id) -> list[tuple[GaussianPattern, float]]` | SELECT WHERE agent_id = ? |
-| `delete(pattern_id)` | DELETE WHERE pattern_id = ? |
-| `update_weight(pattern_id, weight)` | UPDATE weight WHERE pattern_id = ? |
+| `delete(pattern_id)` | DELETE WHERE id = ? |
+| `update_weight(pattern_id, weight)` | UPDATE weight WHERE id = ? |
 
-**Additional method (monitor-specific):**
+**Additional method (monitor-specific, already implemented):**
 
 ```python
 def query_all(self) -> list[tuple[GaussianPattern, float, str]]:
     """
     Return all patterns across all agents as (pattern, weight, agent_id) triples.
-    Used exclusively by StructuralLawMonitor.
+    Used by StructuralLawMonitor to compute population-wide metrics.
     """
 ```
 
 ### 2.5 Serialisation
 
-`mu` and `sigma` serialised with `np.save` to `BytesIO`, stored as `BLOB`. Deserialised with `np.load` from `BytesIO`. `level` stored as `INTEGER`, updated by `save()` from `pattern.level`.
+Patterns serialised to JSON via `pattern.to_dict()` and deserialised via `pattern_from_dict()`. `level` is included in the JSON payload and recovered on load — no separate column required.
 
 ---
 
@@ -188,16 +188,19 @@ Newline-delimited JSON (NDJSON) — appendable without parsing the full file.
 ### 6.1 Constructor Change
 
 ```python
-def __init__(self, agents, field=None, monitor=None):
+def __init__(self, agents, field: PatternField, seed_pattern=None, groups=None, monitor=None):
 ```
 
-`monitor: StructuralLawMonitor | None = None`. If `None`, monitoring disabled — zero overhead, fully backward compatible.
+`monitor: StructuralLawMonitor | None = None` is added as a new keyword argument. The existing positional parameters (`field`, `seed_pattern`, `groups`) are unchanged — fully backward compatible. If `monitor` is `None`, monitoring is disabled with zero overhead.
 
 ### 6.2 step() Change
 
-After the communication phase, before returning:
+After the communication phase, before returning, aggregate `total_conflict` across all agents (sum of per-agent `step_metrics["total_conflict"]` values) and pass it to the monitor:
 
 ```python
+total_conflict = sum(
+    metrics[aid].get("total_conflict", 0.0) for aid in metrics
+)
 field_quality = (
     self.monitor.step(self._t, self.agents, total_conflict)
     if self.monitor is not None
@@ -205,7 +208,13 @@ field_quality = (
 )
 ```
 
-Add `"field_quality": field_quality` to the orchestrator step return dict.
+The orchestrator `step()` return dict gains a top-level `"field_quality"` key alongside the per-agent keys:
+
+```python
+return {**metrics, "field_quality": field_quality}
+```
+
+Note: agent_ids must not be `"field_quality"` — this is a reserved key in the return dict.
 
 ### 6.3 Typical Usage
 
@@ -220,14 +229,12 @@ orchestrator = MultiAgentOrchestrator(agents, monitor=monitor)
 
 ## 7. Testing Strategy
 
-### SQLiteStore (`tests/store/test_sqlite_store.py`)
+### SQLiteStore (`tests/store/test_sqlite.py` — existing file, add cases)
 
-- `test_save_and_query_roundtrip`: save pattern, query by agent_id, verify mu/sigma/weight/level preserved
-- `test_delete_removes_pattern`: save then delete, query returns empty
-- `test_update_weight`: save then update_weight, query shows new weight
-- `test_query_all_across_agents`: save patterns for two agent_ids, query_all returns all
-- `test_memory_db`: `SQLiteStore(":memory:")` works for in-process testing
-- `test_level_persisted`: pattern.level stored and recovered correctly
+`tests/store/test_sqlite.py` already covers `save/load`, `query`, `update_weight`, `delete`, `query_all`, and cross-connection persistence. Add the following cases to the existing file:
+
+- `test_level_persisted`: save a pattern with `level=3`, query by agent_id, verify `pattern.level == 3`
+- `test_query_all_returns_agent_id`: `query_all()` triples include the correct `agent_id` string as third element
 
 ### StructuralLawMonitor (`tests/monitor/test_structural_law.py`)
 
