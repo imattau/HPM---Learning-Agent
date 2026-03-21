@@ -113,7 +113,7 @@ def ensemble_score(agents, vec: np.ndarray) -> float:
 
 
 def make_arc_orchestrator():
-    """Fresh 2-agent HPM orchestrator configured for ARC."""
+    """Fresh 2-agent HPM orchestrator configured for ARC (per-task reset)."""
     return make_orchestrator(
         n_agents=2,
         feature_dim=FEATURE_DIM,
@@ -124,6 +124,33 @@ def make_arc_orchestrator():
         T_recomb=5,
         recomb_cooldown=3,
         init_sigma=2.0,
+    )
+
+
+def make_arc_persistent_orchestrator():
+    """Single long-lived orchestrator for persistent cross-task learning.
+
+    Full HPM stack enabled so patterns can level up across tasks:
+    - StructuralLawMonitor tracks diversity/redundancy every 20 steps
+    - RecombinationStrategist triggers bursts when diversity collapses
+    - min_recomb_level=1 allows recombination before patterns reach L4
+    - beta_comp rewards compression (encourages hierarchical abstraction)
+    - kappa_d_levels active so density bias stabilises recurring patterns
+    """
+    return make_orchestrator(
+        n_agents=2,
+        feature_dim=FEATURE_DIM,
+        agent_ids=["arc_a", "arc_b"],
+        with_monitor=True,
+        T_monitor=20,
+        beta_comp=0.1,
+        gamma_soc=0.5,
+        T_recomb=5,
+        recomb_cooldown=3,
+        init_sigma=2.0,
+        min_recomb_level=1,
+        kappa_d_levels=[0.1, 0.2, 0.3, 0.4, 0.5],
+        kappa_D=0.5,
     )
 
 
@@ -201,13 +228,73 @@ def _eval_worker(args):
     return evaluate_task(task, _worker_all_tasks, task_idx)
 
 
+def run_persistent(eligible, all_tasks):
+    """
+    Persistent mode: single orchestrator across all tasks.
+    Agents accumulate patterns from every task — common ARC transformations
+    build up weight over time and influence future evaluations.
+    Sequential (no parallelism — shared mutable store).
+    """
+    orch, agents, store = make_arc_persistent_orchestrator()
+
+    correct_count = 0
+    rank_sum = 0
+
+    for run_idx, (task_idx, task) in enumerate(eligible):
+        # Train on this task's pairs (adds to accumulated store)
+        train_pairs = task["train"]
+        pairs_a = train_pairs[0::2] or train_pairs
+        pairs_b = train_pairs[1::2] or train_pairs
+
+        n = max(len(pairs_a), len(pairs_b))
+        schedule = [
+            (
+                encode_pair(pairs_a[i % len(pairs_a)]["input"], pairs_a[i % len(pairs_a)]["output"]),
+                encode_pair(pairs_b[i % len(pairs_b)]["input"], pairs_b[i % len(pairs_b)]["output"]),
+            )
+            for i in range(n)
+        ]
+        for _ in range(TRAIN_REPS):
+            for obs_a, obs_b in schedule:
+                orch.step({"arc_a": obs_a, "arc_b": obs_b})
+
+        # Evaluate against distractors
+        test_pair = task["test"][0]
+        correct_vec = encode_pair(test_pair["input"], test_pair["output"])
+        rng = np.random.default_rng(task_idx)
+        other_indices = [j for j in range(len(all_tasks)) if j != task_idx and all_tasks[j]["train"]]
+        distractor_indices = rng.choice(other_indices, size=N_DISTRACTORS, replace=False)
+        distractor_vecs = [
+            encode_pair(test_pair["input"], all_tasks[j]["train"][0]["output"])
+            for j in distractor_indices
+        ]
+
+        correct_score = ensemble_score(agents, correct_vec)
+        distractor_scores = [ensemble_score(agents, v) for v in distractor_vecs]
+        rank = 1 + sum(1 for s in distractor_scores if s <= correct_score)
+        correct = correct_score < min(distractor_scores)
+
+        if correct:
+            correct_count += 1
+        rank_sum += rank
+
+        if (run_idx + 1) % 50 == 0:
+            pct = correct_count / (run_idx + 1) * 100
+            n_patterns = sum(len(agent.store.query(agent.agent_id)) for agent in agents)
+            print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy: {pct:.1f}%, patterns: {n_patterns}", flush=True)
+
+    return correct_count, rank_sum
+
+
 def main():
     import multiprocessing
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=None,
-                        help="Number of parallel workers (default: CPU count)")
+                        help="Number of parallel workers (default: CPU count, ignored in --persistent mode)")
+    parser.add_argument("--persistent", action="store_true",
+                        help="Agents learn across tasks (sequential, shared store)")
     args = parser.parse_args()
 
     print("Loading ARC dataset...", flush=True)
@@ -215,29 +302,32 @@ def main():
 
     eligible = [(i, t) for i, t in enumerate(all_tasks) if task_fits(t)]
     excluded = len(all_tasks) - len(eligible)
-    n_workers = args.workers or multiprocessing.cpu_count()
 
     print(
         f"Tasks: {len(all_tasks)} total, {excluded} excluded "
         f"(grid > {MAX_GRID_DIM}x{MAX_GRID_DIM}), {len(eligible)} evaluated"
     )
-    print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
-
-    work = [(task, task_idx) for task_idx, task in eligible]
 
     correct_count = 0
     rank_sum = 0
 
-    with multiprocessing.Pool(processes=n_workers,
-                              initializer=_init_worker,
-                              initargs=(all_tasks,)) as pool:
-        for run_idx, (correct, rank) in enumerate(pool.imap_unordered(_eval_worker, work)):
-            if correct:
-                correct_count += 1
-            rank_sum += rank
-            if (run_idx + 1) % 50 == 0:
-                pct = correct_count / (run_idx + 1) * 100
-                print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy so far: {pct:.1f}%", flush=True)
+    if args.persistent:
+        print("Running (2-agent persistent, sequential, shared store)...", flush=True)
+        correct_count, rank_sum = run_persistent(eligible, all_tasks)
+    else:
+        n_workers = args.workers or multiprocessing.cpu_count()
+        print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
+        work = [(task, task_idx) for task_idx, task in eligible]
+        with multiprocessing.Pool(processes=n_workers,
+                                  initializer=_init_worker,
+                                  initargs=(all_tasks,)) as pool:
+            for run_idx, (correct, rank) in enumerate(pool.imap_unordered(_eval_worker, work)):
+                if correct:
+                    correct_count += 1
+                rank_sum += rank
+                if (run_idx + 1) % 50 == 0:
+                    pct = correct_count / (run_idx + 1) * 100
+                    print(f"  {run_idx + 1}/{len(eligible)} tasks — accuracy so far: {pct:.1f}%", flush=True)
 
     n = len(eligible)
     accuracy = correct_count / n * 100 if n > 0 else 0.0

@@ -58,3 +58,4 @@ class AgentConfig:
     kappa_0: float = 0.1              # entry weight scale for accepted h*
     recomb_temp: float = 1.0          # softmax temperature for pair sampling
     conflict_stress_scale: float = 0.0  # multiplier: temp *= (1 + scale * total_conflict); 0 = off
+    min_recomb_level: int = 4         # minimum HPM level for recombination eligibility

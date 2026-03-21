@@ -65,7 +65,6 @@ class TieredStore:
     def delete(self, pattern_id: str) -> None:
         if self._current_context and self._current_context in self._tier1:
             self._tier1[self._current_context].delete(pattern_id)
-        self._tier2.delete(pattern_id)
 
     def update_weight(self, pattern_id: str, weight: float) -> None:
         """Only mutates Tier 1. Tier 2 is protected from task signal."""

@@ -52,7 +52,7 @@ class RecombinationOperator:
         RecombinationResult | None
         """
         # 1. Level gate
-        candidate_indices = [i for i, p in enumerate(patterns) if p.level >= 4]
+        candidate_indices = [i for i, p in enumerate(patterns) if p.level >= config.min_recomb_level]
         if len(candidate_indices) < 2:
             return None
 
@@ -86,12 +86,13 @@ class RecombinationOperator:
                 sym_kl_normalised(h_star, parent_b, rng=self._rng),
             )
             if obs_buffer:
-                # log_prob() returns NLL (positive); negating gives log-likelihood (≤ 0).
-                # Eff is therefore non-positive, so insight ≤ beta_orig * alpha_nov * 1.0.
-                # With defaults this caps entry_weight at kappa_0 * 0.5 = 0.05.
-                eff = float(np.mean([-h_star.log_prob(x) for x in obs_buffer]))
+                # log_prob() returns NLL (positive = diffuse, negative = very tight).
+                # Lower NLL = better fit. We use -NLL (log-likelihood) and pass through
+                # sigmoid so eff is always in (0, 1). Tight fits give eff > 0.5.
+                mean_nll = float(np.mean([h_star.log_prob(x) for x in obs_buffer]))
+                eff = float(1.0 / (1.0 + np.exp(mean_nll)))  # sigmoid(-NLL)
             else:
-                eff = 0.0
+                eff = 0.5
 
             insight = config.beta_orig * (config.alpha_nov * nov + config.alpha_eff * eff)
 

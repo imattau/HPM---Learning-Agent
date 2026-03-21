@@ -25,8 +25,8 @@ from benchmarks.common import make_agent, print_results_table
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-MAX_GRID_DIM = 10                         # max rows/cols; tasks exceeding this are excluded
-GRID_SIZE = MAX_GRID_DIM * MAX_GRID_DIM   # 100
+MAX_GRID_DIM = 20                         # max rows/cols; tasks exceeding this are excluded
+GRID_SIZE = MAX_GRID_DIM * MAX_GRID_DIM   # 400
 FEATURE_DIM = GRID_SIZE * 2               # 200: encode(input) + encode(output)
 TRAIN_REPS = 10                           # agent.step() calls per training pair
 N_DISTRACTORS = 4                         # distractor outputs per test

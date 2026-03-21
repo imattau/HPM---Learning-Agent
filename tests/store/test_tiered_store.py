@@ -63,3 +63,14 @@ def test_delete_removes_from_tier1():
     store.save(p, 1.0, "agent_a")
     store.delete(p.id)
     assert store.query("agent_a") == []
+
+
+def test_delete_does_not_remove_from_tier2():
+    store = TieredStore()
+    p = _pat()
+    store.save(p, 1.0, "agent_a")          # goes to tier2
+    store.begin_context("task_0")
+    store.delete(p.id)                      # should NOT affect tier2
+    store.end_context("task_0", correct=False)
+    tier2 = store.query_tier2("agent_a")
+    assert len(tier2) == 1                  # tier2 pattern still there
