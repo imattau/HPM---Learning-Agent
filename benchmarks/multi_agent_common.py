@@ -60,6 +60,7 @@ def make_orchestrator(
 
     cfg_kwargs = dict(BENCH_CONFIG)
     cfg_kwargs["feature_dim"] = feature_dim
+    cfg_kwargs.setdefault("gamma_soc", 0.5)  # enable social learning via PatternField
     cfg_kwargs.update(overrides)
 
     agents = [
