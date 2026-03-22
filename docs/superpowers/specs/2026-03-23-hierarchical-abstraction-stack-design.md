@@ -63,9 +63,16 @@ LevelBundle                   dataclass
   epistemic_loss: float
 
 extract_bundle(agent) -> LevelBundle
-  — pulls top pattern mu from agent's store (zeros if empty)
-  — pulls field weight via agent.field.get_weight(pattern.id), or 0.0
-  — pulls epistemic_loss from agent.epistemic.last_loss
+  — queries agent.store.query(agent.agent_id) → list of (pattern, weight) 2-tuples
+  — if empty: returns LevelBundle(agent_id, mu=zeros(config.feature_dim),
+                                  weight=0.0, epistemic_loss=1.0)
+    Note: in normal operation Agent._seed_if_empty() runs at construction so
+    the store is never empty; this guard covers manually-cleared stores in tests.
+  — top pattern: max(records, key=lambda r: r[1]) → (top_pattern, top_weight)
+  — weight: top_weight (from store record, the agent's own pattern weight)
+  — epistemic_loss: agent.epistemic._running_loss.get(top_pattern.id, 0.0)
+    (EpistemicEvaluator stores running loss per pattern_id in _running_loss dict;
+     defaults to 0.0 if pattern has never been evaluated)
 
 encode_bundle(bundle: LevelBundle) -> np.ndarray
   — np.concatenate([bundle.mu, [bundle.weight, bundle.epistemic_loss]])
@@ -78,11 +85,18 @@ make_hierarchical_orchestrator(
     K: int = 1,
     l1_pattern_type: str = "gaussian",
     l2_pattern_type: str = "gaussian",
-    **kwargs
+    l1_agent_ids: list[str] | None = None,
+    l2_agent_ids: list[str] | None = None,
 ) -> tuple[HierarchicalOrchestrator, list[Agent], list[Agent]]
-  — builds level1_orch via make_orchestrator(n_l1_agents, l1_feature_dim, ...)
-  — builds level2_orch via make_orchestrator(n_l2_agents, l1_feature_dim + 2, ...)
-  — returns HierarchicalOrchestrator + both agent lists
+  — builds level1_orch via make_orchestrator(n_l1_agents, l1_feature_dim,
+      pattern_types=[l1_pattern_type]*n_l1_agents, agent_ids=l1_agent_ids)
+  — builds level2_orch via make_orchestrator(n_l2_agents, l1_feature_dim + 2,
+      pattern_types=[l2_pattern_type]*n_l2_agents, agent_ids=l2_agent_ids)
+  — No **kwargs: all options are explicit to prevent accidental cross-level
+    dim mismatch. This is the only supported construction path; constructing
+    HierarchicalOrchestrator directly with mismatched orchestrators is
+    undefined behaviour.
+  — returns HierarchicalOrchestrator, level1_agents, level2_agents
 
 HierarchicalOrchestrator
   level1_orch: MultiAgentOrchestrator
@@ -90,15 +104,26 @@ HierarchicalOrchestrator
   level1_agents: list[Agent]
   level2_agents: list[Agent]
   K: int
-  _t: int
+  _t: int  (initialised to 0)
 
   step(obs: np.ndarray) -> dict
     — broadcasts obs to all Level 1 agents, calls level1_orch.step()
-    — increments _t
+    — increments _t (BEFORE cadence check, so first cadence fires at t=K not t=0)
+    — l2_result = {}
     — if _t % K == 0:
-        for each Level 1 agent, extract_bundle() → encode_bundle()
-        for each bundle: calls level2_orch.step({l2_agent_id: encoded_bundle})
+        for each Level 1 agent, extract_bundle() → encode_bundle() → encoded
+        for each encoded bundle:
+          l2_result = level2_orch.step(
+            {l2_agent.agent_id: encoded for l2_agent in level2_agents}
+          )
+          # All Level 2 agents receive the same bundle per call.
+          # N Level 1 agents → N calls to level2_orch.step() per cadence tick.
     — returns {"level1": l1_result, "level2": l2_result, "t": _t}
+      # "level2" is {} on non-cadence steps, last l2_result on cadence steps.
+
+  Edge cases:
+    K > total steps: Level 2 is never stepped. Valid, no error.
+    K = 1: Level 2 steps on every Level 1 step (synchronous mode).
 ```
 
 ### Modified files
@@ -162,4 +187,4 @@ Level 2 Orchestrator
 
 - `hierarchical_smoke.py` runs without error and Level 2 receives bundles at the correct cadence
 - All unit tests in `test_hierarchical.py` pass
-- Setting K=1 produces identical behaviour to a flat `MultiAgentOrchestrator` run with feature_dim = D+2 (regression check)
+- Setting K=1: Level 2 receives exactly N bundles per step (one per Level 1 agent), and `len(level2_results) == n_steps * n_l1_agents` (structural cadence check — not numerical equivalence with a flat orchestrator, since bundle content is path-dependent on Level 1 state)
