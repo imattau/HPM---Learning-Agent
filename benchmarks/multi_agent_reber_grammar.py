@@ -130,6 +130,9 @@ def run() -> dict:
         alphabet_size=K,
         with_monitor=True,
         T_monitor=200,
+        with_forecaster=True,
+        with_actor=True,
+        n_actions=K,  # one action per grammar symbol
     )
 
     for seq in train_seqs:

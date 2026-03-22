@@ -17,7 +17,9 @@ import numpy as np
 from hpm.config import AgentConfig
 from hpm.agents.agent import Agent
 from hpm.agents.multi_agent import MultiAgentOrchestrator
+from hpm.agents.actor import DecisionalActor
 from hpm.field.field import PatternField
+from hpm.monitor.predictive_synthesis import PredictiveSynthesisAgent
 from hpm.patterns.factory import make_pattern
 from hpm.store.memory import InMemoryStore
 from hpm.monitor.structural_law import StructuralLawMonitor
@@ -34,7 +36,10 @@ def make_orchestrator(
     T_monitor: int = 50,
     agent_seeds: list[int] | None = None,
     store=None,
-    pattern_types: list[str] | None = None,  # NEW
+    pattern_types: list[str] | None = None,
+    with_forecaster: bool = False,
+    with_actor: bool = False,
+    n_actions: int = 4,
     **overrides,
 ) -> tuple:
     """
@@ -96,7 +101,30 @@ def make_orchestrator(
         RecombinationStrategist()
         if (with_strategist and with_monitor) else None
     )
-    orch = MultiAgentOrchestrator(agents, field, monitor=monitor, strategist=strategist)
+
+    forecaster = (
+        PredictiveSynthesisAgent(store)
+        if with_forecaster else None
+    )
+
+    if with_actor:
+        # Random orthonormal action vectors in feature space (seeded for reproducibility).
+        # In a real deployment these would be domain-specific candidate vectors.
+        rng_act = np.random.default_rng(0)
+        raw = rng_act.standard_normal((n_actions, feature_dim))
+        norms = np.linalg.norm(raw, axis=1, keepdims=True)
+        action_vectors = raw / np.where(norms > 0, norms, 1.0)
+        actor = DecisionalActor(action_vectors=action_vectors, forecaster=forecaster)
+    else:
+        actor = None
+
+    orch = MultiAgentOrchestrator(
+        agents, field,
+        monitor=monitor,
+        strategist=strategist,
+        forecaster=forecaster,
+        actor=actor,
+    )
 
     return orch, agents, store
 
