@@ -59,6 +59,16 @@ def test_b_floor_prevents_zero():
     assert np.all(p.b >= 1e-6)
 
 
+def test_freeze_mu_keeps_mu_fixed():
+    p = LaplacePattern(np.zeros(3), np.ones(3), freeze_mu=True)
+    x = np.ones(3) * 5.0
+    for _ in range(50):
+        p = p.update(x)
+    assert np.allclose(p.mu, np.zeros(3))
+    # b should still update
+    assert p._n_obs == 50
+
+
 def test_b_floor_on_construction():
     p = LaplacePattern(np.zeros(2), np.array([-1.0, 0.0]))
     assert np.all(p.b >= 1e-6)
@@ -86,6 +96,20 @@ def test_connectivity_always_zero(pattern):
 def test_compress_ratio(pattern):
     c = pattern.compress()
     assert 0.0 <= c <= 1.0
+
+
+def test_compress_concentrated():
+    """compress() should be high when scale is concentrated in one dimension."""
+    p = LaplacePattern(np.zeros(4), np.array([10.0, 1.0, 1.0, 1.0]))
+    c = p.compress()
+    expected = 10.0 / 13.0
+    assert abs(c - expected) < 1e-9
+
+
+def test_compress_uniform():
+    """compress() returns 1/D for uniform b."""
+    p = LaplacePattern(np.zeros(4), np.ones(4))
+    assert abs(p.compress() - 0.25) < 1e-9
 
 
 def test_is_structurally_valid(pattern):

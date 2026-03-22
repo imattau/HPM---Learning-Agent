@@ -33,6 +33,14 @@ class LaplacePattern:
         return rng.laplace(loc=self.mu, scale=self.b, size=(n, len(self.mu)))
 
     def update(self, x: np.ndarray) -> 'LaplacePattern':
+        """Online update. Returns new instance (value-type semantics).
+
+        mu: running mean (approximation to true median).
+        b: running mean of |x - mu_old|, floored at 1e-6.
+           Unlike GaussianPattern which keeps sigma fixed, b is updated
+           because it is cheap to estimate online and converges to ~0 for
+           degenerate distributions (all obs identical), which is correct.
+        """
         mu_old = self.mu
         n = self._n_obs + 1
         new_mu = mu_old if self.freeze_mu else (mu_old * self._n_obs + np.asarray(x, dtype=float)) / n
@@ -57,6 +65,10 @@ class LaplacePattern:
         return 0.0
 
     def compress(self) -> float:
+        """Concentration ratio: fraction of total scale in the dominant dimension.
+        Analogous to the top-eigenvalue ratio in GaussianPattern.compress().
+        Returns 1/D for uniform b (uncompressed), approaches 1.0 as scale concentrates.
+        """
         total = self.b.sum()
         if total == 0.0:
             return 0.0
