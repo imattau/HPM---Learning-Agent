@@ -148,6 +148,7 @@ class Agent:
                 mu=rng.normal(0, 1, self.config.feature_dim),
                 scale=scale,
                 pattern_type=self.config.pattern_type,
+                alphabet_size=self.config.alphabet_size,
             )
             self.store.save(init, 1.0, self.agent_id)
 
@@ -304,7 +305,9 @@ class Agent:
         if self.field is not None and hasattr(self.store, '_tier2_negative'):
             neg_incoming = self.field.pull_negative(self.agent_id, self.config.gamma_neg)
             for pattern, weight in neg_incoming:
-                self.store._tier2_negative.save(pattern, weight, self.agent_id)
+                current_neg = self.store._tier2_negative.query_all()
+                if len(current_neg) < self.config.max_tier2_negative:
+                    self.store._tier2_negative.save(pattern, weight, self.agent_id)
 
         # Inhibitory channel: Step B — broadcast own negative patterns to field
         if self.field is not None and hasattr(self.store, 'query_negative'):

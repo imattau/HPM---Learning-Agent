@@ -1,17 +1,21 @@
 import numpy as np
 from hpm.patterns.gaussian import GaussianPattern
 from hpm.patterns.laplace import LaplacePattern
+from hpm.patterns.categorical import CategoricalPattern
 
 
-def make_pattern(mu, scale, pattern_type: str = "gaussian", **kwargs):
+def make_pattern(mu, scale, pattern_type: str = "gaussian", alphabet_size: int = 10, **kwargs):
     """Construct a pattern from (mu, scale) parameters.
 
     Args:
         mu: Location vector (ndarray or list).
         scale: For Gaussian: covariance matrix. For Laplace: scale vector b
                (scalar is broadcast to np.ones(len(mu)) * scalar).
-        pattern_type: "gaussian" or "laplace".
+               Ignored for categorical patterns.
+        pattern_type: "gaussian" | "laplace" | "categorical".
+        alphabet_size: K for CategoricalPattern; ignored by Gaussian/Laplace.
         **kwargs: Passed to the pattern constructor (id, level, source_id, freeze_mu).
+                  For categorical, K can be passed explicitly via kwargs to override alphabet_size.
     """
     mu = np.asarray(mu, dtype=float)
     if pattern_type == "gaussian":
@@ -19,8 +23,13 @@ def make_pattern(mu, scale, pattern_type: str = "gaussian", **kwargs):
     elif pattern_type == "laplace":
         b = np.ones(len(mu)) * scale if np.isscalar(scale) else np.asarray(scale, dtype=float)
         return LaplacePattern(mu, b, **kwargs)
+    elif pattern_type == "categorical":
+        K = kwargs.pop("K", alphabet_size)
+        D = len(mu)
+        probs = np.ones((D, K)) / K  # uniform = maximum entropy prior
+        return CategoricalPattern(probs, K=K, **kwargs)
     else:
-        raise ValueError(f"Unknown pattern_type: {pattern_type!r}. Expected 'gaussian' or 'laplace'.")
+        raise ValueError(f"Unknown pattern_type: {pattern_type!r}. Expected 'gaussian', 'laplace', or 'categorical'.")
 
 
 def pattern_from_dict(d: dict):
@@ -34,5 +43,7 @@ def pattern_from_dict(d: dict):
         return GaussianPattern.from_dict(d)
     elif t == 'laplace':
         return LaplacePattern.from_dict(d)
+    elif t == 'categorical':
+        return CategoricalPattern.from_dict(d)
     else:
-        raise ValueError(f"Unknown pattern type in dict: {t!r}. Expected 'gaussian' or 'laplace'.")
+        raise ValueError(f"Unknown pattern type in dict: {t!r}. Expected 'gaussian', 'laplace', or 'categorical'.")
