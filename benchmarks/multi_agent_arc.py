@@ -127,7 +127,7 @@ def ensemble_score(agents, vec: np.ndarray) -> float:
     return total if any_records else 0.0
 
 
-def make_arc_orchestrator():
+def make_arc_orchestrator(pattern_types=None):
     """Fresh 2-agent HPM orchestrator configured for ARC (per-task reset)."""
     return make_orchestrator(
         n_agents=2,
@@ -139,6 +139,7 @@ def make_arc_orchestrator():
         T_recomb=5,
         recomb_cooldown=3,
         init_sigma=2.0,
+        pattern_types=pattern_types or ["gaussian", "gaussian"],
     )
 
 
@@ -174,7 +175,12 @@ def make_arc_persistent_orchestrator(store=None):
     )
 
 
-def evaluate_task(task, all_tasks, task_idx):
+def make_arc_laplace_orchestrator():
+    """Fresh 2-agent HPM orchestrator using LaplacePattern for ARC."""
+    return make_arc_orchestrator(pattern_types=["laplace", "laplace"])
+
+
+def evaluate_task(task, all_tasks, task_idx, pattern_types=None):
     """
     Run one ARC task with 2-agent ensemble scoring.
 
@@ -186,7 +192,7 @@ def evaluate_task(task, all_tasks, task_idx):
     Returns:
         (correct, rank)
     """
-    orch, agents, store = make_arc_orchestrator()
+    orch, agents, store = make_arc_orchestrator(pattern_types=pattern_types)
 
     # Partition training pairs between agents.
     # agent_a gets even-indexed pairs, agent_b gets odd-indexed pairs.

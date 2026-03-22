@@ -2,6 +2,7 @@ import numpy as np
 from collections import deque
 from ..config import AgentConfig
 from ..patterns.gaussian import GaussianPattern
+from ..patterns.factory import make_pattern, pattern_from_dict
 from ..evaluators.epistemic import EpistemicEvaluator
 from ..evaluators.affective import AffectiveEvaluator
 from ..evaluators.social import SocialEvaluator
@@ -90,13 +91,10 @@ class Agent:
         count = 0
         for p in patterns:
             if p.level >= 4 and p.id not in self._shared_ids:
-                shared_copy = GaussianPattern(
-                    mu=p.mu.copy(),
-                    sigma=p.sigma.copy(),
-                    source_id=p.id,
-                    # No id= -> fresh UUID. Communicative sharing transfers structure,
-                    # not UUID identity. source_id preserves provenance.
-                )
+                d = p.to_dict()
+                d['id'] = None      # fresh UUID (constructor does: id or str(uuid.uuid4()))
+                d['source_id'] = p.id
+                shared_copy = pattern_from_dict(d)
                 field.broadcast(self.agent_id, shared_copy)
                 self._shared_ids.add(p.id)
                 count += 1
@@ -143,9 +141,13 @@ class Agent:
     def _seed_if_empty(self) -> None:
         if not self.store.query(self.agent_id):
             rng = np.random.default_rng()
-            init = GaussianPattern(
+            scale = (np.eye(self.config.feature_dim) * self.config.init_sigma
+                     if self.config.pattern_type == "gaussian"
+                     else self.config.init_sigma)
+            init = make_pattern(
                 mu=rng.normal(0, 1, self.config.feature_dim),
-                sigma=np.eye(self.config.feature_dim) * self.config.init_sigma,
+                scale=scale,
+                pattern_type=self.config.pattern_type,
             )
             self.store.save(init, 1.0, self.agent_id)
 

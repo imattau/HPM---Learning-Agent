@@ -63,3 +63,5 @@ class AgentConfig:
     gamma_neg: float = 0.3               # social inhibition attenuation (0 = off)
     neg_conflict_threshold: float = 0.7  # cosine sim threshold for negative_merge
     max_tier2_negative: int = 100        # cap on _tier2_negative store size
+    # Pattern type selection
+    pattern_type: str = "gaussian"  # "gaussian" | "laplace"

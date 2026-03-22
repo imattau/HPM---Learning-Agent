@@ -18,7 +18,7 @@ from hpm.config import AgentConfig
 from hpm.agents.agent import Agent
 from hpm.agents.multi_agent import MultiAgentOrchestrator
 from hpm.field.field import PatternField
-from hpm.patterns.gaussian import GaussianPattern
+from hpm.patterns.factory import make_pattern
 from hpm.store.memory import InMemoryStore
 from hpm.monitor.structural_law import StructuralLawMonitor
 from hpm.monitor.recombination_strategist import RecombinationStrategist
@@ -34,6 +34,7 @@ def make_orchestrator(
     T_monitor: int = 50,
     agent_seeds: list[int] | None = None,
     store=None,
+    pattern_types: list[str] | None = None,  # NEW
     **overrides,
 ) -> tuple:
     """
@@ -64,9 +65,10 @@ def make_orchestrator(
     cfg_kwargs.setdefault("gamma_soc", 0.5)  # enable social learning via PatternField
     cfg_kwargs.update(overrides)
 
+    _pattern_types = pattern_types or ["gaussian"] * len(agent_ids)
     agents = [
-        Agent(AgentConfig(agent_id=aid, **cfg_kwargs), store=store, field=field)
-        for aid in agent_ids
+        Agent(AgentConfig(agent_id=aid, pattern_type=pt, **cfg_kwargs), store=store, field=field)
+        for aid, pt in zip(agent_ids, _pattern_types)
     ]
 
     # Pre-seed each agent with a distinct random pattern when agent_seeds provided.
@@ -80,8 +82,10 @@ def make_orchestrator(
             norm = np.linalg.norm(mu)
             if norm > 0:
                 mu /= norm
-            sigma = np.eye(feature_dim) * init_sigma
-            pattern = GaussianPattern(mu=mu, sigma=sigma)
+            scale = (np.eye(feature_dim) * init_sigma
+                     if agent.config.pattern_type == "gaussian"
+                     else init_sigma)
+            pattern = make_pattern(mu, scale, pattern_type=agent.config.pattern_type)
             agent.store.save(pattern, 1.0, agent.agent_id)
 
     monitor = (
