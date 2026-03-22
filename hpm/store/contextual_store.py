@@ -150,6 +150,9 @@ class ContextualPatternStore:
 
         # Phase 3: delegate global injection to librarian
         self._inject_globals()
+
+        # Delegate to inner TieredStore so Tier 1 context is created and agents can save patterns
+        self._store.begin_context(context_id)
         return context_id
 
     def end_context(self, context_id: str, success_metrics: dict) -> None:
@@ -183,7 +186,11 @@ class ContextualPatternStore:
         with open(index_path, "w") as f:
             json.dump(index, f)
 
-        # Phase 3: delegate global pass to librarian
+        # Delegate to inner TieredStore so similarity_merge / negative_merge run
+        correct = success_metrics.get("correct", False)
+        self._store.end_context(context_id, correct=correct)
+
+        # Phase 3: delegate global pass to librarian (after end_context promotes patterns)
         self._librarian.run_global_pass(
             sqlite_store=self._db_path,
             tier2_patterns=self._store.query_tier2_all(),
