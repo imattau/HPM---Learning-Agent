@@ -4,7 +4,7 @@
 
 **Goal:** Implement a general N-level `StackedOrchestrator` that supports arbitrary abstraction depth, and add a separate hierarchical ARC benchmark to compare 3-level stacked performance against the flat single-agent baseline.
 
-**Architecture:** `hpm/agents/stacked.py` introduces `LevelConfig` (per-level config dataclass), `StackedOrchestrator` (N-level stack with per-level cadence and the witness model from Sub-project 1), and `make_stacked_orchestrator` (factory that auto-computes dims). `benchmarks/hierarchical_arc.py` runs a 3-level stack (L1=64-dim, L2=66-dim, L3=68-dim) on the existing ARC encoding and reports L3 accuracy vs the flat baseline. Existing `arc_benchmark.py` and `multi_agent_arc.py` are NOT modified.
+**Architecture:** `hpm/agents/stacked.py` introduces `LevelConfig` (per-level config dataclass), `StackedOrchestrator` (N-level stack with per-level cadence and the witness model from Sub-project 1), and `make_stacked_orchestrator` (factory that auto-computes dims). `benchmarks/hierarchical_arc.py` runs a 3-level stack (L1=64-dim, L2=66-dim, L3=68-dim) on the existing ARC encoding. **Scoring uses L1 agents** — L3 agents operate in 68-dim bundle space and cannot directly score 64-dim ARC vectors; L1 agents share the same feature space as the raw ARC encoding, so the benchmark tests whether the hierarchical stack shapes L1 representations better than a flat setup. Existing `arc_benchmark.py` and `multi_agent_arc.py` are NOT modified.
 
 **Tech Stack:** Python 3.11+, NumPy, existing `hpm` package (`Agent`, `MultiAgentOrchestrator`, `extract_bundle`, `encode_bundle`), existing `benchmarks/multi_agent_common.py` (`make_orchestrator`), pytest.
 
@@ -14,7 +14,7 @@
 
 **`hpm/agents/hierarchical.py`** — already implemented. Provides `extract_bundle(agent)`, `encode_bundle(bundle)`. Study its `make_hierarchical_orchestrator` for the lazy-import pattern used to call `benchmarks/multi_agent_common.make_orchestrator` from inside `hpm/`.
 
-**`benchmarks/multi_agent_arc.py`** — provides `encode_pair(input_grid, output_grid)`, `ensemble_score(agents, vec)`, `load_tasks()`, `task_fits(task)`, `_PROJ` (the fixed random projection matrix, seed=0). The hierarchical benchmark reuses all of these.
+**`benchmarks/multi_agent_arc.py`** — provides `encode_pair(input_grid, output_grid)`, `ensemble_score(agents, vec)`, `load_tasks()`, `task_fits(task)`. The hierarchical benchmark reuses all of these. Note: tasks are loaded from the full dataset and capped at `[:400]`; after applying `task_fits`, ~342 tasks remain — this is the comparison baseline.
 
 **`benchmarks/multi_agent_common.py`** — `make_orchestrator(n_agents, feature_dim, agent_ids, pattern_types, ...)` returns `(orchestrator, agents, store)`.
 
@@ -26,18 +26,18 @@
 |---|---|---|
 | `hpm/agents/stacked.py` | Create | `LevelConfig`, `StackedOrchestrator`, `make_stacked_orchestrator` |
 | `hpm/agents/__init__.py` | Modify | Re-export new symbols |
-| `tests/agents/test_stacked.py` | Create | All unit tests |
+| `tests/agents/test_stacked.py` | Create | All unit tests (written before implementation) |
 | `benchmarks/hierarchical_arc.py` | Create | Hierarchical ARC benchmark |
 
 ---
 
-### Task 1: LevelConfig + StackedOrchestrator skeleton + make_stacked_orchestrator
+### Task 1: All tests + full implementation of stacked.py
 
 **Files:**
-- Create: `hpm/agents/stacked.py`
-- Create: `tests/agents/test_stacked.py`
+- Create: `tests/agents/test_stacked.py` (tests first)
+- Create: `hpm/agents/stacked.py` (implementation after)
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write ALL failing tests**
 
 ```python
 # tests/agents/test_stacked.py
@@ -106,7 +106,7 @@ def test_stacked_orchestrator_level_agents_shape():
 
 
 # ---------------------------------------------------------------------------
-# level_Ks construction: K[0] = 1 always, K[1:] from configs[1:]
+# level_Ks: K[0]=1 always; K[1:] from configs[1:]
 # ---------------------------------------------------------------------------
 
 def test_stacked_orchestrator_level_ks():
@@ -129,14 +129,134 @@ def test_stacked_orchestrator_ticks_initial():
     configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=3)]
     orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
     assert orch._level_ticks == [0, 0]
+
+
+# ---------------------------------------------------------------------------
+# Cadence: K=1 (synchronous)
+# ---------------------------------------------------------------------------
+
+def test_cadence_k1_all_levels_fire_every_step():
+    """K=1: level2 fires on every step."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    for _ in range(10):
+        result = orch.step(rng.standard_normal(4))
+        assert result["level2"] != {}
+
+
+def test_cadence_k1_ticks_equal():
+    """K=1 2-level: _level_ticks[1] == _level_ticks[0] after N steps."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    for _ in range(15):
+        orch.step(rng.standard_normal(4))
+    assert orch._level_ticks[1] == orch._level_ticks[0]
+
+
+def test_cadence_k1_l2_feature_dim():
+    """2-level K=1: L2 agents have feature_dim = l1_feature_dim + 2."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
+    orch, agents = make_stacked_orchestrator(l1_feature_dim=8, level_configs=configs)
+    assert agents[1][0].config.feature_dim == 10
+
+
+# ---------------------------------------------------------------------------
+# Cadence: K=3
+# ---------------------------------------------------------------------------
+
+def test_cadence_k3_l2_fires_at_correct_steps():
+    """K=3: level2 fires at t=3,6,9,12."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=3)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    fire_steps = []
+    for _ in range(12):
+        result = orch.step(rng.standard_normal(4))
+        if result["level2"] != {}:
+            fire_steps.append(result["t"])
+    assert fire_steps == [3, 6, 9, 12]
+
+
+def test_cadence_k3_tick_counters():
+    """K=3: after 9 steps, _level_ticks[0]==9, _level_ticks[1]==3."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=3)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    for _ in range(9):
+        orch.step(rng.standard_normal(4))
+    assert orch._level_ticks[0] == 9
+    assert orch._level_ticks[1] == 3
+
+
+# ---------------------------------------------------------------------------
+# Cadence: 3-level K=3
+# ---------------------------------------------------------------------------
+
+def test_cadence_3level_k3_l3_fires_at_t9_18_27():
+    """3-level K=3: L3 fires at t=9,18,27 (every 9 L1 steps)."""
+    configs = [
+        LevelConfig(n_agents=2),
+        LevelConfig(n_agents=2, K=3),
+        LevelConfig(n_agents=1, K=3),
+    ]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    l3_fire_steps = []
+    for _ in range(30):
+        result = orch.step(rng.standard_normal(4))
+        if result["level3"] != {}:
+            l3_fire_steps.append(result["t"])
+    assert l3_fire_steps == [9, 18, 27]
+
+
+# ---------------------------------------------------------------------------
+# Non-cadence steps return {}
+# ---------------------------------------------------------------------------
+
+def test_non_cadence_step_returns_empty():
+    """t=1 with K=5: level2 is {}."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=5)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    result = orch.step(np.zeros(4))  # t=1
+    assert result["level2"] == {}
+
+
+# ---------------------------------------------------------------------------
+# t counter
+# ---------------------------------------------------------------------------
+
+def test_t_counter_increments():
+    """result["t"] == step number (1-indexed)."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    for i in range(1, 6):
+        result = orch.step(np.zeros(4))
+        assert result["t"] == i
+
+
+# ---------------------------------------------------------------------------
+# K larger than n_steps
+# ---------------------------------------------------------------------------
+
+def test_k_larger_than_steps_no_error():
+    """K=100, 10 steps: level2 never fires, no exception."""
+    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=100)]
+    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
+    rng = np.random.default_rng(0)
+    for _ in range(10):
+        result = orch.step(rng.standard_normal(4))
+    assert result["level2"] == {}
+    assert orch._level_ticks[1] == 0
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify they all fail**
 
 ```bash
 cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/agents/test_stacked.py -v
 ```
-Expected: `ModuleNotFoundError` — `stacked.py` does not exist yet.
+Expected: `ModuleNotFoundError` — `stacked.py` does not exist yet. All 17 tests fail.
 
 - [ ] **Step 3: Implement `hpm/agents/stacked.py`**
 
@@ -196,10 +316,10 @@ class StackedOrchestrator:
     def step(self, obs: np.ndarray) -> dict:
         """Step the hierarchy on one raw observation.
 
-        Increment-then-check order (same as Sub-project 1):
+        Increment-then-check order (same as Sub-project 1 HierarchicalOrchestrator):
         each level's tick counter is incremented AFTER that level fires;
         the cadence check for level i+1 uses the updated _level_ticks[i]
-        from the same step() call.
+        from the same step() call. First L2 cadence fires when _level_ticks[0] == K.
 
         Returns dict with keys "level1".."level{n}" and "t" (_level_ticks[0]).
         Deeper levels return {} on non-cadence steps.
@@ -207,7 +327,7 @@ class StackedOrchestrator:
         n = len(self.level_orches)
         results: list[dict] = [{} for _ in range(n)]
 
-        # Step level 0 (always)
+        # Step level 0 (L1) — always fires
         l1_obs = {a.agent_id: obs for a in self.level_agents[0]}
         results[0] = self.level_orches[0].step(l1_obs)
         self._level_ticks[0] += 1
@@ -243,8 +363,8 @@ def make_stacked_orchestrator(
     NOTE: level_configs[0].K is ignored. L1 always steps on every call.
     If level_configs[0].K != 1, it is silently treated as 1.
 
-    Returns: (StackedOrchestrator, list_of_agent_lists)
-    The second element is a convenience alias for orch.level_agents.
+    Returns: (StackedOrchestrator, list_of_agent_lists_per_level)
+    The second element is a convenience alias for orch.level_agents (same objects).
     """
     import sys
     _repo_root = str(pathlib.Path(__file__).resolve().parent.parent.parent)
@@ -274,174 +394,29 @@ def make_stacked_orchestrator(
     return stacked, all_agents
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run all 17 tests to verify they pass**
 
 ```bash
 cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/agents/test_stacked.py -v
 ```
-Expected: all 7 tests PASS.
+Expected: all 17 tests PASS. If any cadence test fails, debug `StackedOrchestrator.step()`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run full test suite to catch regressions**
 
 ```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent && git add hpm/agents/stacked.py tests/agents/test_stacked.py && git commit -m "feat: add LevelConfig, StackedOrchestrator skeleton, make_stacked_orchestrator"
+cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/ --tb=short -q
+```
+Expected: all existing tests + 17 new tests PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/mattthomson/workspace/HPM---Learning-Agent && git add hpm/agents/stacked.py tests/agents/test_stacked.py && git commit -m "feat: add LevelConfig, StackedOrchestrator, make_stacked_orchestrator"
 ```
 
 ---
 
-### Task 2: StackedOrchestrator.step() — cadence tests
-
-**Files:**
-- Modify: `tests/agents/test_stacked.py`
-
-Note: `step()` is already implemented in Task 1. This task adds tests that exercise the cadence logic. If any test fails, debug `step()` in `stacked.py`.
-
-- [ ] **Step 1: Add cadence tests to `tests/agents/test_stacked.py`**
-
-```python
-# ---------------------------------------------------------------------------
-# Cadence: K=1 (synchronous — all levels step every step)
-# ---------------------------------------------------------------------------
-
-def test_cadence_k1_all_levels_fire_every_step():
-    """K=1: level2 fires on every step; level2 result is non-empty every step."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    for _ in range(10):
-        result = orch.step(rng.standard_normal(4))
-        assert result["level2"] != {}
-
-
-def test_cadence_k1_ticks_equal():
-    """K=1 2-level: _level_ticks[1] == _level_ticks[0] after N steps."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    for _ in range(15):
-        orch.step(rng.standard_normal(4))
-    assert orch._level_ticks[1] == orch._level_ticks[0]
-
-
-def test_cadence_k1_l2_feature_dim():
-    """2-level K=1: L2 agents have feature_dim = l1_feature_dim + 2."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
-    orch, agents = make_stacked_orchestrator(l1_feature_dim=8, level_configs=configs)
-    assert agents[1][0].config.feature_dim == 10
-
-
-# ---------------------------------------------------------------------------
-# Cadence: K=3 (L2 fires every 3 L1 steps)
-# ---------------------------------------------------------------------------
-
-def test_cadence_k3_l2_fires_at_correct_steps():
-    """K=3: level2 fires at t=3,6,9,...; level2 is {} at t=1,2,4,5,..."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=3)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    fire_steps = []
-    for step in range(1, 13):
-        result = orch.step(rng.standard_normal(4))
-        if result["level2"] != {}:
-            fire_steps.append(result["t"])
-    assert fire_steps == [3, 6, 9, 12]
-
-
-def test_cadence_k3_tick_counters():
-    """K=3: after 9 steps, _level_ticks[0]==9, _level_ticks[1]==3."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=3)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    for _ in range(9):
-        orch.step(rng.standard_normal(4))
-    assert orch._level_ticks[0] == 9
-    assert orch._level_ticks[1] == 3
-
-
-# ---------------------------------------------------------------------------
-# Cadence: 3-level stack K=3 at L2 and L3
-# ---------------------------------------------------------------------------
-
-def test_cadence_3level_k3_l3_fires_at_t9_18_27():
-    """3-level K=3: L3 fires at t=9,18,27 (every 9 L1 steps)."""
-    configs = [
-        LevelConfig(n_agents=2),
-        LevelConfig(n_agents=2, K=3),
-        LevelConfig(n_agents=1, K=3),
-    ]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    l3_fire_steps = []
-    for _ in range(30):
-        result = orch.step(rng.standard_normal(4))
-        if result["level3"] != {}:
-            l3_fire_steps.append(result["t"])
-    assert l3_fire_steps == [9, 18, 27]
-
-
-# ---------------------------------------------------------------------------
-# Non-cadence steps return {}
-# ---------------------------------------------------------------------------
-
-def test_non_cadence_step_returns_empty():
-    """t=1 with K=5: level2 is {}."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=5)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    result = orch.step(np.zeros(4))  # t=1
-    assert result["level2"] == {}
-
-
-# ---------------------------------------------------------------------------
-# t counter
-# ---------------------------------------------------------------------------
-
-def test_t_counter_increments():
-    """result["t"] == step number (1-indexed)."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=1)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    for i in range(1, 6):
-        result = orch.step(np.zeros(4))
-        assert result["t"] == i
-
-
-# ---------------------------------------------------------------------------
-# K larger than n_steps: deeper levels never fire
-# ---------------------------------------------------------------------------
-
-def test_k_larger_than_steps_no_error():
-    """K=100, 10 steps: level2 never fires, no exception."""
-    configs = [LevelConfig(n_agents=1), LevelConfig(n_agents=1, K=100)]
-    orch, _ = make_stacked_orchestrator(l1_feature_dim=4, level_configs=configs)
-    rng = np.random.default_rng(0)
-    for _ in range(10):
-        result = orch.step(rng.standard_normal(4))
-    assert result["level2"] == {}
-    assert orch._level_ticks[1] == 0
-```
-
-- [ ] **Step 2: Run tests to verify they pass**
-
-```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/agents/test_stacked.py -v
-```
-Expected: all tests PASS (17 total). If any cadence test fails, debug `StackedOrchestrator.step()` in `stacked.py`.
-
-- [ ] **Step 3: Run full test suite to catch regressions**
-
-```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/ -v --tb=short
-```
-Expected: all existing tests + new stacked tests PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent && git add tests/agents/test_stacked.py && git commit -m "feat: add StackedOrchestrator cadence tests"
-```
-
----
-
-### Task 3: __init__ re-export
+### Task 2: __init__ re-export
 
 **Files:**
 - Modify: `hpm/agents/__init__.py`
@@ -449,12 +424,12 @@ cd /home/mattthomson/workspace/HPM---Learning-Agent && git add tests/agents/test
 - [ ] **Step 1: Read current `hpm/agents/__init__.py`**
 
 ```bash
-cat hpm/agents/__init__.py
+cat /home/mattthomson/workspace/HPM---Learning-Agent/hpm/agents/__init__.py
 ```
 
 - [ ] **Step 2: Add re-exports**
 
-Add to `hpm/agents/__init__.py`:
+Add to `hpm/agents/__init__.py` (after the existing hierarchical imports):
 
 ```python
 from .stacked import (
@@ -483,7 +458,6 @@ Expected: `OK`
 ```bash
 cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/ --tb=short -q
 ```
-Expected: all tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -493,23 +467,19 @@ cd /home/mattthomson/workspace/HPM---Learning-Agent && git add hpm/agents/__init
 
 ---
 
-### Task 4: Hierarchical ARC benchmark
+### Task 3: Hierarchical ARC benchmark
 
 **Files:**
 - Create: `benchmarks/hierarchical_arc.py`
 
-Key facts about the existing ARC benchmarks (read `benchmarks/multi_agent_arc.py` before starting):
-- `encode_pair(input_grid, output_grid)` — encodes the transformation delta via `_PROJ` (fixed random projection, seed=0, shape 400→64)
-- `ensemble_score(agents, vec)` — takes a list of agents + a 64-dim vec, returns weighted NLL score (lower = more probable)
-- `load_tasks()` — downloads and returns all ARC training tasks
-- `task_fits(task)` — returns True if all grids ≤ 20×20
-- `TRAIN_REPS = 10` — each training pair is stepped 10 times
+**Before starting:** Read `benchmarks/multi_agent_arc.py` to understand:
+- `encode_pair(input_grid, output_grid)` — encodes transformation delta via fixed projection → 64-dim vec
+- `ensemble_score(agents, vec)` — takes list of agents + vec, returns weighted NLL (lower = more probable)
+- `load_tasks()`, `task_fits(task)`, `TRAIN_REPS = 10`, `N_DISTRACTORS = 4`
 
-The hierarchical benchmark uses L3 agents for final scoring. L3 agents have `feature_dim=68` (64 + 2*2), so `ensemble_score` must be called with `l3_agents` and the **64-dim** encoded vector — because L3 agents store patterns over 68-dim bundle space, not the raw 64-dim ARC space. Instead, score using all agents across ALL levels using `ensemble_score` on the 64-dim vec, but only on `level_agents[0]` (L1 agents, same dim as the flat baseline). Alternatively, use L3's stored pattern means to back-project — but that's complex. **Simplest valid approach:** Use only L3 agents for scoring, but score them with the ENCODED bundle of L2's top agent at test time, not the raw 64-dim vec.
+**Scoring design:** L3 agents operate in 68-dim bundle space and cannot directly score 64-dim raw ARC vectors. Scoring uses L1 agents (feature_dim=64) via `ensemble_score(l1_agents, encoded_vec)`. The hypothesis being tested: does training L1 agents inside a 3-level hierarchical stack produce better 64-dim representations than training a flat single agent on the same data?
 
-**Actually simpler:** Re-use L1 agents for scoring (same 64-dim interface as existing benchmarks) — the hierarchical stack trains L1, L2, L3 during training, but at test time the L1 agents have been shaped by the hierarchy's learning. Report L1 accuracy to get a valid comparison with the flat baseline.
-
-**Even simpler (spec-compliant):** Run the stacked orchestrator during training. At test time, score using L1 agents only (same `ensemble_score(l1_agents, encoded_vec)` call). The hypothesis is that L1 agents in a hierarchical stack learn better representations than L1 agents in a flat setup, because the L2/L3 cadence creates additional pressure. This is a valid test of the stack's effect.
+**Task cap:** Take the first 400 tasks after loading (matching `multi_agent_arc.py`'s pattern). After applying `task_fits`, ~342 tasks remain — this is the comparison baseline.
 
 - [ ] **Step 1: Write `benchmarks/hierarchical_arc.py`**
 
@@ -517,19 +487,20 @@ The hierarchical benchmark uses L3 agents for final scoring. L3 agents have `fea
 """
 Hierarchical ARC Benchmark
 ===========================
-Tests whether a 3-level StackedOrchestrator improves ARC discrimination
-accuracy vs the flat single-agent baseline.
+Tests whether a 3-level StackedOrchestrator shapes L1 agent representations
+better than a flat single-agent baseline on ARC discrimination tasks.
 
 Stack config:
-  L1: 2 agents, GaussianPattern, feature_dim=64, K=1
-  L2: 2 agents, GaussianPattern, feature_dim=66, K=3
-  L3: 1 agent,  GaussianPattern, feature_dim=68, K=3
+  L1: 2 agents, GaussianPattern, feature_dim=64, K=1 (always steps)
+  L2: 2 agents, GaussianPattern, feature_dim=66, K=3 (fires every 3 L1 steps)
+  L3: 1 agent,  GaussianPattern, feature_dim=68, K=3 (fires every 9 L1 steps)
 
-During training, all training pairs are stepped through the stacked orchestrator.
-At test time, L1 agents (dim=64) score the candidate via ensemble_score —
-same interface as the flat baseline, enabling direct comparison.
+Scoring: L1 agents (dim=64) score candidates via ensemble_score, same as the
+flat baseline. L3 agents operate in 68-dim bundle space and cannot score 64-dim
+raw ARC vectors directly. This benchmark tests whether hierarchical pressure
+from L2/L3 improves L1 representation quality.
 
-Flat baseline accuracy is re-run inline for a fair same-seed comparison.
+Both hierarchical and flat orchestrators are reset per task (same as multi_agent_arc.py).
 
 Run:
     python benchmarks/hierarchical_arc.py
@@ -546,17 +517,22 @@ from benchmarks.multi_agent_arc import (
 from benchmarks.multi_agent_common import make_orchestrator, print_results_table
 from hpm.agents.stacked import LevelConfig, make_stacked_orchestrator
 
-# Stack config
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 L1_FEATURE_DIM = 64
 STACK_CONFIGS = [
-    LevelConfig(n_agents=2, K=1),            # L1: 64-dim
-    LevelConfig(n_agents=2, K=3),            # L2: 66-dim
-    LevelConfig(n_agents=1, K=3),            # L3: 68-dim
+    LevelConfig(n_agents=2, K=1),   # L1: 64-dim
+    LevelConfig(n_agents=2, K=3),   # L2: 66-dim, fires every 3 L1 steps
+    LevelConfig(n_agents=1, K=3),   # L3: 68-dim, fires every 9 L1 steps
 ]
+# With TRAIN_REPS=10 per pair and K_L2=3: L2 fires ~3 times per pair.
+# With K_L3=3: L3 fires once per 9 L1 steps → fires at step 9 of training.
+# For tasks with ≥1 training pair (all ARC tasks), L3 fires at least once.
 
 
-def make_flat_orchestrator():
-    """Single-agent flat baseline (same config as arc_benchmark.py single agent)."""
+def _make_flat_orchestrator():
+    """Single flat agent baseline (comparable to arc_benchmark.py single agent)."""
     return make_orchestrator(
         n_agents=1,
         feature_dim=L1_FEATURE_DIM,
@@ -565,65 +541,10 @@ def make_flat_orchestrator():
     )
 
 
-def evaluate_task_hierarchical(task: dict) -> int | None:
-    """Train stacked orchestrator on task training pairs, score test pair.
-
-    Returns 1 if correct output is ranked first, 0 otherwise, None if task skipped.
-    """
-    if not task_fits(task):
-        return None
-
-    stacked_orch, all_agents = make_stacked_orchestrator(
-        l1_feature_dim=L1_FEATURE_DIM,
-        level_configs=STACK_CONFIGS,
-    )
-    l1_agents = all_agents[0]
-
-    # Train on all training pairs
-    for pair in task["train"]:
-        vec = encode_pair(pair["input"], pair["output"])
-        for _ in range(TRAIN_REPS):
-            stacked_orch.step(vec)
-
-    # Guard: assert L3 fired at least once (prevents silent untrained-agent scoring)
-    if stacked_orch._level_ticks[-1] == 0:
-        raise RuntimeError(
-            f"L3 never fired during training (task has {len(task['train'])} pairs, "
-            f"K_l2={STACK_CONFIGS[1].K}, K_l3={STACK_CONFIGS[2].K}). "
-            "Increase TRAIN_REPS or reduce K."
-        )
-
-    # Score test pair: rank correct output against N_DISTRACTORS from other tasks
-    test_pair = task["test"][0]
-    correct_vec = encode_pair(test_pair["input"], test_pair["output"])
-    # ensemble_score uses L1 agents (dim=64) — same interface as flat baseline
-    correct_score = ensemble_score(l1_agents, correct_vec)
-
-    # Distractors are encoded as candidate output encodings; reuse task distractor
-    # generation from multi_agent_arc (inline here to avoid import of internal fn)
-    return correct_score  # returned raw; ranking done in run()
-
-
-def evaluate_task_flat(task: dict) -> float | None:
-    """Single flat agent baseline for direct comparison."""
-    if not task_fits(task):
-        return None
-    orch, agents, _ = make_flat_orchestrator()
-    for pair in task["train"]:
-        vec = encode_pair(pair["input"], pair["output"])
-        for _ in range(TRAIN_REPS):
-            orch.step({agents[0].agent_id: vec})
-    test_pair = task["test"][0]
-    correct_vec = encode_pair(test_pair["input"], test_pair["output"])
-    return ensemble_score(agents, correct_vec)
-
-
 def run() -> dict:
     tasks = load_tasks()
-    tasks = [t for t in tasks if task_fits(t)][:400]  # same 400-task cap
+    tasks = [t for t in tasks if task_fits(t)][:400]
 
-    # Build distractor pool: for each task, collect candidate vecs
-    # (correct + 4 from other tasks). Mirror multi_agent_arc.py's approach.
     rng = np.random.default_rng(42)
 
     hierarchical_correct = 0
@@ -635,15 +556,13 @@ def run() -> dict:
         test_pair = task["test"][0]
         correct_vec = encode_pair(test_pair["input"], test_pair["output"])
 
-        # Pick 4 distractor tasks (different indices)
+        # Pick N_DISTRACTORS from other tasks
         distractor_idxs = [j for j in range(len(tasks)) if j != i]
         chosen = rng.choice(distractor_idxs, size=N_DISTRACTORS, replace=False)
-        distractor_vecs = []
-        for di in chosen:
-            dt = tasks[di]
-            dp = dt["test"][0]
-            distractor_vecs.append(encode_pair(dp["input"], dp["output"]))
-
+        distractor_vecs = [
+            encode_pair(tasks[di]["test"][0]["input"], tasks[di]["test"][0]["output"])
+            for di in chosen
+        ]
         candidates = [correct_vec] + distractor_vecs
 
         # --- Hierarchical ---
@@ -652,29 +571,32 @@ def run() -> dict:
             level_configs=STACK_CONFIGS,
         )
         l1_agents = all_agents[0]
+
         for pair in task["train"]:
             vec = encode_pair(pair["input"], pair["output"])
             for _ in range(TRAIN_REPS):
                 stacked_orch.step(vec)
 
+        # Guard: L3 must have fired at least once for meaningful training
         if stacked_orch._level_ticks[-1] == 0:
             raise RuntimeError(
-                f"L3 never fired on task {i} ({len(task['train'])} train pairs). "
-                "Reduce K values or increase TRAIN_REPS."
+                f"L3 never fired on task {i} ({len(task['train'])} train pairs, "
+                f"TRAIN_REPS={TRAIN_REPS}). Reduce K values or increase TRAIN_REPS."
             )
 
+        # Score with L1 agents (dim=64 matches candidate vecs)
         scores_h = [ensemble_score(l1_agents, c) for c in candidates]
         if scores_h[0] == min(scores_h):  # lower NLL = more probable = correct
             hierarchical_correct += 1
 
-        # --- Flat ---
-        orch_f, agents_f, _ = make_flat_orchestrator()
+        # --- Flat baseline ---
+        flat_orch, flat_agents, _ = _make_flat_orchestrator()
         for pair in task["train"]:
             vec = encode_pair(pair["input"], pair["output"])
             for _ in range(TRAIN_REPS):
-                orch_f.step({agents_f[0].agent_id: vec})
+                flat_orch.step({flat_agents[0].agent_id: vec})
 
-        scores_f = [ensemble_score(agents_f, c) for c in candidates]
+        scores_f = [ensemble_score(flat_agents, c) for c in candidates]
         if scores_f[0] == min(scores_f):
             flat_correct += 1
 
@@ -691,21 +613,25 @@ def run() -> dict:
 
 
 def main():
-    cfg_str = f"3-level stack (L1=64, L2=66, L3=68, K_l2={STACK_CONFIGS[1].K}, K_l3={STACK_CONFIGS[2].K})"
+    cfg_str = (
+        f"3-level stack "
+        f"(L1×2=64, L2×2=66 K={STACK_CONFIGS[1].K}, L3×1=68 K={STACK_CONFIGS[2].K})"
+    )
     print(f"Running Hierarchical ARC Benchmark ({cfg_str})...")
     m = run()
 
     h_vs_chance = m["hierarchical_acc"] - m["chance"]
+    f_vs_chance = m["flat_acc"] - m["chance"]
     h_vs_flat = m["hierarchical_acc"] - m["flat_acc"]
 
     print_results_table(
-        title=f"Hierarchical ARC Benchmark ({m['n_tasks']} tasks)",
+        title=f"Hierarchical ARC Benchmark ({m['n_tasks']} tasks, scored via L1 agents)",
         cols=["Setup", "Accuracy", "vs Chance", "vs Flat"],
         rows=[
             {
-                "Setup": "Flat single-agent (L1 only)",
+                "Setup": "Flat single-agent",
                 "Accuracy": f"{m['flat_acc']:.1%}",
-                "vs Chance": f"{m['flat_acc'] - m['chance']:+.1%}",
+                "vs Chance": f"{f_vs_chance:+.1%}",
                 "vs Flat": "—",
             },
             {
@@ -727,21 +653,20 @@ if __name__ == "__main__":
 ```bash
 cd /home/mattthomson/workspace/HPM---Learning-Agent && python benchmarks/hierarchical_arc.py
 ```
-Expected: runs without error; both accuracy values are finite and > 0%; L3 guard does not trigger (TRAIN_REPS=10 with K=3 at L2 means L2 fires ~3+ times, L3 fires at least once per task with ≥1 training pair × 10 reps = 10 L1 steps → L2 fires 3 times → L3 fires once).
+Expected: runs without error; L3 guard does not trigger; both accuracy values are finite; output table printed.
 
-If L3 guard triggers: the task has too few training pairs for the current K values. Reduce `STACK_CONFIGS[1].K` or `STACK_CONFIGS[2].K` to 2, or increase `TRAIN_REPS`.
+If the L3 guard triggers: reduce `STACK_CONFIGS[1].K` or `STACK_CONFIGS[2].K` to 2 and re-run.
 
 - [ ] **Step 3: Run full test suite**
 
 ```bash
 cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m pytest tests/ --tb=short -q
 ```
-Expected: all tests PASS.
 
 - [ ] **Step 4: Commit and push**
 
 ```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent && git add benchmarks/hierarchical_arc.py && git commit -m "feat: add hierarchical ARC benchmark (3-level stacked vs flat baseline)"
+cd /home/mattthomson/workspace/HPM---Learning-Agent && git add benchmarks/hierarchical_arc.py && git commit -m "feat: add hierarchical ARC benchmark (3-level stacked vs flat)"
 git push
 ```
 
@@ -749,8 +674,8 @@ git push
 
 ## Success criteria
 
-- All unit tests in `test_stacked.py` pass (17 tests)
+- All 17 unit tests in `test_stacked.py` pass
 - `from hpm.agents import LevelConfig, StackedOrchestrator, make_stacked_orchestrator` works
 - `hierarchical_arc.py` runs without error; L3 guard does not trigger
-- Both flat and hierarchical accuracy values are reported; both are finite and above 0%
-- Full test suite passes with no regressions (635+ tests)
+- Both flat and hierarchical accuracy values are finite and above 0%
+- Full test suite passes with no regressions
