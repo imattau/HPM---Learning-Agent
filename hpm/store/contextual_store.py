@@ -204,11 +204,13 @@ class ContextualPatternStore:
     # ------------------------------------------------------------------
 
     def _load_archive(self, archive_path: str) -> None:
-        """Deserialise archived Tier 2 records into the wrapped TieredStore's Tier 2."""
+        """Replace Tier 2 with the archived snapshot, respecting the 200-pattern cap."""
         with open(archive_path, "rb") as f:
             records = pickle.load(f)
+        # Clear existing Tier 2 so archive is a clean REPLACE, not an additive inject
+        self._store._tier2._data.clear()
         for pattern, weight, agent_id in records:
-            self._store._tier2.save(pattern, weight, agent_id)
+            self._store.promote_to_tier2(pattern, weight, agent_id)
 
     def _load_index(self, index_path: str) -> list:
         if not os.path.exists(index_path):
@@ -236,7 +238,7 @@ class ContextualPatternStore:
             p_dict = p.to_dict()
             p_dict["id"] = pid
             p_restored = pattern_from_dict(p_dict)
-            self._store._tier2.save(p_restored, weight, agent_id)
+            self._store.promote_to_tier2(p_restored, weight, agent_id)
 
     # ------------------------------------------------------------------
     # TieredStore delegation (transparent to Agent.step())
