@@ -26,6 +26,9 @@ class PatternField:
         # Maps agent_id -> {pattern_id: weight}
         self._agent_patterns: dict[str, dict[str, float]] = {}
         self._broadcast_queue: list[tuple[str, object]] = []
+        # Inhibitory channel: maps agent_id -> [(pattern, weight), ...]
+        # Represents current negative pattern state (not cumulative; reset before each broadcast).
+        self._negative: dict[str, list[tuple]] = {}
 
     @property
     def n_agents(self) -> int:
@@ -107,3 +110,27 @@ class PatternField:
                 entropy -= p * math.log(p)
 
         return {"diversity": entropy, "redundancy": 0.0}
+
+    def broadcast_negative(self, pattern, weight: float, agent_id: str) -> None:
+        """
+        Register a negative pattern from agent_id into the inhibitory channel.
+        Appends to the agent's current step registration (caller must clear before
+        re-broadcasting each step to avoid accumulation).
+        """
+        if agent_id not in self._negative:
+            self._negative[agent_id] = []
+        self._negative[agent_id].append((pattern, weight))
+
+    def pull_negative(self, agent_id: str, gamma_neg: float) -> list:
+        """
+        Return all negative patterns from OTHER agents, attenuated by gamma_neg.
+        Returns list[(pattern, attenuated_weight)].
+        Does not include patterns broadcast by agent_id itself.
+        """
+        result = []
+        for src_id, records in self._negative.items():
+            if src_id == agent_id:
+                continue
+            for pattern, weight in records:
+                result.append((pattern, weight * gamma_neg))
+        return result
