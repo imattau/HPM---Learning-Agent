@@ -71,34 +71,51 @@ LevelConfig                   dataclass
 
 StackedOrchestrator
   level_orches: list[MultiAgentOrchestrator]
-  level_agents: list[list[Agent]]      # public — one list per level
-  level_Ks: list[int]                  # K[0] unused (L1 always steps); K[i] = cadence for level i
-  _level_ticks: list[int]              # how many times each level has been stepped
+  level_agents: list[list[Agent]]      # public — one list per level; same objects as returned by factory
+  level_Ks: list[int]                  # level_Ks[0] = 1 (L1 always steps, unused in check);
+                                       # level_Ks[i] = cadence for level i relative to level i-1 (i >= 1)
+  _level_ticks: list[int]              # initialised to [0] * n_levels
+                                       # counts how many times each level has fired
 
   step(obs: np.ndarray) -> dict
-    — steps level 0 on obs, increments _level_ticks[0]
+    Increment-then-check order (same convention as Sub-project 1):
+    each level's tick counter is incremented AFTER that level fires;
+    the cadence check for level i+1 uses the UPDATED _level_ticks[i] from the same step() call.
+    This means the first L2 cadence fires at _level_ticks[0] == K (not 0).
+
+    — l1_obs = {a.agent_id: obs for a in level_agents[0]}
+    — result[0] = level_orches[0].step(l1_obs)
+    — _level_ticks[0] += 1
     — for i in range(1, n_levels):
         if _level_ticks[i-1] % level_Ks[i] == 0:
           for each agent in level_agents[i-1]:
             bundle = extract_bundle(agent)
             encoded = encode_bundle(bundle)
+            # Witness model: all level-i agents receive the same bundle per call.
+            # N level-(i-1) agents → N separate step() calls to level_orches[i].
+            # This matches the witness model from Sub-project 1.
             obs_dict = {a.agent_id: encoded for a in level_agents[i]}
-            result_i = level_orches[i].step(obs_dict)
-          increments _level_ticks[i]
-    — returns {"level1": ..., "level2": ..., ..., "t": _level_ticks[0]}
+            result[i] = level_orches[i].step(obs_dict)
+          _level_ticks[i] += 1
+    — returns {"level1": result[0], "level2": result[1], ..., "t": _level_ticks[0]}
       keys are "level1" through "level{n}" (1-indexed)
-      deeper levels return {} on non-cadence steps
+      deeper levels are {} on non-cadence steps (result[i] not set → default {})
 
   Edge cases:
     K[i] > total steps: level i never fires. Valid, no error.
-    n_levels=2: degrades to HierarchicalOrchestrator behaviour.
+    n_levels=2, K=1: L2 fires every step; _level_ticks[1] == _level_ticks[0] after N steps;
+      L2 agents receive bundles of shape (D+2,). Structural behaviour matches HierarchicalOrchestrator.
 
 make_stacked_orchestrator(
     l1_feature_dim: int,
     level_configs: list[LevelConfig],
 ) -> tuple[StackedOrchestrator, list[list[Agent]]]
-  — for each config at index i:
+  — Note: level_configs[0].K is IGNORED. L1 always steps on every call; K is only meaningful
+    for levels i >= 1. If level_configs[0].K != 1, it is silently treated as 1.
+    Implementers should document this clearly or assert level_configs[0].K == 1.
+  — for each config at index i (0-based):
       feature_dim = l1_feature_dim + 2 * i
+        (i=0 → D, i=1 → D+2, i=2 → D+4, matching table: L_n has D + 2*(n-1) for 1-indexed n)
       agent_ids = config.agent_ids or [f"l{i+1}_{j}" for j in range(config.n_agents)]
       build orchestrator via make_orchestrator(
           n_agents=config.n_agents,
@@ -107,8 +124,9 @@ make_stacked_orchestrator(
           pattern_types=[config.pattern_type] * config.n_agents,
       )
   — level_Ks = [1] + [cfg.K for cfg in level_configs[1:]]
-    (L1 always steps; K[i] is cadence for level i relative to level i-1)
+    (level_Ks[0] = 1 unused; level_Ks[i] = cadence for level i, i >= 1)
   — returns (StackedOrchestrator, [[l1_agents], [l2_agents], ...])
+    The second element is a convenience alias for orch.level_agents — same objects.
   — lazy import of make_orchestrator from benchmarks/ inside function body
     (same pattern as make_hierarchical_orchestrator in Sub-project 1)
 ```
@@ -127,7 +145,7 @@ Tests:
 - Non-cadence steps: deeper levels return `{}` in result dict
 - `_level_ticks[0]` increments on every step; `_level_ticks[1]` increments only on L2 cadence steps
 - K larger than n_steps: deeper levels never fire, no error, no exception
-- 2-level degenerate case: `make_stacked_orchestrator` with 2 configs behaves like `HierarchicalOrchestrator`
+- 2-level degenerate case: `make_stacked_orchestrator` with 2 configs and K=1 — assert `_level_ticks[1] == _level_ticks[0]` after N steps, L2 agents have `feature_dim == l1_feature_dim + 2`, result always contains non-empty `"level2"` key
 
 ### New benchmark: `benchmarks/hierarchical_arc.py`
 
@@ -140,6 +158,8 @@ Stack configuration:
 Training: same ARC train split, same 342-task subset (grids ≤ 20×20), same random projection seed. Each training pair stepped through `stacked_orch.step()`. L3 agents used for final discrimination scoring via `ensemble_score`.
 
 Output table: task count, L3 accuracy, vs chance (20%), vs flat single-agent baseline (from `arc_benchmark.py`).
+
+Guard: before scoring, assert `stacked_orch._level_ticks[-1] > 0` — if L3 never fired (e.g. too few training pairs), emit a clear error rather than silently reporting accuracy on an untrained agent.
 
 ---
 
