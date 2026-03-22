@@ -8,6 +8,8 @@ Add `CategoricalPattern` as a third pattern type in the HPM framework. Where `Ga
 
 This enables agents to represent discrete structural laws — colour mappings, symbol co-occurrences, positional invariants — without any knowledge of what those symbols mean. The alphabet is defined by a hyperparameter K; the agent's encoding layer handles substrate-specific discretisation.
 
+**K=1 is not supported.** Raise `ValueError` at construction if `K < 2`.
+
 ---
 
 ## Section 1: CategoricalPattern Class
@@ -17,62 +19,78 @@ This enables agents to represent discrete structural laws — colour mappings, s
 ### Parameters
 
 - `probs` — `np.ndarray` shape `(D, K)`. Each row is a probability distribution over K symbols. All values ≥ 1e-8 (floored at construction and after each update). Rows sum to 1.
-- `K` — alphabet size, stored as an instance attribute. Hyperparameter set at construction; not updated.
+- `K` — alphabet size (int, ≥ 2), stored as an instance attribute. Hyperparameter set at construction; not updated.
 - No `sigma` attribute — absence routes `MetaPatternRule.sym_kl_normalised` to the Monte Carlo KL branch (same mechanism as `LaplacePattern`).
 
 ### `log_prob(x) -> float`
 
-`x` is a D-length integer array with values in {0…K-1}:
+`x` is a D-length integer array with values in `{0…K-1}`. Out-of-range values are the caller's responsibility — the pattern does not validate them (consistent with how `GaussianPattern` does not validate float inputs). NumPy will raise `IndexError` on out-of-range values, which is the expected failure mode.
 
 ```
 NLL = -sum(log(probs[d, x[d]]) for d in range(D))
 ```
 
-Lower NLL = more probable. Consistent with `GaussianPattern` sign convention so `ensemble_score` works unchanged across all pattern types.
+Lower NLL = more probable. Consistent with `GaussianPattern` sign convention so `ensemble_score` works unchanged.
 
 ### `update(x) -> CategoricalPattern`
 
-Online Bayesian count update using pre-update probabilities (consistent with `LaplacePattern`'s `mu_old` convention):
+Online Bayesian count update. `_n_obs` is initialised to **K** (not 0), treating the initial uniform `probs` as K pseudo-observations — one per symbol per position. This prevents the first real observation from collapsing the posterior to a point mass.
 
 ```
 probs_new[d, k] = (probs_old[d, k] * n_obs + one_hot(x[d], K)[k]) / (n_obs + 1)
 ```
 
-Floor applied at 1e-8 after update. Returns a new instance (value-type semantics). `id` and `level` preserved.
+Uses pre-update `probs_old` (consistent with `LaplacePattern`'s `mu_old` convention). Floor applied at 1e-8 after update. Returns a new instance (value-type semantics). `id` and `level` preserved. `_n_obs` incremented by 1.
 
 ### `recombine(other) -> CategoricalPattern`
 
 `_n_obs`-weighted average of `probs` matrices:
 
 ```
-probs_new = (probs_self * n_obs_self + probs_other * n_obs_other) / (n_obs_self + n_obs_other)
+total = n_obs_self + n_obs_other
+if total == 0:
+    probs_new = (probs_self + probs_other) / 2   # fallback: uniform average
+else:
+    probs_new = (probs_self * n_obs_self + probs_other * n_obs_other) / total
 ```
 
-Raises `TypeError` if `other` is not a `CategoricalPattern`. This is a safety net; the primary guard is that `make_orchestrator()` assigns homogeneous types per agent so cross-type recombination cannot occur in normal operation.
+Renormalise rows after averaging (to correct any floating-point drift). Raises `TypeError` if `other` is not a `CategoricalPattern`. Both patterns must have the same D and K; if not, raise `ValueError`.
 
-**Rationale for weighted average:** A pattern that has seen 100 observations carries more structural authority than one that has seen 5. Pooling raw counts is the statistically correct way to merge two Dirichlet posteriors.
+**Rationale for weighted average:** A pattern that has seen 100 observations carries more structural authority than one that has seen 5. Pooling raw counts is the statistically correct way to merge two Dirichlet posteriors. With `_n_obs` initialised to K, freshly constructed patterns both start at K, so the fallback (total == 0) is unreachable in practice; it is a safety net for direct construction with `_n_obs=0`.
 
 ### `sample(n, rng) -> np.ndarray`
 
-Returns shape `(n, D)` integer array. Each column `d` drawn independently:
+Returns shape `(n, D)` **integer** array. Each column `d` drawn independently:
 
 ```python
 samples[:, d] = rng.choice(K, size=n, p=probs[d])
 ```
 
-Required by `MetaPatternRule`'s Monte Carlo KL branch.
+**Note:** `sample()` is not part of the `Pattern` protocol in `base.py`, but it is required by `MetaPatternRule`'s Monte Carlo KL branch, which calls `p.sample(n, rng)` when `hasattr(p, 'sigma')` is False. If `sample()` is omitted, the MC KL branch will fail at runtime with `AttributeError`. It must be implemented.
 
 ### Structural Methods
 
-- `description_length()`: count of positions whose entropy `H(probs[d])` is below `log(K) * 0.5` — positions that have learned a definite preference (less than half maximum entropy). Analogous to GaussianPattern's count of non-trivial mu entries.
-- `connectivity()`: `0.0` — independence assumption across positions. Satisfies the protocol; can be upgraded to average mutual information in a future phase.
-- `compress()`: `max_row_entropy / mean_row_entropy` — measures how concentrated the most peaked position is relative to average. High ratio = one very strong anchor found amid noise.
-- `is_structurally_valid()`: `True` iff all `probs ≥ 0` and each row sums to 1 (within 1e-6 tolerance).
+- `description_length() -> float`: `float(count)` where `count` is the number of positions whose entropy `H(probs[d]) = -sum(p * log(p))` is below `log(K) * 0.5` — positions that have learned a definite preference (less than half maximum entropy). Returns `float` to match the protocol's declared return type.
+- `connectivity() -> float`: Returns `0.0` — independence assumption across positions. Satisfies the protocol method signature with defined semantics; can be upgraded to average mutual information in a future phase.
+- `compress() -> float`: `max_row_entropy / mean_row_entropy`. If `mean_row_entropy == 0` (all rows are point masses, e.g. K→1 limit), return `1.0`. Measures how concentrated the most peaked position is relative to average — high ratio = one very strong anchor found amid noise.
+- `is_structurally_valid() -> bool`: Returns `True` iff all `probs >= 1e-8` (floor integrity — not `>= 0`, which is vacuous given the floor) and each row sums to 1 within 1e-6 tolerance.
 
 ### Serialisation
 
-`to_dict()` emits `type: "categorical"`, `probs` as nested list, `K`, `id`, `level`, `source_id`, `_n_obs`.
-`from_dict()` is a classmethod on `CategoricalPattern`.
+`to_dict()` emits:
+```python
+{
+    'type': 'categorical',
+    'probs': probs.tolist(),  # nested list
+    'K': K,
+    'id': self.id,
+    'level': self.level,
+    'source_id': self.source_id,
+    'n_obs': self._n_obs,   # key is 'n_obs' (no underscore) — matches GaussianPattern/LaplacePattern convention
+}
+```
+
+`from_dict()` is a classmethod on `CategoricalPattern` that reads `d['n_obs']` (not `d['_n_obs']`).
 `pattern_from_dict()` in `factory.py` routes on `d['type'] == "categorical"`.
 
 ---
@@ -81,27 +99,42 @@ Required by `MetaPatternRule`'s Monte Carlo KL branch.
 
 ### AgentConfig (`hpm/config.py`)
 
-One new field:
+Two changes:
 
 ```python
 alphabet_size: int = 10  # K for CategoricalPattern; ignored by Gaussian/Laplace
+pattern_type: str = "gaussian"  # "gaussian" | "laplace" | "categorical"
 ```
 
-Default 10 covers the ARC colour palette (0–9). Meaningless for continuous pattern types — fully backward compatible.
+Default `alphabet_size=10` covers the ARC colour palette (0–9). Meaningless for continuous pattern types — fully backward compatible. Update the `pattern_type` comment to include `"categorical"`.
 
 ### Factory (`hpm/patterns/factory.py`)
 
-Extend `make_pattern()`:
+Add `alphabet_size: int = 10` as a named parameter to `make_pattern()`:
+
+```python
+def make_pattern(mu, scale, pattern_type: str = "gaussian", alphabet_size: int = 10, **kwargs):
+```
+
+New categorical branch:
 
 ```python
 elif pattern_type == "categorical":
-    K = kwargs.get("K", alphabet_size)  # alphabet_size from AgentConfig
-    D = len(mu)  # mu used only for dimensionality; not stored in the pattern
-    probs = np.ones((D, K)) / K          # uniform = maximum entropy prior
-    return CategoricalPattern(probs, K=K, level=level)
+    K = kwargs.pop("K", alphabet_size)
+    D = len(mu)
+    probs = np.ones((D, K)) / K   # uniform = maximum entropy prior
+    return CategoricalPattern(probs, K=K, **kwargs)
 ```
 
-Uniform initialisation is the maximum-entropy prior — the agent starts with no preference. Each `update()` call is a symmetry-breaking event, shifting probability mass toward observed symbols.
+`mu` is used only for dimensionality (`D = len(mu)`); it is not stored in `CategoricalPattern`. `scale` is ignored for categorical patterns (consistent with how it is ignored for LaplacePattern's `b` when `scale` is a scalar).
+
+Callers pass `alphabet_size=config.alphabet_size` when creating categorical patterns:
+
+```python
+make_pattern(mu=mu, scale=1.0, pattern_type="categorical", alphabet_size=config.alphabet_size)
+```
+
+Existing Gaussian/Laplace callers are unaffected — `alphabet_size` has a default and is ignored by those branches.
 
 Extend `pattern_from_dict()`:
 
@@ -114,13 +147,13 @@ elif t == "categorical":
 
 `CategoricalPattern.log_prob(x)` expects integer vectors; `GaussianPattern` and `LaplacePattern` expect float vectors. These are incompatible in the same observation pipeline.
 
-**Design decision: Separate encoding per agent (Option A — Substrate Honest).**
+**Design decision: Separate encoding per agent (Substrate Honest).**
 
-The benchmark routes integer-encoded observations to categorical agents and float-encoded observations to continuous agents. `orch.step({"arc_a": float_vec, "arc_b": int_vec})` already works — the orchestrator passes each agent its own keyed observation by `agent_id`. The benchmark adds an integer encoding branch for categorical agents; the specialist classes and store layers are unaffected.
+The benchmark routes integer-encoded observations to categorical agents and float-encoded observations to continuous agents. `orch.step({"arc_a": float_vec, "arc_b": int_vec})` already works — the orchestrator passes each agent its own keyed observation by `agent_id`.
 
 This places discretisation responsibility on the Executive layer (benchmark / orchestrator loop), which in a full HPM deployment is the job of the `SubstrateBridge`. The pattern type remains substrate-agnostic; the bridge decides how to slice a signal into discrete symbols.
 
-**In the ARC benchmark**, a categorical agent receives `encode_grid_categorical(output) - encode_grid_categorical(input)` represented as a D-length integer vector — the per-pixel colour change, discretised to {-9…+9} and re-mapped to {0…18} (K=19), or simply the raw output grid flattened to integer values (K=10). The exact encoding is a benchmark-level choice.
+**In the ARC benchmark**, a categorical agent receives the raw output grid values flattened to a D-length integer vector (values 0–9, K=10). The delta encoding used for Gaussian/Laplace agents is not applicable here — colour identity, not colour change, is the discrete signal.
 
 ---
 
@@ -146,17 +179,20 @@ No changes required to any specialist class. The Pattern protocol is sufficient:
 ### `tests/patterns/test_categorical.py` (unit)
 
 - `log_prob` at a maximally probable vector is lower than at an improbable vector
-- `log_prob` is always finite (floor prevents `log(0)`)
+- `log_prob` is always finite after construction (floor prevents `log(0)`)
 - `update` increments `_n_obs`, shifts `probs` toward observed symbol
 - After 100 identical updates, observed symbol probability > 0.95 at each position
+- Initial `_n_obs == K` (pseudo-count for prior)
 - `sample(n, rng)` returns shape `(n, D)` integer array with values in `{0…K-1}`
 - `hasattr(pattern, 'sigma')` is `False`
 - `recombine` with another `CategoricalPattern` uses `_n_obs`-weighted average
+- `recombine` falls back to uniform average when both `_n_obs` contribute equally (same n_obs)
 - `recombine` with `GaussianPattern` raises `TypeError`
-- `is_structurally_valid()` — False if any row sums outside [1-1e-6, 1+1e-6]
-- `to_dict` / `from_dict` round-trip preserves `probs`, `K`, `id`, `level`, `_n_obs`
-- `compress()` returns value in [0, 1] (or ≥ 1 for max/mean ratio — clamp not required)
-- `description_length()` returns positive integer
+- `is_structurally_valid()` — False if any entry < 1e-8 or any row sums outside [1-1e-6, 1+1e-6]
+- `to_dict` / `from_dict` round-trip preserves `probs`, `K`, `id`, `level`, `n_obs` (no underscore in dict key)
+- `compress()` returns `1.0` when all rows are point masses (zero denominator guard)
+- `description_length()` returns a `float`
+- `CategoricalPattern(probs, K=1)` raises `ValueError`
 
 ### `tests/integration/test_categorical_arc.py`
 
@@ -172,7 +208,7 @@ No changes required to any specialist class. The Pattern protocol is sufficient:
 | File | Action |
 |---|---|
 | `hpm/patterns/categorical.py` | Create |
-| `hpm/patterns/factory.py` | Extend `make_pattern()` + `pattern_from_dict()` |
-| `hpm/config.py` | Add `alphabet_size: int = 10` |
+| `hpm/patterns/factory.py` | Extend `make_pattern()` signature + body; extend `pattern_from_dict()` |
+| `hpm/config.py` | Add `alphabet_size: int = 10`; update `pattern_type` comment |
 | `tests/patterns/test_categorical.py` | Create |
 | `tests/integration/test_categorical_arc.py` | Create |
