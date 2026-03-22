@@ -254,28 +254,43 @@ def _eval_worker(args):
     return evaluate_task(task, _worker_all_tasks, task_idx)
 
 
-def run_persistent(eligible, all_tasks):
+def run_persistent(eligible, all_tasks, use_contextual=True):
     """
     Persistent mode: single orchestrator across all tasks.
     Uses TieredStore so task-specific patterns are ephemeral (Tier 1) and
     successful cross-task meta-patterns are promoted to persistent Tier 2.
     CrossTaskRecombinator runs every 10 tasks to build higher-level meta-patterns.
     Sequential (no parallelism — shared mutable store).
+
+    Args:
+        use_contextual: If True (default), wraps TieredStore in ContextualPatternStore
+            for structural warm-starting from similar past tasks. If False, uses bare
+            TieredStore (original behaviour, useful for comparison).
     """
     from hpm.store.tiered_store import TieredStore
     from hpm.monitor.cross_task_recombinator import CrossTaskRecombinator
 
     tiered = TieredStore()
-    orch, agents, store = make_arc_persistent_orchestrator(store=tiered)
+
+    if use_contextual:
+        from hpm.store.contextual_store import ContextualPatternStore, extract_signature
+        archive_dir = "data/archives/arc_persistent"
+        os.makedirs("data", exist_ok=True)
+        os.makedirs(archive_dir, exist_ok=True)
+        store_obj = ContextualPatternStore(
+            tiered_store=tiered,
+            archive_dir=archive_dir,
+        )
+    else:
+        store_obj = tiered
+
+    orch, agents, store = make_arc_persistent_orchestrator(store=store_obj)
     recombinator = CrossTaskRecombinator()
 
     correct_count = 0
     rank_sum = 0
 
     for run_idx, (task_idx, task) in enumerate(eligible):
-        context_id = str(task_idx)
-        tiered.begin_context(context_id)
-
         # Train on this task's pairs (adds to Tier 1 of TieredStore)
         train_pairs = task["train"]
         pairs_a = train_pairs[0::2] or train_pairs
@@ -289,6 +304,21 @@ def run_persistent(eligible, all_tasks):
             )
             for i in range(n)
         ]
+
+        if use_contextual:
+            # Extract structural signature from first training pair's input grid
+            first_grid = np.array(train_pairs[0]["input"], dtype=float)
+            sig = extract_signature(first_grid)
+            # Collect first 3 encoded training pair vectors for NLL fingerprinting
+            all_vecs = [
+                encode_pair(pairs_a[i % len(pairs_a)]["input"], pairs_a[i % len(pairs_a)]["output"])
+                for i in range(min(3, n))
+            ]
+            context_id = store_obj.begin_context(sig, all_vecs)
+        else:
+            context_id = str(task_idx)
+            tiered.begin_context(context_id)
+
         for _ in range(TRAIN_REPS):
             for obs_a, obs_b in schedule:
                 orch.step({"arc_a": obs_a, "arc_b": obs_b})
@@ -310,7 +340,10 @@ def run_persistent(eligible, all_tasks):
         correct = correct_score < min(distractor_scores)
 
         # End context: promotes patterns to Tier 2 only on correct tasks
-        tiered.end_context(context_id, correct=correct)
+        if use_contextual:
+            store_obj.end_context(context_id, success_metrics={"correct": correct})
+        else:
+            tiered.end_context(context_id, correct=correct)
 
         # Off-line cross-task recombination every 10 tasks
         if (run_idx + 1) % 10 == 0:
@@ -344,6 +377,10 @@ def main():
                         help="Number of parallel workers (default: CPU count, ignored in --persistent mode)")
     parser.add_argument("--persistent", action="store_true",
                         help="Agents learn across tasks (sequential, shared store)")
+    parser.add_argument("--no-contextual", action="store_true",
+                        help="Use bare TieredStore instead of ContextualPatternStore (for comparison)")
+    parser.add_argument("--max-tasks", type=int, default=None,
+                        help="Limit number of tasks evaluated (useful for quick testing)")
     args = parser.parse_args()
 
     print("Loading ARC dataset...", flush=True)
@@ -351,6 +388,9 @@ def main():
 
     eligible = [(i, t) for i, t in enumerate(all_tasks) if task_fits(t)]
     excluded = len(all_tasks) - len(eligible)
+
+    if args.max_tasks is not None:
+        eligible = eligible[:args.max_tasks]
 
     print(
         f"Tasks: {len(all_tasks)} total, {excluded} excluded "
@@ -361,8 +401,10 @@ def main():
     rank_sum = 0
 
     if args.persistent:
-        print("Running (2-agent persistent, sequential, shared store)...", flush=True)
-        correct_count, rank_sum = run_persistent(eligible, all_tasks)
+        use_contextual = not args.no_contextual
+        mode_label = "contextual ContextualPatternStore" if use_contextual else "bare TieredStore"
+        print(f"Running (2-agent persistent, sequential, {mode_label})...", flush=True)
+        correct_count, rank_sum = run_persistent(eligible, all_tasks, use_contextual=use_contextual)
     else:
         n_workers = args.workers or multiprocessing.cpu_count()
         print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
