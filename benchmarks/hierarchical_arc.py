@@ -171,44 +171,49 @@ def run() -> dict:
 
 
 def run_persistent() -> dict:
-    """Persistent mode: single StackedOrchestrator across all tasks with TieredStore.
+    """Persistent mode: single StackedOrchestrator across all tasks with ContextualPatternStore.
 
-    L1 agents use a TieredStore:
+    L1 agents use a ContextualPatternStore (wraps TieredStore):
       - Tier 1 (ephemeral): task-specific patterns, cleared at end of each task
       - Tier 2 (persistent): meta-patterns promoted from successful tasks
+      - Archive: Tier 2 snapshot saved per task, warm-started from structurally similar past tasks
 
     L2/L3 use plain InMemoryStore — they accumulate cross-task signal through
     L1 bundles and are never reset.
 
-    Flat baseline uses an identical TieredStore for fair comparison.
+    Flat baseline uses an identical ContextualPatternStore for fair comparison.
     CrossTaskRecombinator runs on L1 every 10 tasks to build higher-level patterns.
     """
+    import os
     from hpm.store.tiered_store import TieredStore
+    from hpm.store.contextual_store import ContextualPatternStore, extract_signature
     from hpm.monitor.cross_task_recombinator import CrossTaskRecombinator
+    from hpm.agents.stacked import StackedOrchestrator
 
     tasks = load_tasks()
     tasks = [t for t in tasks if task_fits(t)][:400]
 
     rng = np.random.default_rng(42)
 
-    # L1: full HPM persistent stack + TieredStore
-    # L2/L3: built via make_stacked_orchestrator with default InMemoryStore,
-    # then combined with the pre-built L1 into a StackedOrchestrator directly.
-    from hpm.agents.stacked import StackedOrchestrator
-
-    # Open task "0" context BEFORE construction so Agent._seed_if_empty() writes
-    # initial seed patterns to Tier 1 (task "0"), not Tier 2. Seed patterns then
-    # participate in task 0's training and may be promoted to Tier 2 on success.
+    os.makedirs("data", exist_ok=True)
     l1_tiered = TieredStore()
     flat_tiered = TieredStore()
-    l1_tiered.begin_context("0")
-    flat_tiered.begin_context("0")
+    l1_contextual = ContextualPatternStore(
+        tiered_store=l1_tiered,
+        archive_dir="data/archives/hierarchical_arc_persistent",
+    )
+    flat_contextual = ContextualPatternStore(
+        tiered_store=flat_tiered,
+        archive_dir="data/archives/hierarchical_arc_persistent_flat",
+    )
 
-    l1_orch, l1_agents, _ = _make_persistent_l1_orchestrator(store=l1_tiered)
-    flat_orch, flat_agents, _ = _make_persistent_flat_orchestrator(store=flat_tiered)
+    # Build L1 orchestrators with ContextualPatternStore (delegates transparently to TieredStore).
+    # Seed patterns written by Agent._seed_if_empty() go to Tier 2 (no context open at
+    # construction time) — same behaviour as multi_agent_arc.py persistent mode.
+    l1_orch, l1_agents, _ = _make_persistent_l1_orchestrator(store=l1_contextual)
+    flat_orch, flat_agents, _ = _make_persistent_flat_orchestrator(store=flat_contextual)
 
-    # Build L2/L3 via make_stacked_orchestrator using a dummy 2-level config,
-    # then extract just the upper levels.
+    # Build L2/L3 via make_stacked_orchestrator, then assemble manually with L1.
     _upper_configs = STACK_CONFIGS[1:]  # L2, L3 configs
     _upper_orch, _upper_agents = make_stacked_orchestrator(
         l1_feature_dim=L1_FEATURE_DIM + 2,  # L2 input dim
@@ -227,13 +232,25 @@ def run_persistent() -> dict:
     n_evaluated = 0
 
     for i, task in enumerate(tasks):
-        context_id = str(i)
-        if i > 0:  # "0" was opened before construction to capture seed patterns
-            l1_tiered.begin_context(context_id)
-            flat_tiered.begin_context(context_id)
+        train_pairs = task["train"]
+
+        # Extract structural signature from first training pair's input grid.
+        # Collect first 3 encoded training vecs for NLL fingerprinting (warm-start filter).
+        first_grid = np.array(train_pairs[0]["input"], dtype=float)
+        sig = extract_signature(first_grid)
+        first_obs = [
+            encode_pair(
+                train_pairs[j % len(train_pairs)]["input"],
+                train_pairs[j % len(train_pairs)]["output"],
+            )
+            for j in range(min(3, len(train_pairs)))
+        ]
+
+        l1_ctx_id = l1_contextual.begin_context(sig, first_obs)
+        flat_ctx_id = flat_contextual.begin_context(sig, first_obs)
 
         # Train on this task's pairs
-        for pair in task["train"]:
+        for pair in train_pairs:
             vec = encode_pair(pair["input"], pair["output"])
             for _ in range(TRAIN_REPS):
                 stacked_orch.step(vec)
@@ -260,9 +277,9 @@ def run_persistent() -> dict:
         if f_correct:
             flat_correct += 1
 
-        # End context: promote L1 patterns to Tier 2 on success
-        l1_tiered.end_context(context_id, correct=h_correct)
-        flat_tiered.end_context(context_id, correct=f_correct)
+        # End context: archive Tier 2, promote patterns on success
+        l1_contextual.end_context(l1_ctx_id, success_metrics={"correct": h_correct})
+        flat_contextual.end_context(flat_ctx_id, success_metrics={"correct": f_correct})
 
         n_evaluated += 1
 
@@ -286,7 +303,7 @@ def run_persistent() -> dict:
         "flat_acc": flat_correct / n_evaluated if n_evaluated else 0.0,
         "chance": 1.0 / (N_DISTRACTORS + 1),
         "l3_ticks": stacked_orch._level_ticks[-1],
-        "l1_tier2": len(l1_tiered.query_tier2("l1_0")),
+        "l1_tier2": len(l1_contextual.query_tier2("l1_0")),
     }
 
 
