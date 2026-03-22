@@ -27,9 +27,11 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import argparse
 import numpy as np
 from benchmarks.common import print_results_table
 from hpm.patterns.categorical import CategoricalPattern
+from hpm.patterns.poisson import PoissonPattern
 
 # ---------------------------------------------------------------------------
 # Grammar definition
@@ -89,6 +91,19 @@ def generate_invalid(rng: np.random.Generator, length_rng_min: int = 4,
     return list(rng.integers(0, K_GRAMMAR, size=length))
 
 
+def encode_counts(seq: list[int]) -> np.ndarray:
+    """Count occurrences of each grammar symbol. Returns shape (K_GRAMMAR,) int array.
+
+    Used by the Poisson mode: Poisson(lambda_k) models the rate of symbol k in valid strings.
+    e.g. B and E always appear exactly once; S and X appear more due to grammar loops.
+    """
+    arr = np.zeros(K_GRAMMAR, dtype=np.intp)
+    for s in seq:
+        if 0 <= s < K_GRAMMAR:
+            arr[s] += 1
+    return arr
+
+
 # ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------
@@ -98,15 +113,23 @@ N_TEST = 500
 RNG_SEED = 42
 
 
-def run() -> dict:
+def run(use_poisson: bool = False) -> dict:
     rng = np.random.default_rng(RNG_SEED)
 
+    if use_poisson:
+        enc = encode_counts
+        pattern = PoissonPattern(np.ones(K_GRAMMAR))
+        dim_label = f"D={K_GRAMMAR} (symbol counts)"
+    else:
+        enc = encode
+        pattern = CategoricalPattern(np.ones((D, K)) / K, K=K)
+        dim_label = f"D={D}, K={K} (positional)"
+
     # --- Train ---
-    pattern = CategoricalPattern(np.ones((D, K)) / K, K=K)
     train_nlls = []
     for _ in range(N_TRAIN):
         seq = generate_reber(rng)
-        x = encode(seq)
+        x = enc(seq)
         nll = pattern.log_prob(x)
         train_nlls.append(nll)
         pattern = pattern.update(x)
@@ -115,24 +138,21 @@ def run() -> dict:
     valid_nlls = []
     for _ in range(N_TEST):
         seq = generate_reber(rng)
-        x = encode(seq)
+        x = enc(seq)
         valid_nlls.append(pattern.log_prob(x))
 
     # --- Test: invalid sequences ---
     invalid_nlls = []
     for _ in range(N_TEST):
         seq = generate_invalid(rng)
-        x = encode(seq)
+        x = enc(seq)
         invalid_nlls.append(pattern.log_prob(x))
 
     valid_arr = np.array(valid_nlls)
     invalid_arr = np.array(invalid_nlls)
 
-    # AUROC: fraction of (invalid, valid) pairs where invalid NLL > valid NLL
-    # (lower NLL = more probable; valid should have lower NLL)
-    pairs = invalid_arr[:, None] > valid_arr[None, :]   # (N_TEST, N_TEST) bool
+    pairs = invalid_arr[:, None] > valid_arr[None, :]
     auroc = float(pairs.mean())
-
     separation = float(invalid_arr.mean() - valid_arr.mean())
     mean_train_nll_start = float(train_nlls[0]) if train_nlls else float('nan')
     mean_train_nll_end = float(np.mean(train_nlls[-50:])) if len(train_nlls) >= 50 else float('nan')
@@ -140,8 +160,7 @@ def run() -> dict:
     return {
         "n_train": N_TRAIN,
         "n_test": N_TEST,
-        "D": D,
-        "K": K,
+        "dim_label": dim_label,
         "valid_nll_mean": float(valid_arr.mean()),
         "valid_nll_std": float(valid_arr.std()),
         "invalid_nll_mean": float(invalid_arr.mean()),
@@ -151,19 +170,26 @@ def run() -> dict:
         "train_nll_start": mean_train_nll_start,
         "train_nll_end": mean_train_nll_end,
         "n_obs_final": pattern._n_obs,
+        "pattern_type": "poisson" if use_poisson else "categorical",
     }
 
 
 def main():
-    print("Running Reber Grammar benchmark...")
-    m = run()
+    parser = argparse.ArgumentParser(description="Reber Grammar benchmark")
+    parser.add_argument("--poisson", action="store_true",
+                        help="Use PoissonPattern with symbol-count encoding instead of CategoricalPattern")
+    args = parser.parse_args()
+
+    label = "PoissonPattern (symbol counts)" if args.poisson else "CategoricalPattern (positional)"
+    print(f"Running Reber Grammar benchmark — {label}...")
+    m = run(use_poisson=args.poisson)
 
     passed_sep = m["separation"] > 5.0
     passed_auroc = m["auroc"] > 0.80
     result_label = "✓ PASS" if (passed_sep and passed_auroc) else "✗ FAIL"
 
     print_results_table(
-        title=f"Reber Grammar — CategoricalPattern (D={m['D']}, K={m['K']}, train={m['n_train']})",
+        title=f"Reber Grammar — {m['pattern_type'].capitalize()}Pattern ({m['dim_label']}, train={m['n_train']})",
         cols=["Metric", "Valid sequences", "Invalid sequences"],
         rows=[
             {"Metric": "Mean NLL",

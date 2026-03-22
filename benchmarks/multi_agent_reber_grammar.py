@@ -26,10 +26,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
+import argparse
 from benchmarks.common import print_results_table
 from benchmarks.multi_agent_common import make_orchestrator
 from benchmarks.multi_agent_arc import ensemble_score
 from hpm.patterns.categorical import CategoricalPattern
+from hpm.patterns.poisson import PoissonPattern
+from benchmarks.reber_grammar import encode_counts
 
 # ---------------------------------------------------------------------------
 # Grammar (shared with reber_grammar.py)
@@ -93,8 +96,22 @@ def auroc(valid_nlls: np.ndarray, invalid_nlls: np.ndarray) -> float:
     return float((invalid_nlls[:, None] > valid_nlls[None, :]).mean())
 
 
-def run() -> dict:
+def run(use_poisson: bool = False) -> dict:
     rng = np.random.default_rng(RNG_SEED)
+
+    if use_poisson:
+        enc = encode_counts
+        feat_dim = K_GRAMMAR
+        pt = "poisson"
+        solo_pattern = PoissonPattern(np.ones(K_GRAMMAR))
+        orch_kwargs = dict(pattern_types=["poisson"] * N_AGENTS, n_actions=K_GRAMMAR)
+    else:
+        enc = encode
+        feat_dim = D
+        pt = "categorical"
+        solo_pattern = CategoricalPattern(np.ones((D, K)) / K, K=K)
+        orch_kwargs = dict(pattern_types=["categorical"] * N_AGENTS,
+                           alphabet_size=K, n_actions=K)
 
     # Generate all sequences upfront
     train_seqs = [generate_reber(rng) for _ in range(N_TRAIN)]
@@ -102,48 +119,42 @@ def run() -> dict:
     test_invalid = [generate_invalid(rng) for _ in range(N_TEST)]
 
     # -----------------------------------------------------------------------
-    # Single-agent baseline: 1 agent, 1/N_AGENTS of training data
+    # Single-agent baseline
     # -----------------------------------------------------------------------
-    subset = train_seqs[::N_AGENTS]   # every Nth sequence
-    solo_pattern = CategoricalPattern(np.ones((D, K)) / K, K=K)
+    subset = train_seqs[::N_AGENTS]
     for seq in subset:
-        x = encode(seq)
+        x = enc(seq)
         for _ in range(TRAIN_REPS):
             solo_pattern = solo_pattern.update(x)
 
-    solo_valid = np.array([solo_pattern.log_prob(encode(s)) for s in test_valid])
-    solo_invalid = np.array([solo_pattern.log_prob(encode(s)) for s in test_invalid])
+    solo_valid = np.array([solo_pattern.log_prob(enc(s)) for s in test_valid])
+    solo_invalid = np.array([solo_pattern.log_prob(enc(s)) for s in test_invalid])
     solo_auroc = auroc(solo_valid, solo_invalid)
     solo_sep = float(solo_invalid.mean() - solo_valid.mean())
 
     # -----------------------------------------------------------------------
     # Multi-agent: 3 agents, all see all training sequences via orch.step().
-    # Monitor (every T_monitor steps) + RecombinationStrategist fire normally.
-    # Symmetry is broken by agent-level stochastic dynamics and recombination.
     # -----------------------------------------------------------------------
     agent_ids = [f"reber_{chr(ord('a') + i)}" for i in range(N_AGENTS)]
     orch, agents, store = make_orchestrator(
         n_agents=N_AGENTS,
-        feature_dim=D,
+        feature_dim=feat_dim,
         agent_ids=agent_ids,
-        pattern_types=["categorical"] * N_AGENTS,
-        alphabet_size=K,
         with_monitor=True,
         T_monitor=200,
         with_forecaster=True,
         with_actor=True,
-        n_actions=K,  # one action per grammar symbol
+        **orch_kwargs,
     )
 
     for seq in train_seqs:
-        x = encode(seq)
+        x = enc(seq)
         obs = {aid: x for aid in agent_ids}
         for _ in range(TRAIN_REPS):
             orch.step(obs)
 
-    # Ensemble score: sum of per-agent ensemble_score (weighted NLL)
-    multi_valid = np.array([ensemble_score(agents, encode(s)) for s in test_valid])
-    multi_invalid = np.array([ensemble_score(agents, encode(s)) for s in test_invalid])
+    multi_valid = np.array([ensemble_score(agents, enc(s)) for s in test_valid])
+    multi_invalid = np.array([ensemble_score(agents, enc(s)) for s in test_invalid])
     multi_auroc = auroc(multi_valid, multi_invalid)
     multi_sep = float(multi_invalid.mean() - multi_valid.mean())
 
@@ -161,12 +172,19 @@ def run() -> dict:
         "n_patterns": n_patterns,
         "n_agents": N_AGENTS,
         "subset_size": len(subset),
+        "pattern_type": pt,
     }
 
 
 def main():
-    print(f"Running Multi-Agent Reber Grammar benchmark ({N_AGENTS} agents)...")
-    m = run()
+    parser = argparse.ArgumentParser(description="Multi-Agent Reber Grammar benchmark")
+    parser.add_argument("--poisson", action="store_true",
+                        help="Use PoissonPattern with symbol-count encoding")
+    args = parser.parse_args()
+
+    label = "PoissonPattern" if args.poisson else "CategoricalPattern"
+    print(f"Running Multi-Agent Reber Grammar benchmark ({N_AGENTS} agents, {label})...")
+    m = run(use_poisson=args.poisson)
 
     improvement = m["multi_auroc"] - m["solo_auroc"]
     passed = m["multi_auroc"] >= m["solo_auroc"] - 0.02   # allow 2pp tolerance

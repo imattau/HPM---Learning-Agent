@@ -20,6 +20,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import argparse
 import numpy as np
 from benchmarks.multi_agent_common import (
     make_orchestrator, step_all, avg_metric, compute_redundancy, print_results_table,
@@ -45,30 +46,41 @@ def unit_vector(rng: np.random.Generator, dim: int) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-def run() -> dict:
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    """Map ℝᴰ → (0,1)ᴰ for Beta agents."""
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def run(use_beta: bool = False) -> dict:
     rng = np.random.default_rng(RNG_SEED)
     mu0 = unit_vector(rng, FEATURE_DIM)
+
+    pt = ["beta", "beta"] if use_beta else ["gaussian", "gaussian"]
+    seeds = None if use_beta else [42, 99]  # Beta has no meaningful seed; Gaussian uses seeds
 
     orch, agents, store = make_orchestrator(
         n_agents=2,
         feature_dim=FEATURE_DIM,
         agent_ids=["immunity_a", "immunity_b"],
-        pattern_types=["gaussian", "gaussian"],
+        pattern_types=pt,
         with_monitor=True,
         T_monitor=50,
-        agent_seeds=[42, 99],   # different initial patterns → agents have complementary starts
+        agent_seeds=seeds,
         kappa_D=1.0,
         kappa_d_levels=[0.2, 0.4, 0.6, 0.8, 1.0],
     )
 
+    def encode_obs(raw: np.ndarray) -> np.ndarray:
+        return _sigmoid(raw) if use_beta else raw
+
     # -----------------------------------------------------------------------
-    # Phase 1: Stable Gaussian signal
+    # Phase 1: Stable signal
     # -----------------------------------------------------------------------
     phase1_accs = []
     baseline_window_accs = []
 
     for step in range(PHASE1_STEPS):
-        obs = rng.normal(loc=mu0, scale=SIGNAL_STD)
+        obs = encode_obs(rng.normal(loc=mu0, scale=SIGNAL_STD))
         result = step_all(orch, agents, obs)
         acc = avg_metric(result, agents, "mean_accuracy")
         phase1_accs.append(acc)
@@ -87,7 +99,7 @@ def run() -> dict:
     phase2_accs = []
 
     for _ in range(PHASE2_STEPS):
-        obs = rng.uniform(-1.0, 1.0, size=FEATURE_DIM)
+        obs = encode_obs(rng.uniform(-1.0, 1.0, size=FEATURE_DIM))
         result = step_all(orch, agents, obs)
         phase2_accs.append(avg_metric(result, agents, "mean_accuracy"))
 
@@ -100,7 +112,7 @@ def run() -> dict:
     t_rec = None
 
     for step in range(PHASE3_STEPS):
-        obs = rng.normal(loc=mu0, scale=SIGNAL_STD)
+        obs = encode_obs(rng.normal(loc=mu0, scale=SIGNAL_STD))
         result = step_all(orch, agents, obs)
         acc = avg_metric(result, agents, "mean_accuracy")
         phase3_accs.append(acc)
@@ -134,7 +146,14 @@ def run() -> dict:
 
 
 def main():
-    metrics = run()
+    parser = argparse.ArgumentParser(description="Multi-Agent Structural Immunity benchmark")
+    parser.add_argument("--beta", action="store_true",
+                        help="Use BetaPattern with sigmoid-mapped observations")
+    args = parser.parse_args()
+
+    label = "BetaPattern" if args.beta else "GaussianPattern"
+    print(f"Running Multi-Agent Structural Immunity benchmark (2 agents, {label})...")
+    metrics = run(use_beta=args.beta)
     _fmt_r = metrics["_fmt_r"]
 
     t_rec = metrics["t_rec"]
