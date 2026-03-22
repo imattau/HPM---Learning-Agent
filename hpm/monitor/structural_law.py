@@ -21,6 +21,27 @@ def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
+def _taboo_overlap(agents) -> float:
+    """
+    Fraction of negative pattern UUIDs present in ALL agents vs any agent (Jaccard).
+    Returns 0.0 if no agents have negative patterns.
+    """
+    neg_id_sets = [
+        {p.id for p, _ in agent.store.query_negative(agent.agent_id)}
+        for agent in agents
+        if hasattr(agent.store, 'query_negative')
+    ]
+    # Filter out agents with empty negative stores for union/intersection purposes
+    non_empty = [s for s in neg_id_sets if s]
+    if not non_empty:
+        return 0.0
+    union = non_empty[0].union(*non_empty[1:])
+    if not union:
+        return 0.0
+    intersection = non_empty[0].intersection(*non_empty[1:])
+    return len(intersection) / len(union)
+
+
 class StructuralLawMonitor:
     """
     Computes population-level Field Quality Metrics from a shared PatternStore.
@@ -66,6 +87,15 @@ class StructuralLawMonitor:
 
         light = self._compute_light(patterns, weights, total_conflict)
 
+        negative_count = sum(
+            len(agent.store.query_negative(agent.agent_id))
+            for agent in agents
+            if hasattr(agent.store, 'query_negative')
+        )
+        taboo_ov = _taboo_overlap(agents)
+        light["negative_count"] = negative_count
+        light["taboo_overlap"] = taboo_ov
+
         heavy_diversity = None
         heavy_redundancy = None
 
@@ -80,6 +110,8 @@ class StructuralLawMonitor:
             **light,
             "diversity": heavy_diversity,
             "redundancy": heavy_redundancy,
+            "negative_count": light.get("negative_count", 0),
+            "taboo_overlap": light.get("taboo_overlap", 0.0),
         }
 
     # ------------------------------------------------------------------
@@ -144,7 +176,8 @@ class StructuralLawMonitor:
 
     def _print_table(self, step_t, light, diversity, redundancy):
         title = f"Field Quality Report (step {step_t})"
-        cols = ["Patterns", "L4+", "L4+ Weight", "Diversity", "Redundancy", "Conflict", "Stable"]
+        cols = ["Patterns", "L4+", "L4+ Weight", "Diversity", "Redundancy",
+                "Conflict", "Stable", "NegCount", "TabooOvlp"]
         row = {
             "Patterns": str(light["pattern_count"]),
             "L4+": str(light["level4plus_count"]),
@@ -153,6 +186,8 @@ class StructuralLawMonitor:
             "Redundancy": f"{redundancy:.2f}" if redundancy is not None else "—",
             "Conflict": f"{light['conflict']:.2f}",
             "Stable": f"{light['stability_mean']:.2f}",
+            "NegCount": str(light.get("negative_count", 0)),
+            "TabooOvlp": f"{light.get('taboo_overlap', 0.0):.2f}",
         }
         col_widths = {c: max(len(c), len(row[c])) for c in cols}
         sep = "   "
@@ -173,6 +208,8 @@ class StructuralLawMonitor:
             "level_distribution": {str(k): v for k, v in light["level_distribution"].items()},
             "diversity": diversity,
             "redundancy": redundancy,
+            "negative_count": light.get("negative_count", 0),
+            "taboo_overlap": light.get("taboo_overlap", 0.0),
         }
         with open(self._log_path, "a") as f:
             f.write(json.dumps(entry) + "\n")

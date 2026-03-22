@@ -53,6 +53,11 @@ class RecombinationStrategist:
         self._original_conflict_thresholds: dict = {}
         self._diversity_ema: float | None = None
         self._conflict_persistent_cycles: int = 0
+        # Fear Reset state
+        self.fear_threshold: float = 0.8
+        self.fear_reset_duration: int = 20
+        self._fear_reset_remaining: int = 0
+        self._saved_gamma_neg: dict = {}  # agent_id -> saved gamma_neg
 
     def step(self, step_t: int, field_quality: dict, agents: list) -> dict:
         """
@@ -99,12 +104,39 @@ class RecombinationStrategist:
             # --- Conflict Scale Damping (beta_c) ---
             beta_c_scaled = self._update_beta_c(conflict, agents)
 
+        # Fear Reset: if taboo_overlap exceeds threshold, zero gamma_neg temporarily
+        taboo = float(field_quality.get("taboo_overlap", 0.0))
+        fear_reset_fired = False
+
+        if taboo > self.fear_threshold and self._fear_reset_remaining == 0:
+            # Trigger Fear Reset
+            self._fear_reset_remaining = self.fear_reset_duration
+            for agent in agents:
+                self._saved_gamma_neg[agent.agent_id] = getattr(
+                    agent.config, 'gamma_neg', 0.3
+                )
+                if hasattr(agent.config, 'gamma_neg'):
+                    agent.config.gamma_neg = 0.0
+            fear_reset_fired = True
+
+        if self._fear_reset_remaining > 0:
+            self._fear_reset_remaining -= 1
+            if self._fear_reset_remaining == 0:
+                # Restore gamma_neg for all agents
+                for agent in agents:
+                    if agent.agent_id in self._saved_gamma_neg:
+                        if hasattr(agent.config, 'gamma_neg'):
+                            agent.config.gamma_neg = self._saved_gamma_neg[agent.agent_id]
+                self._saved_gamma_neg = {}
+
         return {
             "burst_active": self._burst_steps_remaining > 0,
             "kappa_0": kappa_0_applied,
             "beta_c_scaled": beta_c_scaled,
             "stagnation_count": self._stagnation_count,
             "cooldown_remaining": self._cooldown_steps_remaining,
+            "fear_reset_active": self._fear_reset_remaining > 0,
+            "fear_reset_fired": fear_reset_fired,
         }
 
     # ------------------------------------------------------------------
