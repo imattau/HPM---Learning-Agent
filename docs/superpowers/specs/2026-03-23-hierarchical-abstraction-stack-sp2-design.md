@@ -155,11 +155,13 @@ Stack configuration:
 - L2: 2 agents, GaussianPattern, K=3
 - L3: 1 agent, GaussianPattern, K=3 (fires every 9 L1 steps)
 
-Training: same ARC train split, same 342-task subset (grids ≤ 20×20), same random projection seed. Each training pair stepped through `stacked_orch.step()`. L3 agents used for final discrimination scoring via `ensemble_score`.
+Training: same ARC train split, same 342-task subset (grids ≤ 20×20), same random projection seed. Each training pair stepped through `stacked_orch.step()`. L1 agents used for final discrimination scoring via `ensemble_score`.
 
-Output table: task count, L3 accuracy, vs chance (20%), vs flat single-agent baseline (from `arc_benchmark.py`).
+Rationale for L1 scoring: L3 operates in 68-dim bundle space (not 64-dim ARC vector space), so L3 cannot directly score raw ARC observations. The benchmark tests whether L2/L3 hierarchical pressure improves L1 representations — not whether L3 can score directly. L1 agents are the appropriate scorers since they share the same 64-dim input space as the test observations.
 
-Guard: before scoring, assert `stacked_orch._level_ticks[-1] > 0` — if L3 never fired (e.g. too few training pairs), emit a clear error rather than silently reporting accuracy on an untrained agent.
+Output table: task count, hierarchical accuracy (scored via L1 agents), vs chance (20%), vs flat single-agent baseline (from `arc_benchmark.py`).
+
+Guard: before scoring, assert `stacked_orch._level_ticks[0] > 0` — if L1 never fired (e.g. no training pairs), emit a clear error rather than silently reporting accuracy on an untrained agent. Also assert `stacked_orch._level_ticks[-1] > 0` to confirm L3 did fire during training (validating the hierarchy was active).
 
 ---
 
@@ -208,6 +210,6 @@ L3 Orchestrator (1 agent, GaussianPattern, dim=68)
 ## Success criteria
 
 - All unit tests in `test_stacked.py` pass
-- `hierarchical_arc.py` runs without error and reports a finite L3 accuracy score
-- L3 accuracy is reported alongside flat single-agent baseline for comparison
+- `hierarchical_arc.py` runs without error and reports a finite hierarchical accuracy score (scored via L1 agents)
+- Hierarchical accuracy is reported alongside flat single-agent baseline for comparison
 - Setting n_levels=2 with K=1 produces the same structural behaviour as `HierarchicalOrchestrator`
