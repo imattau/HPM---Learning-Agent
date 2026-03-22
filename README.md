@@ -111,6 +111,24 @@ Pass criterion: gap > 0.
 
 ---
 
+## What the results suggest
+
+Taken together, the benchmarks show something more interesting than raw performance numbers. Each test targets a different property that HPM claims good learning systems should have — and the results offer early evidence for each claim.
+
+**Structure over surface.** The Reber Grammar benchmark (AUROC 0.934) shows the agent learning genuine structural regularities in discrete sequences, not just memorising frequencies. The key test is that it assigns lower probability to grammatically invalid sequences even when those sequences are plausible-looking — it has internalised the constraint structure, not just the symbol statistics.
+
+**Resilience through shared representation.** The Structural Immunity benchmark shows rapid recovery (T_rec = 5 steps with Beta agents) after a noise storm. This is not a property of a single well-trained model — it emerges from the PatternField, where patterns that survived the noise have higher weight and exert more influence during recovery. The shared field acts as a distributed memory that buffers individual agents against disruption.
+
+**Efficient representation, not just accurate representation.** The Substrate Efficiency result is arguably the most theoretically significant. The HPM agent sits on the Pareto frontier — it achieves more accuracy per unit of representational complexity than a comparably parameterised GMM. This matters because HPM predicts that good learners should not just fit data well, they should do so *parsimoniously*. A system that builds a bloated model has not understood the structure; it has memorised it.
+
+**Specificity of learned laws.** The Elegance Recovery benchmark tests a subtle property: can the agent distinguish between two laws that produce very similar outputs over a wide input range? The positive gap (+0.06) is small but meaningful — the agent has not just found a smooth fit to the training data, it has converged on the specific generative structure that produced it. This is the beginning of what HPM calls a "generative rule" — a pattern that captures not just what happened, but why.
+
+**What this means for AI development.** Current large AI systems achieve impressive capability through scale — enormous parameter counts, vast training data, and compute-intensive optimisation. HPM points toward a different hypothesis: that human-level generalisation may require not more parameters, but better *architecture* — systems where patterns at multiple levels of abstraction interact, compete, and recombine under principled constraints. The benchmarks here are small-scale, but they validate the structural principles. A system that is simultaneously efficient, resilient, structurally specific, and capable of cross-agent knowledge sharing — at any scale — would represent a qualitatively different approach to machine learning than the dominant paradigm.
+
+The open question is whether these properties, demonstrated here in lightweight closed-form models, will transfer to richer neural substrates. That is the central challenge the future directions below are designed to address.
+
+---
+
 ## Future directions
 
 - **Hierarchical agents** — patterns at one level feeding as inputs to agents at the next level, implementing HPM's multi-level abstraction hierarchy
