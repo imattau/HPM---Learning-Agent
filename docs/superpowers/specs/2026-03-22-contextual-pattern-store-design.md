@@ -34,10 +34,12 @@ class SubstrateSignature:
 
 Wraps a `TieredStore` instance. All `TieredStore` public methods are delegated unchanged — the wrapper is transparent to `Agent.step()`. The wrapper adds two lifecycle methods called explicitly by the benchmark harness:
 
-**`begin_context(sig: SubstrateSignature) -> str`**
+**`begin_context(sig: SubstrateSignature, first_obs: list[np.ndarray]) -> str`**
+
+`first_obs` is a list of up to 3 observation arrays from the start of the current episode. The benchmark harness collects these before calling `begin_context`.
 
 1. Coarse filter: query `index.json` for archived episodes whose `grid_size` matches exactly and whose `unique_color_count` is within ±1.
-2. Fine filter: deserialise each candidate archive and compute Pattern Fingerprint NLL against the first 3 observations of the current episode. Select the lowest-NLL match above a fixed threshold (`fingerprint_nll_threshold: float = 50.0`).
+2. Fine filter: for each coarse-filter candidate, deserialise the archive and compute the mean Pattern Fingerprint NLL of the archive's Tier 2 patterns against `first_obs`. Retain candidates whose mean NLL is below `fingerprint_nll_threshold` (default `50.0`; lower NLL = better match). Select the lowest-NLL survivor.
 3. If a match is found: deserialise that archive's Tier 2 state into the wrapped `TieredStore`. If no match: leave `TieredStore` in its default fresh state.
 4. Unconditionally inject all `is_global=True` patterns from `SQLiteStore` into Tier 2 (Phase 2 behaviour; in Phase 1 this is a no-op because no global patterns exist yet).
 5. Return a `context_id` (UUID string) for this episode.
@@ -61,12 +63,18 @@ data/archives/
 
 ### Benchmark integration
 
-In the ARC benchmark (`benchmarks/multi_agent_arc.py`), `--persistent` mode currently constructs a bare `TieredStore`. This is replaced with `ContextualPatternStore(archive_dir="data/archives", ...)`. The harness calls `begin_context(sig)` before each episode and `end_context(context_id, metrics)` after. Non-persistent mode is unaffected.
+In the ARC benchmark (`benchmarks/multi_agent_arc.py`), `--persistent` mode currently constructs a bare `TieredStore`. This is replaced with `ContextualPatternStore(archive_dir="data/archives", ...)`. The harness:
+
+1. Collects the first 3 observations from the episode's input grid before calling `begin_context(sig, first_obs)`.
+2. Calls `end_context(context_id, metrics)` after the episode completes.
+
+Non-persistent mode is unaffected.
 
 ### Tests (`tests/store/test_contextual_store.py`)
 
 - `extract_signature` returns correct `grid_size`, `unique_color_count`, `object_count`, and `aspect_ratio_bucket` for known inputs
 - Coarse filter excludes archives with mismatched `grid_size` or `color_count` outside ±1
+- Fine filter selects the lowest-NLL candidate and rejects candidates whose NLL exceeds `fingerprint_nll_threshold`
 - Round-trip: `end_context` writes a file; `begin_context` on a matching signature deserialises Tier 2 and confirms patterns are present
 - Integration: agent runs task A, `end_context` archives it, agent runs task B with matching signature, `begin_context` warm-starts from task A's Tier 2 state
 
@@ -89,10 +97,8 @@ ALTER TABLE patterns ADD COLUMN IF NOT EXISTS context_ids TEXT DEFAULT '[]';
 
 After archiving Tier 2:
 
-1. For each pattern in Tier 2 with `weight > global_weight_threshold` (default `0.6`): upsert into `SQLiteStore` and append the current `context_id` to that pattern's `context_ids`.
+1. For each pattern in Tier 2 with `weight > global_weight_threshold` (default `0.6`): upsert into `SQLiteStore` matched on pattern `id`. On insert (new pattern): write all fields. On update (pattern already exists): update `mu` and `weight` in place; append the current `context_id` to `context_ids`. The `id` field is the primary key; no other field is used for matching.
 2. If `len(context_ids) >= global_promotion_n` (default `5`): set `is_global = True` for that pattern.
-
-Patterns are matched by their existing `id` field.
 
 ### Warm-start update (in `begin_context`)
 
@@ -117,11 +123,24 @@ After Phase 2, the benchmark should report `global_patterns_loaded > 0` after ep
 
 Phase 3 is a structural refactor with no change to observable behaviour or benchmark metrics.
 
+### `CandidateArchive` dataclass
+
+```python
+@dataclass
+class CandidateArchive:
+    context_id: str
+    signature: SubstrateSignature
+    archive_path: str   # absolute path to the .pkl file
+    success_metrics: dict
+```
+
+Used as the exchange type between `Librarian` and `Forecaster`.
+
 ### `Librarian` (`hpm/agents/librarian.py`)
 
 Stateless class (no `__init__` state beyond config). Owns:
 - `extract_signature(grid) -> SubstrateSignature`
-- `query_archive(sig, archive_dir) -> list[CandidateArchive]`
+- `query_archive(sig, archive_dir) -> list[CandidateArchive]` — applies the coarse filter and returns matching candidates
 - `run_global_pass(tier2_patterns, context_id, sqlite_store, config) -> None`
 - `write_global_flags(sqlite_store, config) -> None`
 
@@ -130,7 +149,7 @@ Stateless class (no `__init__` state beyond config). Owns:
 Stateless class. Owns:
 - `rank(candidates: list[CandidateArchive], obs: list[np.ndarray]) -> list[RankedCandidate]`
 
-`RankedCandidate` is a dataclass: `{candidate: CandidateArchive, nll: float}`, sorted ascending by NLL.
+`RankedCandidate` is a dataclass: `{candidate: CandidateArchive, nll: float}`, sorted ascending by NLL. Candidates whose NLL exceeds `fingerprint_nll_threshold` are excluded from the result.
 
 ### Agent refactor
 
@@ -158,6 +177,9 @@ No benchmark metric changes between Phase 2 and Phase 3. The refactor is validat
 | Pickle Tier 2 only (not Tier 1) | Tier 1 is ephemeral working memory; Tier 2 holds promoted, stable patterns worth recalling |
 | SQLiteStore for globals | Unified schema, single source of truth, fits HPM's promotion-ladder semantics |
 | Coarse filter then fine NLL filter | Coarse filter is O(1) per candidate (index scan); NLL test on first 3 obs adds precision without circular dependency on episode outcome |
+| `first_obs` passed into `begin_context` | Avoids circular dependency; benchmark harness has the observations before `begin_context` is called |
+| `fingerprint_nll_threshold = 50.0` | Tunable default; chosen as a conservative starting point above typical within-task NLL variance |
+| Upsert by pattern `id`, update mu+weight | Single source of truth per pattern; `id` is stable across episodes for the same learned structure |
 | Atomic archive writes (tmp + replace) | Prevents corrupt index from a mid-write crash |
 | Phase-by-phase validation | Each phase benchmarked before the next; applies HPM's own gating logic to the development process |
 | Phase 3 is pure refactor | Separating Librarian and Forecaster improves testability and boundary clarity without touching any dynamics |
