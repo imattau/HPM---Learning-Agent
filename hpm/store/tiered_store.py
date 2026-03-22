@@ -18,6 +18,7 @@ class TieredStore:
     def __init__(self):
         self._tier1: dict[str, InMemoryStore] = {}
         self._tier2: InMemoryStore = InMemoryStore()
+        self._tier2_negative: InMemoryStore = InMemoryStore()
         self._current_context: str | None = None
 
     def begin_context(self, context_id: str) -> None:
@@ -32,10 +33,16 @@ class TieredStore:
         self._current_context = context_id
         self._tier1[context_id] = InMemoryStore()
 
-    def end_context(self, context_id: str, correct: bool) -> None:
-        """End task context. Runs similarity_merge on success before clearing."""
+    def end_context(self, context_id: str, correct: bool,
+                    neg_conflict_threshold: float = 0.7,
+                    max_tier2_negative: int = 100) -> None:
+        """End task context. Runs similarity_merge on success, negative_merge on failure."""
         if correct and context_id in self._tier1:
             self.similarity_merge(context_id)
+        elif not correct and context_id in self._tier1:
+            self.negative_merge(context_id,
+                                neg_conflict_threshold=neg_conflict_threshold,
+                                max_tier2_negative=max_tier2_negative)
         self._tier1.pop(context_id, None)
         if self._current_context == context_id:
             self._current_context = None
@@ -135,6 +142,57 @@ class TieredStore:
     def promote_to_tier2(self, pattern, weight: float, agent_id: str) -> None:
         """Directly promote a pattern to Tier 2."""
         self._tier2.save(pattern, weight, agent_id)
+
+    def query_negative(self, agent_id: str) -> list:
+        """Return all negative Tier 2 patterns for agent_id as list[(pattern, weight)]."""
+        return self._tier2_negative.query(agent_id)
+
+    def query_tier2_negative_all(self) -> list:
+        """Return all negative Tier 2 records (for monitoring/testing)."""
+        return self._tier2_negative.query_all()
+
+    def negative_merge(self, context_id: str,
+                       neg_conflict_threshold: float = 0.7,
+                       max_tier2_negative: int = 100) -> None:
+        """
+        Promote conflicting Tier 1 patterns to _tier2_negative.
+
+        A Tier 1 pattern from a failed task is promoted if its cosine similarity
+        to any positive Tier 2 pattern >= neg_conflict_threshold. This encodes the
+        taboo: a pattern shape highly similar to a known-good meta-pattern was
+        present during failure — it is misleadingly similar (anti-predictive).
+
+        Patterns with zero norm are skipped (same guard as similarity_merge).
+        New patterns are silently dropped when cap is reached.
+        """
+        import numpy as np
+
+        if context_id not in self._tier1:
+            return
+
+        t1_records = self._tier1[context_id].query_all()
+        t2_all = self._tier2.query_all()
+
+        for p1, w1, aid1 in t1_records:
+            mu1 = p1.mu
+            norm1 = np.linalg.norm(mu1)
+            if norm1 < 1e-8:
+                continue
+
+            best_sim = -1.0
+            for p2, w2, _ in t2_all:
+                mu2 = p2.mu
+                norm2 = np.linalg.norm(mu2)
+                if norm2 < 1e-8:
+                    continue
+                sim = float(np.dot(mu1, mu2) / (norm1 * norm2))
+                if sim > best_sim:
+                    best_sim = sim
+
+            if best_sim >= neg_conflict_threshold:
+                current_neg = self._tier2_negative.query_all()
+                if len(current_neg) < max_tier2_negative:
+                    self._tier2_negative.save(p1, w1 * 0.5, aid1)
 
 
 # Verify protocol compliance at import time (structural subtyping check)
