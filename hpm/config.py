@@ -59,3 +59,7 @@ class AgentConfig:
     recomb_temp: float = 1.0          # softmax temperature for pair sampling
     conflict_stress_scale: float = 0.0  # multiplier: temp *= (1 + scale * total_conflict); 0 = off
     min_recomb_level: int = 4         # minimum HPM level for recombination eligibility
+    # Negative / inhibitory tier
+    gamma_neg: float = 0.3               # social inhibition attenuation (0 = off)
+    neg_conflict_threshold: float = 0.7  # cosine sim threshold for negative_merge
+    max_tier2_negative: int = 100        # cap on _tier2_negative store size
