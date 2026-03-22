@@ -95,20 +95,35 @@ def load_tasks():
 
 def ensemble_score(agents, vec: np.ndarray) -> float:
     """
-    Compute ensemble NLL score for a candidate vector across all agents.
+    Compute ensemble score for a candidate vector.
 
-    score = sum over agents of: sum(w_i * pattern_i.log_prob(vec))
+    Positive patterns contribute to the total (higher NLL = less probable = worse).
+    Negative patterns are subtracted: a candidate close to a taboo pattern has low
+    NLL under that pattern, so subtracting a small value leaves the score HIGH (worse).
+    A candidate far from taboo patterns has high NLL, so subtracting a large value
+    makes the score LOWER (better rank).
 
-    Lower score = more probable under the ensemble.
-    Returns 0.0 if all stores are empty.
+    Formula:
+        total += pos_weight * pos_NLL   (existing behaviour)
+        total -= neg_weight * neg_NLL   (new inhibitory term)
+
+    Lower total = more preferred candidate (consistent with existing ranking).
+    Returns 0.0 if all stores are empty (backward compatible).
+
+    Sign convention: GaussianPattern.log_prob returns NLL (lower = more probable).
     """
     total = 0.0
     any_records = False
     for agent in agents:
-        records = agent.store.query(agent.agent_id)
-        if records:
+        pos = agent.store.query(agent.agent_id)
+        if pos:
             any_records = True
-            total += sum(w * p.log_prob(vec) for p, w in records)
+            total += sum(w * p.log_prob(vec) for p, w in pos)
+        if hasattr(agent.store, 'query_negative'):
+            neg = agent.store.query_negative(agent.agent_id)
+            if neg:
+                any_records = True
+                total -= sum(w * p.log_prob(vec) for p, w in neg)
     return total if any_records else 0.0
 
 
