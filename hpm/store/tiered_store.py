@@ -139,8 +139,18 @@ class TieredStore:
                 self._tier2.save(p1, w1 * 0.5, aid1)
                 t2_patterns.append((p1, w1 * 0.5, aid1))
 
-    def promote_to_tier2(self, pattern, weight: float, agent_id: str) -> None:
-        """Directly promote a pattern to Tier 2."""
+    def promote_to_tier2(self, pattern, weight: float, agent_id: str,
+                         max_tier2_patterns: int = 200) -> None:
+        """Directly promote a pattern to Tier 2, respecting the global cap.
+
+        When Tier 2 is at capacity, the lowest-weight pattern is evicted before
+        the new one is inserted, so the store never exceeds max_tier2_patterns.
+        """
+        current = self._tier2.query_all()
+        if len(current) >= max_tier2_patterns:
+            # Evict the pattern with the lowest weight
+            lowest_id = min(current, key=lambda rec: rec[1])[0].id
+            self._tier2.delete(lowest_id)
         self._tier2.save(pattern, weight, agent_id)
 
     def query_negative(self, agent_id: str) -> list:

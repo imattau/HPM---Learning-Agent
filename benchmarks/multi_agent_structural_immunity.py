@@ -53,6 +53,7 @@ def run() -> dict:
         n_agents=2,
         feature_dim=FEATURE_DIM,
         agent_ids=["immunity_a", "immunity_b"],
+        pattern_types=["gaussian", "gaussian"],
         with_monitor=True,
         T_monitor=50,
         agent_seeds=[42, 99],   # different initial patterns → agents have complementary starts

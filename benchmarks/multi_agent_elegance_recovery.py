@@ -124,6 +124,7 @@ def run() -> dict:
         n_agents=2,
         feature_dim=FEATURE_DIM,
         agent_ids=["elegance_a", "elegance_b"],
+        pattern_types=["gaussian", "gaussian"],
         with_monitor=True,
         T_monitor=50,
         min_recomb_level=1,

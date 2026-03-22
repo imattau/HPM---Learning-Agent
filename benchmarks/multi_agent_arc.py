@@ -38,12 +38,13 @@ from benchmarks.multi_agent_common import make_orchestrator, print_results_table
 # ---------------------------------------------------------------------------
 MAX_GRID_DIM = 20
 GRID_SIZE = MAX_GRID_DIM * MAX_GRID_DIM   # 400
-RAW_DIM = GRID_SIZE * 2                   # 800 (full grid pair)
+RAW_DIM = GRID_SIZE                       # 400 (transformation delta — output minus input)
 FEATURE_DIM = 64                          # projected dimension (JL projection)
 TRAIN_REPS = 10
 N_DISTRACTORS = 4
 
 # Fixed random projection matrix: RAW_DIM → FEATURE_DIM
+# Projects the transformation delta (output - input) to 64-dim feature space.
 # Same matrix across all tasks so distances are consistent.
 _PROJ = np.random.default_rng(0).standard_normal((RAW_DIM, FEATURE_DIM)) / np.sqrt(FEATURE_DIM)
 
@@ -58,8 +59,10 @@ def encode_grid(grid):
 
 
 def encode_pair(input_grid, output_grid):
-    raw = np.concatenate([encode_grid(input_grid), encode_grid(output_grid)])
-    return raw @ _PROJ  # project 800 → 64
+    # Encode the transformation: what changed, not what exists.
+    # Each coordinate represents a pixel-level change (output - input), normalised to [-1, 1].
+    delta = encode_grid(output_grid) - encode_grid(input_grid)
+    return delta @ _PROJ  # project 400 → 64
 
 
 def grid_fits(grid):
@@ -151,7 +154,7 @@ def make_arc_orchestrator(pattern_types=None):
     )
 
 
-def make_arc_persistent_orchestrator(store=None):
+def make_arc_persistent_orchestrator(store=None, pattern_types=None):
     """Single long-lived orchestrator for persistent cross-task learning.
 
     Full HPM stack enabled so patterns can level up across tasks:
@@ -164,11 +167,14 @@ def make_arc_persistent_orchestrator(store=None):
     Args:
         store: Optional PatternStore to inject (e.g. TieredStore). If None,
                defaults to InMemoryStore().
+        pattern_types: List of pattern types per agent, e.g. ["gaussian", "laplace"].
+               Defaults to ["gaussian", "gaussian"].
     """
     return make_orchestrator(
         n_agents=2,
         feature_dim=FEATURE_DIM,
         agent_ids=["arc_a", "arc_b"],
+        pattern_types=pattern_types or ["gaussian", "gaussian"],
         with_monitor=True,
         T_monitor=20,
         beta_comp=0.1,
@@ -181,6 +187,11 @@ def make_arc_persistent_orchestrator(store=None):
         kappa_D=0.5,
         store=store,
     )
+
+
+def make_arc_mixed_orchestrator(store=None):
+    """Fresh 2-agent HPM orchestrator: arc_a uses Gaussian, arc_b uses Laplace."""
+    return make_arc_orchestrator(pattern_types=["gaussian", "laplace"])
 
 
 def make_arc_laplace_orchestrator():
@@ -258,11 +269,11 @@ def _init_worker(all_tasks):
 
 
 def _eval_worker(args):
-    task, task_idx = args
-    return evaluate_task(task, _worker_all_tasks, task_idx)
+    task, task_idx, pattern_types = args
+    return evaluate_task(task, _worker_all_tasks, task_idx, pattern_types=pattern_types)
 
 
-def run_persistent(eligible, all_tasks, use_contextual=True):
+def run_persistent(eligible, all_tasks, use_contextual=True, pattern_types=None):
     """
     Persistent mode: single orchestrator across all tasks.
     Uses TieredStore so task-specific patterns are ephemeral (Tier 1) and
@@ -294,7 +305,7 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
     else:
         store_obj = tiered
 
-    orch, agents, store = make_arc_persistent_orchestrator(store=store_obj)
+    orch, agents, store = make_arc_persistent_orchestrator(store=store_obj, pattern_types=pattern_types)
     recombinator = CrossTaskRecombinator()
 
     # --- PredictiveSynthesisAgent and DecisionalActor ---
@@ -432,7 +443,11 @@ def main():
                         help="Use bare TieredStore instead of ContextualPatternStore (for comparison)")
     parser.add_argument("--max-tasks", type=int, default=None,
                         help="Limit number of tasks evaluated (useful for quick testing)")
+    parser.add_argument("--mixed", action="store_true",
+                        help="Use mixed pattern store: arc_a=Gaussian, arc_b=Laplace")
     args = parser.parse_args()
+
+    pattern_types = ["gaussian", "laplace"] if args.mixed else ["gaussian", "gaussian"]
 
     print("Loading ARC dataset...", flush=True)
     all_tasks = load_tasks()
@@ -454,12 +469,15 @@ def main():
     if args.persistent:
         use_contextual = not args.no_contextual
         mode_label = "contextual ContextualPatternStore" if use_contextual else "bare TieredStore"
-        print(f"Running (2-agent persistent, sequential, {mode_label})...", flush=True)
-        correct_count, rank_sum = run_persistent(eligible, all_tasks, use_contextual=use_contextual)
+        type_label = f"mixed ({pattern_types[0]}+{pattern_types[1]})" if args.mixed else pattern_types[0]
+        print(f"Running (2-agent persistent, sequential, {mode_label}, {type_label})...", flush=True)
+        correct_count, rank_sum = run_persistent(eligible, all_tasks, use_contextual=use_contextual,
+                                                  pattern_types=pattern_types)
     else:
         n_workers = args.workers or multiprocessing.cpu_count()
-        print(f"Running (2-agent ensemble, {n_workers} workers)...", flush=True)
-        work = [(task, task_idx) for task_idx, task in eligible]
+        type_label = f"mixed ({pattern_types[0]}+{pattern_types[1]})" if args.mixed else pattern_types[0]
+        print(f"Running (2-agent ensemble, {n_workers} workers, {type_label})...", flush=True)
+        work = [(task, task_idx, pattern_types) for task_idx, task in eligible]
         with multiprocessing.Pool(processes=n_workers,
                                   initializer=_init_worker,
                                   initargs=(all_tasks,)) as pool:

@@ -27,9 +27,14 @@ from benchmarks.common import make_agent, print_results_table
 # ---------------------------------------------------------------------------
 MAX_GRID_DIM = 20                         # max rows/cols; tasks exceeding this are excluded
 GRID_SIZE = MAX_GRID_DIM * MAX_GRID_DIM   # 400
-FEATURE_DIM = GRID_SIZE * 2               # 200: encode(input) + encode(output)
+RAW_DIM = GRID_SIZE                       # 400 (transformation delta — output minus input)
+FEATURE_DIM = 64                          # projected dimension (JL projection)
 TRAIN_REPS = 10                           # agent.step() calls per training pair
 N_DISTRACTORS = 4                         # distractor outputs per test
+
+# Fixed random projection matrix: RAW_DIM → FEATURE_DIM
+# Projects the transformation delta (output - input) to 64-dim feature space.
+_PROJ = np.random.default_rng(0).standard_normal((RAW_DIM, FEATURE_DIM)) / np.sqrt(FEATURE_DIM)
 
 
 def encode_grid(grid: list[list[int]]) -> np.ndarray:
@@ -47,8 +52,9 @@ def encode_grid(grid: list[list[int]]) -> np.ndarray:
 
 
 def encode_pair(input_grid: list[list[int]], output_grid: list[list[int]]) -> np.ndarray:
-    """Concatenate encoded input and output into a FEATURE_DIM observation vector."""
-    return np.concatenate([encode_grid(input_grid), encode_grid(output_grid)])
+    """Encode the transformation delta (output - input), projected to FEATURE_DIM."""
+    delta = encode_grid(output_grid) - encode_grid(input_grid)
+    return delta @ _PROJ  # project 400 → 64
 
 
 def grid_fits(grid: list[list[int]]) -> bool:
