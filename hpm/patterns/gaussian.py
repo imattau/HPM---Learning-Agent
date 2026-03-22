@@ -41,6 +41,10 @@ class GaussianPattern:
         D = self.mu.shape[0]
         return float(0.5 * (np.dot(z, z) + self._log_det + D * np.log(2.0 * np.pi)))
 
+    def sample(self, n: int, rng) -> np.ndarray:
+        """Return n samples from the Gaussian distribution, shape (n, D)."""
+        return rng.multivariate_normal(self.mu, self.sigma, n)
+
     def description_length(self) -> float:
         return float(
             np.sum(np.abs(self.mu) > 1e-6)

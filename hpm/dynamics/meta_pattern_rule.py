@@ -33,9 +33,9 @@ def sym_kl_normalised(p, q, n_samples: int = 200, rng=None) -> float:
     else:
         if rng is None:
             rng = np.random.default_rng()
-        samples_p = rng.multivariate_normal(p.mu, p.sigma, n_samples)
+        samples_p = p.sample(n_samples, rng)
         kl_pq = float(np.mean([q.log_prob(s) - p.log_prob(s) for s in samples_p]))
-        samples_q = rng.multivariate_normal(q.mu, q.sigma, n_samples)
+        samples_q = q.sample(n_samples, rng)
         kl_qp = float(np.mean([p.log_prob(s) - q.log_prob(s) for s in samples_q]))
 
     sym_kl = max((kl_pq + kl_qp) / 2.0, 0.0)
