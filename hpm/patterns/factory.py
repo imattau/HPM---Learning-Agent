@@ -1,0 +1,38 @@
+import numpy as np
+from hpm.patterns.gaussian import GaussianPattern
+from hpm.patterns.laplace import LaplacePattern
+
+
+def make_pattern(mu, scale, pattern_type: str = "gaussian", **kwargs):
+    """Construct a pattern from (mu, scale) parameters.
+
+    Args:
+        mu: Location vector (ndarray or list).
+        scale: For Gaussian: covariance matrix. For Laplace: scale vector b
+               (scalar is broadcast to np.ones(len(mu)) * scalar).
+        pattern_type: "gaussian" or "laplace".
+        **kwargs: Passed to the pattern constructor (id, level, source_id, freeze_mu).
+    """
+    mu = np.asarray(mu, dtype=float)
+    if pattern_type == "gaussian":
+        return GaussianPattern(mu, scale, **kwargs)
+    elif pattern_type == "laplace":
+        b = np.ones(len(mu)) * scale if np.isscalar(scale) else np.asarray(scale, dtype=float)
+        return LaplacePattern(mu, b, **kwargs)
+    else:
+        raise ValueError(f"Unknown pattern_type: {pattern_type!r}. Expected 'gaussian' or 'laplace'.")
+
+
+def pattern_from_dict(d: dict):
+    """Deserialise a pattern from a dict produced by to_dict().
+
+    Dispatches on d['type']. Defaults to 'gaussian' if type key is absent
+    (backward compatibility with pre-factory serialised patterns).
+    """
+    t = d.get('type', 'gaussian')
+    if t == 'gaussian':
+        return GaussianPattern.from_dict(d)
+    elif t == 'laplace':
+        return LaplacePattern.from_dict(d)
+    else:
+        raise ValueError(f"Unknown pattern type in dict: {t!r}. Expected 'gaussian' or 'laplace'.")
