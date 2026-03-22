@@ -6,6 +6,11 @@ from .hierarchical import (
     HierarchicalOrchestrator,
     make_hierarchical_orchestrator,
 )
+from .stacked import (
+    LevelConfig,
+    StackedOrchestrator,
+    make_stacked_orchestrator,
+)
 
 __all__ = [
     "DecisionalActor",
@@ -14,4 +19,7 @@ __all__ = [
     "extract_bundle",
     "HierarchicalOrchestrator",
     "make_hierarchical_orchestrator",
+    "LevelConfig",
+    "StackedOrchestrator",
+    "make_stacked_orchestrator",
 ]
