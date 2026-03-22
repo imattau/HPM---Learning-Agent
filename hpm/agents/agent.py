@@ -298,6 +298,18 @@ class Agent:
         if self.field is not None:
             communicated_out = self._share_pending(self.field, report_patterns)
 
+        # Inhibitory channel: Step A — pull negative patterns from other agents
+        if self.field is not None and hasattr(self.store, '_tier2_negative'):
+            neg_incoming = self.field.pull_negative(self.agent_id, self.config.gamma_neg)
+            for pattern, weight in neg_incoming:
+                self.store._tier2_negative.save(pattern, weight, self.agent_id)
+
+        # Inhibitory channel: Step B — broadcast own negative patterns to field
+        if self.field is not None and hasattr(self.store, 'query_negative'):
+            self.field._negative[self.agent_id] = []   # reset before re-broadcasting
+            for pattern, weight in self.store.query_negative(self.agent_id):
+                self.field.broadcast_negative(pattern, weight, self.agent_id)
+
         return {
             't': self._t,
             'n_patterns': len(report_patterns),
