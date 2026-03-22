@@ -277,6 +277,8 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
     """
     from hpm.store.tiered_store import TieredStore
     from hpm.monitor.cross_task_recombinator import CrossTaskRecombinator
+    from hpm.monitor.predictive_synthesis import PredictiveSynthesisAgent
+    from hpm.agents.actor import DecisionalActor
 
     tiered = TieredStore()
 
@@ -294,6 +296,24 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
 
     orch, agents, store = make_arc_persistent_orchestrator(store=store_obj)
     recombinator = CrossTaskRecombinator()
+
+    # --- PredictiveSynthesisAgent and DecisionalActor ---
+    forecaster = PredictiveSynthesisAgent(store=store_obj)
+
+    class _NullBridge:
+        T_substrate = 20
+        _t = 0
+
+    bridge_stub = _NullBridge()
+    action_vectors = np.zeros((1, FEATURE_DIM))  # dummy — ExternalHead inactive for discrimination task
+    actor = DecisionalActor(
+        action_vectors=action_vectors,
+        forecaster=forecaster,
+        bridge=bridge_stub,
+    )
+
+    global_step = 0
+    forecast_report: dict = {}  # initialised here; overwritten each training step
 
     correct_count = 0
     rank_sum = 0
@@ -329,7 +349,21 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
 
         for _ in range(TRAIN_REPS):
             for obs_a, obs_b in schedule:
-                orch.step({"arc_a": obs_a, "arc_b": obs_b})
+                step_result = orch.step({"arc_a": obs_a, "arc_b": obs_b})
+                field_quality = step_result.get("field_quality", {})
+                current_vec = obs_a  # use agent_a's observation as current encoded vector
+                forecast_report = forecaster.step(
+                    step_t=global_step,
+                    current_obs={"arc_a": current_vec, "arc_b": obs_b},
+                    field_quality=field_quality,
+                )
+                actor_report = actor.step(
+                    step_t=global_step,
+                    field_quality=field_quality,
+                    forecast_report=forecast_report,
+                    external_reward=0.0,  # unknown during training; updated after eval
+                )
+                global_step += 1
 
         # Evaluate against distractors
         test_pair = task["test"][0]
@@ -346,6 +380,14 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
         distractor_scores = [ensemble_score(agents, v) for v in distractor_vecs]
         rank = 1 + sum(1 for s in distractor_scores if s <= correct_score)
         correct = correct_score < min(distractor_scores)
+
+        # Update actor with post-eval reward
+        actor.step(
+            step_t=global_step,
+            field_quality={},
+            forecast_report=forecast_report,
+            external_reward=1.0 if correct else 0.0,
+        )
 
         # End context: promotes patterns to Tier 2 only on correct tasks
         if use_contextual:
@@ -367,9 +409,10 @@ def run_persistent(eligible, all_tasks, use_contextual=True):
             t2_count = len(tiered.query_tier2_all())
             n_patterns = sum(len(agent.store.query(agent.agent_id)) for agent in agents)
             t1_count = n_patterns - t2_count
+            fragility_suffix = " [FRAGILE]" if forecast_report.get("fragility_flag") else ""
             print(
                 f"  {run_idx + 1}/{len(eligible)} — accuracy: {pct:.1f}%, "
-                f"tier1: {t1_count}, tier2_meta: {t2_count}",
+                f"tier1: {t1_count}, tier2_meta: {t2_count}{fragility_suffix}",
                 flush=True,
             )
 
