@@ -155,7 +155,8 @@ class ContextualPatternStore:
         self._store.begin_context(context_id)
         return context_id
 
-    def end_context(self, context_id: str, success_metrics: dict) -> None:
+    def end_context(self, context_id: str, success_metrics: dict,
+                    similarity_threshold: float = 0.95) -> None:
         """Serialise Tier 2 to archive, update index, run global pass."""
         run_dir = os.path.join(self._archive_dir, self._run_id)
         os.makedirs(run_dir, exist_ok=True)
@@ -188,7 +189,8 @@ class ContextualPatternStore:
 
         # Delegate to inner TieredStore so similarity_merge / negative_merge run
         correct = success_metrics.get("correct", False)
-        self._store.end_context(context_id, correct=correct)
+        self._store.end_context(context_id, correct=correct,
+                                similarity_threshold=similarity_threshold)
 
         # Phase 3: delegate global pass to librarian (after end_context promotes patterns)
         self._librarian.run_global_pass(

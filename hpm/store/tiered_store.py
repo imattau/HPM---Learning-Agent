@@ -34,11 +34,12 @@ class TieredStore:
         self._tier1[context_id] = InMemoryStore()
 
     def end_context(self, context_id: str, correct: bool,
+                    similarity_threshold: float = 0.95,
                     neg_conflict_threshold: float = 0.7,
                     max_tier2_negative: int = 100) -> None:
         """End task context. Runs similarity_merge on success, negative_merge on failure."""
         if correct and context_id in self._tier1:
-            self.similarity_merge(context_id)
+            self.similarity_merge(context_id, similarity_threshold=similarity_threshold)
         elif not correct and context_id in self._tier1:
             self.negative_merge(context_id,
                                 neg_conflict_threshold=neg_conflict_threshold,

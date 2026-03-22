@@ -277,9 +277,13 @@ def run_persistent() -> dict:
         if f_correct:
             flat_correct += 1
 
-        # End context: archive Tier 2, promote patterns on success
-        l1_contextual.end_context(l1_ctx_id, success_metrics={"correct": h_correct})
-        flat_contextual.end_context(flat_ctx_id, success_metrics={"correct": f_correct})
+        # End context: archive Tier 2, promote patterns on success.
+        # Lower similarity threshold (0.7 vs default 0.95) to build cross-task library
+        # on ARC's deliberately diverse task distribution.
+        l1_contextual.end_context(l1_ctx_id, success_metrics={"correct": h_correct},
+                                  similarity_threshold=0.7)
+        flat_contextual.end_context(flat_ctx_id, success_metrics={"correct": f_correct},
+                                    similarity_threshold=0.7)
 
         n_evaluated += 1
 
