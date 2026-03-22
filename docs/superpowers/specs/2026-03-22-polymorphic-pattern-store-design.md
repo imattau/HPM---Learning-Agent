@@ -8,7 +8,7 @@ Add a second pattern type — `LaplacePattern` — to the HPM framework, establi
 
 ## Scope
 
-- **In scope:** `LaplacePattern` class, `pattern_type` AgentConfig field, pattern factory, ARC benchmark integration, unit + integration tests
+- **In scope:** `LaplacePattern` class, `sample()` method on GaussianPattern + LaplacePattern, minimal MetaPatternRule change, `pattern_type` AgentConfig field, pattern factory with dict dispatcher, ARC benchmark integration, unit + integration tests
 - **Out of scope:** Mixed-type stores (one agent, multiple types), cross-type KL (closed-form), cross-type recombination, von Mises / Dirac / Categorical / Sparse Kernel types
 
 ---
@@ -27,32 +27,47 @@ Returns NLL (negative log-likelihood), consistent with `GaussianPattern.log_prob
 NLL = sum(|x - mu| / b) + sum(log(2 * b))
 ```
 
+### `sample(n: int, rng) -> np.ndarray`
+
+Returns `n` samples drawn from the Laplace distribution:
+
+```python
+return rng.laplace(loc=self.mu, scale=self.b, size=(n, len(self.mu)))
+```
+
+This method is added to **both** `LaplacePattern` and `GaussianPattern` (see Section 3).
+
 ### `update(x) -> LaplacePattern`
 
 Online update returning a new instance (value-type semantics, same as GaussianPattern):
-- `mu` updated via running mean (approximation to true median — acceptable for streaming)
-- `b` updated via running mean of `|x - mu|`, floored at `1e-6` to prevent collapse
+
+- Record `mu_old = self.mu` before updating
+- `mu` updated via running mean: `mu_new = (mu_old * n_obs + x) / (n_obs + 1)`
+- `b` updated via running mean of residual against `mu_old`: `b_new = (b_old * n_obs + |x - mu_old|) / (n_obs + 1)`, floored at `1e-6`
+- Using `mu_old` for the residual avoids the downward bias that would occur if the already-shifted `mu_new` were used
+- Note: unlike `GaussianPattern.update()` which keeps `sigma` fixed, `LaplacePattern.update()` actively updates `b` — this is intentional since `b` is a single-parameter scale that can be estimated online efficiently
 - `id` and `level` preserved on the new instance
 
 ### `sigma` attribute
 
-LaplacePattern has **no `sigma` attribute** (not in `__dict__`, not a property). This is intentional: `MetaPatternRule.sym_kl_normalised` checks `hasattr(p, 'sigma')` to select the Gaussian Cholesky KL path. When this check fails, the Monte Carlo fallback fires automatically, using `p.log_prob(s)` — which LaplacePattern implements correctly.
+LaplacePattern has **no `sigma` attribute** — not in `__dict__`, not a property. This routes `sym_kl_normalised` to the Monte Carlo branch (which uses `sample()`, not `sigma` — see Section 3).
 
 ### `recombine(other) -> LaplacePattern`
 
 Averages `mu` and `b` element-wise. Raises `TypeError` if `other` is not a `LaplacePattern` (enforces homogeneous stores for this phase).
 
+**Invariant:** `PatternField` only broadcasts between agents configured with the same `pattern_type`. Since `make_orchestrator()` assigns one type per agent, and `PatternField` shares within-type by querying a single store per agent, cross-type recombination cannot occur in practice. `TypeError` is a safety net, not the primary guard.
+
 ### Structural methods
 
-Mirroring GaussianPattern, operating on `b` instead of `sigma`:
-- `description_length()`: count of non-trivial `mu` entries + dimensions
-- `connectivity()`: mean absolute correlation of scale values (proxy for cross-dimensional coupling)
-- `compress()`: ratio of max `b` to sum of `b` values (analogous to top-eigenvalue ratio)
-- `is_structurally_valid()`: returns True iff all `b > 0`
+- `description_length()`: count of non-trivial `mu` entries + dimensions (same as GaussianPattern)
+- `connectivity()`: always returns `0.0` — there is no off-diagonal structure in a diagonal-scale parameterisation (unlike Gaussian's full covariance matrix). Satisfies the protocol method signature with defined semantics.
+- `compress()`: ratio of max `b` to sum of `b` values (analogous to top-eigenvalue ratio for Gaussian)
+- `is_structurally_valid()`: returns `True` iff all `b > 0`
 
 ### Serialisation
 
-`to_dict()` / `from_dict()` round-trip preserving `mu`, `b`, `id`, `level`, `source_id`, `_n_obs`.
+`to_dict()` emits `'type': 'laplace'` and preserves `mu`, `b`, `id`, `level`, `source_id`, `_n_obs`. `from_dict()` is a classmethod on `LaplacePattern`. A top-level dispatcher `pattern_from_dict(d)` in `factory.py` routes on `d['type']` (see Section 2).
 
 ---
 
@@ -70,21 +85,34 @@ Default is `"gaussian"` — all existing code paths are unaffected.
 
 ### Factory (`hpm/patterns/factory.py`)
 
-New module with a single function:
+New module with two functions:
 
 ```python
 def make_pattern(mu, scale, pattern_type: str = "gaussian", **kwargs):
+    """Construct a pattern from (mu, scale) parameters.
+    For Laplace, scale is interpreted as b (broadcast to vector if scalar).
+    """
     if pattern_type == "gaussian":
         return GaussianPattern(mu, scale, **kwargs)
     elif pattern_type == "laplace":
-        return LaplacePattern(mu, scale, **kwargs)  # scale interpreted as b
+        b = np.ones(len(mu)) * scale if np.isscalar(scale) else np.asarray(scale)
+        return LaplacePattern(mu, b, **kwargs)
     else:
         raise ValueError(f"Unknown pattern_type: {pattern_type!r}")
+
+
+def pattern_from_dict(d: dict):
+    """Deserialise a pattern from a dict produced by to_dict()."""
+    t = d.get('type', 'gaussian')
+    if t == 'gaussian':
+        return GaussianPattern.from_dict(d)
+    elif t == 'laplace':
+        return LaplacePattern.from_dict(d)
+    else:
+        raise ValueError(f"Unknown pattern type in dict: {t!r}")
 ```
 
-When a scalar or `init_sigma` float is passed as `scale` for Laplace, it is broadcast to `np.ones(D) * scale`.
-
-The Agent class reads `self.config.pattern_type` and calls the factory when initialising its pattern. No other Agent code changes.
+The Agent class reads `self.config.pattern_type` and calls `make_pattern` when initialising its pattern. Any code path that deserialises patterns from dicts uses `pattern_from_dict`.
 
 ### Orchestrator (`benchmarks/multi_agent_common.py`)
 
@@ -94,23 +122,38 @@ The Agent class reads `self.config.pattern_type` and calls the factory when init
 
 ## Section 3: Integration with Existing Systems
 
-### MetaPatternRule
+### MetaPatternRule (`hpm/dynamics/meta_pattern_rule.py`)
 
-No code changes. The `sym_kl_normalised` Monte Carlo fallback already handles non-Gaussian patterns. LaplacePattern's absence of a `sigma` attribute routes it there automatically. Cost: ~200 samples per pair, but the existing `n > 20` guard suppresses pairwise KL for large stores.
+**Minimal change required.** The existing Monte Carlo fallback branch calls `rng.multivariate_normal(p.mu, p.sigma, n_samples)`, which requires `.sigma` — crashing for `LaplacePattern`. Fix: replace the two `rng.multivariate_normal(...)` calls with `p.sample(n_samples, rng)` and `q.sample(n_samples, rng)`:
+
+```python
+# Before (broken for non-Gaussian):
+samples_p = rng.multivariate_normal(p.mu, p.sigma, n_samples)
+samples_q = rng.multivariate_normal(q.mu, q.sigma, n_samples)
+
+# After (works for any pattern with sample()):
+samples_p = p.sample(n_samples, rng)
+samples_q = q.sample(n_samples, rng)
+```
+
+`GaussianPattern` gains a `sample(n, rng)` method returning `rng.multivariate_normal(self.mu, self.sigma, n)`. `LaplacePattern` gains `sample(n, rng)` returning `rng.laplace(self.mu, self.b, size=(n, len(self.mu)))`. The `if hasattr(p, 'sigma')` guard remains unchanged — it still correctly routes Gaussian pairs through the fast Cholesky KL path.
 
 ### TieredStore / PatternStore
 
-No changes. Stores hold pattern objects by agent_id and never inspect their type. Tier1→Tier2 promotion, negative partition, and `query()` all operate on any object with a `log_prob` method.
+No changes. Stores hold pattern objects by agent_id and never inspect their type.
 
 ### PatternField
 
-No changes. `pattern.recombine(other)` is called during cross-agent sharing. With homogeneous per-agent stores, both patterns are always the same type.
+No changes. `pattern.recombine(other)` is called during cross-agent sharing. With homogeneous per-agent stores, both patterns are always the same type (see invariant in Section 1).
 
-### ARC Benchmark
+### ARC Benchmark (`benchmarks/multi_agent_arc.py`)
 
-`make_arc_orchestrator()` in `benchmarks/multi_agent_arc.py` gains an optional `pattern_types` parameter. A new convenience function `make_arc_laplace_orchestrator()` sets `pattern_types=["laplace", "laplace"]`. `ensemble_score` calls `p.log_prob(vec)` — works identically for both types.
+- `make_arc_orchestrator()` gains an optional `pattern_types` parameter (default: `["gaussian", "gaussian"]`)
+- `evaluate_task()` gains an optional `pattern_types` parameter, threads it through to `make_arc_orchestrator()`
+- New convenience function `make_arc_laplace_orchestrator()` calls `make_arc_orchestrator(pattern_types=["laplace", "laplace"])`
+- `ensemble_score` calls `p.log_prob(vec)` — works identically for both types
 
-**Validation:** Run the multi-agent ARC benchmark with the Laplace orchestrator on the training split. Compare accuracy and mean-rank against the Gaussian baseline to confirm the pattern type has distinct and functional behaviour.
+**Validation:** Run the multi-agent ARC benchmark with `make_arc_laplace_orchestrator()` on the training split. Compare accuracy and mean-rank against the Gaussian baseline.
 
 ---
 
@@ -121,25 +164,34 @@ No changes. `pattern.recombine(other)` is called during cross-agent sharing. Wit
 - `log_prob` returns lower NLL for `x = mu` than for `x` far from `mu`
 - `log_prob` is always finite for valid inputs
 - `update` increments `_n_obs`, moves `mu` toward observed `x`
-- `b` converges toward `|x - mu|` after repeated identical observations
-- `hasattr(pattern, 'sigma')` returns `False` (critical for MetaPatternRule routing)
+- `b` converges toward `|x - mu_old|` after repeated identical observations
+- `sample(n, rng)` returns array of shape `(n, D)` with values drawn from Laplace distribution
+- `hasattr(pattern, 'sigma')` returns `False`
+- `connectivity()` always returns `0.0`
 - `recombine` with another `LaplacePattern` averages `mu` and `b`
 - `recombine` with a `GaussianPattern` raises `TypeError`
-- `to_dict` / `from_dict` round-trip preserves all fields
+- `to_dict` / `from_dict` round-trip preserves all fields; `to_dict()['type'] == 'laplace'`
 - `is_structurally_valid` returns `False` when any `b ≤ 0`
+
+### `tests/patterns/test_gaussian_sample.py` (unit, new)
+
+- `GaussianPattern.sample(n, rng)` returns array of shape `(n, D)`
+- Mean of samples is close to `mu` (statistical check, large n)
 
 ### `tests/patterns/test_factory.py` (unit)
 
 - `make_pattern("gaussian", ...)` returns `GaussianPattern`
 - `make_pattern("laplace", ...)` returns `LaplacePattern`
+- Scalar `scale` broadcast correctly for Laplace
+- `pattern_from_dict({'type': 'gaussian', ...})` returns `GaussianPattern`
+- `pattern_from_dict({'type': 'laplace', ...})` returns `LaplacePattern`
 - Unknown `pattern_type` raises `ValueError`
-- Scalar `scale` is broadcast correctly for both types
 
 ### `tests/integration/test_laplace_arc.py` (integration)
 
-- Runs `make_arc_orchestrator(pattern_types=["laplace", "laplace"])` on 10 ARC tasks
+- Runs `evaluate_task(..., pattern_types=["laplace", "laplace"])` on 10 ARC tasks
 - Asserts no exceptions and `mean_rank ≤ 5.0`
-- Confirms `log_prob` outputs differ between Gaussian and Laplace on the same vector (validates distinct behaviour)
+- Confirms `log_prob` outputs differ between Gaussian and Laplace on the same vector
 
 All existing test files remain unchanged; all current tests must pass after this phase.
 
@@ -149,8 +201,11 @@ All existing test files remain unchanged; all current tests must pass after this
 
 | Decision | Rationale |
 |----------|-----------|
-| No `sigma` attribute on LaplacePattern | Routes KL computation to existing Monte Carlo fallback without touching MetaPatternRule |
-| Running mean for `mu` (not true median) | Median estimation online is non-trivial; running mean is a practical approximation sufficient for pattern matching |
-| Homogeneous per-agent (not mixed store) | Defers cross-type recombination and KL problems until the Laplace type is validated |
-| `b` floor at `1e-6` | Prevents degenerate collapse analogous to Gaussian's Cholesky fallback for near-singular sigma |
-| Factory in separate file | Keeps `gaussian.py` and `laplace.py` independent; factory is the only place that knows about all types |
+| `sample()` method on patterns | Fixes Monte Carlo KL fallback cleanly; makes pattern protocol more complete; two-line change to MetaPatternRule |
+| No `sigma` attribute on LaplacePattern | Routes to Monte Carlo branch in `sym_kl_normalised` automatically |
+| `mu_old` for `b` residual | Avoids downward bias from computing residual against already-shifted mean |
+| `b` updated online (unlike Gaussian's fixed `sigma`) | Single-parameter per-dimension scale is cheap to estimate; Gaussian sigma is kept fixed for stability |
+| `connectivity()` returns 0.0 | Diagonal scale has no off-diagonal structure; honest over misleading proxy |
+| `pattern_from_dict()` in factory | Single dispatch point for deserialisation; keeps pattern classes independent |
+| Homogeneous per-agent (not mixed store) | Defers cross-type recombination and KL problems until Laplace is validated |
+| `b` floor at `1e-6` | Prevents degenerate collapse analogous to Gaussian's Cholesky fallback |
