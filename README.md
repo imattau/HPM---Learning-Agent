@@ -87,10 +87,27 @@ Tests pattern generalisation on tasks from the Abstraction and Reasoning Corpus 
 The multi-agent version splits training pairs between two agents (even/odd), so each sees fewer examples. Scores are comparable to single-agent, suggesting the PatternField sharing partially compensates for fewer examples per agent.
 
 ### Substrate Efficiency
-Compares how efficiently different pattern substrates represent learned structure — measured by description length relative to predictive accuracy.
+Tests whether the agent discovers a compact representation of a redundant data stream. The data is 3 overlapping Gaussian clusters in 16-dimensional space; an optimal model needs only 3 components. The agent's complexity/accuracy trade-off is compared against Gaussian Mixture Models (GMM) at k=1–5 on a Pareto frontier.
+
+| Model | Complexity | Accuracy | Pareto frontier |
+|---|---|---|---|
+| HPM agent | 0.20 | 0.39 | ✓ |
+| GMM k=1 | 0.00 | 0.00 | ✓ |
+| GMM k=2 | 0.23 | 0.31 | ✗ |
+| GMM k=3 | 0.50 | 0.49 | ✓ |
+| GMM k=4 | 0.77 | 0.71 | ✓ |
+| GMM k=5 | 1.00 | 1.00 | ✓ |
+
+The HPM agent sits on the Pareto frontier — it achieves more accuracy per unit of complexity than GMM k=2, using less representational overhead to capture meaningful structure.
 
 ### Elegance Recovery
-Tests whether the system can recover a more parsimonious (lower description-length) solution after perturbation, analogous to human insight after confusion.
+Tests whether the agent recovers the specific structure of a hidden mathematical law, not just any smooth fit. The agent trains on y = x²/(1+x), then the top-weighted pattern is evaluated against a true-law test set and a distractor (y = x²). A positive gap means the agent distinguishes the training law from the near-identical distractor.
+
+| Steps | Recombinations | NLL (true law) | NLL (distractor) | Gap | Result |
+|---|---|---|---|---|---|
+| 1500 | 17 | −3.33 | −3.27 | +0.06 | RECOVERED |
+
+Pass criterion: gap > 0.
 
 ---
 
