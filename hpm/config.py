@@ -64,7 +64,7 @@ class AgentConfig:
     neg_conflict_threshold: float = 0.7  # cosine sim threshold for negative_merge
     max_tier2_negative: int = 100        # cap on _tier2_negative store size
     # Pattern type selection
-    pattern_type: str = "gaussian"  # "gaussian" | "laplace" | "categorical"
+    pattern_type: str = "gaussian"  # "gaussian" | "laplace" | "categorical" | "beta" | "poisson"
     alphabet_size: int = 10  # K for CategoricalPattern; ignored by Gaussian/Laplace
     global_weight_threshold: float = 0.6
     global_promotion_n: int = 5
