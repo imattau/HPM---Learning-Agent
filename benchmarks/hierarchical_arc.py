@@ -46,12 +46,56 @@ STACK_CONFIGS = [
 
 
 def _make_flat_orchestrator():
-    """Single flat agent baseline."""
+    """Single flat agent baseline (per-task reset)."""
     return make_orchestrator(
         n_agents=1,
         feature_dim=L1_FEATURE_DIM,
         agent_ids=["arc_flat"],
         pattern_types=["gaussian"],
+    )
+
+
+def _make_persistent_l1_orchestrator(store=None):
+    """HPM config for persistent cross-task L1 learning.
+
+    Key additions vs per-task reset:
+    - kappa_d_levels: density bias stabilises recurring cross-task patterns
+      (the critical mechanism — patterns that recur across tasks gain weight)
+    - beta_comp=0.1: compression reward encourages abstraction over repetition
+    - init_sigma=2.0: broader initial patterns for better cross-task coverage
+    - gamma_soc=0.5: social learning between L1 agents via shared field
+
+    Monitor/strategist omitted — they add large per-step overhead across 342 tasks.
+    """
+    return make_orchestrator(
+        n_agents=2,
+        feature_dim=L1_FEATURE_DIM,
+        agent_ids=["l1_0", "l1_1"],
+        pattern_types=["gaussian", "gaussian"],
+        with_monitor=False,
+        beta_comp=0.1,
+        gamma_soc=0.5,
+        init_sigma=2.0,
+        kappa_d_levels=[0.1, 0.2, 0.3, 0.4, 0.5],
+        kappa_D=0.5,
+        store=store,
+    )
+
+
+def _make_persistent_flat_orchestrator(store=None):
+    """Persistent flat baseline — same config as L1 persistent for fair comparison."""
+    return make_orchestrator(
+        n_agents=1,
+        feature_dim=L1_FEATURE_DIM,
+        agent_ids=["arc_flat"],
+        pattern_types=["gaussian"],
+        with_monitor=False,
+        beta_comp=0.1,
+        gamma_soc=0.5,
+        init_sigma=2.0,
+        kappa_d_levels=[0.1, 0.2, 0.3, 0.4, 0.5],
+        kappa_D=0.5,
+        store=store,
     )
 
 
@@ -126,20 +170,154 @@ def run() -> dict:
     }
 
 
+def run_persistent() -> dict:
+    """Persistent mode: single StackedOrchestrator across all tasks with TieredStore.
+
+    L1 agents use a TieredStore:
+      - Tier 1 (ephemeral): task-specific patterns, cleared at end of each task
+      - Tier 2 (persistent): meta-patterns promoted from successful tasks
+
+    L2/L3 use plain InMemoryStore — they accumulate cross-task signal through
+    L1 bundles and are never reset.
+
+    Flat baseline uses an identical TieredStore for fair comparison.
+    CrossTaskRecombinator runs on L1 every 10 tasks to build higher-level patterns.
+    """
+    from hpm.store.tiered_store import TieredStore
+    from hpm.monitor.cross_task_recombinator import CrossTaskRecombinator
+
+    tasks = load_tasks()
+    tasks = [t for t in tasks if task_fits(t)][:400]
+
+    rng = np.random.default_rng(42)
+
+    # L1: full HPM persistent stack + TieredStore
+    # L2/L3: built via make_stacked_orchestrator with default InMemoryStore,
+    # then combined with the pre-built L1 into a StackedOrchestrator directly.
+    from hpm.agents.stacked import StackedOrchestrator
+
+    # Open task "0" context BEFORE construction so Agent._seed_if_empty() writes
+    # initial seed patterns to Tier 1 (task "0"), not Tier 2. Seed patterns then
+    # participate in task 0's training and may be promoted to Tier 2 on success.
+    l1_tiered = TieredStore()
+    flat_tiered = TieredStore()
+    l1_tiered.begin_context("0")
+    flat_tiered.begin_context("0")
+
+    l1_orch, l1_agents, _ = _make_persistent_l1_orchestrator(store=l1_tiered)
+    flat_orch, flat_agents, _ = _make_persistent_flat_orchestrator(store=flat_tiered)
+
+    # Build L2/L3 via make_stacked_orchestrator using a dummy 2-level config,
+    # then extract just the upper levels.
+    _upper_configs = STACK_CONFIGS[1:]  # L2, L3 configs
+    _upper_orch, _upper_agents = make_stacked_orchestrator(
+        l1_feature_dim=L1_FEATURE_DIM + 2,  # L2 input dim
+        level_configs=_upper_configs,
+    )
+
+    level_orches = [l1_orch] + _upper_orch.level_orches
+    level_agents = [l1_agents] + _upper_orch.level_agents
+    level_Ks = [1] + [cfg.K for cfg in STACK_CONFIGS[1:]]
+    stacked_orch = StackedOrchestrator(level_orches, level_agents, level_Ks)
+
+    recombinator = CrossTaskRecombinator()
+
+    hierarchical_correct = 0
+    flat_correct = 0
+    n_evaluated = 0
+
+    for i, task in enumerate(tasks):
+        context_id = str(i)
+        if i > 0:  # "0" was opened before construction to capture seed patterns
+            l1_tiered.begin_context(context_id)
+            flat_tiered.begin_context(context_id)
+
+        # Train on this task's pairs
+        for pair in task["train"]:
+            vec = encode_pair(pair["input"], pair["output"])
+            for _ in range(TRAIN_REPS):
+                stacked_orch.step(vec)
+                flat_orch.step({flat_agents[0].agent_id: vec})
+
+        # Score
+        test_pair = task["test"][0]
+        correct_vec = encode_pair(test_pair["input"], test_pair["output"])
+        distractor_idxs = [j for j in range(len(tasks)) if j != i]
+        chosen = rng.choice(distractor_idxs, size=N_DISTRACTORS, replace=False)
+        distractor_vecs = [
+            encode_pair(tasks[di]["test"][0]["input"], tasks[di]["test"][0]["output"])
+            for di in chosen
+        ]
+        candidates = [correct_vec] + distractor_vecs
+
+        scores_h = [ensemble_score(l1_agents, c) for c in candidates]
+        h_correct = scores_h[0] == min(scores_h)
+        if h_correct:
+            hierarchical_correct += 1
+
+        scores_f = [ensemble_score(flat_agents, c) for c in candidates]
+        f_correct = scores_f[0] == min(scores_f)
+        if f_correct:
+            flat_correct += 1
+
+        # End context: promote L1 patterns to Tier 2 on success
+        l1_tiered.end_context(context_id, correct=h_correct)
+        flat_tiered.end_context(context_id, correct=f_correct)
+
+        n_evaluated += 1
+
+        # Cross-task recombination every 10 tasks
+        if (i + 1) % 10 == 0:
+            for agent in l1_agents:
+                recombinator.consolidate(l1_tiered, agent.agent_id)
+
+    # Guard: L3 must have fired during the run
+    if stacked_orch._level_ticks[-1] == 0:
+        raise RuntimeError(
+            "L3 never fired across the full task sequence. "
+            "Reduce K values or increase TRAIN_REPS."
+        )
+
+    return {
+        "n_tasks": n_evaluated,
+        "hierarchical_correct": hierarchical_correct,
+        "flat_correct": flat_correct,
+        "hierarchical_acc": hierarchical_correct / n_evaluated if n_evaluated else 0.0,
+        "flat_acc": flat_correct / n_evaluated if n_evaluated else 0.0,
+        "chance": 1.0 / (N_DISTRACTORS + 1),
+        "l3_ticks": stacked_orch._level_ticks[-1],
+        "l1_tier2": len(l1_tiered.query_tier2("l1_0")),
+    }
+
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--persistent", action="store_true",
+                        help="Single orchestrator across all tasks (cross-task learning)")
+    args = parser.parse_args()
+
     cfg_str = (
         f"3-level stack "
         f"(L1x2=64, L2x2=66 K={STACK_CONFIGS[1].K}, L3x1=68 K={STACK_CONFIGS[2].K})"
     )
-    print(f"Running Hierarchical ARC Benchmark ({cfg_str})...")
-    m = run()
+
+    if args.persistent:
+        print(f"Running Hierarchical ARC Benchmark — persistent mode ({cfg_str})...")
+        m = run_persistent()
+        print(f"  L3 fired {m['l3_ticks']} times across {m['n_tasks']} tasks")
+        print(f"  L1 Tier 2 patterns promoted: {m['l1_tier2']}")
+    else:
+        print(f"Running Hierarchical ARC Benchmark ({cfg_str})...")
+        m = run()
 
     h_vs_chance = m["hierarchical_acc"] - m["chance"]
     f_vs_chance = m["flat_acc"] - m["chance"]
     h_vs_flat = m["hierarchical_acc"] - m["flat_acc"]
 
+    mode = "persistent" if args.persistent else "per-task reset"
     print_results_table(
-        title=f"Hierarchical ARC Benchmark ({m['n_tasks']} tasks, scored via L1 agents)",
+        title=f"Hierarchical ARC Benchmark ({m['n_tasks']} tasks, {mode}, scored via L1 agents)",
         cols=["Setup", "Accuracy", "vs Chance", "vs Flat"],
         rows=[
             {

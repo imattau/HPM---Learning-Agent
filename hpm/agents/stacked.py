@@ -94,6 +94,7 @@ class StackedOrchestrator:
 def make_stacked_orchestrator(
     l1_feature_dim: int,
     level_configs: list[LevelConfig],
+    level_stores: list | None = None,
 ) -> tuple[StackedOrchestrator, list[list[Agent]]]:
     """Build an N-level StackedOrchestrator from a list of LevelConfig objects.
 
@@ -102,6 +103,11 @@ def make_stacked_orchestrator(
       → L1=D, L2=D+2, L3=D+4, ...
 
     NOTE: level_configs[0].K is ignored. L1 always steps on every call.
+
+    Args:
+        level_stores: Optional list of PatternStore instances, one per level.
+            None entries use the default InMemoryStore. Useful for injecting a
+            TieredStore into L1 for persistent cross-task learning.
 
     Returns: (StackedOrchestrator, list_of_agent_lists_per_level)
     Second element is a convenience alias for orch.level_agents (same objects).
@@ -118,11 +124,13 @@ def make_stacked_orchestrator(
     for i, cfg in enumerate(level_configs):
         feature_dim = l1_feature_dim + 2 * i
         agent_ids = cfg.agent_ids or [f"l{i + 1}_{j}" for j in range(cfg.n_agents)]
+        store = level_stores[i] if level_stores and i < len(level_stores) else None
         orch, agents, _ = make_orchestrator(
             n_agents=cfg.n_agents,
             feature_dim=feature_dim,
             agent_ids=agent_ids,
             pattern_types=[cfg.pattern_type] * cfg.n_agents,
+            store=store,
         )
         level_orches.append(orch)
         all_agents.append(agents)
