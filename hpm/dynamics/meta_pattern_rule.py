@@ -5,14 +5,18 @@ StepResult = namedtuple('StepResult', ['weights', 'total_conflict'])
 
 
 def _gaussian_kl(p, q) -> float:
-    """Closed-form KL(p||q) for multivariate Gaussians (numerically stable)."""
+    """Closed-form KL(p||q) for multivariate Gaussians using cached Cholesky."""
+    p._ensure_chol()
+    q._ensure_chol()
     d = len(p.mu)
     diff = q.mu - p.mu
-    trace_term = float(np.trace(np.linalg.solve(q.sigma, p.sigma)))
-    maha = float(diff @ np.linalg.solve(q.sigma, diff))
-    _, logdet_q = np.linalg.slogdet(q.sigma)
-    _, logdet_p = np.linalg.slogdet(p.sigma)
-    return max(0.0, 0.5 * (trace_term + maha - d + float(logdet_q - logdet_p)))
+    # trace(q.sigma^{-1} @ p.sigma) = ||L_q^{-1} @ L_p||_F^2
+    L_q_inv_L_p = np.linalg.solve(q._chol, p._chol)
+    trace_term = float(np.sum(L_q_inv_L_p ** 2))
+    # maha = diff^T q.sigma^{-1} diff = ||L_q^{-1} diff||^2
+    z = np.linalg.solve(q._chol, diff)
+    maha = float(np.dot(z, z))
+    return max(0.0, 0.5 * (trace_term + maha - d + float(q._log_det - p._log_det)))
 
 
 def sym_kl_normalised(p, q, n_samples: int = 200, rng=None) -> float:
@@ -67,12 +71,15 @@ class MetaPatternRule:
         total_bar = float(np.dot(weights, totals))
 
         # Build incompatibility matrix kappa_{ij}
+        # Skip KL computation for large stores (n > 20) to keep cost bounded.
+        # Weight dynamics still run; only the conflict penalty is suppressed.
         kappa = np.zeros((n, n))  # diagonal stays 0: j!=i exclusion (D5)
-        for i in range(n):
-            for j in range(i + 1, n):  # explicit j != i
-                k = sym_kl_normalised(patterns[i], patterns[j], rng=self._rng)
-                kappa[i, j] = k
-                kappa[j, i] = k
+        if n <= 20:
+            for i in range(n):
+                for j in range(i + 1, n):  # explicit j != i
+                    k = sym_kl_normalised(patterns[i], patterns[j], rng=self._rng)
+                    kappa[i, j] = k
+                    kappa[j, i] = k
         assert np.all(np.diag(kappa) == 0.0), "kappa diagonal must be zero (j!=i in D5)"
 
         total_conflict = float(self.beta_c * float(weights @ kappa @ weights))
