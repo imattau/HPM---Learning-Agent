@@ -114,16 +114,24 @@ def ensemble_score(agents, vec: np.ndarray) -> float:
     """
     total = 0.0
     any_records = False
+    seen_pos_ids: set = set()
+    seen_neg_ids: set = set()
     for agent in agents:
         pos = agent.store.query(agent.agent_id)
         if pos:
             any_records = True
-            total += sum(w * p.log_prob(vec) for p, w in pos)
+            for p, w in pos:
+                if p.id not in seen_pos_ids:
+                    total += w * p.log_prob(vec)
+                    seen_pos_ids.add(p.id)
         if hasattr(agent.store, 'query_negative'):
             neg = agent.store.query_negative(agent.agent_id)
             if neg:
                 any_records = True
-                total -= sum(w * p.log_prob(vec) for p, w in neg)
+                for p, w in neg:
+                    if p.id not in seen_neg_ids:
+                        total -= w * p.log_prob(vec)
+                        seen_neg_ids.add(p.id)
     return total if any_records else 0.0
 
 
