@@ -293,7 +293,8 @@ def _make_distractor(family: str, distractor_idx: int, rng) -> dict:
     }
 
 
-def generate_family_tasks(family: str, n_tasks: int = 60, seed: int = 42) -> list:
+def generate_family_tasks(family: str, n_tasks: int = 60, seed: int = 42,
+                          n_train_pairs: int = 3) -> list:
     """Generate n_tasks for the given physics family.
 
     Task schema:
@@ -308,6 +309,8 @@ def generate_family_tasks(family: str, n_tasks: int = 60, seed: int = 42) -> lis
     Only tasks where the correct candidate achieves the goal are kept.
     Attempts up to 3×n_tasks scenes before returning what's available.
     All 5 candidates share the same test_initial (= test["init"]).
+
+    n_train_pairs: number of training pairs to generate per task (default 3).
     """
     builder = _FAMILY_BUILDERS[family]
     rng = random.Random(seed)
@@ -327,7 +330,7 @@ def generate_family_tasks(family: str, n_tasks: int = 60, seed: int = 42) -> lis
             continue
 
         train_pairs = []
-        for _ in range(3):
+        for _ in range(n_train_pairs):
             try:
                 tr_init, tr_action = builder(rng)
                 tr_final = simulate_scene(tr_init, tr_action)
