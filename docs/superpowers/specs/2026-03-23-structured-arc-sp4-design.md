@@ -94,8 +94,9 @@ for rep in range(TRAIN_REPS):
     for k in range(n):
         obs_a = (pairs_a[k%len(pairs_a)]["input"], pairs_a[k%len(pairs_a)]["output"])
         obs_b = (pairs_b[k%len(pairs_b)]["input"], pairs_b[k%len(pairs_b)]["output"])
-        l1_obs_dict = {l1_agent_ids[0]: ArcL1Encoder.encode(obs_a)[0],
-                       l1_agent_ids[1]: ArcL1Encoder.encode(obs_b)[0]}
+        # l1_enc, l2_enc, l3_enc are pre-constructed encoder instances
+        l1_obs_dict = {l1_agent_ids[0]: l1_enc.encode(obs_a, epistemic=None)[0],
+                       l1_agent_ids[1]: l1_enc.encode(obs_b, epistemic=None)[0]}
         structured_orch.step(obs_a, l1_obs_dict=l1_obs_dict)
         # L2: all agents see all matched object pairs from obs_a (no L2 partitioning)
         # L3: fires every K=3 calls to step() (cadence on training-pair steps)
