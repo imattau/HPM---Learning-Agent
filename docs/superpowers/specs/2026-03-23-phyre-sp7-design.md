@@ -169,11 +169,13 @@ Features:
 3. Net displacement of active ball — magnitude: `displacement / 500`
 4. Net displacement of active ball — direction: `angle / π` (atan2(Δy, Δx), range [−1, 1])
 5. Goal achieved flag: `1.0` if active ball entered goal region, else `0.0`
-6. Max velocity attained by active ball (normalised by `200`)
+6. Max velocity attained by active ball during simulation (normalised by `200`)
 7. Collision count (total across all dynamic objects, normalised by `10`)
 8. Action object mass/restitution ratio: `(action_mass / 10) × action_restitution`
-9. Epistemic from L2: `l2_weight`
-10. Epistemic from L2: `l2_loss`
+9. Active ball final speed: `sqrt(vx_final² + vy_final²) / 200`
+10. Action object displacement magnitude (normalised by `500`; non-zero for Collision family where action ball moves)
+11. Epistemic from L2: `l2_weight`
+12. Epistemic from L2: `l2_loss`
 
 Total: **10 explicit physics features + 2 epistemic = 12 features**
 
