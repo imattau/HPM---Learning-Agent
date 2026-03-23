@@ -101,6 +101,8 @@ Extends `structured_math.py` with three conditions:
 | `l4_only` | L4 prediction scoring only, γ=1.0 always (no L5 monitoring) |
 | `l4l5_full` | Full L4+L5: adaptive γ from L5 meta-monitor |
 
+**Benchmark parameters:** `n_per_family=60`, 3 transformation families → 180 tasks total.
+
 **Expected results:**
 - `l4_only` validates whether structural features predict transformation classes (ablation: intuition without supervision)
 - `l4l5_full` should match or exceed `l2l3` on standard tasks and outperform `l4_only` on tasks where L4 misfires (L5 detects surprise and falls back)
