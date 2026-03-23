@@ -61,6 +61,7 @@ The project includes a suite of benchmarks testing various "Superpowers" (SP) of
 | **SP13** | Chemistry II | Surprise | `benchmarks/structured_chem_logic_v2.py` |
 | **SP14** | Linguistic | Surprise | `benchmarks/structured_linguistic_l4l5.py` |
 | **SP15** | X-Domain | Alignment | `benchmarks/multi_domain_alignment.py` |
+| **SP16** | Rosetta | Discovery | `benchmarks/rosetta_geometric_benchmark.py` |
 
 
 **Example Command:**
