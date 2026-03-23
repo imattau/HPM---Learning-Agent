@@ -59,6 +59,7 @@ The project includes a suite of benchmarks testing various "Superpowers" (SP) of
 | SP11 | DS-1000 | Accuracy | `benchmarks/structured_ds1000_l4l5.py` |
 | **SP12** | Chemistry I | Accuracy | `benchmarks/structured_chem_logic_l4l5.py` |
 | **SP13** | Chemistry II | Surprise | `benchmarks/structured_chem_logic_v2.py` |
+| **SP14** | Linguistic | Surprise | `benchmarks/structured_linguistic_l4l5.py` |
 
 
 **Example Command:**
