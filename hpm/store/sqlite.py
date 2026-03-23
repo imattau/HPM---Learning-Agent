@@ -6,15 +6,16 @@ from hpm.patterns import pattern_from_dict
 class SQLiteStore:
     """
     SQLite-backed PatternStore. Persists patterns across sessions.
-    Schema: patterns(id TEXT PK, agent_id TEXT, pattern_json TEXT, weight REAL).
+    Schema: patterns(id TEXT, agent_id TEXT, pattern_json TEXT, weight REAL, PRIMARY KEY (id, agent_id)).
     """
 
     _SCHEMA = """
     CREATE TABLE IF NOT EXISTS patterns (
-        id TEXT PRIMARY KEY,
+        id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
         pattern_json TEXT NOT NULL,
-        weight REAL NOT NULL
+        weight REAL NOT NULL,
+        PRIMARY KEY (id, agent_id)
     )
     """
 
@@ -37,14 +38,14 @@ class SQLiteStore:
                 (pattern.id, agent_id, json.dumps(pattern.to_dict()), weight),
             )
 
-    def load(self, pattern_id: str) -> tuple:
+    def load(self, pattern_id: str, agent_id: str) -> tuple:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT pattern_json, weight FROM patterns WHERE id = ?",
-                (pattern_id,),
+                "SELECT pattern_json, weight FROM patterns WHERE id = ? AND agent_id = ?",
+                (pattern_id, agent_id),
             ).fetchone()
         if row is None:
-            raise KeyError(pattern_id)
+            raise KeyError(f"{pattern_id} for {agent_id}")
         return pattern_from_dict(json.loads(row[0])), row[1]
 
     def query(self, agent_id: str) -> list:
@@ -62,13 +63,13 @@ class SQLiteStore:
             ).fetchall()
         return [(pattern_from_dict(json.loads(r[0])), r[1], r[2]) for r in rows]
 
-    def delete(self, pattern_id: str) -> None:
+    def delete(self, pattern_id: str, agent_id: str) -> None:
         with self._conn() as conn:
-            conn.execute("DELETE FROM patterns WHERE id = ?", (pattern_id,))
+            conn.execute("DELETE FROM patterns WHERE id = ? AND agent_id = ?", (pattern_id, agent_id))
 
-    def update_weight(self, pattern_id: str, weight: float) -> None:
+    def update_weight(self, pattern_id: str, agent_id: str, weight: float) -> None:
         with self._conn() as conn:
             conn.execute(
-                "UPDATE patterns SET weight = ? WHERE id = ?",
-                (weight, pattern_id),
+                "UPDATE patterns SET weight = ? WHERE id = ? AND agent_id = ?",
+                (weight, pattern_id, agent_id),
             )

@@ -157,7 +157,8 @@ class StructuralLawMonitor:
             norm_weights = [1.0 / len(weights)] * len(weights) if weights else []
         diversity = max(0.0, -sum(w * math.log(w + 1e-9) for w in norm_weights)) if norm_weights else 0.0
 
-        # Redundancy: mean pairwise sym_kl_normalised for Level 4+ patterns
+        # Redundancy: 1.0 - mean pairwise sym_kl_normalised for Level 4+ patterns
+        # High similarity (low KL) -> High redundancy
         l4plus_patterns = [p for p in patterns if getattr(p, "level", 1) >= 4]
         if len(l4plus_patterns) < 2:
             redundancy = 0.0
@@ -166,7 +167,7 @@ class StructuralLawMonitor:
             for i in range(len(l4plus_patterns)):
                 for j in range(i + 1, len(l4plus_patterns)):
                     sims.append(sym_kl_normalised(l4plus_patterns[i], l4plus_patterns[j]))
-            redundancy = float(np.mean(sims)) if sims else 0.0
+            redundancy = float(1.0 - np.mean(sims)) if sims else 0.0
 
         return diversity, redundancy
 

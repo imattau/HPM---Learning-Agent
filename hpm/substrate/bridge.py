@@ -99,24 +99,27 @@ class SubstrateBridgeAgent:
             freq_map[pid] = f_freq
 
         # --- Standard Alignment Pass ---
-        updated_weights: dict = {}  # pattern_id -> new weight after boost
+        # Switch to ADDITIVE boost: w = w + alpha * f_freq
+        # This allows rescuing near-zero patterns.
+        updated_weights: dict = {}  # (pattern_id, agent_id) -> new weight after boost
         for pattern, weight, agent_id in candidates:
             pid = pattern.id
             f_freq = freq_map[pid]
-            new_weight = weight * (1.0 + self.alpha * f_freq)
-            self._store.update_weight(pid, new_weight)
-            updated_weights[pid] = new_weight
+            new_weight = weight + self.alpha * f_freq
+            self._store.update_weight(pid, agent_id, new_weight)
+            updated_weights[(pid, agent_id)] = new_weight
 
         # --- Echo-Chamber Audit ---
+        # Switch to ADDITIVE penalty: w = max(0, w - gamma)
         echo_penalty_applied = False
         redundancy = field_quality.get("redundancy")
         if redundancy is not None and redundancy > self.redundancy_threshold:
             for pattern, weight, agent_id in candidates:
                 pid = pattern.id
                 if freq_map[pid] < self.frequency_low_threshold:
-                    penalised = updated_weights[pid] * (1.0 - self.gamma)
-                    self._store.update_weight(pid, penalised)
-                    updated_weights[pid] = penalised
+                    penalised = max(0.0, updated_weights[(pid, agent_id)] - self.gamma)
+                    self._store.update_weight(pid, agent_id, penalised)
+                    updated_weights[(pid, agent_id)] = penalised
             echo_penalty_applied = True
 
         # --- Per-Agent Normalisation ---
@@ -126,7 +129,7 @@ class SubstrateBridgeAgent:
             total = sum(w for _, w in records)
             if total > 0:
                 for p, w in records:
-                    self._store.update_weight(p.id, w / total)
+                    self._store.update_weight(p.id, aid, w / total)
 
         mean_freq = float(np.mean(list(freq_map.values()))) if freq_map else 0.0
 

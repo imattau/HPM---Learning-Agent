@@ -135,7 +135,7 @@ class Agent:
         total_w = sum(w for _, w in all_records)
         if total_w > 0:
             for p, w in all_records:
-                self.store.update_weight(p.id, w / total_w)
+                self.store.update_weight(p.id, self.agent_id, w / total_w)
         return True
 
     def _seed_if_empty(self) -> None:
@@ -244,12 +244,13 @@ class Agent:
         surviving = []
         surviving_patterns = []
         for p, w in zip(patterns, new_weights):
-            self.store.delete(p.id)
+            self.store.delete(p.id, self.agent_id)
             if w >= self.config.epsilon:
                 updated = p.update(x)
                 self.store.save(updated, float(w), self.agent_id)
-                surviving.append((updated.id, float(w)))
+                surviving.append((updated, float(w)))
                 surviving_patterns.append(updated)
+
 
         # Register with field using post-update UUIDs (preserved by update())
         if self.field is not None:
@@ -285,7 +286,7 @@ class Agent:
                 total_w = sum(w for _, w in all_records)
                 if total_w > 0:
                     for p, w in all_records:
-                        self.store.update_weight(p.id, w / total_w)
+                        self.store.update_weight(p.id, self.agent_id, w / total_w)
             # Cooldown resets unconditionally whether attempt() accepted or not.
             # Intentional: prevents thrashing on an incompatible pattern population.
             self._last_recomb_t = self._t
