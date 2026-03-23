@@ -56,6 +56,8 @@ The project includes a suite of benchmarks testing various "Superpowers" (SP) of
 | **SP5-6** | Math | Accuracy | `benchmarks/structured_math_l4l5.py` |
 | **SP7-8** | Physics | Accuracy | `benchmarks/structured_phyre.py` |
 | **SP10** | Transfer | Alignment | `benchmarks/phyre_delta_alignment.py` |
+| **SP11** | DS-1000 | Accuracy | `benchmarks/structured_ds1000_l4l5.py` |
+| **SP12** | Chemistry | Accuracy | `benchmarks/structured_chem_logic_l4l5.py` |
 
 **Example Command:**
 ```bash
