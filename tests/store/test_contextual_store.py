@@ -409,3 +409,128 @@ def test_begin_context_injects_global_patterns(tmp_path):
 
     tier2_ids = [rec[0].id for rec in tiered.query_tier2_all()]
     assert p.id in tier2_ids, "is_global pattern must be injected into Tier 2"
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Archive format round-trip and backward compat
+# ---------------------------------------------------------------------------
+
+def _make_contextual_store(archive_dir, dim=8):
+    """Helper: ContextualPatternStore with one Tier 2 pattern in a temp dir."""
+    tiered = TieredStore()
+    store = ContextualPatternStore(tiered_store=tiered, archive_dir=archive_dir)
+    p = make_pattern(mu=np.ones(dim), scale=np.eye(dim), pattern_type="gaussian")
+    tiered._tier2.save(p, 1.0, "agent_x")
+    return store, tiered
+
+
+def test_load_archive_old_list_format_returns_empty_l3(tmp_path):
+    """Old list-format pkl loads without error; _load_archive returns []."""
+    store, tiered = _make_contextual_store(str(tmp_path))
+    archive_path = str(tmp_path / "old.pkl")
+    tier2 = tiered.query_tier2_all()
+    with open(archive_path, "wb") as f:
+        pickle.dump(tier2, f)
+    l3_bundles = store._load_archive(archive_path)
+    assert l3_bundles == []
+    # Side effect: Tier 2 was loaded from archive
+    assert len(tiered.query_tier2_all()) > 0
+
+
+def test_load_archive_new_dict_format_returns_l3_bundles(tmp_path):
+    """New dict-format pkl: _load_archive returns list of (mu, w, eps) tuples."""
+    store, tiered = _make_contextual_store(str(tmp_path))
+    archive_path = str(tmp_path / "new.pkl")
+    tier2 = tiered.query_tier2_all()
+    mu = np.array([1.0, 2.0, 3.0])
+    payload = {"tier2": tier2, "l3_bundles": [(mu, 0.9, 0.1)]}
+    with open(archive_path, "wb") as f:
+        pickle.dump(payload, f)
+    l3_bundles = store._load_archive(archive_path)
+    assert len(l3_bundles) == 1
+    stored_mu, stored_w, stored_eps = l3_bundles[0]
+    np.testing.assert_array_almost_equal(stored_mu, mu)
+    assert stored_w == pytest.approx(0.9)
+    assert stored_eps == pytest.approx(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: l3_agents integration
+# ---------------------------------------------------------------------------
+
+def _make_mock_l3_agent(dim=10):
+    """Minimal mock agent with an InMemoryStore for injection tests."""
+    from hpm.store.memory import InMemoryStore
+    from unittest.mock import MagicMock
+    agent = MagicMock()
+    agent.agent_id = "l3_mock"
+    agent.store = InMemoryStore()
+    agent.config = MagicMock()
+    agent.config.feature_dim = dim
+    return agent
+
+
+def test_inject_l3_seeds_agent_store(tmp_path):
+    """After begin_context with a matching L3 archive, L3 agent store contains seeded pattern."""
+    import datetime
+
+    dim = 10
+    tiered = TieredStore()
+    mock_l3 = _make_mock_l3_agent(dim=dim)
+    store = ContextualPatternStore(
+        tiered_store=tiered,
+        archive_dir=str(tmp_path),
+        l3_agents=[mock_l3],
+    )
+
+    # Write an archive with an L3 bundle
+    run_dir = tmp_path / store._run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    mu = np.linspace(0, 1, dim)
+    tier2_p = make_pattern(mu=np.ones(8), scale=np.eye(8), pattern_type="gaussian")
+    tiered._tier2.save(tier2_p, 1.0, "some_agent")
+    tier2_state = tiered.query_tier2_all()
+    archive_path = str(run_dir / "test_ctx.pkl")
+    payload = {"tier2": tier2_state, "l3_bundles": [(mu, 0.8, 0.2)]}
+    with open(archive_path, "wb") as f:
+        pickle.dump(payload, f)
+
+    # Write index so librarian can find this archive
+    index_path = str(run_dir / "index.json")
+    index = [{
+        "context_id": "test_ctx",
+        "signature": {
+            "grid_size": [5, 5],
+            "unique_color_count": 2,
+            "object_count": 3,
+            "aspect_ratio_bucket": "square",
+        },
+        "success_metrics": {"correct": True},
+        "archive_path": archive_path,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    }]
+    with open(index_path, "w") as f:
+        json.dump(index, f)
+
+    # begin_context: should inject the L3 bundle into mock_l3.store
+    sig = SubstrateSignature(grid_size=(5, 5), unique_color_count=2,
+                             object_count=3, aspect_ratio_bucket="square")
+    store.begin_context(sig, first_obs=[np.zeros(8)])
+
+    patterns = mock_l3.store.query_all()
+    assert len(patterns) >= 1
+    np.testing.assert_array_almost_equal(patterns[0][0].mu, mu)
+
+
+def test_no_l3_agents_fallback_unchanged(tmp_path):
+    """With l3_agents=None, begin_context behaviour is identical to existing code."""
+    tiered = TieredStore()
+    store = ContextualPatternStore(
+        tiered_store=tiered,
+        archive_dir=str(tmp_path),
+        l3_agents=None,
+    )
+    sig = SubstrateSignature(grid_size=(5, 5), unique_color_count=2,
+                             object_count=1, aspect_ratio_bucket="square")
+    ctx_id = store.begin_context(sig, first_obs=[np.zeros(8)])
+    assert isinstance(ctx_id, str)

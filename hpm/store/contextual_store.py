@@ -92,6 +92,7 @@ class ContextualPatternStore:
         fingerprint_nll_threshold: float = 50.0,
         global_weight_threshold: float = 0.6,
         global_promotion_n: int = 5,
+        l3_agents: list | None = None,
     ):
         self._store = tiered_store
         self._archive_dir = archive_dir
@@ -100,6 +101,7 @@ class ContextualPatternStore:
         self._global_weight_threshold = global_weight_threshold
         self._global_promotion_n = global_promotion_n
         self._last_sig: Optional[SubstrateSignature] = None
+        self._l3_agents: list | None = l3_agents
 
         # Phase 3: delegate to dedicated classes
         from hpm.store.archive_librarian import ArchiveLibrarian
@@ -133,20 +135,34 @@ class ContextualPatternStore:
     # ------------------------------------------------------------------
 
     def begin_context(self, sig: SubstrateSignature, first_obs: list) -> str:
-        """Warm-start Tier 2 from best matching past episode; return context_id."""
+        """Warm-start Tier 2 and L3 agents from best matching past episode; return context_id."""
         context_id = str(uuid.uuid4())
         self._last_sig = sig
 
-        # Phase 3: delegate coarse filter to librarian
+        # Coarse filter: substrate signature
         candidates = self._librarian.query_archive(sig, Path(self._archive_dir))
 
-        # Phase 3: delegate fine filter (NLL ranking) to forecaster
-        ranked = self._forecaster.rank(
-            candidates, first_obs, nll_threshold=self._fingerprint_nll_threshold
-        )
-        if ranked:
-            best = ranked[0]
-            self._load_archive(str(best.candidate.archive_path))
+        # Fine ranking: L3 cosine similarity if l3_agents available, else NLL (existing path).
+        # Note: _rank_by_l3 returns raw candidate objects (candidate.archive_path).
+        # The forecaster.rank() path returns RankedCandidate wrappers (best.candidate.archive_path).
+        l3_bundles = []
+        if self._l3_agents:
+            from hpm.agents.hierarchical import extract_bundle, encode_bundle
+            current_l3_vecs = [encode_bundle(extract_bundle(a)) for a in self._l3_agents]
+            ranked_candidates = self._rank_by_l3(candidates, current_l3_vecs)
+            if ranked_candidates:
+                best = ranked_candidates[0]
+                l3_bundles = self._load_archive(str(best.archive_path))
+        else:
+            ranked = self._forecaster.rank(
+                candidates, first_obs, nll_threshold=self._fingerprint_nll_threshold
+            )
+            if ranked:
+                best = ranked[0]
+                l3_bundles = self._load_archive(str(best.candidate.archive_path))
+
+        # Inject L3 bundles as seed patterns (no-op if l3_agents=None or l3_bundles=[])
+        self._inject_l3(l3_bundles)
 
         # Phase 3: delegate global injection to librarian
         self._inject_globals()
@@ -162,11 +178,23 @@ class ContextualPatternStore:
         os.makedirs(run_dir, exist_ok=True)
 
         archive_path = os.path.join(run_dir, f"{context_id}.pkl")
-        tmp_path = archive_path + ".tmp.pkl"
+        tmp_path_pkl = archive_path + ".tmp.pkl"
         tier2_state = self._store.query_tier2_all()
-        with open(tmp_path, "wb") as f:
-            pickle.dump(tier2_state, f)
-        os.replace(tmp_path, archive_path)
+
+        correct = success_metrics.get("correct", False)
+        if self._l3_agents and correct:
+            from hpm.agents.hierarchical import extract_bundle
+            l3_bundles = []
+            for a in self._l3_agents:
+                b = extract_bundle(a)  # cache result — read all fields from same bundle
+                l3_bundles.append((b.mu.copy(), float(b.weight), float(b.epistemic_loss)))
+            payload = {"tier2": tier2_state, "l3_bundles": l3_bundles}
+        else:
+            payload = tier2_state  # old list format when no l3_agents or task failed
+
+        with open(tmp_path_pkl, "wb") as f:
+            pickle.dump(payload, f)
+        os.replace(tmp_path_pkl, archive_path)
 
         index_path = os.path.join(run_dir, "index.json")
         index = self._load_index(index_path)
@@ -205,14 +233,84 @@ class ContextualPatternStore:
     # Internal helpers — Phase 1
     # ------------------------------------------------------------------
 
-    def _load_archive(self, archive_path: str) -> None:
-        """Replace Tier 2 with the archived snapshot, respecting the 200-pattern cap."""
+    def _load_archive(self, archive_path: str) -> list:
+        """Load archive from disk. Replace Tier 2 with archived patterns.
+
+        Returns l3_bundles: list of (mu_array, weight, epistemic_loss) tuples.
+        Returns [] for old list-format archives (backward compatible).
+        """
         with open(archive_path, "rb") as f:
             records = pickle.load(f)
-        # Clear existing Tier 2 so archive is a clean REPLACE, not an additive inject
+
+        if isinstance(records, list):
+            # Old format: plain list of (pattern, weight, agent_id)
+            tier2_records = records
+            l3_bundles = []
+        else:
+            # New format: dict with "tier2" and "l3_bundles" keys
+            tier2_records = records.get("tier2", [])
+            l3_bundles = records.get("l3_bundles", [])
+
+        # Replace Tier 2 (clean REPLACE, not additive)
         self._store._tier2._data.clear()
-        for pattern, weight, agent_id in records:
+        for pattern, weight, agent_id in tier2_records:
             self._store.promote_to_tier2(pattern, weight, agent_id)
+
+        return l3_bundles
+
+    def _inject_l3(self, l3_bundles: list) -> None:
+        """Inject stored L3 bundle arrays as GaussianPattern seeds into L3 agents' stores.
+
+        Each bundle is (mu_array, weight, epistemic_loss). Uses identity covariance —
+        weight already encodes certainty; broad prior avoids over-constraining agents
+        before they see the new task's training data.
+        """
+        if not self._l3_agents or not l3_bundles:
+            return
+        from hpm.patterns.factory import make_pattern
+        for mu, weight, epistemic_loss in l3_bundles:
+            pattern = make_pattern(mu=mu, scale=np.eye(len(mu)), pattern_type="gaussian")
+            for agent in self._l3_agents:
+                agent.store.save(pattern, weight, agent.agent_id)
+
+    def _rank_by_l3(self, candidates: list, current_l3_vecs: list) -> list:
+        """Re-rank candidates by cosine similarity of stored L3 bundles to current L3 state.
+
+        candidates: raw candidate objects from ArchiveLibrarian (have .archive_path attribute)
+        current_l3_vecs: list of encoded L3 bundle vectors (one per L3 agent)
+
+        Candidates without L3 bundles (old-format archives) are moved to the end.
+        Returns re-ranked candidates list (most similar first).
+
+        Note: loads the full archive pkl per candidate (pickle does not support partial
+        key loading). Acceptable at benchmark scale (hundreds of tasks).
+        """
+        def _score(candidate) -> float:
+            try:
+                with open(str(candidate.archive_path), "rb") as f:
+                    records = pickle.load(f)
+            except Exception:
+                return -1.0
+            if isinstance(records, list):
+                return -1.0  # old format — no L3 bundles
+            l3_bundles = records.get("l3_bundles", [])
+            if not l3_bundles or not current_l3_vecs:
+                return -1.0
+            sims = []
+            for mu, _w, _eps in l3_bundles:
+                norm_stored = np.linalg.norm(mu)
+                for vec in current_l3_vecs:
+                    norm_cur = np.linalg.norm(vec)
+                    if norm_stored < 1e-12 or norm_cur < 1e-12:
+                        continue
+                    if len(mu) != len(vec):
+                        continue  # dimension mismatch — skip
+                    sims.append(float(np.dot(mu, vec) / (norm_stored * norm_cur)))
+            return float(np.mean(sims)) if sims else -1.0
+
+        scored = [(candidate, _score(candidate)) for candidate in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [c for c, _ in scored]
 
     def _load_index(self, index_path: str) -> list:
         if not os.path.exists(index_path):
