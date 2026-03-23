@@ -49,8 +49,13 @@ class StackedOrchestrator:
         self.level_Ks = level_Ks
         self._level_ticks: list[int] = [0] * len(level_orches)
 
-    def step(self, obs: np.ndarray) -> dict:
+    def step(self, obs) -> dict:
         """Step the hierarchy on one raw observation.
+
+        obs may be:
+          - np.ndarray: broadcast to all L1 agents (original behaviour)
+          - dict[agent_id, np.ndarray]: passed directly to L1 orchestrator,
+            allowing partitioned training where each L1 agent sees different data.
 
         Increment-then-check order (same as HierarchicalOrchestrator):
         each level's tick counter is incremented AFTER that level fires;
@@ -64,7 +69,10 @@ class StackedOrchestrator:
         results: list[dict] = [{} for _ in range(n)]
 
         # Step level 0 (L1) — always fires
-        l1_obs = {a.agent_id: obs for a in self.level_agents[0]}
+        if isinstance(obs, dict):
+            l1_obs = obs
+        else:
+            l1_obs = {a.agent_id: obs for a in self.level_agents[0]}
         results[0] = self.level_orches[0].step(l1_obs)
         self._level_ticks[0] += 1
 

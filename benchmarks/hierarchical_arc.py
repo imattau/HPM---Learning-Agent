@@ -114,11 +114,14 @@ def run() -> dict:
         test_pair = task["test"][0]
         correct_vec = encode_pair(test_pair["input"], test_pair["output"])
 
-        # Pick N_DISTRACTORS from other tasks
+        # Pick N_DISTRACTORS from other tasks.
+        # Distractors share test_input with the correct answer so the task is
+        # "which output fits what I learned?" — same protocol as multi_agent_arc.
+        test_input = test_pair["input"]
         distractor_idxs = [j for j in range(len(tasks)) if j != i]
         chosen = rng.choice(distractor_idxs, size=N_DISTRACTORS, replace=False)
         distractor_vecs = [
-            encode_pair(tasks[di]["test"][0]["input"], tasks[di]["test"][0]["output"])
+            encode_pair(test_input, tasks[di]["train"][0]["output"])
             for di in chosen
         ]
         candidates = [correct_vec] + distractor_vecs
@@ -130,10 +133,21 @@ def run() -> dict:
         )
         l1_agents = all_agents[0]
 
-        for pair in task["train"]:
-            vec = encode_pair(pair["input"], pair["output"])
-            for _ in range(TRAIN_REPS):
-                stacked_orch.step(vec)
+        # Partition training pairs across L1 agents (same as multi_agent_arc).
+        train_pairs = task["train"]
+        pairs_a = train_pairs[0::2] or train_pairs
+        pairs_b = train_pairs[1::2] or train_pairs
+        l1_ids = [a.agent_id for a in l1_agents]
+        n_pairs = max(len(pairs_a), len(pairs_b))
+        for _ in range(TRAIN_REPS):
+            for k in range(n_pairs):
+                obs_a = encode_pair(pairs_a[k % len(pairs_a)]["input"], pairs_a[k % len(pairs_a)]["output"])
+                obs_b = encode_pair(pairs_b[k % len(pairs_b)]["input"], pairs_b[k % len(pairs_b)]["output"])
+                # Alternate: first agent gets obs_a, rest get obs_b
+                l1_obs = {l1_ids[0]: obs_a}
+                for aid in l1_ids[1:]:
+                    l1_obs[aid] = obs_b
+                stacked_orch.step(l1_obs)
 
         # Guard: L3 must have fired at least once for meaningful training
         if stacked_orch._level_ticks[-1] == 0:
@@ -149,9 +163,9 @@ def run() -> dict:
 
         # --- Flat baseline ---
         flat_orch, flat_agents, _ = _make_flat_orchestrator()
-        for pair in task["train"]:
-            vec = encode_pair(pair["input"], pair["output"])
-            for _ in range(TRAIN_REPS):
+        for _ in range(TRAIN_REPS):
+            for k in range(n_pairs):
+                vec = encode_pair(pairs_a[k % len(pairs_a)]["input"], pairs_a[k % len(pairs_a)]["output"])
                 flat_orch.step({flat_agents[0].agent_id: vec})
 
         scores_f = [ensemble_score(flat_agents, c) for c in candidates]
@@ -253,20 +267,29 @@ def run_persistent() -> dict:
         l1_ctx_id = l1_contextual.begin_context(sig, first_obs)
         flat_ctx_id = flat_contextual.begin_context(sig, first_obs)
 
-        # Train on this task's pairs
-        for pair in train_pairs:
-            vec = encode_pair(pair["input"], pair["output"])
-            for _ in range(TRAIN_REPS):
-                stacked_orch.step(vec)
-                flat_orch.step({flat_agents[0].agent_id: vec})
+        # Partition training pairs across L1 agents (same as multi_agent_arc).
+        pairs_a = train_pairs[0::2] or train_pairs
+        pairs_b = train_pairs[1::2] or train_pairs
+        l1_ids = [a.agent_id for a in l1_agents]
+        n_pairs = max(len(pairs_a), len(pairs_b))
+        for _ in range(TRAIN_REPS):
+            for k in range(n_pairs):
+                obs_a = encode_pair(pairs_a[k % len(pairs_a)]["input"], pairs_a[k % len(pairs_a)]["output"])
+                obs_b = encode_pair(pairs_b[k % len(pairs_b)]["input"], pairs_b[k % len(pairs_b)]["output"])
+                l1_obs = {l1_ids[0]: obs_a}
+                for aid in l1_ids[1:]:
+                    l1_obs[aid] = obs_b
+                stacked_orch.step(l1_obs)
+                flat_orch.step({flat_agents[0].agent_id: obs_a})
 
-        # Score
+        # Score: distractors share test_input (same protocol as multi_agent_arc)
         test_pair = task["test"][0]
-        correct_vec = encode_pair(test_pair["input"], test_pair["output"])
+        test_input = test_pair["input"]
+        correct_vec = encode_pair(test_input, test_pair["output"])
         distractor_idxs = [j for j in range(len(tasks)) if j != i]
         chosen = rng.choice(distractor_idxs, size=N_DISTRACTORS, replace=False)
         distractor_vecs = [
-            encode_pair(tasks[di]["test"][0]["input"], tasks[di]["test"][0]["output"])
+            encode_pair(test_input, tasks[di]["train"][0]["output"])
             for di in chosen
         ]
         candidates = [correct_vec] + distractor_vecs
