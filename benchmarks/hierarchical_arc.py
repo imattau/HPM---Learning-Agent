@@ -198,20 +198,12 @@ def run_persistent() -> dict:
     os.makedirs("data", exist_ok=True)
     l1_tiered = TieredStore()
     flat_tiered = TieredStore()
-    l1_contextual = ContextualPatternStore(
-        tiered_store=l1_tiered,
-        archive_dir="data/archives/hierarchical_arc_persistent",
-    )
-    flat_contextual = ContextualPatternStore(
-        tiered_store=flat_tiered,
-        archive_dir="data/archives/hierarchical_arc_persistent_flat",
-    )
 
-    # Build L1 orchestrators with ContextualPatternStore (delegates transparently to TieredStore).
-    # Seed patterns written by Agent._seed_if_empty() go to Tier 2 (no context open at
-    # construction time) — same behaviour as multi_agent_arc.py persistent mode.
-    l1_orch, l1_agents, _ = _make_persistent_l1_orchestrator(store=l1_contextual)
-    flat_orch, flat_agents, _ = _make_persistent_flat_orchestrator(store=flat_contextual)
+    # Build L1 orchestrators using bare TieredStores.
+    # ContextualPatternStore wraps l1_tiered for lifecycle management (begin/end_context).
+    # Agents use l1_tiered directly — ContextualPatternStore delegates all save/query calls to it.
+    l1_orch, l1_agents, _ = _make_persistent_l1_orchestrator(store=l1_tiered)
+    flat_orch, flat_agents, _ = _make_persistent_flat_orchestrator(store=flat_tiered)
 
     # Build L2/L3 via make_stacked_orchestrator, then assemble manually with L1.
     _upper_configs = STACK_CONFIGS[1:]  # L2, L3 configs
@@ -224,6 +216,18 @@ def run_persistent() -> dict:
     level_agents = [l1_agents] + _upper_orch.level_agents
     level_Ks = [1] + [cfg.K for cfg in STACK_CONFIGS[1:]]
     stacked_orch = StackedOrchestrator(level_orches, level_agents, level_Ks)
+
+    # Build ContextualPatternStores AFTER stacked_orch so we can pass l3_agents.
+    # stacked_orch.level_agents[-1] = the L3 agent list.
+    l1_contextual = ContextualPatternStore(
+        tiered_store=l1_tiered,
+        archive_dir="data/archives/hierarchical_arc_persistent",
+        l3_agents=stacked_orch.level_agents[-1],
+    )
+    flat_contextual = ContextualPatternStore(
+        tiered_store=flat_tiered,
+        archive_dir="data/archives/hierarchical_arc_persistent_flat",
+    )
 
     recombinator = CrossTaskRecombinator()
 
