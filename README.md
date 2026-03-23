@@ -49,7 +49,7 @@ Five pattern substrates are implemented, each suited to different data:
 
 ## Benchmarks
 
-Five benchmarks test different aspects of HPM-grounded learning. Multi-agent versions run the full orchestrator (PatternField + Monitor + Strategist + Actor).
+Benchmarks test different aspects of HPM-grounded learning across a progression from flat single-level agents to hierarchical multi-level architectures. Multi-agent versions run the full orchestrator (PatternField + Monitor + Strategist + Actor). For thorough analysis of all results, see [benchmarks/README.md](benchmarks/README.md).
 
 ### Reber Grammar — discrete sequence learning
 The Reber Grammar is a finite-state automaton over a 7-symbol alphabet. Valid sequences follow hidden structural rules; random sequences do not. The agent learns positional symbol distributions and must distinguish valid from random sequences.
@@ -108,6 +108,111 @@ Tests whether the agent recovers the specific structure of a hidden mathematical
 | 1500 | 17 | −3.33 | −3.27 | +0.06 | RECOVERED |
 
 Pass criterion: gap > 0.
+
+---
+
+### SP4 — Structured ARC (hierarchical encoders)
+
+Extends the ARC benchmark with a five-level hierarchical encoder stack (L1: pixel moments, L2: object anatomy, L3: transformation rule, L4: relational meta-rule, L5: strategy gate). Each ablation tests the contribution of each level independently.
+
+| Configuration | Accuracy | vs Flat |
+|---|---|---|
+| flat (no hierarchy) | 63.2% | baseline |
+| l1_only | 63.2% | — |
+| l2_only | 46.5% | −16.7pp |
+| l3_only | — | — |
+| full (L1–L3) | 69.0% | +5.8pp |
+| L4_only | **88.6%** | **+25.4pp** |
+| L4+L5 (full stack) | 88.6% | +25.4pp |
+
+L4 alone delivers a +25.4pp gain. L5 neither adds nor subtracts — it correctly identifies L4 as reliable and sets its gating weight to 1.0.
+
+### SP5 — Structured Math (algebraic transformation families)
+
+Tests hierarchical encoding on symbolic algebraic reasoning: four transformation families (linear, quadratic, exponential, logarithmic), each with multiple task variants.
+
+| Configuration | Accuracy | vs Flat |
+|---|---|---|
+| flat | 10.6% | baseline |
+| l1_only | 10.6% | — |
+| l2_only | 66.7% | +56.1pp |
+| l3_only | **97.8%** | **+87.2pp** |
+| l2+l3 | 96.7% | +86.1pp |
+| full (L1–L3) | 96.7% | +86.1pp |
+
+L3 alone achieves 97.8% — the decisive abstraction level for symbolic reasoning. L1 carries no discriminative signal; the family structure lives entirely at L3.
+
+### SP6 — Math L4/L5
+
+Extends SP5 with L4 (relational meta-rule) and L5 (strategy gate) layers.
+
+| Configuration | Accuracy |
+|---|---|
+| l2+l3 (SP5 baseline) | 96.7% |
+| l4_only | **98.3%** |
+| l4+l5 (full stack) | 98.3% |
+
+L4 adds a further +1.6pp over the already high SP5 baseline. L5 again stays at gamma=1.0, correctly deferring to a reliable L4.
+
+### SP7 — PhyRE Physics Reasoning
+
+Hierarchical encoding applied to simulated physics: four families (Projectile, Bounce, Slide, Collision), 60 tasks each, 240 tasks total. The task is to identify the correct physics outcome from distractors.
+
+| Configuration | Accuracy | vs Flat |
+|---|---|---|
+| flat | 22.5% | baseline |
+| l2+l3 | **62.5%** | **+40.0pp** |
+| l4_only | 61.7% | +39.2pp |
+| l4+l5 (full stack) | 61.7% | +39.2pp |
+
+L2+L3 captures the main signal (+40pp). L4 provides no gain over L2+L3 here — in contrast to ARC, where L4 was the decisive level.
+
+### SP8 — Cross-task L4 (PhyRE)
+
+Tests whether training L4 across physics families (not just within each family) improves transfer. Cross-task training pairs examples from different families at the L4 level.
+
+| Configuration | Accuracy |
+|---|---|
+| l2+l3 (SP7 baseline) | 62.5% |
+| cross_task_l4 | 58.3% |
+
+No gain from cross-task L4 training on PhyRE. The relational structure at L4 does not transfer across physics families in this setting.
+
+### SP9 — Naive Cross-Domain Transfer (zero-padding)
+
+Tests whether representations learned in one domain can be transferred to another via zero-padding (concatenating source-domain embeddings with zeros to match the target embedding dimension). Three transfer directions tested.
+
+| Transfer direction | l2+l3 baseline | cross_domain | Result |
+|---|---|---|---|
+| Math+PhyRE → ARC | 80.0% | 26.7% | NEGATIVE (−53.3pp) |
+| Math+ARC → PhyRE | 58.3% | 16.7% | NEGATIVE (−41.6pp) |
+| PhyRE+ARC → Math | 100% | 22.2% | NEGATIVE (−77.8pp) |
+
+Naive zero-padding collapses performance in all three directions. Cross-domain representations are not structurally compatible without alignment.
+
+### SP10 — Delta Alignment (Procrustes cross-domain transfer)
+
+Replaces zero-padding with Procrustes-based alignment of embedding delta-vectors. Instead of concatenating raw embeddings, it aligns the *change* in representation across abstraction levels using an orthogonal rotation matrix learned from paired examples.
+
+| Transfer direction | l2+l3 baseline | delta_align | vs SP9 | vs baseline |
+|---|---|---|---|---|
+| Math+PhyRE → ARC | 80.0% | **80.0%** | +53.3pp | ties |
+| Math+ARC → PhyRE | 63.3% | **63.3%** | +46.6pp | ties |
+| PhyRE+ARC → Math | 97.8% | 57.8% | +35.6pp | −40.0pp (partial) |
+
+**Verdict: PARTIAL.** Delta alignment beats SP9 in all three directions and ties the within-domain l2+l3 baseline in 2 of 3 cases. The Math→PhyRE→Math direction partially recovers but does not reach baseline, suggesting the Procrustes alignment is insufficient when the source and target embedding geometries are highly dissimilar.
+
+---
+
+### Key architectural findings across SP4–SP10
+
+| Insight | Evidence |
+|---|---|
+| The decisive abstraction level differs by domain | L3 for Math (97.8% solo), L4 for ARC (+25.4pp) |
+| L5 is correctly passive when lower levels are reliable | gamma stays at 1.0 in ARC, Math, PhyRE |
+| ARC rewards meta-relational reasoning; PhyRE does not | L4 +25.4pp on ARC, 0pp on PhyRE |
+| Naive cross-domain transfer destroys performance | SP9: −41 to −78pp vs baseline |
+| Relational delta alignment partially solves transfer | SP10: ties baseline on 2/3 directions |
 
 ---
 
@@ -174,11 +279,34 @@ python benchmarks/structural_immunity.py
 python benchmarks/multi_agent_structural_immunity.py
 python benchmarks/multi_agent_structural_immunity.py --beta  # Beta variant
 
-# Other benchmarks
+# Flat ARC baseline
 python benchmarks/arc_benchmark.py
 python benchmarks/multi_agent_arc.py
+
+# Other early benchmarks
 python benchmarks/substrate_efficiency.py
 python benchmarks/elegance_recovery.py
+
+# SP4 — Structured ARC (hierarchical encoders, L1–L5)
+python benchmarks/structured_arc.py
+
+# SP5 — Structured Math (algebraic transformation families)
+python benchmarks/structured_math.py
+
+# SP6 — Math with L4/L5 layers
+python benchmarks/structured_math_l4l5.py
+
+# SP7 — PhyRE physics reasoning (hierarchical)
+python benchmarks/structured_phyre.py
+
+# SP8 — Cross-task L4 training sweep (PhyRE)
+python benchmarks/phyre_cross_task_l4.py
+
+# SP9 — Naive cross-domain transfer (zero-padding)
+python benchmarks/phyre_cross_domain_l4.py
+
+# SP10 — Delta alignment cross-domain transfer (Procrustes)
+python benchmarks/phyre_delta_alignment.py
 ```
 
 ### Run tests
