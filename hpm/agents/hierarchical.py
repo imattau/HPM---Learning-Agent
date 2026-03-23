@@ -13,6 +13,7 @@ class LevelBundle:
     mu: np.ndarray        # shape (D,) — top pattern mean
     weight: float         # top pattern's store weight
     epistemic_loss: float # running epistemic loss for that pattern
+    strategic_confidence: float = 1.0  # L5 metacognitive gating signal (default: full trust)
 
 
 def extract_bundle(agent: Agent) -> LevelBundle:

@@ -98,15 +98,65 @@ def test_structured_orch_l1_obs_dict_override():
     assert "level1" in result
 
 
-def test_structured_orch_raises_generative_head():
-    """Passing non-None generative_head raises NotImplementedError at construction."""
+def test_structured_orch_accepts_generative_head():
+    """Passing non-None generative_head is now accepted (L4 implemented)."""
+    from hpm.agents.l4_generative import L4GenerativeHead
     l1_orch, l1_agents = _make_level(1, 4, "l1")
     enc1 = _make_dummy_encoder(4)
-    with pytest.raises(NotImplementedError):
-        StructuredOrchestrator(
-            encoders=[enc1],
-            orches=[l1_orch],
-            agents=[l1_agents],
-            level_Ks=[1],
-            generative_head=object(),
-        )
+    head = L4GenerativeHead(feature_dim_in=4, feature_dim_out=4)
+    so = StructuredOrchestrator(
+        encoders=[enc1],
+        orches=[l1_orch],
+        agents=[l1_agents],
+        level_Ks=[1],
+        generative_head=head,
+    )
+    assert so.generative_head is head
+
+
+def test_structured_orch_reset_clears_l4_l5():
+    """reset() clears L4 and L5 state."""
+    from hpm.agents.l4_generative import L4GenerativeHead
+    from hpm.agents.l5_monitor import L5MetaMonitor
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    enc1 = _make_dummy_encoder(4)
+    head = L4GenerativeHead(feature_dim_in=4, feature_dim_out=4)
+    monitor = L5MetaMonitor()
+    so = StructuredOrchestrator(
+        encoders=[enc1],
+        orches=[l1_orch],
+        agents=[l1_agents],
+        level_Ks=[1],
+        generative_head=head,
+        meta_monitor=monitor,
+    )
+    rng = np.random.default_rng(0)
+    so.generative_head.accumulate(rng.standard_normal(4), rng.standard_normal(4))
+    so.generative_head.accumulate(rng.standard_normal(4), rng.standard_normal(4))
+    so.generative_head.fit()
+    so.meta_monitor.update(rng.standard_normal(4), rng.standard_normal(4))
+    so.reset()
+    assert so.generative_head.predict(np.zeros(4)) is None
+    assert so.meta_monitor.strategic_confidence() == 1.0
+
+
+def test_l4_accumulate_and_update_adds_pairs():
+    """_l4_accumulate_and_update stores pairs in L4 head."""
+    from hpm.agents.l4_generative import L4GenerativeHead
+    from hpm.agents.l5_monitor import L5MetaMonitor
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    enc1 = _make_dummy_encoder(4)
+    head = L4GenerativeHead(feature_dim_in=4, feature_dim_out=4)
+    monitor = L5MetaMonitor()
+    so = StructuredOrchestrator(
+        encoders=[enc1],
+        orches=[l1_orch],
+        agents=[l1_agents],
+        level_Ks=[1],
+        generative_head=head,
+        meta_monitor=monitor,
+    )
+    rng = np.random.default_rng(1)
+    for _ in range(3):
+        so._l4_accumulate_and_update(rng.standard_normal(4), rng.standard_normal(4))
+    assert len(so.generative_head._X) == 3

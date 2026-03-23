@@ -19,6 +19,8 @@ class StructuredOrchestrator:
                   level_Ks[i] = K means level i fires every K step() calls.
         _step_ticks: How many times step() has been called (index 0 = total).
                      _step_ticks[i] counts how many times level i has fired.
+        generative_head: Optional L4GenerativeHead for L2->L3 forward prediction.
+        meta_monitor: Optional L5MetaMonitor for metacognitive surprise gating.
     """
 
     def __init__(
@@ -30,10 +32,8 @@ class StructuredOrchestrator:
         generative_head=None,
         meta_monitor=None,
     ):
-        if generative_head is not None:
-            raise NotImplementedError("L4 generative_head not yet implemented")
-        if meta_monitor is not None:
-            raise NotImplementedError("L5 meta_monitor not yet implemented")
+        self.generative_head = generative_head
+        self.meta_monitor = meta_monitor
 
         assert len(encoders) == len(orches) == len(agents), (
             "encoders, orches, and agents must have the same length"
@@ -88,6 +88,27 @@ class StructuredOrchestrator:
                 results[f"level{i + 1}"] = {}
 
         return results
+
+    def reset(self) -> None:
+        """Reset L4 and L5 state (call at each task boundary)."""
+        if self.generative_head is not None:
+            self.generative_head.reset()
+        if self.meta_monitor is not None:
+            self.meta_monitor.reset()
+
+    def _l4_accumulate_and_update(self, l2_vec: np.ndarray, actual_l3_vec: np.ndarray) -> None:
+        """Accumulate an (L2, L3) training pair into L4 and update L5 surprise.
+
+        Called during the training phase of each task step after L2 and L3
+        vectors have been computed. No-op if generative_head is None.
+        L5 update is skipped when l4_pred is None (fewer than 2 pairs so far).
+        """
+        if self.generative_head is None:
+            return
+        self.generative_head.accumulate(l2_vec, actual_l3_vec)
+        l4_pred = self.generative_head.predict(l2_vec)  # None until >= 2 pairs
+        if self.meta_monitor is not None:
+            self.meta_monitor.update(l4_pred, actual_l3_vec)
 
     def _extract_epistemic(self, level_idx: int, step_result: dict) -> tuple[float, float]:
         """Extract (weight, epistemic_loss) from primary agent at this level.
