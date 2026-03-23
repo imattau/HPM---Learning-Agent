@@ -26,6 +26,11 @@ from benchmarks.arc_encoders import (
     ArcL1Encoder, ArcL2Encoder, ArcL3Encoder, _encode_grid_flat, _L1_PROJ,
 )
 from hpm.agents.structured import StructuredOrchestrator
+from hpm.agents.l4_generative import L4GenerativeHead
+from hpm.agents.l5_monitor import L5MetaMonitor
+
+_L2_DIM = 9   # ArcL2Encoder output dim
+_L3_DIM = 14  # ArcL3Encoder output dim
 
 
 def _make_structured_orch():
@@ -84,6 +89,53 @@ def _score_structured(l1_agents, l2_agents, l3_agents, obs, l1_ep, l2_ep):
     return l1_score, l2_score, l3_score
 
 
+def _cosine_dist(a: np.ndarray, b: np.ndarray) -> float:
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    if na < 1e-12 or nb < 1e-12:
+        return 1.0
+    return float(1.0 - np.dot(a, b) / (na * nb))
+
+
+def _build_l4_for_task(train_pairs, l2_enc, l3_enc, l2_ep) -> tuple:
+    """Fit L4 on training pairs. Returns (head, monitor, l2_prototype, l3_prototype)."""
+    l2_vecs, l3_vecs = [], []
+    for pair in train_pairs:
+        obs = (pair["input"], pair["output"])
+        l2v = l2_enc.encode(obs, epistemic=None)
+        l2_mean = np.mean(l2v, axis=0) if l2v else np.zeros(_L2_DIM)
+        l3v = l3_enc.encode(obs, epistemic=l2_ep)
+        l3_mean = l3v[0] if l3v else np.zeros(_L3_DIM)
+        l2_vecs.append(l2_mean)
+        l3_vecs.append(l3_mean)
+
+    l2_proto = np.mean(l2_vecs, axis=0) if l2_vecs else np.zeros(_L2_DIM)
+    l3_proto = np.mean(l3_vecs, axis=0) if l3_vecs else np.zeros(_L3_DIM)
+
+    head = L4GenerativeHead(feature_dim_in=_L2_DIM, feature_dim_out=_L3_DIM)
+    monitor = L5MetaMonitor()
+    for l2v, l3v in zip(l2_vecs, l3_vecs):
+        head.accumulate(l2v, l3v)
+        pred = head.predict(l2v)
+        monitor.update(pred, l3v)
+    head.fit()
+    return head, monitor, l2_proto, l3_proto
+
+
+def _score_l4(obs, l2_enc, l3_enc, l2_ep, head, l3_proto, gamma) -> float:
+    """Score a candidate using L4 interpolated with L3 NLL."""
+    l2v = l2_enc.encode(obs, epistemic=None)
+    l2_mean = np.mean(l2v, axis=0) if l2v else np.zeros(_L2_DIM)
+    l3v = l3_enc.encode(obs, epistemic=l2_ep)
+    l3_mean = l3v[0] if l3v else np.zeros(_L3_DIM)
+
+    l3_nll = float(np.sum((l3_mean - l3_proto) ** 2))
+    pred = head.predict(l2_mean)
+    if pred is None:
+        return l3_nll
+    cos_d = _cosine_dist(l3_mean, pred)
+    return gamma * cos_d + (1.0 - gamma) * l3_nll
+
+
 def run(max_tasks: int | None = None) -> dict:
     tasks = load_tasks()
     tasks = [t for t in tasks if task_fits(t)][:400]
@@ -92,7 +144,7 @@ def run(max_tasks: int | None = None) -> dict:
 
     rng = np.random.default_rng(42)
 
-    flat_correct = l1_correct = l2_correct = full_correct = 0
+    flat_correct = l1_correct = l2_correct = full_correct = l4_correct = l4l5_correct = 0
     n_evaluated = 0
 
     for i, task in enumerate(tasks):
@@ -132,6 +184,15 @@ def run(max_tasks: int | None = None) -> dict:
         l1_ep = orch._epistemic[0] or (0.0, 0.0)
         l2_ep = orch._epistemic[1] or (0.0, 0.0)
 
+        # --- L4/L5 setup ---
+        l2_enc_inst = ArcL2Encoder()
+        l3_enc_inst = ArcL3Encoder()
+        l4_head, l5_monitor, l2_proto, l3_proto = _build_l4_for_task(
+            train_pairs, l2_enc_inst, l3_enc_inst, l2_ep
+        )
+        gamma_l4 = 1.0
+        gamma_l4l5 = l5_monitor.strategic_confidence()
+
         # Score all candidates
         all_scores = [
             _score_structured(l1_agents, l2_agents, l3_agents, obs, l1_ep, l2_ep)
@@ -147,6 +208,16 @@ def run(max_tasks: int | None = None) -> dict:
             l2_correct += 1
         if combined[0] == min(combined):
             full_correct += 1
+
+        # L4 scoring
+        l4_scores = [_score_l4(obs, l2_enc_inst, l3_enc_inst, l2_ep, l4_head, l3_proto, gamma_l4) for obs in all_obs]
+        if l4_scores[0] == min(l4_scores):
+            l4_correct += 1
+
+        # L4L5 scoring
+        l4l5_scores = [_score_l4(obs, l2_enc_inst, l3_enc_inst, l2_ep, l4_head, l3_proto, gamma_l4l5) for obs in all_obs]
+        if l4l5_scores[0] == min(l4l5_scores):
+            l4l5_correct += 1
 
         # --- Flat baseline ---
         flat_orch, flat_agents = _make_flat_orch()
@@ -175,6 +246,8 @@ def run(max_tasks: int | None = None) -> dict:
         "l1_acc": l1_correct / n_evaluated if n_evaluated else 0.0,
         "l2_acc": l2_correct / n_evaluated if n_evaluated else 0.0,
         "full_acc": full_correct / n_evaluated if n_evaluated else 0.0,
+        "l4_acc": l4_correct / n_evaluated if n_evaluated else 0.0,
+        "l4l5_acc": l4l5_correct / n_evaluated if n_evaluated else 0.0,
         "chance": chance,
     }
 
@@ -191,6 +264,8 @@ def main():
             {"Setup": "L1 only (structured train)", "Accuracy": f"{m['l1_acc']:.1%}", "vs Chance": f"{m['l1_acc']-chance:+.1%}"},
             {"Setup": "L2 only (object anatomy)",  "Accuracy": f"{m['l2_acc']:.1%}", "vs Chance": f"{m['l2_acc']-chance:+.1%}"},
             {"Setup": "Full (L1+L2+L3 combined)",  "Accuracy": f"{m['full_acc']:.1%}", "vs Chance": f"{m['full_acc']-chance:+.1%}"},
+            {"Setup": "L4 only (ridge, gamma=1.0)", "Accuracy": f"{m['l4_acc']:.1%}", "vs Chance": f"{m['l4_acc']-chance:+.1%}"},
+            {"Setup": "L4+L5 (adaptive gamma)",    "Accuracy": f"{m['l4l5_acc']:.1%}", "vs Chance": f"{m['l4l5_acc']-chance:+.1%}"},
         ],
     )
 
