@@ -27,6 +27,7 @@ from hpm_ai_v1.core.l5_compiler import L5Compiler
 from hpm_ai_v1.store.concurrent_sqlite import ConcurrentSQLiteStore
 from hpm_ai_v1.transpiler.encoders import ASTL2Encoder
 from hpm_ai_v1.core.benchmark_generator import AutonomousBenchmarkGenerator
+from hpm_ai_v1.transpiler.mmr import MMRTranslator, ProjectManifold
 
 class SuccessionController:
     def __init__(self, repo_path: str, db_path: str, target_file: str):
@@ -41,18 +42,32 @@ class SuccessionController:
         self.mutator = CodeMutationActor(l2_dim=16, l3_dim=32)
         self.l2_enc = ASTL2Encoder()
         self.bench_gen = AutonomousBenchmarkGenerator(repo_path)
+        self.mmr_trans = MMRTranslator()
+        self.project_manifold = ProjectManifold()
         
         self.agents = [
             Agent(AgentConfig(agent_id=f"miner_{i}", feature_dim=16), store=self.store, field=self.field)
             for i in range(2)
         ]
         self.orchestrator = MultiAgentOrchestrator(self.agents, self.field)
-        self.max_generations = 10
+        self.max_generations = 5
         self.test_command = "pytest tests/ -v"
 
+    def build_project_manifold(self):
+        """Ingest the entire codebase into the Global Brain (ProjectManifold)."""
+        print("Ingesting Project Manifold (Global Brain)...")
+        for filepath in self.code_sub.get_all_python_files():
+            tree = self.code_sub.parse_ast(filepath)
+            if tree:
+                rel_graph = self.mmr_trans.to_relational_graph(tree)
+                self.project_manifold.add_module(filepath, rel_graph)
+        print(f"Ingested {len(self.project_manifold.modules)} modules.")
+
     def run_succession_loop(self):
+        self.build_project_manifold()
+        
         # 1. Initial Baseline
-        print("Evaluating Baseline (Generation 0)...")
+        print(f"Evaluating Baseline (Generation 0) for {self.target_file}...")
         target_path = os.path.join(self.repo_path, self.target_file)
         tree = self.code_sub.parse_ast(target_path)
         node_count = len(list(ast.walk(tree))) if tree else 1000
@@ -85,6 +100,13 @@ class SuccessionController:
                 print("No novel logic forged. L5 stagnation tracking updated.")
                 self.compiler.evaluate_mutation({"success": False}, current_source)
             else:
+                # Project-Level Structural Immunity Check
+                new_tree = ast.parse(new_source)
+                new_mmr = self.mmr_trans.to_relational_graph(new_tree)
+                if not self.project_manifold.check_structural_immunity(target_path, new_mmr):
+                    self.compiler.evaluate_mutation({"success": False}, current_source)
+                    continue
+
                 # Step B: Sandbox Validation (Patch-based)
                 print("Verifying New Generation in Sandbox (Unified Diff Head)...")
                 result = self.sandbox.evaluate_code(new_source, self.target_file, test_command=self.test_command)
@@ -104,9 +126,9 @@ class SuccessionController:
             time.sleep(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="HPM AI v2.1 Succession Controller")
+    parser = argparse.ArgumentParser(description="HPM AI v2.2 Succession Controller")
     parser.add_argument("--repo_path", type=str, default=".", help="Path to codebase")
-    parser.add_argument("--target_file", type=str, required=True, help="File to mutate")
+    parser.add_argument("--target_file", type=str, default="hpm/evaluators/resource_cost.py", help="File to mutate")
     parser.add_argument("--db_path", type=str, default="hpm_ai_v2.db", help="Path to pattern store")
     args = parser.parse_args()
 

@@ -1,7 +1,8 @@
-"""Middle-Manifold Representation (MMR) for HPM AI v2.1.
+"""Middle-Manifold Representation (MMR) for HPM AI v2.2.
 
 Decouples Relational Logic from Python Syntax by representing code as 
-abstract graphs of functional primitives. Transitioned to Vectorized Topology.
+abstract graphs of functional primitives.
+Now supports Project-Level Manifolds (The 'Global Brain').
 """
 import ast
 import numpy as np
@@ -23,20 +24,64 @@ class MMRNode:
         self.embedding = _get_basis_vector(node_type)
         self.value = value
         self.children: List['MMRNode'] = []
+        self.dependencies: List[str] = [] # Project-level Call Edges / Imports
 
     def to_dict(self) -> Dict:
         return {
             "type": self.node_type,
             "embedding": self.embedding.tolist(),
             "value": self.value,
-            "children": [c.to_dict() for c in self.children]
+            "children": [c.to_dict() for c in self.children],
+            "dependencies": self.dependencies
         }
+
+class ProjectManifold:
+    """The 'Global Brain' Topology.
+    Maps inter-module dependencies across the entire codebase.
+    """
+    def __init__(self):
+        self.modules: Dict[str, MMRNode] = {}
+        
+    def add_module(self, filepath: str, root_node: MMRNode):
+        self.modules[filepath] = root_node
+        
+    def check_structural_immunity(self, changed_filepath: str, new_node: MMRNode) -> bool:
+        """
+        Detects if a local mutation breaks the global topology.
+        e.g., changing a function signature used by other modules.
+        """
+        # For prototype: simply checks if the 'value' (e.g. func name) was deleted.
+        if changed_filepath not in self.modules:
+            return True
+            
+        old_root = self.modules[changed_filepath]
+        old_exports = [c.value for c in old_root.children if c.node_type in ("FunctionDef", "ClassDef")]
+        new_exports = [c.value for c in new_node.children if c.node_type in ("FunctionDef", "ClassDef")]
+        
+        # If an export is dropped, check if others depend on it
+        dropped = set(old_exports) - set(new_exports)
+        if dropped:
+            # Check all other modules for calls to the dropped exports
+            for path, mod in self.modules.items():
+                if path == changed_filepath: continue
+                # Simple check: does the dependency list contain the dropped name?
+                # (In a full system, this would trace the exact CallEdge)
+                all_deps = self._get_all_deps(mod)
+                if any(d in all_deps for d in dropped):
+                    print(f"Global Contradiction: Mutation breaks dependencies in {path}")
+                    return False
+        return True
+
+    def _get_all_deps(self, node: MMRNode) -> List[str]:
+        deps = list(node.dependencies)
+        for c in node.children:
+            deps.extend(self._get_all_deps(c))
+        return deps
 
 class MMRTranslator:
     """Bridges Python AST and the language-independent MMR Manifold."""
 
     def __init__(self):
-        # Build inverse mapping for reconstruction
         self._type_cache: Dict[str, np.ndarray] = {}
 
     def to_relational_graph(self, node: ast.AST) -> MMRNode:
@@ -51,6 +96,13 @@ class MMRTranslator:
             mmr.value = node.arg
         elif isinstance(node, ast.FunctionDef):
             mmr.value = node.name
+        elif isinstance(node, ast.ClassDef):
+            mmr.value = node.name
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                mmr.dependencies.append(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                mmr.dependencies.append(node.func.attr)
 
         for child in ast.iter_child_nodes(node):
             mmr.children.append(self.to_relational_graph(child))
@@ -58,18 +110,12 @@ class MMRTranslator:
         return mmr
 
     def _match_type(self, embedding: np.ndarray) -> str:
-        """Find the closest AST type by cosine similarity."""
-        # For prototype, we use the known types in ast module
         best_type = "Pass"
         best_sim = -1.0
-        
-        # In a real v3 system, this would be a learned dictionary.
-        # Here we scan common AST types.
         common_types = [
-            "FunctionDef", "Name", "Constant", "arg", "Return", "Assign", 
-            "For", "While", "If", "BinOp", "Call", "Attribute", "Load", "Store"
+            "FunctionDef", "ClassDef", "Name", "Constant", "arg", "Return", "Assign", 
+            "For", "While", "If", "BinOp", "Call", "Attribute", "Load", "Store", "Module"
         ]
-        
         for t in common_types:
             v = _get_basis_vector(t)
             sim = float(np.dot(embedding, v))
@@ -85,7 +131,6 @@ class MMRTranslator:
         if not node_class:
             return ast.Pass()
 
-        # Handle leaf nodes / values
         if node_type == "Name":
             return ast.Name(id=mmr.value or "var", ctx=ast.Load())
         elif node_type == "Constant":
@@ -105,7 +150,8 @@ class MMRTranslator:
                     decorator_list=[],
                     returns=None
                 )
-            # Default empty constructor for structural blocks
+            elif node_type == "Module":
+                return ast.Module(body=children_ast, type_ignores=[])
             return node_class()
         except Exception:
             return ast.Pass()
