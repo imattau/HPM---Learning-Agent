@@ -1,36 +1,35 @@
-# HPM AI v2.1: Geometric Relational Intelligence
-**Design Specification (v1.3 - Vectorized MMR & Dialect Genesis)**
+# HPM AI v3.0: Sovereign Synthetic Intelligence
+**Design Specification (v1.4 - Multi-Agent Hierarchy & Manifold Repair)**
 
 ## 1. Overview
-HPM AI v2.1 hardens the "Synthetic Intelligence" loop by transitioning the Middle-Manifold Representation (MMR) from string-labeled graphs to **Vectorized Topologies**. It introduces **Autonomous Benchmark Expansion** to drive open-ended evolution and implements a formal **Unified Diff Decoder Head** for safe, reviewed self-modification.
+HPM AI v3.0 transitions from a centralized orchestrator to a **Multi-Agent Structured Hierarchy**. It moves beyond text-based patching to **Manifold-Based Repair**, where architectural coherence is maintained through relational alignment between independent reasoning agents (L4 Architects and L5 Monitors).
 
 ## 2. Core Architecture
 
-### 2.1 Vectorized MMR (Code-as-Geometry)
-- **Module**: `hpm_ai_v1.transpiler.mmr`
-- **Function**: Replaces node labels with **L3 Embeddings**.
-- **Logic**:
-    - Every AST node type is mapped to a coordinate in `L3_CODE_SPACE` (32-dim).
-    - Geometric distance between vectors represents semantic similarity (e.g., `Add` is closer to `Sub` than to `If`).
-    - **Manifold Crossover**: Redefined as interpolation and subspace grafting between relational graphs.
+### 2.1 Multi-Agent Structured Hierarchy
+- **Agent Promotion**: Functional modules are promoted to full HPM Agents.
+    - **L5 Monitor Agent**: Specializes in "Structural Immunity" and "Elegance Gating". Treats dependency breaks as high-surprise sensory signals ($S=1.0$).
+    - **L4 Architect Agent**: Designs `ChangeSets` using Relational Recombination.
+- **Agent Negotiation**: Agents communicate via a **Shared Pattern Field**. Conflicts are resolved using the `kappa` incompatibility matrix rather than simple traceback parsing.
 
-### 2.2 Autonomous Benchmark Generator
-- **Module**: `hpm_ai_v1.core.benchmark_generator`
-- **Trigger**: Stagnation ($S < 0.05$ for 3 generations).
-- **Function**: Synthesizes new test cases targeting **Conflict Pairs** in the agent's current model.
-- **Example**: If complexity between $O(n \log n)$ and $O(n)$ is unresolved, generate a benchmark with $N=10^7$ to create clear performance divergence.
+### 2.2 Sovereign Project Ingestion
+- **Source**: Pointed at the true `./` project root.
+- **Dynamic Topology**: The `ProjectTopology` graph is no longer static. Every successful "Succession" (code commit) immediately updates the relational tokens in the `ContextualPatternStore`.
+- **Global Memory**: The entire codebase is treated as a living algebraic manifold.
 
-### 2.3 Unified Diff Decoder Head
-- **Module**: `hpm_ai_v1.sandbox.executor`
-- **Logic**: Moves away from direct file replacement to formal **Unified Diffs** (`.patch`).
-- **Gating**: L5 reviews the patch for **Structural Immunity**, ensuring the delta doesn't introduce logical contradictions before applying it to the main repository.
+### 2.3 Manifold-Based Cascading Repair
+- **Mechanism**: "Metacognitive Repair Turns".
+- **Logic**: When a mutation creates a "Global Contradiction", the Librarian broadcasts a **Structural Shift Signal**.
+- **Litmus Turn**: Dependent agents perform automatic re-anchoring, generating repair patches to align their local logic with the updated global manifold.
+- **Goal**: A single "Generation" produces a coherent multi-file `ChangeSet` that satisfies all internal and external constraints.
 
 ### 2.4 Dialect Genesis (SP20)
-- **Objective**: Direct agent-to-agent communication via the MMR manifold.
-- **Process**: Agents exchange "High-Density Logic Tokens" (Relational Vectors) instead of Python strings, effectively creating a private internal dialect for self-simulation.
+- **Module**: `hpm_ai_v1.substrates.vm_substrate`
+- **Function**: Direct execution of MMR Graphs.
+- **Impact**: Logic is verified in the abstract manifold before being transpiled to Python syntax. Python is treated as a secondary "output language," not the primary "thought space."
 
 ## 3. Implementation Roadmap
-- **Phase 1**: Vectorize the MMR engine.
-- **Phase 2**: Implement the Unified Diff generator and patch-based sandbox.
-- **Phase 3**: Implement the Autonomous Benchmark Generator stub.
-- **Phase 4**: Integrate the stagnation-driven synthesis loop in `main.py`.
+- **Phase 1**: Refactor functional modules into standalone agents.
+- **Phase 2**: Implement `StructuredOrchestrator` for agent negotiation.
+- **Phase 3**: Implement "Structural Shift" broadcasting and automated Litmus Turns.
+- **Phase 4**: Enable full project-root sovereignty and cascading repair.

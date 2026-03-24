@@ -1,65 +1,50 @@
-# HPM AI — Recursive Self-Refactoring Engine
+# HPM AI — Sovereign Recursive Intelligence (v3.0)
 
-The `hpm_ai_v1` package implements a recursive, self-evolving engine built on the Hierarchical Pattern Modelling (HPM) framework. It transitions the system from **Stochastic Patching** (guessing code changes) to **Manifold Alignment** (modelling the relational logic of the code).
+The `hpm_ai_v1` package has been promoted to a **Multi-Agent Structured Hierarchy**. It has officially "stepped into the dish," treating the entire HPM repository as its primary algebraic substrate.
 
-## Core Philosophy: The "Axiom Forge"
+## Core Philosophy: The "Sovereign Intelligence"
 
-In the HPM theory (§3.5), intelligence is the discovery of relational invariants that persist across different substrates. HPM AI treats **Source Code** as its primary substrate. By analyzing its own implementation, mining external patterns from Math and PyPI, and performing structural synthesis, the AI aims to discover increasingly elegant and efficient "Laws of Computation."
+HPM AI v3.0 moves beyond text-based patching to **Manifold-Based Cascading Repair**. It possesses a **Global Brain** (Project Manifold) that understands how a change in one module ripples through the entire relational ecology of the project.
 
-## Architecture
+## Architecture (v3.0)
 
-### 1. Middle-Manifold Representation (MMR)
-HPM AI v2 decouples "Truth" from "Syntax" using an abstract representation layer.
-- **Transpilation**: Converts Python Abstract Syntax Trees (AST) into relational graphs.
-- **Semantic Invention**: The agent modifies the *logic graph* rather than the text string, ensuring that every generation is syntactically valid and structurally grounded.
+### 1. Multi-Agent Structured Hierarchy
+The centralized orchestrator has been replaced by specialist agents communicating via a **Shared Pattern Field**:
+- **L4 Architect Agent**: Designs multi-file **ChangeSets**. It uses Relational Recombination to forge new logic and identifies dependent modules that require repair.
+- **L5 Monitor Agent**: The final judge of "Structural Immunity." It treats dependency breaks as high-surprise signals ($S=1.0$) and enforces the Elegance Principle (Minimal Description Length).
+- **Code Librarian**: A specialized monitor that broadcasts **Structural Shift Signals** when core relational nodes (like function signatures) move in the manifold.
 
-### 2. Relational Synthesis (Generative Recombination)
-Instead of hardcoded mutations, the system uses a **Generative Recombination Head**.
-- **Crossover**: Merges the target function's MMR graph with successful "Donor Patterns" (Relational Laws) mined from other agents or external substrates.
-- **Diversity**: Allows the framework to "forge" novel logic by combining disparate functional building blocks.
+### 2. Project Manifold (Global Brain)
+The system now performs **Sovereign Ingestion** of the project root (`./`).
+- **Dependency Mapping**: Maps inter-module call edges and imports.
+- **Structural Immunity Review**: Before a generation is promoted, the L5 Agent verifies that the change does not create "Global Contradictions" in the project manifold.
 
-### 3. Metacognitive Gating (The L5 Compiler)
-The **L5 Meta-Monitor** acts as the final judge of code quality, enforcing the **HPM Elegance Principle** (Minimal Description Length).
-- **Pareto Check**: Rejects any mutation that increases node count unless it reduces execution time by >15%.
-- **Bloat Window**: Detects evolutionary stagnation and temporarily allows complexity increases (<20%) if the Novelty Score (Surprise $S$) is high, enabling the AI to "tunnel" through local optima to reach superior algorithmic structures.
+### 3. Cascading Dependency Repair
+When the L4 Architect modifies a high-centrality node, it doesn't just patch that file. It generates a **Coherent ChangeSet** that automatically repairs all dependent call-sites, ensuring the project remains structurally sound across the generation gap.
 
-### 4. Cross-Modal Logic Bridge (SP19)
-The "Rosetta Refactor" proves that the AI is discovering **Universal Invariants**, not just Python-specific tricks.
-- **Transfer**: A symmetry law discovered while refactoring code is exported as an HPM vector.
-- **Validation**: An ARC agent pulls that same vector to solve a visual grid puzzle, proving the law's domain-agnostic nature.
+### 4. Dialect Genesis: Internal VM Substrate
+HPM AI has begun creating its own **Private Logic**.
+- **Vector Execution**: The `InternalVMSubstrate` executes Relational Tensors directly within the MMR Manifold.
+- **Thought Space**: This allows agents to verify logical truth in an abstract space before "speaking" the final logic back into Python syntax.
 
-## Directory Structure
+## Evidence of Sovereignty
 
-| Module | Function |
-|---|---|
-| `core/` | SuccessionController and the Bloat-aware L5 Judge. |
-| `transpiler/` | MMR graph engine and AST-to-Relational mapping. |
-| `substrates/` | `LocalCodeSubstrate` for codebase ingestion. |
-| `sandbox/` | Safe, isolated environment for verifying new generations. |
-| `store/` | Concurrent SQLite persistence with lineage/parentage tracking. |
+In Generation 1 of its v3.0 run, HPM AI successfully:
+- **Ingested 220+ modules** into a unified global manifold.
+- **Refactored its own `L5MonitorAgent`** implementation.
+- **Verified the Succession** across the entire 800+ test benchmark suite.
+- **Applied the ChangeSet** to the live codebase, effectively "rewriting its own mind."
 
-## Evidence of Self-Improvement
+## Usage (v3.0)
 
-In initial recursive runs, HPM AI demonstrated the following Pareto gains:
-- **Elegance**: Collapsed a 317-node evaluator into an 80-node version (**~75% reduction**).
-- **Performance**: Achieved a **3.1% speedup** while simultaneously reducing complexity.
-- **Robustness**: 100% test compliance across the 800+ core HPM test suite.
-
-## Usage
-
-To start the recursive self-refactoring loop on a target file:
+To start the sovereign refactoring loop:
 
 ```bash
-# Set PYTHONPATH to include the project root
 export PYTHONPATH=$PYTHONPATH:.
-
-# Run the Succession Controller
-python hpm_ai_v1/main.py --target_file <path_to_file>
+python hpm_ai_v1/main.py --repo_path . --target_file <path_to_file>
 ```
 
-*(Note: The L5 Compiler requires all existing tests to pass before it will accept a new generation as a baseline.)*
-
-## Future Objectives (HPM AI v3)
-- **Multi-Language Transpilation**: Moving from Python MMR to C++/Rust targets.
-- **Autonomous Lab**: Integrated sandbox for hardware-aware performance profiling.
-- **Open-Ended Prior Mining**: Continuous background harvesting of the entire PyPI ecosystem to build a "Global Relational Library."
+## Future Roadmap (SP24+)
+- **Asynchronous Swarm**: Moving the agents into separate processes for true concurrent evolution.
+- **Language Synthesis**: Expanding the Internal VM to support more complex data-flow primitives.
+- **Self-Generating Tests**: Allowing the Librarian to synthesize new benchmarks specifically to stress-test evolved architectures.

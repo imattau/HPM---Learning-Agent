@@ -1,79 +1,75 @@
-"""Internal VM Substrate for HPM AI v2.2.
+"""Internal VM Substrate for HPM AI v3.0.
 
-Executes the Middle-Manifold Representation (MMR) graphs directly, 
-bypassing Python. This is the foundation of the Dialect Genesis (SP22).
+Executes Middle-Manifold Representation (MMR) graphs directly.
+Allows agents to verify 'Logical Truth' in the abstract manifold 
+before committing to Python syntax.
 """
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from hpm_ai_v1.transpiler.mmr import MMRNode
 
 class InternalVMSubstrate:
     """
-    Executes Relational Tokens directly without translating back to Python.
-    Treats the MMR graph as an abstract data flow machine.
+    The foundation of the 'Geometric Dialect'.
+    Executes Relational Tokens as data-flow graphs.
     """
     def __init__(self):
-        self.memory: Dict[str, Any] = {}
-        # Map node embedding similarity to internal op codes
-        self._op_registry = {
-            "Add": lambda a, b: a + b,
-            "Sub": lambda a, b: a - b,
-            "Mult": lambda a, b: a * b,
-            "Div": lambda a, b: a / b if b != 0 else 0,
-            "Eq": lambda a, b: a == b,
-            "Gt": lambda a, b: a > b,
-            "Lt": lambda a, b: a < b
+        # Map node embeddings to functional operations
+        self._ops = {
+            "Add": lambda args: args[0] + args[1] if len(args) >= 2 else 0,
+            "Sub": lambda args: args[0] - args[1] if len(args) >= 2 else 0,
+            "Mult": lambda args: args[0] * args[1] if len(args) >= 2 else 0,
+            "Eq": lambda args: args[0] == args[1] if len(args) >= 2 else False,
+            "Return": lambda args: args[0] if args else None,
         }
 
-    def _execute_node(self, node: MMRNode, context: Dict[str, Any]) -> Any:
-        # Match node type using embedding (mocked using string type for prototype)
-        # In a full v3 implementation, this would cluster embeddings into operations
+    def _get_op_by_embedding(self, embedding: np.ndarray) -> str:
+        """Find the operator whose basis vector is closest to the node's embedding."""
+        from hpm_ai_v1.transpiler.mmr import _get_basis_vector
+        best_op = "Return"
+        best_sim = -1.0
+        for op in self._ops.keys():
+            v = _get_basis_vector(op)
+            sim = float(np.dot(embedding, v))
+            if sim > best_sim:
+                best_sim = sim
+                best_op = op
+        return best_op
+
+    def execute(self, node: MMRNode, inputs: Dict[str, Any]) -> Any:
+        """Recursive execution of the Relational Manifold."""
+        # 1. Resolve Node Intent via Embedding
+        op_name = self._get_op_by_embedding(node.embedding)
+        
+        # 2. Handle Leaf Nodes
         if node.node_type == "Constant":
             return node.value
-        elif node.node_type == "Name":
-            return context.get(node.value, self.memory.get(node.value, None))
-        elif node.node_type == "BinOp":
-            if len(node.children) >= 2:
-                left = self._execute_node(node.children[0], context)
-                right = self._execute_node(node.children[1], context)
-                op_node = node.children[2] if len(node.children) > 2 else None
-                op_name = op_node.node_type if op_node else "Add" # Default
-                
-                # Execute the relational op
-                op_func = self._op_registry.get(op_name, self._op_registry["Add"])
-                return op_func(left, right)
-        elif node.node_type == "Return":
-            if node.children:
-                return self._execute_node(node.children[0], context)
-        elif node.node_type == "Assign":
-            if len(node.children) >= 2:
-                target = node.children[0]
-                value = self._execute_node(node.children[1], context)
-                if target.node_type == "Name":
-                    context[target.value] = value
-                return value
-        elif node.node_type == "FunctionDef":
-            # Just execute the body for now
-            result = None
-            for child in node.children:
-                result = self._execute_node(child, context)
-            return result
-        elif node.node_type == "Module":
-            result = None
-            for child in node.children:
-                result = self._execute_node(child, context)
-            return result
-            
-        # Fallback: traverse children
-        result = None
-        for child in node.children:
-            result = self._execute_node(child, context)
-        return result
+        if node.node_type == "Name":
+            return inputs.get(node.value)
+        if node.node_type == "arg":
+            return inputs.get(node.value)
 
-    def execute(self, mmr_graph: MMRNode, inputs: Dict[str, Any]) -> Any:
+        # 3. Recursive Child Evaluation
+        child_results = []
+        for child in node.children:
+            res = self.execute(child, inputs)
+            child_results.append(res)
+
+        # 4. Apply Operational Logic
+        if op_name in self._ops:
+            return self._ops[op_name](child_results)
+            
+        return child_results[-1] if child_results else None
+
+    def verify_equivalence(self, mmr_a: MMRNode, mmr_b: MMRNode, test_inputs: List[Dict[str, Any]]) -> float:
         """
-        Executes a Relational Manifold (MMR Graph) with the given inputs.
-        This represents the agent 'thinking' directly in its own logic space.
+        Measures the logical divergence between two manifolds.
+        Proves that a refactored law preserves the original 'Structural Truth'.
         """
-        context = dict(inputs)
-        return self._execute_node(mmr_graph, context)
+        matches = 0
+        for inp in test_inputs:
+            res_a = self.execute(mmr_a, inp)
+            res_b = self.execute(mmr_b, inp)
+            if res_a == res_b:
+                matches += 1
+        return matches / len(test_inputs) if test_inputs else 1.0

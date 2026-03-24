@@ -288,15 +288,15 @@ The open question is whether these properties, demonstrated here in lightweight 
 
 ---
 
-## HPM AI — Self-Improving Synthetic Intelligence
+## HPM AI — Sovereign Recursive Intelligence (v3.0)
 
-The **HPM AI** (implemented in `hpm_ai_v1/`) marks the transition of the framework from a research tool into a recursive, self-refining "Synthetic Intelligence." It treats its own source code as a primary substrate and leverages HPM's hierarchical stack to autonomously evolve its architecture.
+The **HPM AI** (implemented in `hpm_ai_v1/`) has been promoted from a research tool to a **Sovereign Multi-Agent Hierarchy**. It has "stepped into the dish," treating the entire HPM codebase as its primary algebraic substrate.
 
-### Key Capabilities
-- **Middle-Manifold Representation (MMR)**: Decouples logic from syntax by modelling code as abstract relational graphs.
-- **Relational Synthesis**: Forges new code logic via structural crossovers between successful patterns.
-- **Metacognitive Exploration**: Uses "Bloat Windows" to tunnel through local minima and discover novel algorithmic peaks.
-- **Cross-Modal Logic Bridge (SP19)**: Proves that laws discovered in code (e.g., symmetry checks) can be exported to solve visual ARC puzzles, demonstrating universal relational invariance.
+### Core Capabilities (v3.0)
+- **Cascading Dependency Repair**: Automatically identifies and repairs project-wide dependency breaks (TypeErrors, NameErrors) caused by architectural evolution.
+- **Global Project Manifold**: Possesses a "Global Brain" that understands the relational ecology of the entire 220+ module repository.
+- **Agentic Negotiation**: Specialist agents (L4 Architects and L5 Monitors) design and gate ChangeSets through a shared Pattern Field and `kappa` incompatibility matrix.
+- **Dialect Genesis**: Executes abstract relational logic directly within an internal VM substrate, bypassing Python for pure logic verification.
 
 For more details on the self-evolution engine, see [hpm_ai_v1/README.md](hpm_ai_v1/README.md).
 
