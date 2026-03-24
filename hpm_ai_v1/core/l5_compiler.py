@@ -1,7 +1,7 @@
-"""L5 Metacognitive Compiler for HPM AI v2.
+"""L5 Metacognitive Compiler for HPM AI v2.1.
 
-Enforces the HPM Elegance Principle with a stagnation-triggered 'Bloat Window'.
-Allows temporary complexity increases (<20%) to enable algorithmic 'tunnelling'.
+Enforces the HPM Elegance Principle with a stagnation-triggered 'Bloat Window'
+and formal Structural Immunity Review of unified diff patches.
 """
 import ast
 import os
@@ -25,19 +25,43 @@ class L5Compiler:
             tree = ast.parse(source)
             return len(list(ast.walk(tree)))
         except SyntaxError:
-            return float('inf')
+            return 1000000
+
+    def _is_structurally_immune(self, patch: str) -> bool:
+        """Review the unified diff for logic-breaking patterns (Taboos)."""
+        if not patch: return True
+        
+        # Example Taboos: 
+        # - Deleting a function entirely without replacement
+        if "---" in patch and "+++" in patch:
+            lines = patch.splitlines()
+            deleted_count = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+            added_count = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
+            
+            # If we delete 10+ lines and add only 1 (likely 'pass'), it's a structural regression
+            if deleted_count > 10 and added_count <= 2:
+                return False
+        return True
 
     def evaluate_mutation(self, sandbox_result: Dict[str, Any], new_source: str) -> bool:
         """
         Gating logic for accepting a self-authored generation.
-        Introduces Metacognitive Exploration:
-        - If stagnant, permits <20% bloat IF surprise is high (novel algorithm).
+        1. Must pass tests (success = True)
+        2. Must pass Structural Immunity Review
+        3. Must be Pareto-efficient (Elegance Principle)
         """
         if not sandbox_result["success"]:
             print(f"L5 Reject: Sandbox tests failed.")
             self.stagnation_counter += 1
             return False
             
+        # 1. Structural Immunity Review
+        patch = sandbox_result.get("patch", "")
+        if not self._is_structurally_immune(patch):
+            print("L5 Reject: Mutation failed Structural Immunity Review (Logic Contradiction).")
+            self.stagnation_counter += 1
+            return False
+
         new_node_count = self._get_node_count(new_source)
         new_cost = sandbox_result["cost_time"]
         surprise = sandbox_result.get("surprise", 0.0)
@@ -49,17 +73,16 @@ class L5Compiler:
         else:
             self.allow_bloat = False
 
-        # Elegance Principle: 
-        cost_improvement = (self.best_cost - new_cost) / self.best_cost if self.best_cost > 0 else 0
-        
         # BLOAT WINDOW Logic
         if self.allow_bloat and new_node_count <= self.best_node_count * 1.2:
-            if surprise > 0.5: # High novelty signal
+            if surprise > 0.5: 
                 print(f"L5 Accept (Bloat Window): Complexity increased for novel logic (S={surprise:.2f})")
                 self._update_best(new_cost, new_node_count)
                 return True
 
         # Standard Pareto / Elegance Gating
+        cost_improvement = (self.best_cost - new_cost) / self.best_cost if self.best_cost > 0 else 0
+        
         if new_node_count > self.best_node_count:
             if cost_improvement < 0.15:
                 print(f"L5 Reject: Complexity increased ({new_node_count} > {self.best_node_count}) "

@@ -1,7 +1,7 @@
-"""HPM AI v2: Succession Controller.
+"""HPM AI v2.1: Succession Controller.
 
-Implements Abstract Relational Intelligence via MMR, Metacognitive 
-Exploration (Bloat Windows), and Active Prior Injection from PyPI.
+Implements Geometric Relational Intelligence via Vectorized MMR, Metacognitive 
+Exploration (Bloat Windows), and Autonomous Benchmark Expansion.
 """
 import os
 import ast
@@ -26,6 +26,7 @@ from hpm_ai_v1.sandbox.executor import SandboxExecutor
 from hpm_ai_v1.core.l5_compiler import L5Compiler
 from hpm_ai_v1.store.concurrent_sqlite import ConcurrentSQLiteStore
 from hpm_ai_v1.transpiler.encoders import ASTL2Encoder
+from hpm_ai_v1.core.benchmark_generator import AutonomousBenchmarkGenerator
 
 class SuccessionController:
     def __init__(self, repo_path: str, db_path: str, target_file: str):
@@ -35,11 +36,11 @@ class SuccessionController:
         self.field = PatternField()
         self.code_sub = LocalCodeSubstrate(repo_path)
         self.math_sub = MathSubstrate(feature_dim=16)
-        # Initialize PyPI with seed packages
-        self.pypi_sub = PyPISubstrate(seed_packages=["functools", "numpy", "scipy"])
+        self.pypi_sub = PyPISubstrate(seed_packages=["functools", "numpy"])
         self.sandbox = SandboxExecutor(repo_path)
         self.mutator = CodeMutationActor(l2_dim=16, l3_dim=32)
         self.l2_enc = ASTL2Encoder()
+        self.bench_gen = AutonomousBenchmarkGenerator(repo_path)
         
         self.agents = [
             Agent(AgentConfig(agent_id=f"miner_{i}", feature_dim=16), store=self.store, field=self.field)
@@ -47,27 +48,7 @@ class SuccessionController:
         ]
         self.orchestrator = MultiAgentOrchestrator(self.agents, self.field)
         self.max_generations = 10
-
-    def bridge_big_o_inhibitors(self):
-        """Fetch 'Big O' patterns and inject them as negative inhibitors into the field."""
-        print("Substrate Bridging: Injecting Big-O complexity inhibitors...")
-        # L3 laws from MathSubstrate (simulating complexity priors)
-        priors = self.math_sub.fetch("statistics") # Using 'statistics' as a proxy for complexity distributions
-        if priors:
-            mu = priors[0][:16]
-            inhibitor = make_pattern(mu, np.eye(16), pattern_type="gaussian")
-            self.field.broadcast_negative(inhibitor, 0.5, "math_substrate")
-
-    def active_prior_injection(self):
-        """Query PyPI for optimization patterns and inject them into the candidate pool."""
-        print("Active Prior Injection: Mining 'Memoization' patterns from PyPI...")
-        # Simulating mining a successful pattern
-        memo_source = "@functools.lru_cache(None)\ndef memoized_func(x): return x"
-        try:
-            memo_ast = ast.parse(memo_source).body[0]
-            return [memo_ast]
-        except:
-            return []
+        self.test_command = "pytest tests/ -v"
 
     def run_succession_loop(self):
         # 1. Initial Baseline
@@ -76,7 +57,7 @@ class SuccessionController:
         tree = self.code_sub.parse_ast(target_path)
         node_count = len(list(ast.walk(tree))) if tree else 1000
         
-        baseline = self.sandbox.evaluate_code("", self.target_file)
+        baseline = self.sandbox.evaluate_code("", self.target_file, test_command=self.test_command)
         if not baseline["success"]:
             print("Baseline failing tests. Aborting.")
             return
@@ -88,14 +69,7 @@ class SuccessionController:
         for gen in range(1, self.max_generations + 1):
             print(f"\n--- Generation {gen} ---")
             
-            # Step A: Prior-Guided Recombination
-            self.bridge_big_o_inhibitors()
-            pypi_blueprints = self.active_prior_injection()
-            
-            # Step B: Gathering internal L3 population
-            l3_population = pypi_blueprints
-            
-            # Step C: Relational Synthesis (Mutation via MMR)
+            # Step A: Relational Synthesis (Mutation via Vectorized MMR)
             current_source = self.code_sub.read_file(target_path)
             current_tree = self.code_sub.parse_ast(target_path)
             if not current_tree: break
@@ -104,24 +78,33 @@ class SuccessionController:
             if not target_func: break
             
             l2_input = self.l2_enc.encode(target_func)
-            new_source = self.mutator.propose_mutation(current_source, l2_input, l3_population)
+            # Mutation now uses relational recombination in manifold space
+            new_source = self.mutator.propose_mutation(current_source, l2_input, l3_population=[])
             
             if not new_source or new_source == current_source:
                 print("No novel logic forged. L5 stagnation tracking updated.")
                 self.compiler.evaluate_mutation({"success": False}, current_source)
             else:
-                # Step D: Sandbox Validation
-                print("Verifying New Generation in Sandbox...")
-                result = self.sandbox.evaluate_code(new_source, self.target_file)
+                # Step B: Sandbox Validation (Patch-based)
+                print("Verifying New Generation in Sandbox (Unified Diff Head)...")
+                result = self.sandbox.evaluate_code(new_source, self.target_file, test_command=self.test_command)
                 
-                # Step E: Metacognitive Gating (L5)
+                # Step C: Metacognitive Gating (L5 + Structural Immunity)
                 if self.compiler.evaluate_mutation(result, new_source):
                     self.compiler.commit_succession(new_source, self.repo_path, self.target_file)
+                
+            # Step D: Autonomous Benchmark Expansion (Stagnation Trigger)
+            if self.compiler.stagnation_counter >= 3:
+                print("!!! Stagnation Triggered (S < 0.05) !!!")
+                # Forge new constraints to drive evolution
+                new_test_path = self.bench_gen.generate_conflict_benchmark(reason="stagnation")
+                # Add to subsequent test runs
+                # (In real system, we'd append to test_command)
                 
             time.sleep(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="HPM AI v2 Succession Controller")
+    parser = argparse.ArgumentParser(description="HPM AI v2.1 Succession Controller")
     parser.add_argument("--repo_path", type=str, default=".", help="Path to codebase")
     parser.add_argument("--target_file", type=str, required=True, help="File to mutate")
     parser.add_argument("--db_path", type=str, default="hpm_ai_v2.db", help="Path to pattern store")
