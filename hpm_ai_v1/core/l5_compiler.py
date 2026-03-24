@@ -83,22 +83,26 @@ class L5MonitorAgent(Agent):
         d_nodes = (new_node_count - self.best_node_count) / self.best_node_count if self.best_node_count > 0 else 0
         
         # Soft Pareto Score
-        score = d_perf - (current_lam * d_nodes)
+        # Novelty Vector is represented by sandbox surprise (divergence from baseline)
+        novelty = surprise 
         
-        # Acceptance Logic:
-        # 1. If nodes decreased, accept if tests pass (Elegance Gain)
+        # 1. If nodes decreased, AUTO-ACCEPT unless tests failed (Elegance Gain)
         if new_node_count < self.best_node_count:
             print(f"L5 Monitor: Accept Elegance Gain ({new_node_count} < {self.best_node_count})")
             self._update_best(new_cost, new_node_count)
             return True
             
-        # 2. If nodes increased, use Lagrangian score
-        if score > 0.1: # Threshold for significant improvement
-            print(f"L5 Monitor: Accept Lagranian Trade-off (Score={score:.2f})")
-            self._update_best(new_cost, new_node_count)
-            return True
+        # 2. If nodes increased, only accept if stagnation is active and novelty is high
+        if self.stagnation_counter > 3:
+            if novelty > 0.7 and new_node_count <= self.best_node_count * 1.2:
+                print(f"L5 Monitor: Accept High-Novelty Bloat (Novelty={novelty:.2f})")
+                self._update_best(new_cost, new_node_count)
+                return True
+            else:
+                print(f"L5 Reject: Bloat rejected (Novelty {novelty:.2f} <= 0.7)")
+        else:
+            print(f"L5 Reject: Complexity increase forbidden outside Bloat Window.")
 
-        print(f"L5 Reject: Soft Pareto Score insufficient ({score:.2f})")
         self.stagnation_counter += 1
         return False
 
