@@ -26,6 +26,11 @@ class ConcurrentSQLiteStore:
         PRIMARY KEY (id, agent_id)
     );
     CREATE INDEX IF NOT EXISTS idx_agent_id ON patterns(agent_id);
+
+    CREATE TABLE IF NOT EXISTS metadata (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL
+    );
     """
 
     def __init__(self, db_path: str, timeout: float = 10.0):
@@ -42,6 +47,25 @@ class ConcurrentSQLiteStore:
     def _init_db(self):
         with self._conn() as conn:
             conn.executescript(self._SCHEMA)
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        """Store arbitrary JSON-serializable metadata."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value_json) VALUES (?, ?)",
+                (key, json.dumps(value))
+            )
+
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        """Retrieve stored metadata."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT value_json FROM metadata WHERE key = ?",
+                (key,)
+            ).fetchone()
+        if row:
+            return json.loads(row[0])
+        return default
 
     def save(self, pattern, weight: float, agent_id: str, parent_l3_id: Optional[str] = None, recombination_op: Optional[str] = None) -> None:
         with self._conn() as conn:

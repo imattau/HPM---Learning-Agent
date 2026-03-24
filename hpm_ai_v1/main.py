@@ -1,4 +1,4 @@
-"""HPM AI v3.2.2: Sovereign Orchestrator (Substrate-Anchored).
+"""HPM AI v3.2.3: Sovereign Orchestrator (Substrate-Anchored).
 
 Implements Global Saliency: autonomously identifies refactor targets.
 Implements Algebraic MMR: topological verification of relational invariants.
@@ -48,7 +48,8 @@ class SovereignOrchestrator:
         self.l2_enc = ASTL2Encoder()
         self.mmr_trans = MMRTranslator()
         self.topology = ProjectTopology()
-        self.librarian = CodeLibrarian(self.topology)
+        # Librarian persists state via SQLite
+        self.librarian = CodeLibrarian(self.topology, store=self.store)
         
         # Specialists
         self.l4_architect = L4ArchitectAgent(
@@ -84,10 +85,8 @@ class SovereignOrchestrator:
         # 1. Mine 'Pareto' and 'Big-O' laws from Math
         pareto_priors = self.math_sub.fetch("pareto")
         for p_vec in pareto_priors:
-            # Map 16-dim prior to a pattern and anchor in the field
             p = make_pattern(p_vec[:16], np.eye(16)*0.1, pattern_type="gaussian")
             p.label = "pareto_efficiency"
-            # Positive social reward for efficient structures
             self.field.broadcast("math_substrate", p)
 
         # 2. Mine 'Complexity' inhibitors
@@ -97,8 +96,6 @@ class SovereignOrchestrator:
         inhibitor = make_pattern(complexity_mu, np.eye(16), pattern_type="gaussian")
         self.field.broadcast_negative(inhibitor, 0.5, "complexity_monitor")
 
-        # 3. Mine design patterns from PyPI (Active Prior Injection)
-        # Note: In a real run, this feeds the L4 Architect's l3_population
         return []
 
     def run_sovereign_loop(self, max_gens: int = 10):
@@ -116,9 +113,20 @@ class SovereignOrchestrator:
         for gen in range(1, max_gens + 1):
             print(f"\n--- Generation {gen} ---")
             
-            # Step 0: Anchor Knowledge
-            pypi_blueprints = self.run_prior_harvesting()
+            # Step 0: Anchor Knowledge & Social Reinforcement
+            self.run_prior_harvesting()
             
+            # SOCIAL REINFORCEMENT: Miners 'step' to align with manifold
+            for _ in range(5):
+                # Simulated mining tasks
+                obs_math = self.math_sub.fetch("statistics")[0][:16]
+                obs_code = np.random.standard_normal(16) 
+                
+                self.orchestrator.step({
+                    "math_miner": obs_math,
+                    "pypi_miner": obs_code
+                })
+
             # Step 1: Autonomous Saliency Scan
             target_path = self.librarian.get_most_salient_target()
             if not target_path:
@@ -143,9 +151,7 @@ class SovereignOrchestrator:
             if not target_func: continue
             
             l2_in = self.l2_enc.encode(target_func)
-            
-            # Use mined L3 population from store + PyPI blueprints
-            l3_population = pypi_blueprints # Could also query store for patterns with 'efficiency' labels
+            l3_population = [] 
             
             changeset = self.l4_architect.propose_cascading_mutation(
                 self.repo_path, rel_target, self.topology, l2_in, l3_population=l3_population
@@ -184,7 +190,7 @@ class SovereignOrchestrator:
             time.sleep(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="HPM AI v3.2.2 Logic Forge")
+    parser = argparse.ArgumentParser(description="HPM AI v3.2.3 Logic Forge")
     parser.add_argument("--repo_path", type=str, default=".", help="Path to project root")
     parser.add_argument("--db_path", type=str, default="hpm_ai_v3.db", help="Persistent store path")
     args = parser.parse_args()

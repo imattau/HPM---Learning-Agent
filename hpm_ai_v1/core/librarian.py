@@ -1,20 +1,36 @@
-"""Librarian for HPM AI v3.2.1.
+"""Librarian for HPM AI v3.2.3.
 
 Tracks the Global Project Manifold and broadcasts Structural Shift Signals.
 Implements Diversity-Driven Saliency and Metacognitive Tabooing to prevent 
-stagnation loops.
+stagnation loops. Persists state via ConcurrentSQLiteStore.
 """
 from typing import Dict, List, Set, Optional, Tuple
 import numpy as np
 from hpm_ai_v1.transpiler.mmr import ProjectTopology, MMRNode
+from hpm_ai_v1.store.concurrent_sqlite import ConcurrentSQLiteStore
 
 class CodeLibrarian:
-    def __init__(self, topology: ProjectTopology):
+    def __init__(self, topology: ProjectTopology, store: Optional[ConcurrentSQLiteStore] = None):
         self.topology = topology
+        self.store = store
         self.shift_history: List[Dict] = []
-        self.taboo_list: Set[str] = set()
-        self.failure_counts: Dict[str, int] = {}
-        self.target_history: List[str] = []
+        
+        # Load persistent state if store is available
+        if self.store:
+            self.taboo_list = set(self.store.get_metadata("taboo_list", []))
+            self.failure_counts = self.store.get_metadata("failure_counts", {})
+            self.target_history = self.store.get_metadata("target_history", [])
+        else:
+            self.taboo_list = set()
+            self.failure_counts = {}
+            self.target_history = []
+
+    def _save_state(self):
+        """Internal helper to sync state to store."""
+        if self.store:
+            self.store.set_metadata("taboo_list", list(self.taboo_list))
+            self.store.set_metadata("failure_counts", self.failure_counts)
+            self.store.set_metadata("target_history", self.target_history)
 
     def broadcast_structural_shift(self, filepath: str, old_name: str, new_name: str):
         """Signals that a core relational node has moved in the manifold."""
@@ -35,6 +51,7 @@ class CodeLibrarian:
         self.failure_counts[filepath] = 0
         if filepath in self.taboo_list:
             self.taboo_list.remove(filepath)
+        self._save_state()
 
     def report_failure(self, filepath: str):
         """Metacognitive feedback from L5."""
@@ -42,6 +59,20 @@ class CodeLibrarian:
         if self.failure_counts[filepath] >= 3:
             print(f"Librarian: Module {filepath} entered TABOO state (Repeated failures).")
             self.taboo_list.add(filepath)
+        self._save_state()
+
+    def analyze_manifold_redundancy(self) -> List[Tuple[str, str, float]]:
+        """Identifies modules with high relational similarity."""
+        redundancies = []
+        filepaths = list(self.topology.modules.keys())
+        for i in range(len(filepaths)):
+            for j in range(i + 1, len(filepaths)):
+                path_a, path_b = filepaths[i], filepaths[j]
+                mmr_a, mmr_b = self.topology.modules[path_a], self.topology.modules[path_b]
+                sim = float(np.dot(mmr_a.embedding, mmr_b.embedding))
+                if sim > 0.95:
+                    redundancies.append((path_a, path_b, sim))
+        return sorted(redundancies, key=lambda x: x[2], reverse=True)
 
     def get_most_salient_target(self) -> Optional[str]:
         """
@@ -77,6 +108,7 @@ class CodeLibrarian:
             print("Librarian: All salient targets tabooed. Clearing oldest taboos...")
             taboo_list_ordered = list(self.taboo_list)
             self.taboo_list = set(taboo_list_ordered[len(taboo_list_ordered)//2:])
+            self._save_state()
             return self.get_most_salient_target()
 
         # Pick best target
@@ -85,7 +117,8 @@ class CodeLibrarian:
         self.target_history.append(best_target)
         if len(self.target_history) > 10:
             self.target_history.pop(0)
-            
+        
+        self._save_state()
         print(f"Librarian: Saliency detected in {best_target} (Score={highest_score:.2f})")
         return best_target
 
