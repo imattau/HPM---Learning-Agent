@@ -1,12 +1,12 @@
-"""Middle-Manifold Representation (MMR) for HPM AI v2.2.
+"""Middle-Manifold Representation (MMR) for HPM AI v2.3.
 
-Decouples Relational Logic from Python Syntax by representing code as 
-abstract graphs of functional primitives.
-Now supports Project-Level Manifolds (The 'Global Brain').
+Decouples Relational Logic from Python Syntax.
+Now supports Cascading Dependency Repair and Global Project Topology.
 """
 import ast
+import os
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set, Tuple
 
 # Shared padded dimension for the MMR Manifold
 MMR_DIM = 32
@@ -18,75 +18,61 @@ def _get_basis_vector(name: str) -> np.ndarray:
     return v / (np.linalg.norm(v) + 1e-9)
 
 class MMRNode:
-    def __init__(self, node_type: str, value: Any = None):
+    def __init__(self, node_type: str, value: Any = None, filepath: str = ""):
         self.node_type = node_type
-        # Vectorized Topology: node_type is mapped to an L3 Embedding
         self.embedding = _get_basis_vector(node_type)
         self.value = value
+        self.filepath = filepath
         self.children: List['MMRNode'] = []
-        self.dependencies: List[str] = [] # Project-level Call Edges / Imports
+        self.dependencies: List[str] = [] # Names this node calls
+        self.lineno: int = 0
 
     def to_dict(self) -> Dict:
         return {
             "type": self.node_type,
             "embedding": self.embedding.tolist(),
             "value": self.value,
+            "filepath": self.filepath,
             "children": [c.to_dict() for c in self.children],
             "dependencies": self.dependencies
         }
 
-class ProjectManifold:
-    """The 'Global Brain' Topology.
-    Maps inter-module dependencies across the entire codebase.
-    """
+class ProjectTopology:
+    """Maps the 'Relational Ecology' of the entire project."""
     def __init__(self):
+        # Maps name (function/class) -> filepath
+        self.exports: Dict[str, str] = {}
+        # Maps name -> List of (caller_filepath, caller_node)
+        self.in_edges: Dict[str, List[Tuple[str, MMRNode]]] = {}
+        # Maps filepath -> MMR root
         self.modules: Dict[str, MMRNode] = {}
-        
+
     def add_module(self, filepath: str, root_node: MMRNode):
         self.modules[filepath] = root_node
-        
-    def check_structural_immunity(self, changed_filepath: str, new_node: MMRNode) -> bool:
-        """
-        Detects if a local mutation breaks the global topology.
-        e.g., changing a function signature used by other modules.
-        """
-        # For prototype: simply checks if the 'value' (e.g. func name) was deleted.
-        if changed_filepath not in self.modules:
-            return True
-            
-        old_root = self.modules[changed_filepath]
-        old_exports = [c.value for c in old_root.children if c.node_type in ("FunctionDef", "ClassDef")]
-        new_exports = [c.value for c in new_node.children if c.node_type in ("FunctionDef", "ClassDef")]
-        
-        # If an export is dropped, check if others depend on it
-        dropped = set(old_exports) - set(new_exports)
-        if dropped:
-            # Check all other modules for calls to the dropped exports
-            for path, mod in self.modules.items():
-                if path == changed_filepath: continue
-                # Simple check: does the dependency list contain the dropped name?
-                # (In a full system, this would trace the exact CallEdge)
-                all_deps = self._get_all_deps(mod)
-                if any(d in all_deps for d in dropped):
-                    print(f"Global Contradiction: Mutation breaks dependencies in {path}")
-                    return False
-        return True
+        self._index_node(filepath, root_node)
 
-    def _get_all_deps(self, node: MMRNode) -> List[str]:
-        deps = list(node.dependencies)
-        for c in node.children:
-            deps.extend(self._get_all_deps(c))
-        return deps
+    def _index_node(self, filepath: str, node: MMRNode):
+        if node.node_type in ("FunctionDef", "ClassDef") and node.value:
+            self.exports[node.value] = filepath
+        
+        for dep in node.dependencies:
+            if dep not in self.in_edges:
+                self.in_edges[dep] = []
+            self.in_edges[dep].append((filepath, node))
+            
+        for child in node.children:
+            self._index_node(filepath, child)
+
+    def get_impacted_files(self, changed_name: str) -> Set[str]:
+        """Find all files that call the changed name."""
+        return {filepath for filepath, _ in self.in_edges.get(changed_name, [])}
 
 class MMRTranslator:
     """Bridges Python AST and the language-independent MMR Manifold."""
 
-    def __init__(self):
-        self._type_cache: Dict[str, np.ndarray] = {}
-
-    def to_relational_graph(self, node: ast.AST) -> MMRNode:
-        """Convert Python AST to Abstract MMR Graph."""
-        mmr = MMRNode(node_type=type(node).__name__)
+    def to_relational_graph(self, node: ast.AST, filepath: str = "") -> MMRNode:
+        mmr = MMRNode(node_type=type(node).__name__, filepath=filepath)
+        mmr.lineno = getattr(node, 'lineno', 0)
         
         if isinstance(node, ast.Name):
             mmr.value = node.id
@@ -105,7 +91,7 @@ class MMRTranslator:
                 mmr.dependencies.append(node.func.attr)
 
         for child in ast.iter_child_nodes(node):
-            mmr.children.append(self.to_relational_graph(child))
+            mmr.children.append(self.to_relational_graph(child, filepath))
             
         return mmr
 
@@ -125,7 +111,6 @@ class MMRTranslator:
         return best_type
 
     def from_relational_graph(self, mmr: MMRNode) -> ast.AST:
-        """Synthesize Python AST from Vectorized MMR Graph."""
         node_type = self._match_type(mmr.embedding)
         node_class = getattr(ast, node_type, None)
         if not node_class:

@@ -1,53 +1,29 @@
-"""Sandbox Executor for HPM AI v2.1.
+"""Sandbox Executor for HPM AI v2.3.
 
-Implements the 'Decoder Head' for Unified Diffs. Generates and applies 
-standard .patch files to ensure repository integrity during self-modification.
+Safely executes the 'Next Generation' codebase in a temporary directory.
+Now supports Multi-File ChangeSets and Traceback capture.
 """
 import os
 import shutil
 import tempfile
 import subprocess
 import time
-import difflib
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List
+from hpm_ai_v1.core.mutator import ChangeSet
 
 class SandboxExecutor:
     def __init__(self, original_repo_path: str):
         self.original_repo_path = original_repo_path
 
-    def generate_patch(self, original_source: str, new_source: str, filepath: str) -> str:
-        """Create a standard Unified Diff patch."""
-        orig_lines = original_source.splitlines(keepends=True)
-        new_lines = new_source.splitlines(keepends=True)
-        diff = difflib.unified_diff(
-            orig_lines, new_lines,
-            fromfile=filepath,
-            tofile=filepath,
-            n=3
-        )
-        return "".join(diff)
-
-    def evaluate_code(self, new_source: str, target_file: str, test_command: str = "pytest tests/") -> Dict[str, Any]:
-        """Runs the improved code in a temp directory using a .patch file."""
+    def evaluate_changeset(self, changeset: ChangeSet, test_command: str = "pytest tests/") -> Dict[str, Any]:
+        """Runs the improved code in a temp directory and captures metrics."""
         result = {
             "success": False,
             "cost_time": float('inf'),
             "surprise": 1.0,
             "output": "",
-            "patch": ""
+            "error_type": None
         }
-        
-        # Read original source for patching
-        full_path = os.path.join(self.original_repo_path, target_file)
-        if not os.path.exists(full_path):
-            return result
-            
-        with open(full_path, 'r') as f:
-            original_source = f.read()
-
-        # Only generate patch if there's a change
-        if new_source and new_source != original_source:
-            result["patch"] = self.generate_patch(original_source, new_source, target_file)
         
         with tempfile.TemporaryDirectory() as tmpdir:
             dest_path = os.path.join(tmpdir, "repo")
@@ -57,20 +33,13 @@ class SandboxExecutor:
                 ignore=shutil.ignore_patterns('.git', '.venv', '__pycache__', 'data', '*.db')
             )
             
-            # Apply patch if exists
-            if result["patch"]:
-                patch_path = os.path.join(tmpdir, "mutation.patch")
-                with open(patch_path, "w") as f:
-                    f.write(result["patch"])
+            # Apply all mutations in the changeset
+            for rel_path, new_source in changeset.mutations.items():
+                full_path = os.path.join(dest_path, rel_path)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                with open(full_path, "w", encoding='utf-8') as f:
+                    f.write(new_source)
                 
-                # Apply via CLI patch tool
-                apply_cmd = ["patch", "-p0", "-i", patch_path]
-                patch_proc = subprocess.run(apply_cmd, cwd=dest_path, capture_output=True, text=True)
-                
-                if patch_proc.returncode != 0:
-                    result["output"] = f"Patch application failed: {patch_proc.stderr}"
-                    return result
-            
             # Run test suite
             start_time = time.time()
             test_proc = subprocess.run(
@@ -89,5 +58,9 @@ class SandboxExecutor:
                 result["surprise"] = 0.0 
             else:
                 result["surprise"] = 1.0 
+                # Analyze error type
+                if "TypeError" in result["output"]: result["error_type"] = "TypeError"
+                elif "AttributeError" in result["output"]: result["error_type"] = "AttributeError"
+                elif "NameError" in result["output"]: result["error_type"] = "NameError"
                 
         return result
