@@ -1,8 +1,7 @@
-"""L5 Metacognitive Compiler for HPM AI v1.
+"""L5 Metacognitive Compiler for HPM AI v2.
 
-Acts as the final judge of code quality. Enforces the HPM Elegance Principle:
-A mutation is rejected unless it reduces AST node count (MDL) or 
-significantly improves performance (>15%).
+Enforces the HPM Elegance Principle with a stagnation-triggered 'Bloat Window'.
+Allows temporary complexity increases (<20%) to enable algorithmic 'tunnelling'.
 """
 import ast
 import os
@@ -17,6 +16,8 @@ class L5Compiler:
         self.monitor = L5MetaMonitor()
         self.resource_eval = ResourceCostEvaluator(lambda_cost=1.0)
         self.generation = 1
+        self.stagnation_counter = 0
+        self.allow_bloat = False
 
     def _get_node_count(self, source: str) -> int:
         """Calculate the Description Length (node count) of the source code."""
@@ -29,45 +30,59 @@ class L5Compiler:
     def evaluate_mutation(self, sandbox_result: Dict[str, Any], new_source: str) -> bool:
         """
         Gating logic for accepting a self-authored generation.
-        1. Must pass tests (success = True)
-        2. Must not increase epistemic surprise (Logical Contradiction)
-        3. Must satisfy Elegance Principle (Pareto efficiency on Length vs. Speed)
+        Introduces Metacognitive Exploration:
+        - If stagnant, permits <20% bloat IF surprise is high (novel algorithm).
         """
         if not sandbox_result["success"]:
             print(f"L5 Reject: Sandbox tests failed.")
+            self.stagnation_counter += 1
             return False
             
-        if sandbox_result["surprise"] > 0.5:
-            print(f"L5 Reject: High epistemic surprise detected.")
-            return False
-
         new_node_count = self._get_node_count(new_source)
         new_cost = sandbox_result["cost_time"]
+        surprise = sandbox_result.get("surprise", 0.0)
+
+        # Update allow_bloat flag based on stagnation
+        if self.stagnation_counter > 3:
+            self.allow_bloat = True
+            print("L5 Metacognition: Stagnation detected. Enabling Bloat Window.")
+        else:
+            self.allow_bloat = False
 
         # Elegance Principle: 
-        # Reject if node count increased UNLESS cost decreased by > 15%
         cost_improvement = (self.best_cost - new_cost) / self.best_cost if self.best_cost > 0 else 0
         
+        # BLOAT WINDOW Logic
+        if self.allow_bloat and new_node_count <= self.best_node_count * 1.2:
+            if surprise > 0.5: # High novelty signal
+                print(f"L5 Accept (Bloat Window): Complexity increased for novel logic (S={surprise:.2f})")
+                self._update_best(new_cost, new_node_count)
+                return True
+
+        # Standard Pareto / Elegance Gating
         if new_node_count > self.best_node_count:
             if cost_improvement < 0.15:
                 print(f"L5 Reject: Complexity increased ({new_node_count} > {self.best_node_count}) "
                       f"without sufficient performance gain ({cost_improvement:.1%}).")
+                self.stagnation_counter += 1
                 return False
         
-        # Pareto Check: Must not be worse in either dimension than best known
         if new_cost > self.best_cost and new_node_count >= self.best_node_count:
-            print(f"L5 Reject: Not Pareto efficient. Cost and complexity are both worse.")
+            print(f"L5 Reject: Not Pareto efficient.")
+            self.stagnation_counter += 1
             return False
 
         # If we made it here, the mutation is verified
-        self.best_cost = new_cost
-        self.best_node_count = new_node_count
-        self.generation += 1
-        
-        print(f"L5 Accept: Generation {self.generation} verified.")
-        print(f"  Cost: {new_cost:.4f}s ({cost_improvement:+.1%})")
-        print(f"  Nodes: {new_node_count} (Best: {self.best_node_count})")
+        self._update_best(new_cost, new_node_count)
         return True
+
+    def _update_best(self, cost: float, node_count: int):
+        self.best_cost = cost
+        self.best_node_count = node_count
+        self.generation += 1
+        self.stagnation_counter = 0 # Reset on success
+        print(f"L5 Accept: Generation {self.generation} verified.")
+        print(f"  Cost: {self.best_cost:.4f}s, Nodes: {self.best_node_count}")
 
     def commit_succession(self, new_source: str, repo_path: str, target_file: str) -> None:
         """Pass the torch: Permanently overwrite the live source code."""

@@ -1,7 +1,7 @@
-"""HPM AI v1: Succession Controller.
+"""HPM AI v2: Succession Controller.
 
-Implements the recursive Generation Succession model. Moves from 
-stochastic patching to Manifold Alignment and Relational Synthesis.
+Implements Abstract Relational Intelligence via MMR, Metacognitive 
+Exploration (Bloat Windows), and Active Prior Injection from PyPI.
 """
 import os
 import ast
@@ -12,13 +12,14 @@ from typing import List
 
 # Core HPM Framework
 from hpm.substrate.math import MathSubstrate
+from hpm.substrate.pypi import PyPISubstrate
 from hpm.agents.agent import Agent
 from hpm.agents.multi_agent import MultiAgentOrchestrator
 from hpm.config import AgentConfig
 from hpm.field.field import PatternField
 from hpm.patterns.factory import make_pattern
 
-# HPM AI v1 Modules
+# HPM AI v1/v2 Modules
 from hpm_ai_v1.substrates.code_substrate import LocalCodeSubstrate
 from hpm_ai_v1.core.mutator import CodeMutationActor
 from hpm_ai_v1.sandbox.executor import SandboxExecutor
@@ -33,58 +34,45 @@ class SuccessionController:
         self.store = ConcurrentSQLiteStore(db_path)
         self.field = PatternField()
         self.code_sub = LocalCodeSubstrate(repo_path)
-        self.math_sub = MathSubstrate()
+        self.math_sub = MathSubstrate(feature_dim=16)
+        # Initialize PyPI with seed packages
+        self.pypi_sub = PyPISubstrate(seed_packages=["functools", "numpy", "scipy"])
         self.sandbox = SandboxExecutor(repo_path)
         self.mutator = CodeMutationActor(l2_dim=16, l3_dim=32)
         self.l2_enc = ASTL2Encoder()
         
-        # Initialize ensemble
         self.agents = [
             Agent(AgentConfig(agent_id=f"miner_{i}", feature_dim=16), store=self.store, field=self.field)
             for i in range(2)
         ]
         self.orchestrator = MultiAgentOrchestrator(self.agents, self.field)
-        
-        self.stagnation_counter = 0
-        self.max_generations = 5 # For safety in prototype
+        self.max_generations = 10
 
     def bridge_big_o_inhibitors(self):
         """Fetch 'Big O' patterns and inject them as negative inhibitors into the field."""
         print("Substrate Bridging: Injecting Big-O complexity inhibitors...")
-        # Mocking Big-O discovery: high node count + high loop depth = negative
-        complex_mu = np.zeros(16)
-        complex_mu[1] = 50.0 # High line count
-        complex_mu[2] = 10.0 # High AST depth
-        
-        inhibitor = make_pattern(complex_mu, np.eye(16), pattern_type="gaussian")
-        # Direct field manipulation for prototype
-        self.field.broadcast_negative(inhibitor, 0.5, "math_substrate")
+        # L3 laws from MathSubstrate (simulating complexity priors)
+        priors = self.math_sub.fetch("statistics") # Using 'statistics' as a proxy for complexity distributions
+        if priors:
+            mu = priors[0][:16]
+            inhibitor = make_pattern(mu, np.eye(16), pattern_type="gaussian")
+            self.field.broadcast_negative(inhibitor, 0.5, "math_substrate")
 
-    def train_mutator_intuition(self):
-        """Pre-train the L4 head to recognize 'Elegance' (e.g., adding a docstring)."""
-        print("Pre-training L4 Generative Head on 'Elegance' priors...")
-        # Example: Input anatomy (no docstring) -> Target Law (add docstring)
-        # L2 index 4 is 'has docstring'
-        l2_no_doc = np.zeros(16)
-        l2_no_doc[4] = 0.0
-        
-        l2_with_doc = np.zeros(16)
-        l2_with_doc[4] = 1.0
-        
-        # L3 Law is the delta
-        l3_add_doc = np.pad(l2_with_doc - l2_no_doc, (0, 16))
-        
-        for _ in range(5):
-            self.mutator.l4_head.accumulate(l2_no_doc, l3_add_doc)
-        self.mutator.l4_head.fit()
+    def active_prior_injection(self):
+        """Query PyPI for optimization patterns and inject them into the candidate pool."""
+        print("Active Prior Injection: Mining 'Memoization' patterns from PyPI...")
+        # Simulating mining a successful pattern
+        memo_source = "@functools.lru_cache(None)\ndef memoized_func(x): return x"
+        try:
+            memo_ast = ast.parse(memo_source).body[0]
+            return [memo_ast]
+        except:
+            return []
 
     def run_succession_loop(self):
         # 1. Initial Baseline
         print("Evaluating Baseline (Generation 0)...")
         target_path = os.path.join(self.repo_path, self.target_file)
-        source = self.code_sub.read_file(target_path)
-        if not source: return
-
         tree = self.code_sub.parse_ast(target_path)
         node_count = len(list(ast.walk(tree))) if tree else 1000
         
@@ -96,27 +84,18 @@ class SuccessionController:
         print(f"Baseline: Cost={baseline['cost_time']:.4f}s, Nodes={node_count}")
         self.compiler = L5Compiler(baseline_cost=baseline["cost_time"], baseline_node_count=node_count)
 
-        # Pre-train intuition
-        self.train_mutator_intuition()
-
         # 2. Succession Loop
         for gen in range(1, self.max_generations + 1):
             print(f"\n--- Generation {gen} ---")
             
-            # Step A: Knowledge Mining & Inhibitor Injection
+            # Step A: Prior-Guided Recombination
             self.bridge_big_o_inhibitors()
+            pypi_blueprints = self.active_prior_injection()
             
-            # Step B: Relational Gathering (L3 Population)
-            # Find high-weight patterns from previous successful refactors
-            all_patterns = self.store.query_all()
-            l3_population = []
-            for p_dict, weight, _ in all_patterns:
-                if weight > 0.5: # Only trust strong laws
-                    # In a full system, p_dict would be converted back to AST subtrees
-                    # Mocking a donor for prototype
-                    l3_population.append(ast.parse("def donor(): pass").body[0])
-
-            # Step C: Relational Synthesis (Mutation)
+            # Step B: Gathering internal L3 population
+            l3_population = pypi_blueprints
+            
+            # Step C: Relational Synthesis (Mutation via MMR)
             current_source = self.code_sub.read_file(target_path)
             current_tree = self.code_sub.parse_ast(target_path)
             if not current_tree: break
@@ -128,8 +107,8 @@ class SuccessionController:
             new_source = self.mutator.propose_mutation(current_source, l2_input, l3_population)
             
             if not new_source or new_source == current_source:
-                print("No novel logic forged. Stagnation increasing.")
-                self.stagnation_counter += 1
+                print("No novel logic forged. L5 stagnation tracking updated.")
+                self.compiler.evaluate_mutation({"success": False}, current_source)
             else:
                 # Step D: Sandbox Validation
                 print("Verifying New Generation in Sandbox...")
@@ -137,27 +116,15 @@ class SuccessionController:
                 
                 # Step E: Metacognitive Gating (L5)
                 if self.compiler.evaluate_mutation(result, new_source):
-                    print(f"Succession Approved: Applying Generation {gen}")
                     self.compiler.commit_succession(new_source, self.repo_path, self.target_file)
-                    self.stagnation_counter = 0
-                else:
-                    self.stagnation_counter += 1
-
-            # Step F: Stagnation Trigger
-            if self.stagnation_counter >= 3:
-                print("!!! Stagnation Triggered (S < 0.01) !!!")
-                print("Introducing new latent constraint: Memory Limit 256MB")
-                # In real system, would modify config or environment
-                self.stagnation_counter = 0
                 
-            # Slow down loop for visibility
             time.sleep(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="HPM AI v1 Succession Controller")
+    parser = argparse.ArgumentParser(description="HPM AI v2 Succession Controller")
     parser.add_argument("--repo_path", type=str, default=".", help="Path to codebase")
     parser.add_argument("--target_file", type=str, required=True, help="File to mutate")
-    parser.add_argument("--db_path", type=str, default="hpm_ai_v1.db", help="Path to pattern store")
+    parser.add_argument("--db_path", type=str, default="hpm_ai_v2.db", help="Path to pattern store")
     args = parser.parse_args()
 
     controller = SuccessionController(args.repo_path, args.db_path, args.target_file)
