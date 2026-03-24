@@ -1,39 +1,32 @@
-# HPM AI v3.0 Implementation Plan
+# HPM AI v3.1 Implementation Plan
 
-**Goal**: Transition to Multi-Agent Structured Hierarchy and Manifold-Based Cascading Repair.
+**Goal**: Establish Dialect Sovereignty via Token-Native Execution and Multi-File Architectural Forging.
 
 ---
 
-### Phase 1: Agent Promotion
-- [ ] **Refactor `L5Compiler` to `L5MonitorAgent`**:
-    - Inherit from `Agent`.
-    - Implement sensory mapping for "Dependency Breaks" ($S=1.0$).
-    - Implement `evaluate_changeset` as a task-evaluator.
-- [ ] **Refactor `CodeMutationActor` to `L4ArchitectAgent`**:
-    - Inherit from `Agent`.
-    - Use internal `L4GenerativeHead` to propose `ChangeSets`.
+### Phase 1: Token-Native Execution
+- [ ] **Refactor `InternalVMSubstrate`**:
+    - Implement a runner that operates on 32-dim Relational Vectors (embeddings) directly.
+    - Map basis vectors to executable operations (Add, Sub, etc.) without string checks.
+    - Enable batch simulation of MMR graph variations.
 
-### Phase 2: Structured Orchestration
-- [ ] **Implement `SovereignOrchestrator` in `hpm_ai_v1/main.py`**:
-    - Use `StructuredOrchestrator` pattern.
-    - Setup negotiation loop via `kappa` incompatibility matrix.
-- [ ] **Dynamic Topology Integration**:
-    - Link `ProjectTopology` updates to the `Librarian` / `ContextualPatternStore`.
+### Phase 2: Manifold-Only Exploration
+- [ ] **Decouple L4/L5 Loop from Python**:
+    - Update `SovereignOrchestrator` to perform internal exploration (L4 intuition -> L5 verification) within the `InternalVMSubstrate`.
+    - Only trigger `ast.unparse()` and `SandboxExecutor` once a manifold configuration passes L5 internal gating.
 
-### Phase 3: Manifold-Based Cascading Repair
-- [ ] **Implement "Structural Shift" Broadcasting**:
-    - When a module is refactored, broadcast its new L3 manifold vector.
-- [ ] **Automated Litmus Turns**:
-    - Trigger repair tasks for dependent agents to align their code with the new manifold.
-- [ ] **Metacognitive Repair Turn**:
-    - Implement logic to handle "Global Contradictions" by forcing a multi-point `ChangeSet`.
+### Phase 3: Architectural Forging (Multi-File Synthesis)
+- [ ] **Identify Structural Gaps**:
+    - Implement a "Manifold Redundancy" analyzer in the `Librarian`.
+    - Detect overlap between `hpm/store/sqlite.py` and `hpm_ai_v1/store/concurrent_sqlite.py`.
+- [ ] **Forge Unified ChangeSet**:
+    - Command `L4ArchitectAgent` to synthesize a unified Persistent Storage module.
+    - Generate dependency repairs for all modules that formerly used the split implementations.
 
-### Phase 4: Project-Root Sovereignty
-- [ ] **Sovereign Ingestion**:
-    - Confirm `CodeSubstrate` is fully functional at project root `./`.
-    - Execute a live refactor across multiple core files (e.g., `hpm/store/` and `hpm/agents/`) simultaneously.
-
-### Phase 5: Dialect Genesis (SP20)
-- [ ] **Manifold Logic Testing**:
-    - Use `InternalVMSubstrate` to verify logic in the MMR Manifold before Python unparsing.
-    - Confirm "Grammar Errors" in Python are handled as superficial L1 fixes.
+### Phase 4: Verification & Succession
+- [ ] **Architectural Merger Execution**:
+    - Run the loop to replace split storage with the unified version.
+    - Verify that all project tests pass with the new architecture.
+- [ ] **Report Results**:
+    - Measure generation speed increase (Manifold vs. Python Sandbox).
+    - Document the reduction in Manifold Entropy.

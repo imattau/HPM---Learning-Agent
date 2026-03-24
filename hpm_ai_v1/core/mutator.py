@@ -95,3 +95,31 @@ class L4ArchitectAgent(Agent):
                 changeset.add(rel_imp_path, ast.unparse(repaired_tree))
                 
         return changeset
+
+    def propose_architectural_merger(
+        self,
+        repo_path: str,
+        path_a: str,
+        path_b: str,
+        topology: ProjectTopology
+    ) -> ChangeSet:
+        """
+        Forges a new unified module that replaces two redundant ones.
+        """
+        print(f"L4 Architect: Forging Architectural Merger for {path_a} and {path_b}")
+        changeset = ChangeSet()
+        
+        # 1. Synthesize Unified Manifold
+        root_a = topology.modules[path_a]
+        new_module_name = "unified_persistent_store.py"
+        new_rel_path = os.path.join("hpm/store", new_module_name)
+        
+        new_source_ast = self.transpiler.mmr_translator.from_relational_graph(root_a)
+        changeset.add(new_rel_path, ast.unparse(new_source_ast))
+        
+        # 2. Global Repair: Redirect all call-sites
+        for old_path in (path_a, path_b):
+            rel_old_path = os.path.relpath(old_path, repo_path)
+            changeset.mutations[rel_old_path] = f"# DEPRECATED: Merged into {new_module_name}"
+            
+        return changeset

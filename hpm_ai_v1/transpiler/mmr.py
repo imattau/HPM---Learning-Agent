@@ -1,10 +1,10 @@
-"""Middle-Manifold Representation (MMR) for HPM AI v2.3.
+"""Middle-Manifold Representation (MMR) for HPM AI v2.2.
 
-Decouples Relational Logic from Python Syntax.
-Now supports Cascading Dependency Repair and Global Project Topology.
+Decouples Relational Logic from Python Syntax by representing code as 
+abstract graphs of functional primitives.
+Now supports Project-Level Manifolds (The 'Global Brain').
 """
 import ast
-import os
 import numpy as np
 from typing import Dict, List, Any, Optional, Set, Tuple
 
@@ -40,11 +40,8 @@ class MMRNode:
 class ProjectTopology:
     """Maps the 'Relational Ecology' of the entire project."""
     def __init__(self):
-        # Maps name (function/class) -> filepath
         self.exports: Dict[str, str] = {}
-        # Maps name -> List of (caller_filepath, caller_node)
         self.in_edges: Dict[str, List[Tuple[str, MMRNode]]] = {}
-        # Maps filepath -> MMR root
         self.modules: Dict[str, MMRNode] = {}
 
     def add_module(self, filepath: str, root_node: MMRNode):
@@ -111,32 +108,45 @@ class MMRTranslator:
         return best_type
 
     def from_relational_graph(self, mmr: MMRNode) -> ast.AST:
+        """Synthesize Python AST from Vectorized MMR Graph."""
         node_type = self._match_type(mmr.embedding)
         node_class = getattr(ast, node_type, None)
         if not node_class:
-            return ast.Pass()
+            return ast.Pass(lineno=1, col_offset=0)
 
+        # Handle leaf nodes / values
+        node = None
         if node_type == "Name":
-            return ast.Name(id=mmr.value or "var", ctx=ast.Load())
+            node = ast.Name(id=mmr.value or "var", ctx=ast.Load())
         elif node_type == "Constant":
-            return ast.Constant(value=mmr.value)
+            node = ast.Constant(value=mmr.value)
         elif node_type == "arg":
-            return ast.arg(arg=mmr.value or "arg")
+            node = ast.arg(arg=mmr.value or "arg")
         elif node_type == "Pass":
-            return ast.Pass()
+            node = ast.Pass()
+
+        if node:
+            node.lineno = 1
+            node.col_offset = 0
+            return node
 
         try:
             children_ast = [self.from_relational_graph(c) for c in mmr.children]
             if node_type == "FunctionDef":
-                return ast.FunctionDef(
+                node = ast.FunctionDef(
                     name=mmr.value or "inferred_func",
                     args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
-                    body=children_ast if children_ast else [ast.Pass()],
+                    body=children_ast if children_ast else [ast.Pass(lineno=1, col_offset=0)],
                     decorator_list=[],
                     returns=None
                 )
             elif node_type == "Module":
-                return ast.Module(body=children_ast, type_ignores=[])
-            return node_class()
+                node = ast.Module(body=children_ast, type_ignores=[])
+            else:
+                node = node_class()
+            
+            node.lineno = 1
+            node.col_offset = 0
+            return node
         except Exception:
-            return ast.Pass()
+            return ast.Pass(lineno=1, col_offset=0)
