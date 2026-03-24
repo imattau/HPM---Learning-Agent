@@ -64,7 +64,7 @@ class ASTL2Encoder:
     """L2: Structural Anatomy.
     Encodes the shape of the function: number of args, depth, complexity.
     """
-    feature_dim = 16
+    feature_dim = 64
 
     def __init__(self):
         self.l1_enc = ASTL1Encoder()
@@ -80,26 +80,25 @@ class ASTL2Encoder:
     def encode(self, node: ast.AST) -> np.ndarray:
         vec = np.zeros(self.feature_dim)
         
-        if isinstance(node, ast.FunctionDef):
-            # 0: Number of arguments
-            vec[0] = len(node.args.args)
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            # 0: Number of arguments (or methods for class)
+            if isinstance(node, ast.FunctionDef):
+                vec[0] = len(node.args.args)
+            else:
+                vec[0] = len([n for n in node.body if isinstance(n, ast.FunctionDef)])
+                
             # 1: Number of lines / body length
             vec[1] = len(node.body)
             # 2: Max AST depth (Cyclomatic complexity proxy)
             vec[2] = self._get_max_depth(node)
             # 3: Has return type annotation?
-            vec[3] = 1.0 if node.returns else 0.0
+            vec[3] = 1.0 if hasattr(node, 'returns') and node.returns else 0.0
             # 4: Has docstring?
             vec[4] = 1.0 if ast.get_docstring(node) else 0.0
             
-            # 5-15: Blend in a compressed L1 syntax signature
+            # 5-36: Blend in L1 syntax signature (32-dim)
             l1_vec = self.l1_enc.encode(node)
-            # Downsample 32-dim L1 to 11-dim by summing chunks
-            chunk_size = 32 // 11
-            for i in range(11):
-                start = i * chunk_size
-                end = start + chunk_size if i < 10 else 32
-                vec[5 + i] = np.sum(l1_vec[start:end])
+            vec[5:37] = l1_vec
                 
         return vec
 
@@ -107,7 +106,7 @@ class ASTL3Encoder:
     """L3: Relational Law (The Transformation Delta).
     Represents how an AST mutated from State A to State B.
     """
-    feature_dim = 32
+    feature_dim = 64
 
     def __init__(self):
         self.l2_enc = ASTL2Encoder()
@@ -118,5 +117,4 @@ class ASTL3Encoder:
         vec_b = self.l2_enc.encode(node_mutated)
         
         delta = vec_b - vec_a
-        # Pad to 32 dims
-        return np.pad(delta, (0, 16))
+        return delta # 64-dim

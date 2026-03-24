@@ -6,7 +6,7 @@ agents (and the refactoring sandbox) reading/writing concurrently.
 import json
 import sqlite3
 import time
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 from hpm.patterns.factory import pattern_from_dict
 
 class ConcurrentSQLiteStore:

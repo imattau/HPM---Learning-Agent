@@ -26,7 +26,7 @@ class L4ArchitectAgent(Agent):
     def __init__(self, config: AgentConfig, **kwargs):
         super().__init__(config, **kwargs)
         self.transpiler = StructuralTranspiler()
-        self.l4_head = L4GenerativeHead(feature_dim_in=config.feature_dim, feature_dim_out=32)
+        self.l4_head = L4GenerativeHead(feature_dim_in=config.feature_dim, feature_dim_out=64)
 
     def propose_cascading_mutation(
         self, 
@@ -50,7 +50,7 @@ class L4ArchitectAgent(Agent):
             original_source = f.read()
             
         # 1. Primary Intuition: What is the target L3 law for this function?
-        target_l3_law = self.l4_head.predict(l2_input) or np.zeros(32)
+        target_l3_law = self.l4_head.predict(l2_input) or np.zeros(64)
         
         # 2. Semantic Invention: MMR Crossover
         tree = ast.parse(original_source)
