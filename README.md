@@ -288,6 +288,20 @@ The open question is whether these properties, demonstrated here in lightweight 
 
 ---
 
+## HPM AI — Self-Improving Synthetic Intelligence
+
+The **HPM AI** (implemented in `hpm_ai_v1/`) marks the transition of the framework from a research tool into a recursive, self-refining "Synthetic Intelligence." It treats its own source code as a primary substrate and leverages HPM's hierarchical stack to autonomously evolve its architecture.
+
+### Key Capabilities
+- **Middle-Manifold Representation (MMR)**: Decouples logic from syntax by modelling code as abstract relational graphs.
+- **Relational Synthesis**: Forges new code logic via structural crossovers between successful patterns.
+- **Metacognitive Exploration**: Uses "Bloat Windows" to tunnel through local minima and discover novel algorithmic peaks.
+- **Cross-Modal Logic Bridge (SP19)**: Proves that laws discovered in code (e.g., symmetry checks) can be exported to solve visual ARC puzzles, demonstrating universal relational invariance.
+
+For more details on the self-evolution engine, see [hpm_ai_v1/README.md](hpm_ai_v1/README.md).
+
+---
+
 ## Future directions
 
 - **Hierarchical agents** — patterns at one level feeding as inputs to agents at the next level, implementing HPM's multi-level abstraction hierarchy
