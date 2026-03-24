@@ -2,6 +2,7 @@
 
 Parses local Python files into AST nodes, serving as the L1/L2 sensory environment
 for the self-refactoring agent.
+"""
 import ast
 import os
 from typing import List, Dict, Any, Optional, Iterator
@@ -48,11 +49,12 @@ class LocalCodeSubstrate:
                 yield hash_vectorise(source, self.feature_dim)
 
     def get_all_python_files(self) -> List[str]:
-...
-
         """Recursively find all .py files in the target directory."""
         py_files = []
         for root, _, files in os.walk(self.root_dir):
+            # Ignore some standard folders
+            if any(part in root for part in ['.git', '.venv', '__pycache__']):
+                continue
             for file in files:
                 if file.endswith(".py"):
                     py_files.append(os.path.join(root, file))

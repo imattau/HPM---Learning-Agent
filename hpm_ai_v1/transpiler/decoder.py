@@ -1,72 +1,85 @@
 """AST Decoder for HPM AI v1.
 
-Maps L3 Relational patterns back into valid Python Code by generating 
-AST mutations and selecting the one that minimizes the L3 NLL.
+Implements Relational Recombination: merges the target function's AST with 
+high-weight L3 patterns (optimization laws) discovered by the framework.
 """
 import ast
 import copy
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Any
 from hpm_ai_v1.transpiler.encoders import ASTL3Encoder
 
 class StructuralTranspiler:
-    def __init__(self):
+    """
+    The 'Generative Recombination Head'. Operates on AST sub-trees as 
+    Relational Tokens to synthesize new code logic.
+    """
+    def __init__(self, pattern_field: Any = None):
         self.l3_enc = ASTL3Encoder()
+        self.pattern_field = pattern_field # Placeholder for shared L3 laws
 
-    def generate_mutations(self, node: ast.AST) -> List[ast.AST]:
-        """Generate a pool of valid AST mutations (candidate space)."""
-        mutations = []
-        
-        # Candidate 1: The original
-        mutations.append(copy.deepcopy(node))
-        
-        # In a full system, this would apply specific AST rewrite rules.
-        # Here we mock a few generic structural changes.
-        if hasattr(node, 'body') and isinstance(node.body, list):
-            # Mutation: Add a pass statement (changes depth/length)
-            m1 = copy.deepcopy(node)
-            m1.body.append(ast.Pass())
-            mutations.append(m1)
-            
-            # Mutation: Add a dummy docstring
-            m2 = copy.deepcopy(node)
-            docstring = ast.Expr(value=ast.Constant(value="Optimized via HPM AI"))
-            m2.body.insert(0, docstring)
-            mutations.append(m2)
-            
-            # Mutation: If it has args, clear them (extreme mutation)
-            if isinstance(m1, ast.FunctionDef) and m1.args.args:
-                m3 = copy.deepcopy(node)
-                m3.args.args = []
-                mutations.append(m3)
+    def _get_node_count(self, node: ast.AST) -> int:
+        """Measure AST complexity (Description Length)."""
+        return len(list(ast.walk(node)))
 
-        return mutations
-
-    def transpile(self, original_ast: ast.AST, target_l3_vector: np.ndarray) -> str:
+    def crossover(self, base_node: ast.AST, donor_node: ast.AST) -> ast.AST:
         """
-        Finds the AST mutation that best matches the target Relational Law (L3 vector),
-        then unparses it back to valid Python code.
+        Performs a structural crossover between two AST trees.
+        Replaces a random sub-tree in base_node with a sub-tree from donor_node.
         """
-        candidates = self.generate_mutations(original_ast)
+        child = copy.deepcopy(base_node)
+        
+        # Simplistic crossover for prototype: 
+        # Replace the first 'If' or 'For' block in child with one from donor
+        base_blocks = [n for n in ast.walk(child) if isinstance(n, (ast.If, ast.For, ast.Assign))]
+        donor_blocks = [n for n in ast.walk(donor_node) if isinstance(n, (ast.If, ast.For, ast.Assign))]
+        
+        if base_blocks and donor_blocks:
+            target = base_blocks[0]
+            replacement = donor_blocks[0]
+            
+            # Use NodeTransformer to swap
+            class Swapper(ast.NodeTransformer):
+                def visit(self, node):
+                    if node is target:
+                        return replacement
+                    return self.generic_visit(node)
+            
+            child = Swapper().visit(child)
+            
+        return child
+
+    def generate_recombinations(self, node: ast.AST, l3_population: List[ast.AST]) -> List[ast.AST]:
+        """Forge new code logic by merging the current AST with successful donors."""
+        candidates = [copy.deepcopy(node)]
+        
+        for donor in l3_population:
+            child = self.crossover(node, donor)
+            candidates.append(child)
+            
+        return candidates
+
+    def transpile(self, original_ast: ast.AST, target_l3_law: np.ndarray, l3_population: List[ast.AST] = []) -> str:
+        """
+        Synthesizes the best 'Child AST' using Relational Recombination,
+        ensuring it minimizes the distance to the target L3 law.
+        """
+        candidates = self.generate_recombinations(original_ast, l3_population)
         best_ast = None
         best_nll = float('inf')
         
         for cand in candidates:
-            # How does this candidate relate to the original?
+            # Encode the delta (The Relational Token)
             cand_l3 = self.l3_enc.encode(original_ast, cand)
             
-            # Distance from target law
-            nll = float(np.sum((cand_l3 - target_l3_vector) ** 2))
+            # Manifold Alignment: Check if this mutation matches the target Law
+            nll = float(np.sum((cand_l3 - target_l3_law) ** 2))
             
             if nll < best_nll:
                 best_nll = nll
                 best_ast = cand
                 
-        # Unparse the winning AST back to source code
         if best_ast:
-            try:
-                # ast.unparse is available in Python 3.9+
-                return ast.unparse(best_ast)
-            except AttributeError:
-                return "# Error: Python 3.9+ required for ast.unparse\n" + str(best_ast)
+            # AST-Native Refactoring: Direct code generation via ast.unparse()
+            return ast.unparse(best_ast)
         return ""

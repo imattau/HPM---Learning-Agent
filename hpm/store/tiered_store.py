@@ -22,10 +22,7 @@ class TieredStore:
         self._current_context: str | None = None
 
     def begin_context(self, context_id: str) -> None:
-        """Start a new task context. Creates a fresh Tier 1 store.
-
-        Raises RuntimeError if context_id is already active.
-        """
+        """Start a new task context. Creates a fresh Tier 1 store."""
         if context_id in self._tier1:
             raise RuntimeError(
                 f"Context '{context_id}' already active; call end_context first"
@@ -48,20 +45,20 @@ class TieredStore:
         if self._current_context == context_id:
             self._current_context = None
 
-    def save(self, pattern, weight: float, agent_id: str) -> None:
+    def save(self, pattern, weight: float, agent_id: str = "default_agent") -> None:
         if self._current_context is not None:
             self._tier1[self._current_context].save(pattern, weight, agent_id)
         else:
             self._tier2.save(pattern, weight, agent_id)
 
-    def load(self, pattern_id: str) -> tuple:
-        if self._current_context and self._tier1[self._current_context].has(pattern_id):
-            return self._tier1[self._current_context].load(pattern_id)
-        if self._tier2.has(pattern_id):
-            return self._tier2.load(pattern_id)
-        raise KeyError(f"Pattern '{pattern_id}' not found in Tier 1 or Tier 2")
+    def load(self, pattern_id: str, agent_id: str = "default_agent") -> tuple:
+        if self._current_context and self._tier1[self._current_context].has(pattern_id, agent_id):
+            return self._tier1[self._current_context].load(pattern_id, agent_id)
+        if self._tier2.has(pattern_id, agent_id):
+            return self._tier2.load(pattern_id, agent_id)
+        raise KeyError(f"Pattern '{pattern_id}' for {agent_id} not found in Tier 1 or Tier 2")
 
-    def query(self, agent_id: str) -> list:
+    def query(self, agent_id: str = "default_agent") -> list:
         """Returns Tier 1 (current context) + Tier 2 patterns for agent."""
         t1 = []
         if self._current_context and self._current_context in self._tier1:
@@ -75,37 +72,43 @@ class TieredStore:
             t1 = self._tier1[self._current_context].query_all()
         return t1 + self._tier2.query_all()
 
-    def query_tier2(self, agent_id: str) -> list:
+    def query_tier2(self, agent_id: str = "default_agent") -> list:
         """Direct access to Tier 2 patterns (for monitoring/testing)."""
         return self._tier2.query(agent_id)
 
     def query_tier2_all(self) -> list:
         return self._tier2.query_all()
 
-    def delete(self, pattern_id: str) -> None:
-        if self._current_context and self._current_context in self._tier1:
-            self._tier1[self._current_context].delete(pattern_id)
+    def delete(self, pattern_id: str, agent_id: str = "default_agent") -> None:
+        if self._current_context and self._tier1[self._current_context].has(pattern_id, agent_id):
+            self._tier1[self._current_context].delete(pattern_id, agent_id)
 
-    def update_weight(self, pattern_id: str, weight: float) -> None:
+    def update_weight(self, pattern_id: str, agent_id: str, weight: float = None) -> None:
         """Only mutates Tier 1. Tier 2 is protected from task signal."""
+        # Backward compatibility for (pattern_id, weight)
+        if weight is None:
+            actual_weight = float(agent_id)
+            actual_agent_id = "default_agent"
+        else:
+            actual_weight = weight
+            actual_agent_id = agent_id
+
         if self._current_context and self._current_context in self._tier1:
             t1 = self._tier1[self._current_context]
-            if t1.has(pattern_id):
-                t1.update_weight(pattern_id, weight)
+            if t1.has(pattern_id, actual_agent_id):
+                t1.update_weight(pattern_id, actual_agent_id, actual_weight)
                 return
-        # Pattern is in Tier 2 — do not mutate (protection invariant)
+
+    def has(self, pattern_id: str, agent_id: str = "default_agent") -> bool:
+        if self._current_context and self._tier1[self._current_context].has(pattern_id, agent_id):
+            return True
+        return self._tier2.has(pattern_id, agent_id)
 
     def similarity_merge(self, context_id: str,
                          similarity_threshold: float = 0.95,
                          consolidation_boost: float = 0.1,
                          max_tier2_patterns: int = 200) -> None:
-        """
-        Compare Tier 1 patterns against Tier 2.
-        - If similar Tier 2 pattern found: boost its weight.
-        - If no match and Tier 2 not full: promote pattern to Tier 2.
-        """
         import numpy as np
-
         if context_id not in self._tier1:
             return
 
@@ -123,7 +126,8 @@ class TieredStore:
             best_t2_id = None
             best_t2_w = 0.0
 
-            for p2, w2, _ in t2_patterns:
+            for p2, w2, aid2 in t2_patterns:
+                if aid2 != aid1: continue # Only merge patterns for same agent
                 mu2 = p2.mu
                 norm2 = np.linalg.norm(mu2)
                 if norm2 < 1e-8:
@@ -135,49 +139,30 @@ class TieredStore:
                     best_t2_w = w2
 
             if best_sim >= similarity_threshold and best_t2_id is not None:
-                self._tier2.update_weight(best_t2_id, best_t2_w + consolidation_boost)
+                self._tier2.update_weight(best_t2_id, aid1, best_t2_w + consolidation_boost)
             elif len(t2_patterns) < max_tier2_patterns:
                 self._tier2.save(p1, w1 * 0.5, aid1)
                 t2_patterns.append((p1, w1 * 0.5, aid1))
 
-    def promote_to_tier2(self, pattern, weight: float, agent_id: str,
+    def promote_to_tier2(self, pattern, weight: float, agent_id: str = "default_agent",
                          max_tier2_patterns: int = 200) -> None:
-        """Directly promote a pattern to Tier 2, respecting the global cap.
-
-        When Tier 2 is at capacity, the lowest-weight pattern is evicted before
-        the new one is inserted, so the store never exceeds max_tier2_patterns.
-        """
         current = self._tier2.query_all()
         if len(current) >= max_tier2_patterns:
             # Evict the pattern with the lowest weight
-            lowest_id = min(current, key=lambda rec: rec[1])[0].id
-            self._tier2.delete(lowest_id)
+            rec = min(current, key=lambda rec: rec[1])
+            self._tier2.delete(rec[0].id, rec[2])
         self._tier2.save(pattern, weight, agent_id)
 
-    def query_negative(self, agent_id: str) -> list:
-        """Return all negative Tier 2 patterns for agent_id as list[(pattern, weight)]."""
+    def query_negative(self, agent_id: str = "default_agent") -> list:
         return self._tier2_negative.query(agent_id)
 
     def query_tier2_negative_all(self) -> list:
-        """Return all negative Tier 2 records (for monitoring/testing)."""
         return self._tier2_negative.query_all()
 
     def negative_merge(self, context_id: str,
                        neg_conflict_threshold: float = 0.7,
                        max_tier2_negative: int = 100) -> None:
-        """
-        Promote conflicting Tier 1 patterns to _tier2_negative.
-
-        A Tier 1 pattern from a failed task is promoted if its cosine similarity
-        to any positive Tier 2 pattern >= neg_conflict_threshold. This encodes the
-        taboo: a pattern shape highly similar to a known-good meta-pattern was
-        present during failure — it is misleadingly similar (anti-predictive).
-
-        Patterns with zero norm are skipped (same guard as similarity_merge).
-        New patterns are silently dropped when cap is reached.
-        """
         import numpy as np
-
         if context_id not in self._tier1:
             return
 
@@ -191,7 +176,8 @@ class TieredStore:
                 continue
 
             best_sim = -1.0
-            for p2, w2, _ in t2_all:
+            for p2, w2, aid2 in t2_all:
+                if aid2 != aid1: continue
                 mu2 = p2.mu
                 norm2 = np.linalg.norm(mu2)
                 if norm2 < 1e-8:

@@ -1,10 +1,10 @@
 """Code Mutation Actor for HPM AI v1.
 
-Utilizes the L4 Generative Head to propose specific code changes (diffs) 
-based on recognized L3 relational patterns.
+Utilizes the L4 Generative Head to propose specific code changes 
+based on recognized L3 relational patterns and crossovers.
 """
-import difflib
 import ast
+from typing import List, Optional, Tuple
 import numpy as np
 from hpm_ai_v1.transpiler.decoder import StructuralTranspiler
 from hpm.agents.l4_generative import L4GenerativeHead
@@ -15,44 +15,33 @@ class CodeMutationActor:
         # The L4 Head intuits the L3 transformation from L2 structural anatomy
         self.l4_head = L4GenerativeHead(feature_dim_in=l2_dim, feature_dim_out=l3_dim)
 
-    def generate_diff(self, original_source: str, new_source: str, filepath: str) -> str:
-        """Generate a standard Unified Code Diff."""
-        orig_lines = original_source.splitlines(keepends=True)
-        new_lines = new_source.splitlines(keepends=True)
-        
-        diff = difflib.unified_diff(
-            orig_lines, new_lines, 
-            fromfile=filepath, 
-            tofile=filepath,
-            n=3
-        )
-        return "".join(diff)
-
-    def propose_mutation(self, original_source: str, filepath: str, l2_input: np.ndarray) -> str:
+    def propose_mutation(
+        self, 
+        original_source: str, 
+        l2_input: np.ndarray, 
+        l3_population: List[ast.AST] = []
+    ) -> Optional[str]:
         """
-        Uses L4 intuition to predict the target law, transpires it, 
-        and returns the unified diff patch.
+        Uses L4 intuition to predict the target law and performs 
+        Relational Recombination using the provided population.
+        Returns the raw source of the new generation.
         """
         # 1. Intuitive Leap: L2 (Anatomy) -> L3 (Law)
         target_l3_law = self.l4_head.predict(l2_input)
         if target_l3_law is None:
-            # Fallback if L4 hasn't learned yet: use identity
+            # Fallback to zero-delta law (identity) if no intuition yet
             target_l3_law = np.zeros(32)
 
-        # 2. Structural Transpilation: Law -> AST
+        # 2. Structural Transpilation: Law + Recombination -> Source
         try:
             tree = ast.parse(original_source)
         except SyntaxError:
-            return ""
+            return None
 
-        target_node = None
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                target_node = node
-                break
-                
+        # Focus on the first function for mutation
+        target_node = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)), None)
         if not target_node:
-            return ""
+            return None
             
-        new_source = self.transpiler.transpile(target_node, target_l3_law)
-        return self.generate_diff(original_source, new_source, filepath)
+        new_source = self.transpiler.transpile(target_node, target_l3_law, l3_population)
+        return new_source

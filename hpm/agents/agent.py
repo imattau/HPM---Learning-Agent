@@ -254,7 +254,7 @@ class Agent:
 
         # Register with field using post-update UUIDs (preserved by update())
         if self.field is not None:
-            self.field.register(self.agent_id, surviving)
+            self.field.register(self.agent_id, [(p.id, w) for p, w in surviving])
 
         self._t += 1
 

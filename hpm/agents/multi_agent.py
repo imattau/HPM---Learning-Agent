@@ -88,7 +88,7 @@ class MultiAgentOrchestrator:
             # Remove existing patterns
             existing = agent.store.query(agent.agent_id)
             for p, _ in existing:
-                agent.store.delete(p.id)
+                agent.store.delete(p.id, agent.agent_id)
             # Save a per-agent copy with the same UUID — preserves copy semantics (B1)
             agent.store.save(
                 GaussianPattern(seed.mu.copy(), seed.sigma.copy(), id=seed.id),
