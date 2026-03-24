@@ -1,7 +1,7 @@
-"""L5 Monitor Agent for HPM AI v3.1.
+"""L5 Monitor Agent for HPM AI v3.2.
 
-Standalone agent specializing in Structural Immunity and Elegance Gating.
-Treats dependency breaks as high-surprise sensory signals.
+Standalone agent specializing in Structural Immunity and Soft Pareto Gating.
+Uses a Lagrangian approach to balance Accuracy vs Complexity.
 """
 import ast
 import os
@@ -23,6 +23,8 @@ class L5MonitorAgent(Agent):
         self.generation = 1
         self.stagnation_counter = 0
         self.allow_bloat = False
+        # Lagrangian Multiplier for node count penalty
+        self.lam = 0.5 
 
     def _get_node_count(self, source: str) -> int:
         """Calculate the Description Length (node count) of the source code."""
@@ -33,77 +35,72 @@ class L5MonitorAgent(Agent):
             return 1000000
 
     def _is_structurally_immune(self, patch: str) -> bool:
-        """Review the unified diff for logic-breaking patterns (Taboos)."""
+        """Review the unified diff for logic-breaking patterns."""
         if not patch: return True
-        
         if "---" in patch and "+++" in patch:
             lines = patch.splitlines()
             deleted_count = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
             added_count = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
-            
-            # If we delete many lines and add almost none, it's a structural regression
             if deleted_count > 5 and added_count <= 2:
                 return False
         return True
 
     def evaluate_changeset(self, sandbox_result: Dict[str, Any], changeset: ChangeSet) -> bool:
         """
-        Gating logic for accepting a self-authored generation.
-        Integrated into the agent's task evaluation.
+        Soft Pareto Gating logic.
+        Score = delta_accuracy - lambda * delta_nodes
         """
-        # 1. Functional Integrity
         if not sandbox_result["success"]:
-            # Dependency breaks are high-surprise signals (S=1.0)
             if sandbox_result.get("error_type") in ("TypeError", "AttributeError", "NameError"):
-                print(f"L5 Monitor: Global Contradiction detected ({sandbox_result['error_type']}). S=1.0")
+                print(f"L5 Monitor: Global Contradiction detected. S=1.0")
                 self.stagnation_counter += 1
                 return False 
-            
-            print(f"L5 Monitor: Logic failure in sandbox.")
+            print(f"L5 Monitor: Sandbox execution failed.")
             self.stagnation_counter += 1
             return False
             
-        # 2. Structural Immunity
         patch = sandbox_result.get("patch", "")
         if not self._is_structurally_immune(patch):
-            print("L5 Monitor: Structural Taboo violated (deletion without synthesis).")
+            print("L5 Monitor: Mutation failed Structural Immunity Review.")
             self.stagnation_counter += 1
             return False
 
-        # 3. Elegance Principle
         primary_file = list(changeset.mutations.keys())[0]
         new_source = changeset.mutations[primary_file]
         new_node_count = self._get_node_count(new_source)
         new_cost = sandbox_result["cost_time"]
         surprise = sandbox_result.get("surprise", 0.0)
 
-        # Stagnation and Bloat Window logic
+        # Dynamic Lambda Adjustment
+        current_lam = self.lam
         if self.stagnation_counter > 3:
-            self.allow_bloat = True
-            print("L5 Monitor: Stagnation detected. Enabling Bloat Window.")
-        else:
-            self.allow_bloat = False
-
-        if self.allow_bloat and new_node_count <= self.best_node_count * 1.2:
-            if surprise > 0.5: 
-                print(f"L5 Monitor: Accept (Bloat Window) for novel logic discovery.")
-                self._update_best(new_cost, new_node_count)
-                return True
-
-        cost_improvement = (self.best_cost - new_cost) / self.best_cost if self.best_cost > 0 else 0
+            current_lam = 0.05 # Lower penalty during Bloat Window
+            print(f"L5 Metacognition: Stagnation detected. Lowering Lagrangian Multiplier (lambda={current_lam})")
         
-        if new_node_count > self.best_node_count and cost_improvement < 0.15:
-            print(f"L5 Monitor: Reject complexity increase (gain {cost_improvement:.1%}).")
-            self.stagnation_counter += 1
-            return False
+        # Performance Delta (Normalised speedup)
+        d_perf = (self.best_cost - new_cost) / self.best_cost if self.best_cost > 0 else 0
+        # Node Delta (Normalised complexity increase)
+        d_nodes = (new_node_count - self.best_node_count) / self.best_node_count if self.best_node_count > 0 else 0
         
-        if new_cost >= self.best_cost * 0.95 and new_node_count >= self.best_node_count:
-            print(f"L5 Monitor: Reject non-Pareto mutation.")
-            self.stagnation_counter += 1
-            return False
+        # Soft Pareto Score
+        score = d_perf - (current_lam * d_nodes)
+        
+        # Acceptance Logic:
+        # 1. If nodes decreased, accept if tests pass (Elegance Gain)
+        if new_node_count < self.best_node_count:
+            print(f"L5 Monitor: Accept Elegance Gain ({new_node_count} < {self.best_node_count})")
+            self._update_best(new_cost, new_node_count)
+            return True
+            
+        # 2. If nodes increased, use Lagrangian score
+        if score > 0.1: # Threshold for significant improvement
+            print(f"L5 Monitor: Accept Lagranian Trade-off (Score={score:.2f})")
+            self._update_best(new_cost, new_node_count)
+            return True
 
-        self._update_best(new_cost, new_node_count)
-        return True
+        print(f"L5 Reject: Soft Pareto Score insufficient ({score:.2f})")
+        self.stagnation_counter += 1
+        return False
 
     def _update_best(self, cost: float, node_count: int):
         self.best_cost = cost

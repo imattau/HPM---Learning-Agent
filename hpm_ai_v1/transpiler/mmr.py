@@ -1,8 +1,8 @@
-"""Middle-Manifold Representation (MMR) for HPM AI v2.2.
+"""Middle-Manifold Representation (MMR) for HPM AI v3.2.
 
 Decouples Relational Logic from Python Syntax by representing code as 
 abstract graphs of functional primitives.
-Now supports Project-Level Manifolds (The 'Global Brain').
+Refactored for Algebraic Verification: all node types are 32-dim Basis Vectors.
 """
 import ast
 import numpy as np
@@ -20,11 +20,12 @@ def _get_basis_vector(name: str) -> np.ndarray:
 class MMRNode:
     def __init__(self, node_type: str, value: Any = None, filepath: str = ""):
         self.node_type = node_type
+        # Algebraic Identity: node_type is mapped to an L3 Embedding
         self.embedding = _get_basis_vector(node_type)
         self.value = value
         self.filepath = filepath
         self.children: List['MMRNode'] = []
-        self.dependencies: List[str] = [] # Names this node calls
+        self.dependencies: List[str] = [] # Call Edges
         self.lineno: int = 0
 
     def to_dict(self) -> Dict:
@@ -61,13 +62,22 @@ class ProjectTopology:
             self._index_node(filepath, child)
 
     def get_impacted_files(self, changed_name: str) -> Set[str]:
-        """Find all files that call the changed name."""
         return {filepath for filepath, _ in self.in_edges.get(changed_name, [])}
 
 class MMRTranslator:
     """Bridges Python AST and the language-independent MMR Manifold."""
 
+    def __init__(self):
+        # Basis vector cache for fast algebraic lookup
+        self._basis_cache = {
+            t: _get_basis_vector(t) for t in [
+                "FunctionDef", "ClassDef", "Name", "Constant", "arg", "Return", "Assign", 
+                "For", "While", "If", "BinOp", "Call", "Attribute", "Load", "Store", "Module", "Pass"
+            ]
+        }
+
     def to_relational_graph(self, node: ast.AST, filepath: str = "") -> MMRNode:
+        """Convert Python AST to Abstract MMR Graph."""
         mmr = MMRNode(node_type=type(node).__name__, filepath=filepath)
         mmr.lineno = getattr(node, 'lineno', 0)
         
@@ -92,15 +102,11 @@ class MMRTranslator:
             
         return mmr
 
-    def _match_type(self, embedding: np.ndarray) -> str:
+    def _algebraic_match(self, embedding: np.ndarray) -> str:
+        """Resolve node type via vector similarity (No string-based branching)."""
         best_type = "Pass"
         best_sim = -1.0
-        common_types = [
-            "FunctionDef", "ClassDef", "Name", "Constant", "arg", "Return", "Assign", 
-            "For", "While", "If", "BinOp", "Call", "Attribute", "Load", "Store", "Module"
-        ]
-        for t in common_types:
-            v = _get_basis_vector(t)
+        for t, v in self._basis_cache.items():
             sim = float(np.dot(embedding, v))
             if sim > best_sim:
                 best_sim = sim
@@ -109,12 +115,11 @@ class MMRTranslator:
 
     def from_relational_graph(self, mmr: MMRNode) -> ast.AST:
         """Synthesize Python AST from Vectorized MMR Graph."""
-        node_type = self._match_type(mmr.embedding)
+        node_type = self._algebraic_match(mmr.embedding)
         node_class = getattr(ast, node_type, None)
         if not node_class:
             return ast.Pass(lineno=1, col_offset=0)
 
-        # Handle leaf nodes / values
         node = None
         if node_type == "Name":
             node = ast.Name(id=mmr.value or "var", ctx=ast.Load())

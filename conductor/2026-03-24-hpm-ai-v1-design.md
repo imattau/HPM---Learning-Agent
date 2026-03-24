@@ -1,33 +1,33 @@
-# HPM AI v3.1: Dialect Sovereignty
-**Design Specification (v1.5 - Token-Native Execution & Architectural Forging)**
+# HPM AI v3.2: The Logic Forge
+**Design Specification (v1.6 - Global Saliency & Algebraic MMR)**
 
 ## 1. Overview
-HPM AI v3.1 achieves **Dialect Sovereignty** by removing the "Python Crutch." It enables high-density execution of relational logic directly within the MMR manifold and transitions from file-patching to **Architectural Forging**—the autonomous synthesis and merging of entire modules based on manifold topology.
+HPM AI v3.2 transitions from a "Code Mimic" to a **Logic Forge**. It eliminates hardcoded file targeting in favor of **Manifold-Directed Saliency** and replaces string-based "simulation" with **Topological Invariant Verification**. It also introduces **Soft Pareto Gating** using a Lagrangian approach to prevent the "Zero-Sum Pruning Trap."
 
 ## 2. Core Architecture
 
-### 2.1 Token-Native Execution (Direct Manifold Simulation)
-- **Module**: `hpm_ai_v1.substrates.vm_substrate.InternalVMSubstrate`
-- **Logic**: Executes MMR graphs using the 32-dimensional basis vectors directly.
-- **Optimization**: Verification of logic happens at "Manifold Speed" (thousands of iterations per second), bypassing Python's `ast` and `subprocess` overhead during internal exploration.
-- **Export**: `ast.unparse()` is only triggered during a **Succession Event** (Final Promotion).
+### 2.1 Manifold-Directed Saliency (Architectural Agency)
+- **Module**: `hpm_ai_v1.core.librarian.CodeLibrarian` / `hpm_ai_v1.core.l5_compiler.L5MonitorAgent`
+- **Function**: Performs project-wide scans to identify refactoring targets automatically.
+- **Metric**: Selects modules with the lowest **Pattern Stickiness** or highest **Structural Entropy** (Epistemic Residual $S$).
+- **Impact**: The `SuccessionLoop` no longer requires a `target_file` parameter.
 
-### 2.2 Multi-File Architectural Forging
-- **Module**: `hpm_ai_v1.core.mutator.L4ArchitectAgent`
-- **Function**: Identifies "Structural Gaps" or "Manifold Redundancy" (e.g., duplicate storage logic).
-- **Action**: Proposes a **Global ChangeSet** that can synthesize entirely new modules or merge existing ones (e.g., forging `hpm/store/unified_persistent_store.py`).
-- **Dependency Edge Synthesis**: Automatically generates the required `ImportNodes` and `CallEdges` for the new architecture.
+### 2.2 Algebraic MMR (Executable Invariants)
+- **Module**: `hpm_ai_v1.transpiler.mmr` / `hpm_ai_v1.substrates.vm_substrate.InternalVMSubstrate`
+- **Logic**: Maps all Python operations to **Manifold Basis Vectors** (32-dim).
+- **Verification**: Instead of text-based simulation, it calculates the **Structural Identity** of the graph.
+- **Equivalence**: If two graphs (Parent/Child) produce the same manifold output for identical input vectors, the logic is verified. If the Child is more elegant (MDL), it is promoted.
 
-### 2.3 Metacognitive Gating (Manifold Verification)
-- **The L5 Monitor**: Now gates logic based on **Manifold Equivalence**. It compares the output of the new Relational Token sequence against the desired L3 Relational Law within the VM substrate.
-- **Pareto Efficiency**: Measured in the manifold (Token Operations per second) before real-world cost verification.
-
-### 2.4 Structural Curiosity
-- **Mechanism**: Triggered by **High Manifold Entropy**.
-- **Action**: If two modules (e.g., `hpm/store/sqlite.py` and `hpm_ai_v1/store/concurrent_sqlite.py`) have high relational similarity but separate implementations, the L4 Architect is commanded to "Forge a Unified Manifold."
+### 2.3 Soft Pareto Gating (Dynamic Lagrangian Weighting)
+- **Module**: `hpm_ai_v1.core.l5_compiler.L5MonitorAgent`
+- **Formula**: $Score = \Delta Accuracy - \lambda(\Delta Nodes)$.
+- **Logic**: 
+    - If a mutation reduces node count, it is accepted unless it breaks tests.
+    - If it increases node count (during "Bloat Windows"), $\lambda$ drops to near zero, permitting complexity for high **Novelty Vectors** ($> 0.7$).
+- **Impact**: Escapes the "Greedy Pruning" local optima by allowing temporary algorithmic investment.
 
 ## 3. Implementation Roadmap
-- **Phase 1**: Implement Token-Native Execution in `InternalVMSubstrate`.
-- **Phase 2**: Update the exploration loop to stay within the MMR manifold.
-- **Phase 3**: Implement "Structural Gap" detection and Architectural Forging.
-- **Phase 4**: Execute the first "Architectural Merger" (Unified Persistent Store).
+- **Phase 1**: Refactor `mmr.py` and `vm_substrate.py` for purely algebraic, basis-vector driven logic.
+- **Phase 2**: Implement `SaliencyScanner` in the `Librarian` to enable autonomous targeting.
+- **Phase 3**: Refactor `L5MonitorAgent` to use Soft Pareto Gating with Lagrangian multipliers.
+- **Phase 4**: Execute a project-wide autonomous refactoring run.
