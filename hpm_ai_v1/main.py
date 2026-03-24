@@ -118,9 +118,22 @@ class SovereignOrchestrator:
             # Step 4: Soft Pareto Gating
             if self.l5_monitor.evaluate_changeset(result, changeset):
                 self.l5_monitor.commit_succession(changeset, self.repo_path)
+                # Success: update global brain
+                for path, src in changeset.mutations.items():
+                    tree = ast.parse(src)
+                    mmr = self.mmr_trans.to_relational_graph(tree, path)
+                    self.librarian.update_manifold(path, mmr)
+                
                 # Re-sync baseline
                 baseline = result
                 self.build_topology()
+            else:
+                # Feedback to Librarian to prevent Saliency Traps
+                self.librarian.report_failure(target_path)
+                
+                if result.get("surprise", 0.0) >= 1.0:
+                    print("L5 Monitor: GLOBAL CONTRADICTION detected. Triggering Repair Turn.")
+                    # Trigger repair task (Phase 3 logic)
             
             time.sleep(1)
 
