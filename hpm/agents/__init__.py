@@ -1,4 +1,15 @@
 from .actor import DecisionalActor
+from .completion import (
+    DecisionTrace,
+    EvaluatorArbitrator,
+    EvaluatorVector,
+    MetaEvaluatorState,
+    FieldConstraint,
+    LifecycleSummary,
+    PatternIdentity,
+    PatternLifecycleTracker,
+    PatternState,
+)
 from .hierarchical import (
     LevelBundle,
     bundle_to_structural_message,
@@ -18,6 +29,15 @@ from .stacked import (
 
 __all__ = [
     "DecisionalActor",
+    "DecisionTrace",
+    "EvaluatorArbitrator",
+    "EvaluatorVector",
+    "MetaEvaluatorState",
+    "FieldConstraint",
+    "LifecycleSummary",
+    "PatternIdentity",
+    "PatternLifecycleTracker",
+    "PatternState",
     "LevelBundle",
     "RelationalBundle",
     "RelationalEdge",

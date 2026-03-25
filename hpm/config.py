@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 class AgentConfig:
     agent_id: str
     feature_dim: int
+    seed: int | None = None  # optional deterministic initialization seed
     # Dynamics (D5)
     eta: float = 0.01
     beta_c: float = 0.1
@@ -22,6 +23,14 @@ class AgentConfig:
     rho: float = 1.0             # field frequency amplification scale (D6)
     alpha_int: float = 0.8       # internal/external field blend (1.0 = agents only, §3.8)
     structural_message_eta: float = 0.05  # reinforcement from accepted structural messages
+    # Completion / lifecycle tracking
+    lifecycle_decay_rate: float = 0.1
+    lifecycle_consolidation_window: int = 3
+    lifecycle_stable_weight_threshold: float = 0.25
+    lifecycle_retire_weight_threshold: float = 0.05
+    lifecycle_absence_window: int = 3
+    evaluator_arbitration_mode: str = "fixed"  # fixed | adaptive | bandit
+    meta_evaluator_learning_rate: float = 0.1
     # Pattern initialisation
     init_sigma: float = 1.0      # initial covariance scale
     # Resource cost evaluator

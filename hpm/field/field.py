@@ -1,5 +1,7 @@
 import math
 
+from hpm.completion_types import FieldConstraint
+
 
 class PatternField:
     """
@@ -27,6 +29,7 @@ class PatternField:
         self._agent_patterns: dict[str, dict[str, float]] = {}
         self._broadcast_queue: list[tuple[str, object]] = []
         self._message_queue: list[tuple[str, object]] = []
+        self._constraints: list[FieldConstraint] = []
         # Inhibitory channel: maps agent_id -> [(pattern, weight), ...]
         # Represents current negative pattern state (not cumulative; reset before each broadcast).
         self._negative: dict[str, list[tuple]] = {}
@@ -88,6 +91,28 @@ class PatternField:
     def broadcast_message(self, source_agent_id: str, message) -> None:
         """Enqueue a structural message separately from pattern broadcasts."""
         self._message_queue.append((source_agent_id, message))
+
+
+    def add_constraint(self, constraint: FieldConstraint) -> None:
+        """Register a persistent field constraint."""
+        self._constraints.append(constraint)
+
+    def constraints_for(self, agent_id: str | None = None) -> list[FieldConstraint]:
+        """Return constraints relevant to the provided agent id (or all when None)."""
+        if agent_id is None:
+            return list(self._constraints)
+        relevant = []
+        for constraint in self._constraints:
+            scope = constraint.scope
+            if scope in {"*", "global", agent_id}:
+                relevant.append(constraint)
+            elif scope.startswith("agent:") and scope.split(":", 1)[1] == agent_id:
+                relevant.append(constraint)
+        return relevant
+
+    def clear_constraints(self) -> None:
+        """Clear all registered constraints."""
+        self._constraints = []
 
     def drain_messages(self) -> list[tuple[str, object]]:
         """Return and clear queued structural messages."""

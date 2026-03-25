@@ -337,3 +337,38 @@ def test_structured_orch_ignores_structural_messages_for_legacy_encoder():
     assert len(enc2.calls) == 1
     # Context is drained at orchestrator level even when encoder cannot consume it.
     assert l1_agents[0].consume_structural_inbox(clear=False) == []
+
+
+def test_structured_orch_passes_identity_snapshots_to_supported_encoder():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class IdentityAwareEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None, identity_snapshots=None):
+            self.calls.append(identity_snapshots)
+            assert identity_snapshots is not None
+            return [np.zeros(6)]
+
+    enc2 = IdentityAwareEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+        identity_snapshots_to_encoders_enabled=True,
+    )
+
+    so.step(np.zeros(4))
+    assert len(enc2.calls) == 1
+    assert isinstance(enc2.calls[0], list)
+    assert enc2.calls[0][0] != {}
+    snapshot = next(iter(enc2.calls[0][0].values()))
+    assert "identity" in snapshot
+    assert "state" in snapshot

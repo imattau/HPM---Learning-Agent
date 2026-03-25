@@ -36,11 +36,13 @@ class StructuredOrchestrator:
         meta_monitor=None,
         relational_bundles_enabled: bool = False,
         structural_messages_to_encoders_enabled: bool = False,
+        identity_snapshots_to_encoders_enabled: bool = False,
     ):
         self.generative_head = generative_head
         self.meta_monitor = meta_monitor
         self.relational_bundles_enabled = relational_bundles_enabled
         self.structural_messages_to_encoders_enabled = structural_messages_to_encoders_enabled
+        self.identity_snapshots_to_encoders_enabled = identity_snapshots_to_encoders_enabled
 
         assert len(encoders) == len(orches) == len(agents), (
             "encoders, orches, and agents must have the same length"
@@ -59,6 +61,7 @@ class StructuredOrchestrator:
         epistemic,
         relational_bundles=None,
         structural_messages=None,
+        identity_snapshots=None,
     ):
         """Call encoder.encode with optional relational and message context when supported."""
         try:
@@ -81,6 +84,13 @@ class StructuredOrchestrator:
             and "structural_messages" in params
         ):
             kwargs["structural_messages"] = structural_messages
+
+        if (
+            self.identity_snapshots_to_encoders_enabled
+            and identity_snapshots is not None
+            and "identity_snapshots" in params
+        ):
+            kwargs["identity_snapshots"] = identity_snapshots
 
         return encoder.encode(observation, **kwargs)
 
@@ -126,12 +136,23 @@ class StructuredOrchestrator:
                         if hasattr(agent, "consume_structural_inbox"):
                             structural_messages.extend(agent.consume_structural_inbox(clear=True))
 
+                identity_snapshots = None
+                if self.identity_snapshots_to_encoders_enabled:
+                    identity_snapshots = []
+                    for agent in self.agents[i - 1]:
+                        lifecycle = getattr(agent, "_lifecycle", None)
+                        if lifecycle is not None and hasattr(lifecycle, "snapshot"):
+                            identity_snapshots.append(lifecycle.snapshot())
+                        else:
+                            identity_snapshots.append({})
+
                 vecs = self._encode_level(
                     self.encoders[i],
                     observation,
                     epistemic=self._epistemic[i - 1],
                     relational_bundles=relational_bundles,
                     structural_messages=structural_messages,
+                    identity_snapshots=identity_snapshots,
                 )
                 last_result: dict = {}
                 for vec in vecs:

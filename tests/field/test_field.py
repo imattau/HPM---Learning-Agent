@@ -149,3 +149,25 @@ def test_drain_broadcasts_leaves_message_queue_intact():
     field.broadcast_message('agent_b', {"kind": "structural"})
     field.drain_broadcasts()
     assert field.drain_messages() == [('agent_b', {"kind": "structural"})]
+
+
+from hpm.agents.completion import FieldConstraint
+
+
+def test_field_constraints_can_be_added_and_filtered():
+    field = PatternField()
+    c1 = FieldConstraint(constraint_type="penalize_complexity", scope="global", strength=0.8, source="env", timestamp=1)
+    c2 = FieldConstraint(constraint_type="prefer_simple", scope="agent-1", strength=0.5, source="env", timestamp=2)
+    field.add_constraint(c1)
+    field.add_constraint(c2)
+
+    assert field.constraints_for("agent-1") == [c1, c2]
+    assert field.constraints_for("agent-2") == [c1]
+    assert field.constraints_for() == [c1, c2]
+
+
+def test_clear_constraints_empties_field_constraints():
+    field = PatternField()
+    field.add_constraint(FieldConstraint(constraint_type="prefer_high_level", scope="*", strength=1.0, source="env", timestamp=1))
+    field.clear_constraints()
+    assert field.constraints_for("agent-1") == []

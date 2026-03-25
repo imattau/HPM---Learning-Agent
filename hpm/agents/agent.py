@@ -1,5 +1,7 @@
-import numpy as np
+import hashlib
 from collections import deque
+
+import numpy as np
 from ..config import AgentConfig
 from ..patterns.gaussian import GaussianPattern
 from ..patterns.factory import make_pattern, pattern_from_dict
@@ -13,6 +15,13 @@ from ..dynamics.recombination import RecombinationOperator
 from ..patterns.classifier import HPMLevelClassifier
 from ..store.memory import InMemoryStore
 from .relational import StructuralMessage
+from .completion import DecisionTrace, EvaluatorArbitrator, FieldConstraint, PatternLifecycleTracker, EvaluatorVector
+
+
+def _stable_seed(agent_id: str, feature_dim: int, pattern_type: str) -> int:
+    payload = f"{agent_id}:{feature_dim}:{pattern_type}".encode("utf-8")
+    digest = hashlib.sha256(payload).digest()
+    return int.from_bytes(digest[:8], "little", signed=False)
 
 
 class Agent:
@@ -79,11 +88,35 @@ class Agent:
         self._t = 0
         self._obs_buffer: deque = deque(maxlen=config.obs_buffer_size)
         self._last_recomb_t: int = -config.recomb_cooldown
-        self._recomb_op = RecombinationOperator(rng=np.random.default_rng(0))
+        self._recomb_seed = (
+            config.seed
+            if config.seed is not None
+            else _stable_seed(config.agent_id, config.feature_dim, f"{config.pattern_type}:recomb")
+        )
+        self._recomb_op = RecombinationOperator(seed=self._recomb_seed)
         self._shared_ids: set[str] = set()
         self._structural_inbox: list[tuple[str, object]] = []
+        self._decision_traces: deque = deque(maxlen=512)
+        self._outcome_history: deque = deque(maxlen=getattr(config, "obs_buffer_size", 50))
         self._structural_message_eta = float(getattr(config, "structural_message_eta", 0.05))
+        self._arbitrator = EvaluatorArbitrator(
+            mode=getattr(config, "evaluator_arbitration_mode", "fixed"),
+            learning_rate=getattr(config, "meta_evaluator_learning_rate", 0.1),
+        )
+        self._lifecycle = PatternLifecycleTracker(
+            consolidation_window=getattr(config, "lifecycle_consolidation_window", 3),
+            stable_weight_threshold=getattr(config, "lifecycle_stable_weight_threshold", 0.25),
+            retire_weight_threshold=getattr(config, "lifecycle_retire_weight_threshold", 0.05),
+            absence_window=getattr(config, "lifecycle_absence_window", 3),
+            decay_rate=getattr(config, "lifecycle_decay_rate", 0.1),
+        )
+        self._init_seed = (
+            config.seed
+            if config.seed is not None
+            else _stable_seed(config.agent_id, config.feature_dim, config.pattern_type)
+        )
         self._seed_if_empty()
+        self._prime_lifecycle_state()
 
     def _share_pending(self, field, patterns: list) -> int:
         """
@@ -213,9 +246,16 @@ class Agent:
             self._structural_inbox.clear()
         return items
 
+    def consume_decision_traces(self, clear: bool = True) -> list[dict]:
+        """Return captured decision traces, optionally clearing after read."""
+        items = [trace for trace in self._decision_traces]
+        if clear:
+            self._decision_traces.clear()
+        return items
+
     def _seed_if_empty(self) -> None:
         if not self.store.query(self.agent_id):
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(self._init_seed)
             scale = (np.eye(self.config.feature_dim) * self.config.init_sigma
                      if self.config.pattern_type == "gaussian"
                      else self.config.init_sigma)
@@ -226,6 +266,48 @@ class Agent:
                 alphabet_size=self.config.alphabet_size,
             )
             self.store.save(init, 1.0, self.agent_id)
+
+    def _prime_lifecycle_state(self) -> None:
+        records = self.store.query(self.agent_id)
+        for pattern, weight in records:
+            self._lifecycle.observe(pattern, weight, step=0)
+
+    def _field_constraints(self) -> list[FieldConstraint]:
+        if self.field is None or not hasattr(self.field, "constraints_for"):
+            return []
+        return list(self.field.constraints_for(self.agent_id))
+
+    def _constraint_adjustment(self, pattern, constraints: list[FieldConstraint]) -> float:
+        if not constraints:
+            return 0.0
+        complexity = pattern.description_length() / max(1.0, float(self.config.feature_dim))
+        level_score = (float(getattr(pattern, "level", 1)) - 1.0) / 4.0
+        adjustment = 0.0
+        for constraint in constraints:
+            strength = float(np.clip(constraint.strength, 0.0, 1.0))
+            ctype = constraint.constraint_type
+            if ctype == "penalize_complexity":
+                adjustment -= strength * complexity
+            elif ctype == "prefer_simple":
+                adjustment += strength * (1.0 - complexity)
+            elif ctype == "prefer_high_level":
+                adjustment += strength * level_score
+            elif ctype == "prefer_low_level":
+                adjustment -= strength * level_score
+            else:
+                adjustment += 0.1 * strength
+        return float(adjustment)
+
+    def _evaluator_vector(self, predictive: float, coherence: float, cost: float, horizon: float) -> EvaluatorVector:
+        aggregate = self._arbitrator.aggregate(predictive, coherence, cost, horizon)
+        return EvaluatorVector(
+            predictive=float(predictive),
+            coherence=float(coherence),
+            cost=float(cost),
+            horizon=float(horizon),
+            aggregate=float(aggregate),
+            arbitration_mode=self._arbitrator.mode,
+        )
 
     def step(self, x: np.ndarray, reward: float = 0.0) -> dict:
         self._obs_buffer.append(x)
@@ -298,12 +380,25 @@ class Agent:
         else:
             e_costs = [0.0] * len(patterns)
 
+        field_constraints = self._field_constraints()
+        predictive_terms = np.asarray(epistemic_accs, dtype=float)
+        coherence_terms = np.asarray(e_affs, dtype=float)
+        cost_terms = np.asarray(e_costs, dtype=float)
+        horizon_terms = np.asarray(e_socs, dtype=float)
+        evaluator_vector = self._evaluator_vector(
+            predictive=float(np.mean(predictive_terms)) if len(predictive_terms) else 0.0,
+            coherence=float(np.mean(coherence_terms)) if len(coherence_terms) else 0.0,
+            cost=float(np.mean(cost_terms)) if len(cost_terms) else 0.0,
+            horizon=float(np.mean(horizon_terms)) if len(horizon_terms) else 0.0,
+        )
+
         totals = np.array([
             epi
             + (self.config.beta_comp * p.compress() if self.config.beta_comp != 0.0 else 0.0)
             + self.config.beta_aff * e_aff
             + self.config.gamma_soc * e_soc
             + self.config.delta_cost * e_cost
+            + self._constraint_adjustment(p, field_constraints)
             for p, epi, e_aff, e_soc, e_cost in zip(patterns, epistemic_accs, e_affs, e_socs, e_costs)
         ])
 
@@ -355,6 +450,10 @@ class Agent:
                 total_conflict=total_conflict,
             )
             if recomb_result is not None:
+                setattr(recomb_result.pattern, "parent_ids", (recomb_result.parent_a_id, recomb_result.parent_b_id))
+                setattr(recomb_result.pattern, "source_id", recomb_result.parent_a_id)
+                setattr(recomb_result.pattern, "lineage_kind", "recombined")
+                setattr(recomb_result.pattern, "source_step", self._t)
                 entry_weight = self.config.kappa_0 * recomb_result.insight_score
                 self.store.save(recomb_result.pattern, entry_weight, self.agent_id)
                 all_records = self.store.query(self.agent_id)
@@ -373,6 +472,12 @@ class Agent:
         else:
             report_patterns = surviving_patterns
 
+        for pattern, weight in self.store.query(self.agent_id):
+            self._lifecycle.observe(pattern, weight, step=self._t)
+        active_ids = {p.id for p in report_patterns}
+        self._lifecycle.finalize(active_ids, step=self._t)
+        lifecycle_summary = self._lifecycle.summary().to_dict()
+
         communicated_out = 0
         if self.field is not None:
             communicated_out = self._share_pending(self.field, report_patterns)
@@ -390,6 +495,48 @@ class Agent:
             self.field._negative[self.agent_id] = []   # reset before re-broadcasting
             for pattern, weight in self.store.query_negative(self.agent_id):
                 self.field.broadcast_negative(pattern, weight, self.agent_id)
+
+        selected_pattern_ids = tuple(p.id for p in report_patterns[: min(3, len(report_patterns))])
+        selected_parent_ids = tuple(
+            sorted(
+                {
+                    parent_id
+                    for pattern in report_patterns[: min(3, len(report_patterns))]
+                    for parent_id in tuple(getattr(pattern, "parent_ids", ()) or (getattr(pattern, "source_id", None),))
+                    if parent_id is not None
+                }
+            )
+        )
+        action = (
+            "recombination:accepted"
+            if recomb_result is not None
+            else ("recombination:attempted" if recomb_attempted else "update")
+        )
+        step_outcome = float(reward - 0.25 * total_conflict + (0.1 if recomb_result is not None else 0.0))
+        self._outcome_history.append(step_outcome)
+        meta_signal = float(np.mean(self._outcome_history)) if self._outcome_history else step_outcome
+        meta_signal_source = "rolling_outcome"
+        meta_evaluator_state = self._arbitrator.update(
+            meta_signal,
+            predictive=float(np.mean(predictive_terms)) if len(predictive_terms) else 0.0,
+            coherence=float(np.mean(coherence_terms)) if len(coherence_terms) else 0.0,
+            cost=float(np.mean(cost_terms)) if len(cost_terms) else 0.0,
+            horizon=float(np.mean(horizon_terms)) if len(horizon_terms) else 0.0,
+            signal_source=meta_signal_source,
+        )
+        decision_trace = DecisionTrace(
+            trace_id=f"{self.agent_id}:{self._t}",
+            selected_pattern_ids=selected_pattern_ids,
+            selected_parent_ids=selected_parent_ids,
+            evaluator_vector=evaluator_vector,
+            constraint_ids=tuple(
+                f"{c.scope}:{c.constraint_type}:{c.timestamp}" for c in field_constraints
+            ),
+            meta_evaluator_state=meta_evaluator_state,
+            signal_source=meta_signal_source,
+            action=action,
+        )
+        self._decision_traces.append(decision_trace.to_dict())
 
         return {
             't': self._t,
@@ -417,4 +564,13 @@ class Agent:
                 if recomb_result else None
             ),
             'communicated_out': communicated_out,
+            'lifecycle_summary': lifecycle_summary,
+            'lifecycle_snapshot': self._lifecycle.snapshot(),
+            'field_constraint_count': len(field_constraints),
+            'field_constraint_strength': float(np.mean([c.strength for c in field_constraints])) if field_constraints else 0.0,
+            'evaluator_vector': evaluator_vector.to_dict(),
+            'meta_evaluator_state': meta_evaluator_state.to_dict(),
+            'decision_trace': decision_trace.to_dict(),
+            'decision_trace_count': len(self._decision_traces),
+            'outcome_signal': step_outcome,
         }

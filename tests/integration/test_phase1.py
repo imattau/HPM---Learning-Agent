@@ -111,6 +111,20 @@ def test_library_floor_prevents_empty_store():
         assert total_weight > 0.0
 
 
+def test_seeded_initialization_is_reproducible():
+    """Empty-store seeding should be deterministic for the same agent identity."""
+    cfg1 = AgentConfig(agent_id="seeded_agent", feature_dim=4)
+    cfg2 = AgentConfig(agent_id="seeded_agent", feature_dim=4)
+    agent1 = Agent(cfg1)
+    agent2 = Agent(cfg2)
+
+    pat1, weight1 = max(agent1.store.query("seeded_agent"), key=lambda r: r[1])
+    pat2, weight2 = max(agent2.store.query("seeded_agent"), key=lambda r: r[1])
+
+    assert weight1 == weight2 == 1.0
+    assert np.allclose(pat1.mu, pat2.mu)
+
+
 def test_store_persists_patterns_across_steps():
     """Patterns in the store reflect state after multiple steps."""
     domain = make_domain()

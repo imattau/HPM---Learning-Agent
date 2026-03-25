@@ -33,8 +33,13 @@ class RecombinationOperator:
         unseeded generator if None.
     """
 
-    def __init__(self, rng=None):
-        self._rng = rng if rng is not None else np.random.default_rng()
+    def __init__(self, rng=None, seed: int | None = None):
+        if rng is not None:
+            self._rng = rng
+        elif seed is not None:
+            self._rng = np.random.default_rng(seed)
+        else:
+            self._rng = np.random.default_rng()
 
     def attempt(self, patterns, weights, obs_buffer, config, trigger, total_conflict=0.0):
         """

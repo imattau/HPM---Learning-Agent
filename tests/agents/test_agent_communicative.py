@@ -133,7 +133,9 @@ def test_communicated_out_in_return_dict_every_step():
     agent, field = make_agent_with_field()
     result = agent.step(np.zeros(2))
     assert 'communicated_out' in result
+    assert 'lifecycle_summary' in result
     assert result['communicated_out'] == 0
+    assert result['lifecycle_summary']['emergent'] >= 1
 
 
 def test_no_sharing_below_level4_from_step():
