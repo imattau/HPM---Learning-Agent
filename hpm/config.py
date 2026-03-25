@@ -21,6 +21,7 @@ class AgentConfig:
     # Social evaluator (Phase 2+)
     rho: float = 1.0             # field frequency amplification scale (D6)
     alpha_int: float = 0.8       # internal/external field blend (1.0 = agents only, §3.8)
+    structural_message_eta: float = 0.05  # reinforcement from accepted structural messages
     # Pattern initialisation
     init_sigma: float = 1.0      # initial covariance scale
     # Resource cost evaluator

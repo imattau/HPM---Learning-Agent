@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 import numpy as np
 import pytest
 from hpm.agents.structured import StructuredOrchestrator
+from hpm.agents.relational import RelationalEdge, StructuralMessage
 from benchmarks.multi_agent_common import make_orchestrator
 
 
@@ -160,3 +161,179 @@ def test_l4_accumulate_and_update_adds_pairs():
     for _ in range(3):
         so._l4_accumulate_and_update(rng.standard_normal(4), rng.standard_normal(4))
     assert len(so.generative_head._X) == 3
+
+
+def test_structured_orch_passes_relational_bundles_to_supported_encoder():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class RelationalAwareEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None, relational_bundles=None):
+            self.calls.append((observation, epistemic, relational_bundles))
+            assert relational_bundles is not None
+            assert len(relational_bundles) == 1
+            return [np.zeros(6)]
+
+    enc2 = RelationalAwareEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+        relational_bundles_enabled=True,
+    )
+
+    so.step(np.zeros(4))
+    assert len(enc2.calls) == 1
+    _, epistemic, bundles = enc2.calls[0]
+    assert epistemic is not None
+    assert bundles[0].agent_id == l1_agents[0].agent_id
+    assert len(bundles[0].relations) == 3
+
+
+def test_structured_orch_ignores_relational_bundles_for_legacy_encoder():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class LegacyEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None):
+            self.calls.append((observation, epistemic))
+            return [np.zeros(6)]
+
+    enc2 = LegacyEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+        relational_bundles_enabled=True,
+    )
+
+    so.step(np.zeros(4))
+    assert len(enc2.calls) == 1
+
+
+def test_structured_orch_default_keeps_relational_bundles_disabled():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class RelationalAwareEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None, relational_bundles=None):
+            self.calls.append(relational_bundles)
+            return [np.zeros(6)]
+
+    enc2 = RelationalAwareEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+    )
+
+    so.step(np.zeros(4))
+    assert enc2.calls == [None]
+
+
+def test_structured_orch_passes_structural_messages_to_supported_encoder():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class MessageAwareEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None, structural_messages=None):
+            self.calls.append(structural_messages)
+            assert structural_messages is not None
+            return [np.zeros(6)]
+
+    enc2 = MessageAwareEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+        structural_messages_to_encoders_enabled=True,
+    )
+
+    msg = StructuralMessage(
+        source_agent_id='sender',
+        relations=(
+            RelationalEdge(
+                source='agent:sender',
+                relation='tracks_pattern',
+                target='pattern:fake',
+                confidence=1.0,
+            ),
+        ),
+        confidence=1.0,
+        provenance=('agent:sender',),
+    )
+    l1_agents[0].accept_structural_message(msg, 'sender')
+
+    so.step(np.zeros(4))
+    assert len(enc2.calls) == 1
+    assert len(enc2.calls[0]) == 1
+    source_id, message = enc2.calls[0][0]
+    assert source_id == 'sender'
+    assert message is msg
+    assert l1_agents[0].consume_structural_inbox(clear=False) == []
+
+
+def test_structured_orch_ignores_structural_messages_for_legacy_encoder():
+    l1_orch, l1_agents = _make_level(1, 4, "l1")
+    l2_orch, l2_agents = _make_level(1, 6, "l2")
+    enc1 = _make_dummy_encoder(4)
+
+    class LegacyEncoder:
+        feature_dim = 6
+        max_steps_per_obs = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, observation, epistemic=None):
+            self.calls.append((observation, epistemic))
+            return [np.zeros(6)]
+
+    enc2 = LegacyEncoder()
+    so = StructuredOrchestrator(
+        encoders=[enc1, enc2],
+        orches=[l1_orch, l2_orch],
+        agents=[l1_agents, l2_agents],
+        level_Ks=[1, 1],
+        structural_messages_to_encoders_enabled=True,
+    )
+
+    msg = StructuralMessage(source_agent_id='sender', relations=(), confidence=1.0, provenance=('agent:sender',))
+    l1_agents[0].accept_structural_message(msg, 'sender')
+
+    so.step(np.zeros(4))
+    assert len(enc2.calls) == 1
+    # Context is drained at orchestrator level even when encoder cannot consume it.
+    assert l1_agents[0].consume_structural_inbox(clear=False) == []

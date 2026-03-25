@@ -122,3 +122,30 @@ def test_multiple_broadcasts_accumulated():
     field.broadcast('b', _pattern())
     queue = field.drain_broadcasts()
     assert len(queue) == 2
+
+
+def test_broadcast_message_appends_to_separate_queue():
+    field = PatternField()
+    message = {"kind": "structural"}
+    field.broadcast_message('agent_a', message)
+    queue = field.drain_messages()
+    assert len(queue) == 1
+    assert queue[0] == ('agent_a', message)
+
+
+def test_drain_messages_clears_queue_without_touching_pattern_broadcasts():
+    field = PatternField()
+    field.broadcast('agent_a', _pattern())
+    field.broadcast_message('agent_b', {"kind": "structural"})
+    messages = field.drain_messages()
+    broadcasts = field.drain_broadcasts()
+    assert messages == [('agent_b', {"kind": "structural"})]
+    assert len(broadcasts) == 1
+
+
+def test_drain_broadcasts_leaves_message_queue_intact():
+    field = PatternField()
+    field.broadcast('agent_a', _pattern())
+    field.broadcast_message('agent_b', {"kind": "structural"})
+    field.drain_broadcasts()
+    assert field.drain_messages() == [('agent_b', {"kind": "structural"})]

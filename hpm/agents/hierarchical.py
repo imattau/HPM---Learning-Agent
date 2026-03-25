@@ -4,6 +4,12 @@ import pathlib
 import numpy as np
 from hpm.agents.agent import Agent
 from hpm.agents.multi_agent import MultiAgentOrchestrator
+from hpm.agents.relational import (
+    RelationalBundle,
+    RelationalEdge,
+    StructuralMessage,
+    mean_relation_confidence,
+)
 
 
 @dataclass
@@ -52,6 +58,80 @@ def encode_bundle(bundle: LevelBundle) -> np.ndarray:
     This becomes the raw observation fed to Level 2 agents.
     """
     return np.concatenate([bundle.mu, [bundle.weight, bundle.epistemic_loss]])
+
+
+def extract_relational_bundle(agent: Agent) -> RelationalBundle:
+    """Extract a bundle with lightweight structural relations from an agent."""
+    base = extract_bundle(agent)
+    records = agent.store.query(agent.agent_id)
+
+    if not records:
+        return RelationalBundle(
+            agent_id=base.agent_id,
+            mu=base.mu.copy(),
+            weight=base.weight,
+            epistemic_loss=base.epistemic_loss,
+            strategic_confidence=base.strategic_confidence,
+            relations=(),
+        )
+
+    top_pattern, top_weight = max(records, key=lambda r: r[1])
+    level = getattr(top_pattern, "level", 1)
+    pattern_ref = f"pattern:{top_pattern.id}"
+    confidence = float(np.clip(top_weight, 0.0, 1.0))
+    relations = (
+        RelationalEdge(
+            source=f"agent:{agent.agent_id}",
+            relation="tracks_pattern",
+            target=pattern_ref,
+            confidence=confidence,
+        ),
+        RelationalEdge(
+            source=pattern_ref,
+            relation="has_level",
+            target=f"level:{level}",
+            confidence=1.0,
+        ),
+        RelationalEdge(
+            source=pattern_ref,
+            relation="has_weight",
+            target=f"weight:{top_weight:.3f}",
+            confidence=confidence,
+        ),
+    )
+    return RelationalBundle(
+        agent_id=base.agent_id,
+        mu=base.mu.copy(),
+        weight=base.weight,
+        epistemic_loss=base.epistemic_loss,
+        strategic_confidence=base.strategic_confidence,
+        relations=relations,
+    )
+
+
+def encode_relational_bundle(bundle: RelationalBundle) -> np.ndarray:
+    """Encode a relational bundle into a compact numeric summary."""
+    return np.concatenate([
+        bundle.mu,
+        [
+            bundle.weight,
+            bundle.epistemic_loss,
+            bundle.strategic_confidence,
+            float(len(bundle.relations)),
+            mean_relation_confidence(bundle.relations),
+        ],
+    ])
+
+
+def bundle_to_structural_message(bundle: RelationalBundle) -> StructuralMessage:
+    """Convert a relational bundle into a constrained structural message."""
+    confidence = float(np.clip(bundle.weight * bundle.strategic_confidence, 0.0, 1.0))
+    return StructuralMessage(
+        source_agent_id=bundle.agent_id,
+        relations=bundle.relations,
+        confidence=confidence,
+        provenance=(f"agent:{bundle.agent_id}",),
+    )
 
 
 class HierarchicalOrchestrator:

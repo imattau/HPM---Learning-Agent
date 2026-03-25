@@ -4,7 +4,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 import numpy as np
 import pytest
 from hpm.agents.hierarchical import LevelBundle, encode_bundle
-from hpm.agents.hierarchical import extract_bundle
+from hpm.agents.hierarchical import (
+    bundle_to_structural_message,
+    encode_relational_bundle,
+    extract_bundle,
+    extract_relational_bundle,
+)
 from hpm.agents.hierarchical import (
     HierarchicalOrchestrator, make_hierarchical_orchestrator
 )
@@ -149,3 +154,47 @@ def test_hierarchical_orchestrator_returns_t():
     for i in range(1, 4):
         result = h_orch.step(np.zeros(4))
         assert result["t"] == i
+
+
+def test_extract_relational_bundle_empty_store_returns_no_relations():
+    agent = _make_agent(feature_dim=4)
+    agent.store._data.clear()
+    bundle = extract_relational_bundle(agent)
+    assert bundle.agent_id == agent.agent_id
+    assert bundle.relations == ()
+    np.testing.assert_allclose(bundle.mu, np.zeros(4))
+
+
+def test_extract_relational_bundle_populated_has_structural_edges():
+    agent = _make_agent(feature_dim=4)
+    rng = np.random.default_rng(7)
+    for _ in range(5):
+        agent.step(rng.standard_normal(4))
+    bundle = extract_relational_bundle(agent)
+    assert len(bundle.relations) == 3
+    assert bundle.relations[0].source == f"agent:{agent.agent_id}"
+    assert bundle.relations[0].relation == "tracks_pattern"
+    assert bundle.relations[1].relation == "has_level"
+    assert bundle.relations[2].relation == "has_weight"
+
+
+def test_encode_relational_bundle_appends_structural_summary():
+    bundle = extract_relational_bundle(_make_agent(feature_dim=4))
+    vec = encode_relational_bundle(bundle)
+    assert vec.shape == (9,)
+    assert vec[-2] == pytest.approx(float(len(bundle.relations)))
+    expected_mean = np.mean([edge.confidence for edge in bundle.relations]) if bundle.relations else 0.0
+    assert vec[-1] == pytest.approx(expected_mean)
+
+
+def test_bundle_to_structural_message_preserves_relations_and_provenance():
+    agent = _make_agent(feature_dim=4, agent_id="rel_agent")
+    rng = np.random.default_rng(9)
+    for _ in range(3):
+        agent.step(rng.standard_normal(4))
+    bundle = extract_relational_bundle(agent)
+    message = bundle_to_structural_message(bundle)
+    assert message.source_agent_id == "rel_agent"
+    assert message.relations == bundle.relations
+    assert message.provenance == ("agent:rel_agent",)
+    assert 0.0 <= message.confidence <= 1.0

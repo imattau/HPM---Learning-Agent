@@ -4,6 +4,7 @@ from hpm.config import AgentConfig
 from hpm.agents.agent import Agent
 from hpm.field.field import PatternField
 from hpm.patterns.gaussian import GaussianPattern
+from hpm.agents.relational import RelationalEdge, StructuralMessage
 from hpm.store.memory import InMemoryStore
 
 
@@ -169,3 +170,84 @@ def test_orchestrator_distributes_broadcast_to_other_agents():
 
     # Agent B may or may not admit -- just verify no exception and method works
     # (admission depends on novelty and efficacy values)
+
+
+def test_emit_structural_message_returns_decodable_message():
+    agent, _ = make_agent_with_field('emit_agent')
+    agent.step(np.zeros(2))
+    message = agent.emit_structural_message()
+    assert message is not None
+    assert message.source_agent_id == 'emit_agent'
+    assert len(message.relations) >= 1
+
+
+def test_accept_structural_message_appends_to_inbox():
+    agent, _ = make_agent_with_field('receiver')
+    payload = {"kind": "structural"}
+    result = agent.accept_structural_message(payload, 'sender')
+    assert result is True
+    assert agent._structural_inbox == [('sender', payload)]
+
+
+def test_orchestrator_relays_structural_messages_when_enabled():
+    from hpm.agents.multi_agent import MultiAgentOrchestrator
+    field = PatternField()
+    agentA = Agent(AgentConfig(agent_id='A', feature_dim=2), field=field)
+    agentB = Agent(AgentConfig(agent_id='B', feature_dim=2), field=field)
+    orch = MultiAgentOrchestrator([agentA, agentB], field, structural_messages_enabled=True)
+
+    obs = {'A': np.zeros(2), 'B': np.ones(2)}
+    orch.step(obs)
+
+    assert any(source == 'A' for source, _ in agentB._structural_inbox)
+    assert any(source == 'B' for source, _ in agentA._structural_inbox)
+
+
+def test_orchestrator_does_not_relay_structural_messages_by_default():
+    from hpm.agents.multi_agent import MultiAgentOrchestrator
+    field = PatternField()
+    agentA = Agent(AgentConfig(agent_id='A', feature_dim=2), field=field)
+    agentB = Agent(AgentConfig(agent_id='B', feature_dim=2), field=field)
+    orch = MultiAgentOrchestrator([agentA, agentB], field)
+
+    obs = {'A': np.zeros(2), 'B': np.ones(2)}
+    orch.step(obs)
+
+    assert agentA._structural_inbox == []
+    assert agentB._structural_inbox == []
+
+
+def test_accept_structural_message_reinforces_matching_pattern():
+    agent, _ = make_agent_with_field('reinforce')
+    # Replace the seeded store contents with two explicit patterns so the
+    # reinforcement effect is easy to observe.
+    for p, _ in agent.store.query('reinforce'):
+        agent.store.delete(p.id, 'reinforce')
+    target = GaussianPattern(np.zeros(2), np.eye(2))
+    other = GaussianPattern(np.ones(2), np.eye(2))
+    agent.store.save(target, 0.25, 'reinforce')
+    agent.store.save(other, 0.75, 'reinforce')
+
+    before = {p.id: w for p, w in agent.store.query('reinforce')}
+    message = StructuralMessage(
+        source_agent_id='sender',
+        relations=(
+            RelationalEdge(
+                source='agent:sender',
+                relation='tracks_pattern',
+                target=f'pattern:{target.id}',
+                confidence=1.0,
+            ),
+        ),
+        confidence=1.0,
+        provenance=('agent:sender',),
+    )
+
+    agent.accept_structural_message(message, 'sender')
+    after = {p.id: w for p, w in agent.store.query('reinforce')}
+
+    assert after[target.id] > before[target.id]
+    before_ratio = before[target.id] / before[other.id]
+    after_ratio = after[target.id] / after[other.id]
+    assert after_ratio > before_ratio
+    assert abs(sum(after.values()) - 1.0) < 1e-9

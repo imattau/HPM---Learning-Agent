@@ -40,6 +40,7 @@ class MultiAgentOrchestrator:
         bridge=None,
         forecaster=None,
         actor=None,
+        structural_messages_enabled: bool = False,
     ):
         self.agents = agents
         self._groups = groups
@@ -50,6 +51,7 @@ class MultiAgentOrchestrator:
         self.bridge = bridge
         self.forecaster = forecaster
         self.actor = actor
+        self.structural_messages_enabled = structural_messages_enabled
 
         if groups is not None:
             # Create one PatternField per unique group and assign to agents
@@ -137,8 +139,16 @@ class MultiAgentOrchestrator:
                     # Overwrites communicated_out: 0 from agent.step() (field was None during step).
                     patterns_post = [p for p, _ in records]
                     step_metrics['communicated_out'] = agent._share_pending(actual_field, patterns_post)
+                    if self.structural_messages_enabled:
+                        message = agent.emit_structural_message()
+                        if message is not None:
+                            actual_field.broadcast_message(agent.agent_id, message)
             else:
                 step_metrics = agent.step(x, reward=r)
+                if self.structural_messages_enabled and agent.field is not None:
+                    message = agent.emit_structural_message()
+                    if message is not None:
+                        agent.field.broadcast_message(agent.agent_id, message)
             step_metrics["m3_active"] = m3_active
             metrics[agent.agent_id] = step_metrics
 
@@ -157,6 +167,21 @@ class MultiAgentOrchestrator:
                 for agent in self.agents:
                     if agent.agent_id != source_agent_id:
                         agent._accept_communicated(pattern, source_agent_id)
+
+        if self.structural_messages_enabled and self._group_fields:
+            for group_id, gfield in self._group_fields.items():
+                messages = gfield.drain_messages()
+                group_agent_ids = {aid for aid, gid in self._groups.items() if gid == group_id}
+                for source_agent_id, message in messages:
+                    for agent in self.agents:
+                        if agent.agent_id in group_agent_ids and agent.agent_id != source_agent_id:
+                            agent.accept_structural_message(message, source_agent_id)
+        elif self.structural_messages_enabled and self.field is not None:
+            messages = self.field.drain_messages()
+            for source_agent_id, message in messages:
+                for agent in self.agents:
+                    if agent.agent_id != source_agent_id:
+                        agent.accept_structural_message(message, source_agent_id)
 
         # Aggregate total_conflict across all agents
         total_conflict_sum = sum(

@@ -4,6 +4,13 @@ AI learning agents built on the **Hierarchical Pattern Modelling (HPM)** framewo
 
 ---
 
+
+## Repository Overview (Concise)
+
+- `hpm/` is the baseline HPM framework implementation (core agents, field dynamics, hierarchy, benchmarks).
+- `hpm_ai_v1/` is a specialized extension line focused on structured multi-agent self-repair and project-manifold reasoning.
+- Current status: baseline is active for continued iteration; HPM AI v1 is largely complete with strong issue coverage and documented architectural insights.
+
 ## What is HPM?
 
 HPM is a framework for understanding learning as the progressive discovery and refinement of patterns across multiple levels of abstraction. Rather than treating learning as a single process (like gradient descent or reinforcement), HPM proposes that all learning systems — including humans — operate through four structural roles working together:

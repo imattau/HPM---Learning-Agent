@@ -26,6 +26,7 @@ class PatternField:
         # Maps agent_id -> {pattern_id: weight}
         self._agent_patterns: dict[str, dict[str, float]] = {}
         self._broadcast_queue: list[tuple[str, object]] = []
+        self._message_queue: list[tuple[str, object]] = []
         # Inhibitory channel: maps agent_id -> [(pattern, weight), ...]
         # Represents current negative pattern state (not cumulative; reset before each broadcast).
         self._negative: dict[str, list[tuple]] = {}
@@ -82,6 +83,16 @@ class PatternField:
         """Return and clear the broadcast queue. Called by orchestrator after all agents step."""
         queue = list(self._broadcast_queue)
         self._broadcast_queue = []
+        return queue
+
+    def broadcast_message(self, source_agent_id: str, message) -> None:
+        """Enqueue a structural message separately from pattern broadcasts."""
+        self._message_queue.append((source_agent_id, message))
+
+    def drain_messages(self) -> list[tuple[str, object]]:
+        """Return and clear queued structural messages."""
+        queue = list(self._message_queue)
+        self._message_queue = []
         return queue
 
     def field_quality(self) -> dict[str, float]:

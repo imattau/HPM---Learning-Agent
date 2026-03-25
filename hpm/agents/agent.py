@@ -12,6 +12,7 @@ from ..dynamics.density import PatternDensity
 from ..dynamics.recombination import RecombinationOperator
 from ..patterns.classifier import HPMLevelClassifier
 from ..store.memory import InMemoryStore
+from .relational import StructuralMessage
 
 
 class Agent:
@@ -80,6 +81,8 @@ class Agent:
         self._last_recomb_t: int = -config.recomb_cooldown
         self._recomb_op = RecombinationOperator(rng=np.random.default_rng(0))
         self._shared_ids: set[str] = set()
+        self._structural_inbox: list[tuple[str, object]] = []
+        self._structural_message_eta = float(getattr(config, "structural_message_eta", 0.05))
         self._seed_if_empty()
 
     def _share_pending(self, field, patterns: list) -> int:
@@ -137,6 +140,78 @@ class Agent:
             for p, w in all_records:
                 self.store.update_weight(p.id, self.agent_id, w / total_w)
         return True
+
+    def emit_structural_message(self):
+        """Emit a compact structural message summarizing the current top pattern."""
+        try:
+            from .hierarchical import extract_relational_bundle, bundle_to_structural_message
+            bundle = extract_relational_bundle(self)
+            if not bundle.relations:
+                return None
+            return bundle_to_structural_message(bundle)
+        except Exception:
+            return None
+
+    def _pattern_id_from_reference(self, reference: str) -> str | None:
+        if not isinstance(reference, str):
+            return None
+        prefix = "pattern:"
+        if not reference.startswith(prefix):
+            return None
+        return reference[len(prefix):]
+
+    def _renormalize_weights(self) -> None:
+        records = self.store.query(self.agent_id)
+        total_w = sum(w for _, w in records)
+        if total_w <= 0:
+            return
+        for p, w in records:
+            self.store.update_weight(p.id, self.agent_id, w / total_w)
+
+    def _apply_structural_message(self, message: StructuralMessage) -> bool:
+        if message.confidence <= 0.0:
+            return False
+
+        records = self.store.query(self.agent_id)
+        if not records:
+            return False
+
+        record_map = {p.id: (p, w) for p, w in records}
+        touched = False
+        message_strength = float(np.clip(message.confidence, 0.0, 1.0))
+
+        for edge in message.relations:
+            if edge.relation != "tracks_pattern":
+                continue
+            pattern_id = self._pattern_id_from_reference(edge.target)
+            if pattern_id is None or pattern_id not in record_map:
+                continue
+            pattern, weight = record_map[pattern_id]
+            boost = self._structural_message_eta * message_strength * float(np.clip(edge.confidence, 0.0, 1.0))
+            if boost <= 0.0:
+                continue
+            self.store.update_weight(pattern.id, self.agent_id, weight * (1.0 + boost))
+            touched = True
+
+        if touched:
+            self._renormalize_weights()
+        return touched
+
+    def accept_structural_message(self, message, source_agent_id: str) -> bool:
+        """Record an incoming structural message for higher-level inspection."""
+        self._structural_inbox.append((source_agent_id, message))
+        if source_agent_id == self.agent_id:
+            return True
+        if isinstance(message, StructuralMessage):
+            self._apply_structural_message(message)
+        return True
+
+    def consume_structural_inbox(self, clear: bool = True) -> list[tuple[str, object]]:
+        """Return structural inbox contents, optionally clearing after read."""
+        items = list(self._structural_inbox)
+        if clear:
+            self._structural_inbox.clear()
+        return items
 
     def _seed_if_empty(self) -> None:
         if not self.store.query(self.agent_id):

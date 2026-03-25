@@ -5,7 +5,10 @@ Cadence for level i is based on total step() calls, not per-object ticks.
 Epistemic state (weight, epistemic_loss) threads from each level into the next encoder.
 """
 from __future__ import annotations
+import inspect
 import numpy as np
+
+from hpm.agents.hierarchical import extract_relational_bundle
 
 
 class StructuredOrchestrator:
@@ -31,9 +34,13 @@ class StructuredOrchestrator:
         level_Ks: list[int],
         generative_head=None,
         meta_monitor=None,
+        relational_bundles_enabled: bool = False,
+        structural_messages_to_encoders_enabled: bool = False,
     ):
         self.generative_head = generative_head
         self.meta_monitor = meta_monitor
+        self.relational_bundles_enabled = relational_bundles_enabled
+        self.structural_messages_to_encoders_enabled = structural_messages_to_encoders_enabled
 
         assert len(encoders) == len(orches) == len(agents), (
             "encoders, orches, and agents must have the same length"
@@ -44,6 +51,38 @@ class StructuredOrchestrator:
         self.level_Ks = level_Ks
         self._step_ticks: list[int] = [0] * len(orches)
         self._epistemic: list[tuple[float, float] | None] = [None] * len(orches)
+
+    def _encode_level(
+        self,
+        encoder,
+        observation,
+        epistemic,
+        relational_bundles=None,
+        structural_messages=None,
+    ):
+        """Call encoder.encode with optional relational and message context when supported."""
+        try:
+            params = inspect.signature(encoder.encode).parameters
+        except (TypeError, ValueError):
+            params = {}
+
+        kwargs = {"epistemic": epistemic}
+
+        if (
+            self.relational_bundles_enabled
+            and relational_bundles is not None
+            and "relational_bundles" in params
+        ):
+            kwargs["relational_bundles"] = relational_bundles
+
+        if (
+            self.structural_messages_to_encoders_enabled
+            and structural_messages is not None
+            and "structural_messages" in params
+        ):
+            kwargs["structural_messages"] = structural_messages
+
+        return encoder.encode(observation, **kwargs)
 
     def step(self, observation, l1_obs_dict: dict | None = None) -> dict:
         """Step all levels on one observation.
@@ -66,7 +105,7 @@ class StructuredOrchestrator:
         if l1_obs_dict is not None:
             l1_result = self.orches[0].step(l1_obs_dict)
         else:
-            vecs = self.encoders[0].encode(observation, epistemic=None)
+            vecs = self._encode_level(self.encoders[0], observation, epistemic=None)
             obs_dict = {a.agent_id: vecs[0] for a in self.agents[0]}
             l1_result = self.orches[0].step(obs_dict)
         self._step_ticks[0] += 1
@@ -76,7 +115,24 @@ class StructuredOrchestrator:
         # Higher levels: cadence check on total step count
         for i in range(1, n):
             if self._step_ticks[0] % self.level_Ks[i] == 0:
-                vecs = self.encoders[i].encode(observation, epistemic=self._epistemic[i - 1])
+                relational_bundles = None
+                if self.relational_bundles_enabled:
+                    relational_bundles = [extract_relational_bundle(agent) for agent in self.agents[i - 1]]
+
+                structural_messages = None
+                if self.structural_messages_to_encoders_enabled:
+                    structural_messages = []
+                    for agent in self.agents[i - 1]:
+                        if hasattr(agent, "consume_structural_inbox"):
+                            structural_messages.extend(agent.consume_structural_inbox(clear=True))
+
+                vecs = self._encode_level(
+                    self.encoders[i],
+                    observation,
+                    epistemic=self._epistemic[i - 1],
+                    relational_bundles=relational_bundles,
+                    structural_messages=structural_messages,
+                )
                 last_result: dict = {}
                 for vec in vecs:
                     obs_dict = {a.agent_id: vec for a in self.agents[i]}

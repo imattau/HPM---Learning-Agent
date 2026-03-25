@@ -35,6 +35,23 @@ In Generation 1 of its v3.0 run, HPM AI successfully:
 - **Verified the Succession** across the entire 800+ test benchmark suite.
 - **Applied the ChangeSet** to the live codebase, effectively "rewriting its own mind."
 
+
+## Program Status (HPM AI v1 Line)
+
+This section of the project is now effectively complete for the v1/v3 architecture line:
+- Core architecture, orchestration, and manifold-based repair loops have been implemented.
+- Failure modes and structural break classes have been exercised with broad benchmark/test coverage.
+- Remaining work is primarily optional optimization and exploratory research, not foundational capability gaps.
+
+## Key Insights Captured
+
+The most important outputs from this phase are the insights, not just the patches:
+- **Relational context beats local patching**: Modeling dependency structure first yields more coherent multi-file repairs.
+- **Hierarchy improves reliability**: L4 planning + L5 structural monitoring reduces silent breakage in complex refactors.
+- **Global manifold checks are high leverage**: Treating dependency contradictions as high-surprise events catches regressions earlier.
+- **ChangeSets are the right unit of work**: Coordinated edits across dependents outperform isolated single-file rewrites.
+- **Internal agent signaling is useful when constrained by structure**: Agent-to-agent internal language is valuable when grounded in shared relational state and explicit validation gates.
+
 ## Usage (v3.0)
 
 To start the sovereign refactoring loop:
