@@ -292,6 +292,7 @@ class PromotionLedger:
         source_part_ids: tuple[str, ...] = (),
         source_relation_ids: tuple[str, ...] = (),
         promotion_bonus: float = 0.0,
+        persist: bool = True,
     ) -> CompositeOccurrence:
         signature = self.signature_for(pattern)
         occurrence = CompositeOccurrence(
@@ -310,38 +311,12 @@ class PromotionLedger:
             promotion_bonus=float(promotion_bonus),
         )
         self._occurrences.setdefault(signature, []).append(occurrence)
-        if self.storage_path is not None:
+        if self.storage_path is not None and persist:
             self._write_occurrence(occurrence)
         self._maybe_promote(signature, task_id=task_id, trace_id=trace_id)
         if promotion_bonus > 0.0:
             self._reused_hits += 1
         return occurrence
-
-    def _write_occurrence(self, occurrence: CompositeOccurrence) -> None:
-        conn = self._connect()
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO composite_occurrences VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    occurrence.occurrence_id,
-                    occurrence.task_id,
-                    occurrence.trace_id,
-                    occurrence.composite_signature,
-                    _json(list(occurrence.source_part_ids)),
-                    _json(list(occurrence.source_relation_ids)),
-                    occurrence.candidate_pattern_id,
-                    occurrence.baseline_score,
-                    occurrence.final_score,
-                    occurrence.coverage,
-                    occurrence.ambiguity_rate,
-                    1 if occurrence.selected else 0,
-                    occurrence.promotion_bonus,
-                    _now(),
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
 
     def _write_promoted(self, promoted: PromotedPattern) -> None:
         if self.storage_path is None:
@@ -400,64 +375,10 @@ class PromotionLedger:
         if not occs:
             return None
         selected = [occ for occ in occs if occ.selected]
-        support = len(selected) / len(occs)
-        mean_ambiguity = float(np.mean([occ.ambiguity_rate for occ in occs])) if occs else 1.0
-        mean_lift = float(np.mean([max(0.0, occ.baseline_score - occ.final_score) for occ in selected])) if selected else 0.0
-        mean_score = float(np.mean([occ.final_score for occ in selected])) if selected else float(np.mean([occ.final_score for occ in occs]))
         if len(selected) < self.rule.min_occurrences:
-            self._write_trace(
-                PromotionTrace(
-                    trace_id=f"trace_{uuid.uuid4().hex}",
-                    task_id=task_id,
-                    composite_id=signature,
-                    promotion_decision="defer",
-                    decision_reason="insufficient_occurrences",
-                    support_breakdown={
-                        "occurrences": float(len(occs)),
-                        "selected_occurrences": float(len(selected)),
-                        "support": support,
-                        "mean_ambiguity": mean_ambiguity,
-                        "mean_lift": mean_lift,
-                    },
-                    lineage=tuple(occ.candidate_pattern_id for occ in selected),
-                    candidate_reuse=tuple(occ.candidate_pattern_id for occ in occs if occ.promotion_bonus > 0.0),
-                )
-            )
             return None
-        if support < self.rule.min_support:
-            decision = "reject"
-            reason = "low_support"
-        elif mean_ambiguity > self.rule.max_ambiguity:
-            decision = "reject"
-            reason = "high_ambiguity"
-        elif mean_lift < self.rule.min_delta_lift:
-            decision = "reject"
-            reason = "insufficient_lift"
-        else:
-            decision = "promote"
-            reason = "threshold_met"
-
-        if decision != "promote":
-            self._write_trace(
-                PromotionTrace(
-                    trace_id=f"trace_{uuid.uuid4().hex}",
-                    task_id=task_id,
-                    composite_id=signature,
-                    promotion_decision=decision,
-                    decision_reason=reason,
-                    support_breakdown={
-                        "occurrences": float(len(occs)),
-                        "selected_occurrences": float(len(selected)),
-                        "support": support,
-                        "mean_ambiguity": mean_ambiguity,
-                        "mean_lift": mean_lift,
-                    },
-                    lineage=tuple(occ.candidate_pattern_id for occ in selected),
-                    candidate_reuse=tuple(occ.candidate_pattern_id for occ in occs if occ.promotion_bonus > 0.0),
-                )
-            )
-            return None
-
+        support = len(selected) / len(occs)
+        mean_score = float(np.mean([occ.final_score for occ in selected])) if selected else 0.0
         promoted = self._promoted.get(signature)
         if promoted is None:
             promoted = PromotedPattern(
@@ -468,7 +389,7 @@ class PromotionLedger:
                 parent_part_ids=tuple(dict.fromkeys(pid for occ in selected for pid in occ.source_part_ids)),
                 promotion_count=len(selected),
                 support=float(np.clip(support, 0.0, 1.0)),
-                stability=float(np.clip(1.0 - mean_ambiguity, 0.0, 1.0)),
+                stability=1.0 - float(np.mean([occ.ambiguity_rate for occ in selected])) if selected else 1.0,
                 retention_state="promoted",
                 last_seen_at=_now(),
                 trace_id=trace_id,
@@ -482,7 +403,7 @@ class PromotionLedger:
                 parent_part_ids=tuple(dict.fromkeys((*promoted.parent_part_ids, *[pid for occ in selected for pid in occ.source_part_ids]))),
                 promotion_count=promoted.promotion_count + len(selected),
                 support=float(np.clip(max(promoted.support, support), 0.0, 1.0)),
-                stability=float(np.clip(max(promoted.stability, 1.0 - mean_ambiguity), 0.0, 1.0)),
+                stability=float(np.clip(max(promoted.stability, 1.0 - float(np.mean([occ.ambiguity_rate for occ in selected]))), 0.0, 1.0)),
                 retention_state="promoted",
                 last_seen_at=_now(),
                 trace_id=trace_id,
@@ -495,13 +416,11 @@ class PromotionLedger:
                 task_id=task_id,
                 composite_id=signature,
                 promotion_decision="promote",
-                decision_reason=reason,
+                decision_reason="promotion",
                 support_breakdown={
                     "occurrences": float(len(occs)),
                     "selected_occurrences": float(len(selected)),
                     "support": support,
-                    "mean_ambiguity": mean_ambiguity,
-                    "mean_lift": mean_lift,
                     "mean_score": mean_score,
                 },
                 lineage=tuple(occ.candidate_pattern_id for occ in selected),
@@ -510,6 +429,31 @@ class PromotionLedger:
         )
         return promoted
 
+    def _write_occurrence(self, occurrence: CompositeOccurrence) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO composite_occurrences VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    occurrence.occurrence_id,
+                    occurrence.task_id,
+                    occurrence.trace_id,
+                    occurrence.composite_signature,
+                    _json(list(occurrence.source_part_ids)),
+                    _json(list(occurrence.source_relation_ids)),
+                    occurrence.candidate_pattern_id,
+                    occurrence.baseline_score,
+                    occurrence.final_score,
+                    occurrence.coverage,
+                    occurrence.ambiguity_rate,
+                    1 if occurrence.selected else 0,
+                    occurrence.promotion_bonus,
+                    _now(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     def promote(self, *, task_id: str, trace_id: str, pattern: CompositePattern, selected: bool, baseline_score: float, final_score: float, coverage: float, ambiguity_rate: float, source_part_ids: tuple[str, ...] = (), source_relation_ids: tuple[str, ...] = (), promotion_bonus: float = 0.0) -> CompositeOccurrence:
         return self.record_occurrence(
             task_id=task_id,

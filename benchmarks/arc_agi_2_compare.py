@@ -382,17 +382,17 @@ def _apply_rank_margin_reweight(candidate_rows: list[dict[str, float]], completi
     if not completion or len(candidate_rows) <= 1:
         return [row["base"] for row in candidate_rows]
 
-    adjustments, _ = _compute_rank_margin_adjustments(candidate_rows)
+    adjustments, _ = _compute_rank_margin_adjustments(candidate_rows, include_contributions=False)
     return [float(row["base"] - adj) for row, adj in zip(candidate_rows, adjustments)]
 
 
 def _apply_rank_margin_reweight_with_details(candidate_rows: list[dict[str, float]]) -> tuple[list[float], list[dict[str, float]]]:
-    adjustments, contributions = _compute_rank_margin_adjustments(candidate_rows)
+    adjustments, contributions = _compute_rank_margin_adjustments(candidate_rows, include_contributions=True)
     scores = [float(row["base"] - adj) for row, adj in zip(candidate_rows, adjustments)]
     return scores, contributions
 
 
-def _compute_rank_margin_adjustments(candidate_rows: list[dict[str, float]]) -> tuple[np.ndarray, list[dict[str, float]]]:
+def _compute_rank_margin_adjustments(candidate_rows: list[dict[str, float]], include_contributions: bool = False) -> tuple[np.ndarray, list[dict[str, float]]]:
     feature_names = ("l1", "l2", "l3", "core")
     feature_matrix = np.array([[row[name] for name in feature_names] for row in candidate_rows], dtype=float)
     n_candidates = feature_matrix.shape[0]
@@ -440,27 +440,30 @@ def _compute_rank_margin_adjustments(candidate_rows: list[dict[str, float]]) -> 
         - 0.04 * complexity
     )
 
-    contributions = []
-    for idx, row in enumerate(candidate_rows):
-        contributions.append({
-            "consensus": float(0.14 * consensus[idx]),
-            "alignment": float(0.10 * alignment[idx]),
-            "trust": float(0.08 * trust[idx]),
-            "structure": float(0.06 * structure[idx]),
-            "gap_bonus": float(0.12 * gap_bonus[idx]),
-            "hypothesis_strength": float(0.08 * hypothesis_strength[idx]),
-            "part_support": float(0.06 * part_support[idx]),
-            "part_selected_ratio": float(0.04 * part_selected_ratio[idx]),
-            "promotion_bonus": float(0.14 * promotion_bonus[idx]),
-            "promotion_reused": float(0.03 * promotion_reused[idx]),
-            "part_alignment": float(-0.10 * part_alignment[idx]),
-            "part_ambiguity": float(-0.04 * part_ambiguity[idx]),
-            "hypothesis_alignment": float(-0.06 * hypothesis_alignment[idx]),
-            "complexity": float(-0.04 * complexity[idx]),
-            "adjustment": float(adjustment[idx]),
-            "base": float(row.get("base", 0.0)),
-            "score": float(row.get("base", 0.0) - adjustment[idx]),
-        })
+    if include_contributions:
+        contributions = []
+        for idx, row in enumerate(candidate_rows):
+            contributions.append({
+                "consensus": float(0.14 * consensus[idx]),
+                "alignment": float(0.10 * alignment[idx]),
+                "trust": float(0.08 * trust[idx]),
+                "structure": float(0.06 * structure[idx]),
+                "gap_bonus": float(0.12 * gap_bonus[idx]),
+                "hypothesis_strength": float(0.08 * hypothesis_strength[idx]),
+                "part_support": float(0.06 * part_support[idx]),
+                "part_selected_ratio": float(0.04 * part_selected_ratio[idx]),
+                "promotion_bonus": float(0.14 * promotion_bonus[idx]),
+                "promotion_reused": float(0.03 * promotion_reused[idx]),
+                "part_alignment": float(-0.10 * part_alignment[idx]),
+                "part_ambiguity": float(-0.04 * part_ambiguity[idx]),
+                "hypothesis_alignment": float(-0.06 * hypothesis_alignment[idx]),
+                "complexity": float(-0.04 * complexity[idx]),
+                "adjustment": float(adjustment[idx]),
+                "base": float(row.get("base", 0.0)),
+                "score": float(row.get("base", 0.0) - adjustment[idx]),
+            })
+    else:
+        contributions = []
     return adjustment, contributions
 def _encode_with_optional_context(encoder, observation, epistemic, relational_bundles=None, structural_messages=None, identity_snapshots=None):
     params = inspect.signature(encoder.encode).parameters
@@ -900,6 +903,7 @@ def run_condition(tasks: list[dict], condition: str, seed: int) -> dict[str, obj
                     source_part_ids=pattern.part_ids,
                     source_relation_ids=pattern.relation_ids,
                     promotion_bonus=float(row.get("promotion_bonus", 0.0)) if completion else 0.0,
+                    persist=bool(cand_idx == idx),
                 )
 
         promotion_snapshot = promotion_ledger.snapshot().to_dict()
