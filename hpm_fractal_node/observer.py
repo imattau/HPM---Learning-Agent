@@ -272,7 +272,8 @@ class Observer:
         self._check_compression_candidates()
 
     def _check_residual_surprise(self, x: np.ndarray, result: ExplanationResult) -> None:
-        if result.residual_surprise >= self.residual_surprise_threshold:
+        # Bootstrap: empty forest always needs a first node
+        if len(self.forest) == 0 or result.residual_surprise >= self.residual_surprise_threshold:
             D = x.shape[0]
             new_node = HFN(
                 mu=x.copy(),
