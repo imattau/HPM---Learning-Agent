@@ -177,7 +177,9 @@ This is a discrete per-query update, not a continuous ODE. α and β are learnin
 - `j` is not destroyed; it becomes a structural component of `h`.
 - This is how competition resolves into hierarchy: weaker, highly overlapping nodes become sub-patterns of stronger nodes.
 
-**Node creation.** When residual surprise (returned by Observer) exceeds a threshold, the Forest spawns a new leaf node. The new node's Gaussian is initialised from the unexplained component of `x`. It starts with low weight w = w_init and is registered in the Forest.
+**Node creation — residual surprise.** When residual surprise (returned by Observer) exceeds a threshold, the Forest spawns a new leaf node. The new node's Gaussian is initialised from the unexplained component of `x`. It starts with low weight w = w_init and is registered in the Forest.
+
+**Node creation — query-induced compression.** The Forest tracks which sub-structures recur across explanation trees. When a set of nodes [h₁, h₂, ... hₙ] consistently co-appear in the same expansion path across M consecutive queries, the Forest creates a new node whose children are [h₁ ... hₙ] and whose Gaussian is derived from their combined structure. This node represents the compressed form of the recurring relationship. It enters the Forest as a candidate with low initial weight w = w_init and must earn stability through continued predictive accuracy. This is the primary mechanism by which new abstractions form: not from unexplained signals alone, but from structural patterns discovered through repeated querying.
 
 ### 7.3 Forest invariant
 
