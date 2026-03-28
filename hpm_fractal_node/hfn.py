@@ -39,6 +39,17 @@ class HFN:
     _children: list[HFN] = field(default_factory=list, repr=False)
     _edges: list[Edge] = field(default_factory=list, repr=False)
 
+    def __post_init__(self) -> None:
+        # Cache diagonal for O(D) log_prob fast path.
+        # All prior nodes use diagonal sigma; this avoids O(D³) Cholesky per call.
+        diag = np.diag(self.sigma)
+        if np.allclose(self.sigma, np.diag(diag)):
+            self._sigma_diag: np.ndarray | None = np.maximum(diag, 1e-9)
+            self._log_det_cached: float = float(np.sum(np.log(self._sigma_diag)))
+        else:
+            self._sigma_diag = None
+            self._log_det_cached = 0.0
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, HFN):
             return NotImplemented
@@ -52,6 +63,11 @@ class HFN:
     def log_prob(self, x: np.ndarray) -> float:
         """Log-probability of x under N(mu, sigma). Lower = more surprising."""
         diff = np.asarray(x, dtype=float) - self.mu
+        D = self.mu.shape[0]
+        if self._sigma_diag is not None:
+            # O(D) fast path for diagonal covariance (all prior nodes)
+            z2 = float(np.dot(diff * diff, 1.0 / self._sigma_diag))
+            return -0.5 * (z2 + self._log_det_cached + D * np.log(2.0 * np.pi))
         try:
             chol = np.linalg.cholesky(self.sigma)
             z = np.linalg.solve(chol, diff)
@@ -60,7 +76,6 @@ class HFN:
             diag = np.maximum(np.diag(self.sigma), 1e-9)
             z = diff / np.sqrt(diag)
             log_det = float(np.sum(np.log(diag)))
-        D = self.mu.shape[0]
         return float(-0.5 * (np.dot(z, z) + log_det + D * np.log(2.0 * np.pi)))
 
     def overlap(self, other: HFN) -> float:

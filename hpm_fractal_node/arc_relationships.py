@@ -5,12 +5,18 @@ Relationships describe how two primitives relate — not what they are.
 They live in pixel space (D = rows * cols) as the centroid of the
 primitive pairs that exhibit each relationship type.
 
-  relationship_adjacency  — two things that touch (unit displacement)
-  relationship_mirror     — two things that are reflections of each other
-  relationship_repeat     — two things that recur with consistent displacement
+  relationship_adjacency    — two things that touch (unit displacement)
+  relationship_mirror       — two things that are reflections of each other
+  relationship_repeat       — two things that recur with consistent displacement
+  relationship_cell_colour  — a cell within the grid is bound to a colour value
 
 prim_* nodes are compressions of a primitive concept with a relationship
 type — typed relationship slots the Observer fills with specific instances.
+
+  prim_cell_colour = recombine(primitive_cell, relationship_cell_colour)
+    The Observer fills this with specific (position, colour) bindings —
+    e.g. compressed(primitive_cell_23, relationship_cell_colour) means
+    "cell at row 2, col 3 is bound to a specific colour."
 """
 
 from __future__ import annotations
@@ -101,11 +107,23 @@ def build_relationships(
     )
     registry[relationship_repeat.id] = relationship_repeat
 
+    # --- Cell-colour binding: a cell within the grid is bound to a colour value ---
+    # mu = uniform 0.5 — the abstract concept of colour-at-position, not a specific binding.
+    # The Observer creates specific instances via recombine(primitive_cell_rc, this).
+    relationship_cell_colour = _node(
+        "relationship_cell_colour",
+        np.full(D, 0.5),
+        sigma_scale=2.0,
+    )
+    registry[relationship_cell_colour.id] = relationship_cell_colour
+
     # --- relationships_hfn: parent of all relationship types ---
     relationships_hfn = _node(
         "relationships_hfn",
-        _centroid(relationship_adjacency, relationship_mirror, relationship_repeat),
+        _centroid(relationship_adjacency, relationship_mirror, relationship_repeat,
+                  relationship_cell_colour),
         relationship_adjacency, relationship_mirror, relationship_repeat,
+        relationship_cell_colour,
         sigma_scale=3.0,
     )
     registry[relationships_hfn.id] = relationships_hfn
@@ -126,5 +144,9 @@ def build_relationships(
     prim_repeat = primitive_region.recombine(relationship_repeat)
     prim_repeat.id = "prim_repeat"  # type: ignore[misc]
     registry[prim_repeat.id] = prim_repeat
+
+    prim_cell_colour = primitive_cell.recombine(relationship_cell_colour)
+    prim_cell_colour.id = "prim_cell_colour"  # type: ignore[misc]
+    registry[prim_cell_colour.id] = prim_cell_colour
 
     return relationships_hfn, registry

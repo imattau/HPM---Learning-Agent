@@ -1,14 +1,14 @@
 """
-ARC-AGI-2 Observer experiment on 10x10 grids.
+ARC-AGI-2 Observer experiment on 10x10 grids — full world model, colour encoding.
 
-Feeds binarized 10x10 ARC input grids (D=100) into a baseline Observer
-and reports what structure emerges — no priors, pure observation.
+Uses value encoding (cell_value / 9.0) and build_world_model(10, 10) so all
+7 layers of priors (perception, primitives, relationships, structural, colour,
+semantic, encoder) are active.
 
 Tau calibration for D=100, sigma=I:
   baseline = D/2 * log(2π) ≈ 91.9
-  Each differing cell adds 0.5 to surprise above baseline.
   tau = baseline + 5.0  → tolerates ~10 cells difference (~10% variation)
-  residual_threshold = baseline + 12.5  → new node for grids >25 cells novel
+  residual_threshold = baseline + 12.5  → new node for >25 cells novel
 
 Run: python3 -m hpm_fractal_node.experiment_arc_10x10
 """
@@ -18,10 +18,8 @@ import glob
 import numpy as np
 from collections import defaultdict
 
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
 from hpm_fractal_node.observer import Observer
-from hpm_fractal_node.arc_prior_forest import build_prior_forest
+from hpm_fractal_node.arc_world_model import build_world_model
 
 
 D = 100  # 10x10
@@ -36,7 +34,7 @@ def load_10x10_inputs(data_dir: str = "data/ARC-AGI-2/data/training") -> list[tu
             grid = ex["input"]
             if len(grid) != 10 or len(grid[0]) != 10:
                 continue
-            vec = np.array([[1.0 if cell != 0 else 0.0 for cell in row]
+            vec = np.array([[cell / 9.0 for cell in row]
                             for row in grid]).flatten()
             records.append((puzzle_id, vec))
     return records
@@ -47,7 +45,7 @@ def vec_to_grid(vec: np.ndarray) -> list[str]:
     return ["".join("X" if c else "." for c in row) for row in grid]
 
 
-def run(n_passes: int = 3, seed: int = 42) -> None:
+def run(n_passes: int = 2, seed: int = 42) -> None:
     rng = np.random.default_rng(seed)
     records = load_10x10_inputs()
     n_puzzles = len(set(r[0] for r in records))
@@ -58,12 +56,11 @@ def run(n_passes: int = 3, seed: int = 42) -> None:
     residual_threshold = baseline + 12.5     # new node for >25 cells novel
     print(f"D={D}, baseline={baseline:.1f}, tau={tau:.1f}, residual_threshold={residual_threshold:.1f}\n")
 
-    forest, prior_registry = build_prior_forest(rows=10, cols=10)
+    forest, prior_registry = build_world_model(rows=10, cols=10)
     prior_ids = set(prior_registry.keys())
 
-    print(f"Prior Forest: {len(forest)} top-level nodes")
-    for n in forest.active_nodes():
-        print(f"  {n.id}  children={len(n.children())}")
+    colour_nodes = [n for n in forest.active_nodes() if "colour" in n.id]
+    print(f"World model: {len(forest)} nodes ({len(colour_nodes)} colour priors)")
     print()
 
     obs = Observer(
@@ -105,25 +102,6 @@ def run(n_passes: int = 3, seed: int = 42) -> None:
         density_counts[bucket] += 1
     for bucket in sorted(density_counts):
         print(f"  {bucket:6s} filled cells: {density_counts[bucket]} nodes")
-
-    # Cross-puzzle coverage
-    print(f"\n=== Cross-puzzle nodes (covering 3+ puzzles) ===")
-    cross = []
-    for node in active:
-        puzzles = set(pid for pid, vec in records if -node.log_prob(vec) < tau)
-        if len(puzzles) >= 3:
-            cross.append((node, puzzles))
-    cross.sort(key=lambda x: -len(x[1]))
-    print(f"Found {len(cross)} nodes covering 3+ puzzles\n")
-
-    for node, puzzles in cross[:8]:
-        w = obs.get_weight(node.id)
-        filled = int((node.mu > 0.5).sum())
-        rows = vec_to_grid(node.mu)
-        print(f"  {node.id[:36]}  w={w:.3f}  covers {len(puzzles)} puzzles  filled={filled}/100")
-        for r in rows[:5]:   # show top 5 rows of 10
-            print(f"    {r}")
-        print(f"    ...")
 
     # Top nodes by weight
     print(f"\n=== Top 10 nodes by weight ===")
