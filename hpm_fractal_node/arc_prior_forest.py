@@ -1,5 +1,5 @@
 """
-ARC prior Forest — conceptual-level world model for 3x3 ARC grids.
+ARC prior Forest — conceptual-level world model for ARC grids.
 
 Priors are concepts, not specific patterns. They represent categories of
 things that exist in the domain. Specific patterns (diagonal, cross, etc.)
@@ -10,9 +10,9 @@ Prior hierarchy:
   prior_grid                    (root frame: this observation is a grid)
     ├── prior_extent             (grid has dimensions; all density is relative to these)
     ├── prior_density            (fill level relative to extent)
-    │     ├── prior_sparse       (1-3 cells filled)
-    │     ├── prior_medium       (4-6 cells filled)
-    │     └── prior_dense        (7-9 cells filled)
+    │     ├── prior_sparse       (~0-30% cells filled)
+    │     ├── prior_medium       (~30-70% cells filled)
+    │     └── prior_dense        (~70-100% cells filled)
     └── prior_spatial_organisation  (cells have positional meaning within extent)
           ├── prior_row_band     (horizontal organisation: top / mid / bottom row)
           ├── prior_col_band     (vertical organisation: left / mid / right col)
@@ -38,6 +38,9 @@ Prior hierarchy:
 
 None of these are specific instances. They define what kinds of properties
 and relationships can exist in the ARC world.
+
+All priors are parameterised by grid size (rows, cols) so the same
+conceptual ontology applies to any grid dimension.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from hpm_fractal_node.hfn import HFN
 from hpm_fractal_node.forest import Forest
 
 
+# Default grid size (kept for backwards compatibility)
 D = 9
 CELL_NAMES = [f"cell_{r}{c}" for r in range(3) for c in range(3)]
 
@@ -56,6 +60,7 @@ CELL_NAMES = [f"cell_{r}{c}" for r in range(3) for c in range(3)]
 # ---------------------------------------------------------------------------
 
 def _node(name: str, mu: np.ndarray, *children: HFN, sigma_scale: float = 1.0) -> HFN:
+    D = mu.shape[0]
     n = HFN(mu=mu, sigma=np.eye(D) * sigma_scale, id=name)
     for c in children:
         n._children.append(c)
@@ -66,52 +71,41 @@ def _centroid(*nodes: HFN) -> np.ndarray:
     return np.mean([n.mu for n in nodes], axis=0)
 
 
-def _uniform(value: float) -> np.ndarray:
+def _uniform(value: float, D: int) -> np.ndarray:
     return np.full(D, value)
+
+
+def _grid_mu(rows: int, cols: int, fn) -> np.ndarray:
+    """Build a mu vector by applying fn(r, c) for each cell position."""
+    return np.array([fn(r, c) for r in range(rows) for c in range(cols)], dtype=float)
 
 
 # ---------------------------------------------------------------------------
 # Grid priors
-#
-# prior_grid is the root frame: "this observation is a grid-structured space."
-# prior_extent encodes that the grid has dimensions — fill density is only
-# meaningful relative to the total cell count. Both are very broad (sigma=3)
-# because they are conceptual anchors, not pattern detectors.
 # ---------------------------------------------------------------------------
 
-def make_grid_priors() -> tuple[HFN, HFN]:
-    # Extent: grid has a size. mu=0.5 everywhere — maximally uninformative
-    # about which cells are filled, but anchors the concept of spatial extent.
-    prior_extent = _node("prior_extent", _uniform(0.5), sigma_scale=3.0)
-
-    # Grid: root frame prior. Parent of extent, density, spatial organisation.
-    # Very broad — just says "this is a grid-structured observation."
-    prior_grid = _node("prior_grid", _uniform(0.5), prior_extent, sigma_scale=3.0)
-
+def make_grid_priors(rows: int, cols: int) -> tuple[HFN, HFN]:
+    D = rows * cols
+    prior_extent = _node("prior_extent", _uniform(0.5, D), sigma_scale=3.0)
+    prior_grid = _node("prior_grid", _uniform(0.5, D), prior_extent, sigma_scale=3.0)
     return prior_grid, prior_extent
 
 
 # ---------------------------------------------------------------------------
 # Density priors
 #
-# Encode the concept of fill level. In binary 9-dim space, a pattern's
-# density is how many cells are occupied. The prior mu is the theoretical
-# centroid of all patterns in that density class.
-#
-# For k cells filled uniformly at random over 9 positions:
-#   centroid_i = k/9  (each cell equally likely to be the filled one)
+# Sparse/medium/dense defined as proportions of total cells, not absolute
+# counts, so the concept scales across grid sizes.
+#   sparse:  ~20% fill  → centroid_i = 0.20
+#   medium:  ~50% fill  → centroid_i = 0.50
+#   dense:   ~80% fill  → centroid_i = 0.80
 # ---------------------------------------------------------------------------
 
-def make_density_priors() -> tuple[HFN, HFN, HFN, HFN]:
-    # Sparse: 1-3 cells filled. Centroid ≈ 2/9 per cell.
-    prior_sparse = _node("prior_sparse", _uniform(2.0 / 9))
-
-    # Medium: 4-6 cells filled. Centroid ≈ 5/9 per cell.
-    prior_medium = _node("prior_medium", _uniform(5.0 / 9))
-
-    # Dense: 7-9 cells filled. Centroid ≈ 8/9 per cell.
-    prior_dense = _node("prior_dense", _uniform(8.0 / 9))
-
+def make_density_priors(rows: int, cols: int) -> tuple[HFN, HFN, HFN, HFN]:
+    D = rows * cols
+    prior_sparse = _node("prior_sparse", _uniform(0.20, D))
+    prior_medium = _node("prior_medium", _uniform(0.50, D))
+    prior_dense  = _node("prior_dense",  _uniform(0.80, D))
     prior_density = _node(
         "prior_density",
         _centroid(prior_sparse, prior_medium, prior_dense),
@@ -123,29 +117,31 @@ def make_density_priors() -> tuple[HFN, HFN, HFN, HFN]:
 
 # ---------------------------------------------------------------------------
 # Structure priors
-#
-# Encode the concept that spatial arrangement matters — not just how many
-# cells are filled, but how they relate spatially.
 # ---------------------------------------------------------------------------
 
-def make_structure_priors() -> tuple[HFN, ...]:
-    # Connectivity: connected patterns cluster around centre cells.
-    # A connected blob typically involves the centre (cell_11 = index 4).
-    connectivity_mu = np.array([0.3, 0.5, 0.3,
-                                 0.5, 0.8, 0.5,
-                                 0.3, 0.5, 0.3])
+def make_structure_priors(rows: int, cols: int) -> tuple[HFN, ...]:
+    cr, cc = rows / 2.0, cols / 2.0  # grid centre (fractional)
+
+    # Connectivity: weight cells by proximity to centre (Gaussian falloff).
+    def connectivity_weight(r, c):
+        dist = ((r - cr) / cr) ** 2 + ((c - cc) / cc) ** 2
+        return float(np.exp(-dist))
+
+    connectivity_mu = _grid_mu(rows, cols, connectivity_weight)
+    # Normalise to [0.3, 0.8] range
+    mn, mx = connectivity_mu.min(), connectivity_mu.max()
+    connectivity_mu = 0.3 + 0.5 * (connectivity_mu - mn) / (mx - mn)
     prior_connectivity = _node("prior_connectivity", connectivity_mu)
 
-    # Symmetry: patterns invariant under reflection/rotation.
-    # Centroid of all symmetric patterns = uniform 0.5.
-    prior_symmetry = _node("prior_symmetry", _uniform(0.5))
+    # Symmetry: uniform centroid (symmetric patterns span all positions equally).
+    D = rows * cols
+    prior_symmetry = _node("prior_symmetry", _uniform(0.5, D))
 
-    # Boundary: the perimeter vs interior distinction.
-    # Perimeter cells: 0,1,2,3,5,6,7,8 (all except centre index 4).
-    boundary_mu = np.array([0.7, 0.7, 0.7,
-                             0.7, 0.3, 0.7,
-                             0.7, 0.7, 0.7])
-    prior_boundary = _node("prior_boundary", boundary_mu)
+    # Boundary: perimeter cells (0.7) vs interior cells (0.3).
+    def boundary_weight(r, c):
+        return 0.7 if (r == 0 or r == rows - 1 or c == 0 or c == cols - 1) else 0.3
+
+    prior_boundary = _node("prior_boundary", _grid_mu(rows, cols, boundary_weight))
 
     prior_structure = _node(
         "prior_structure",
@@ -158,42 +154,46 @@ def make_structure_priors() -> tuple[HFN, ...]:
 
 # ---------------------------------------------------------------------------
 # Colour prior
-#
-# In binary encoding, colour (value identity) is collapsed to presence/absence.
-# This prior encodes the concept that cells HAVE colour — it's a placeholder
-# that tells the system "colour is a meaningful attribute in this domain".
-# Its explanatory power activates when the encoding is extended to include colour.
 # ---------------------------------------------------------------------------
 
-def make_colour_prior() -> HFN:
-    # Very broad — conceptual placeholder.
-    # mu = 0.5 everywhere: "any pattern could have any colour"
-    return _node("prior_colour", _uniform(0.5), sigma_scale=3.0)
+def make_colour_prior(rows: int, cols: int) -> HFN:
+    D = rows * cols
+    return _node("prior_colour", _uniform(0.5, D), sigma_scale=3.0)
 
 
 # ---------------------------------------------------------------------------
 # Spatial organisation priors
 #
-# Encode the concept that cells are arranged directionally — rows, columns,
-# diagonals, and corners are all salient spatial organisations in ARC.
-#
-# Row/col priors: centroid weights the dominant band heavily (0.7),
-# adjacent band lightly (0.3), and opposite band minimally (0.1).
-# Diagonal prior: centroid weights diagonal cells (0.5), centre (1.0).
-# Corner prior: centroid weights the 4 corners (0.7), edges low (0.1).
+# Row/col bands split the grid into thirds. Weights: dominant=0.7,
+# adjacent=0.3, opposite=0.1.
+# Diagonal: main + anti diagonal cells weighted, centre highest.
+# Corners: corner region cells weighted by distance from nearest corner.
 # ---------------------------------------------------------------------------
 
-def make_spatial_organisation_priors() -> tuple[HFN, ...]:
-    # Row bands: horizontal organisation
-    prior_row_top = _node("prior_row_top", np.array([0.7, 0.7, 0.7,
-                                                      0.3, 0.3, 0.3,
-                                                      0.1, 0.1, 0.1]))
-    prior_row_mid = _node("prior_row_mid", np.array([0.1, 0.1, 0.1,
-                                                      0.7, 0.7, 0.7,
-                                                      0.1, 0.1, 0.1]))
-    prior_row_bot = _node("prior_row_bot", np.array([0.1, 0.1, 0.1,
-                                                      0.3, 0.3, 0.3,
-                                                      0.7, 0.7, 0.7]))
+def make_spatial_organisation_priors(rows: int, cols: int) -> tuple[HFN, ...]:
+    r_third = rows / 3.0
+    c_third = cols / 3.0
+
+    def row_weight(r, band):
+        # band: 0=top, 1=mid, 2=bot
+        if band == 0:
+            return 0.7 if r < r_third else (0.3 if r < 2 * r_third else 0.1)
+        elif band == 1:
+            return 0.1 if r < r_third else (0.7 if r < 2 * r_third else 0.1)
+        else:
+            return 0.1 if r < r_third else (0.3 if r < 2 * r_third else 0.7)
+
+    def col_weight(c, band):
+        if band == 0:
+            return 0.7 if c < c_third else (0.3 if c < 2 * c_third else 0.1)
+        elif band == 1:
+            return 0.1 if c < c_third else (0.7 if c < 2 * c_third else 0.1)
+        else:
+            return 0.1 if c < c_third else (0.3 if c < 2 * c_third else 0.7)
+
+    prior_row_top = _node("prior_row_top", _grid_mu(rows, cols, lambda r, c: row_weight(r, 0)))
+    prior_row_mid = _node("prior_row_mid", _grid_mu(rows, cols, lambda r, c: row_weight(r, 1)))
+    prior_row_bot = _node("prior_row_bot", _grid_mu(rows, cols, lambda r, c: row_weight(r, 2)))
     prior_row_band = _node(
         "prior_row_band",
         _centroid(prior_row_top, prior_row_mid, prior_row_bot),
@@ -201,16 +201,9 @@ def make_spatial_organisation_priors() -> tuple[HFN, ...]:
         sigma_scale=2.0,
     )
 
-    # Column bands: vertical organisation
-    prior_col_left  = _node("prior_col_left",  np.array([0.7, 0.3, 0.1,
-                                                          0.7, 0.3, 0.1,
-                                                          0.7, 0.3, 0.1]))
-    prior_col_mid   = _node("prior_col_mid",   np.array([0.1, 0.7, 0.1,
-                                                          0.1, 0.7, 0.1,
-                                                          0.1, 0.7, 0.1]))
-    prior_col_right = _node("prior_col_right", np.array([0.1, 0.3, 0.7,
-                                                          0.1, 0.3, 0.7,
-                                                          0.1, 0.3, 0.7]))
+    prior_col_left  = _node("prior_col_left",  _grid_mu(rows, cols, lambda r, c: col_weight(c, 0)))
+    prior_col_mid   = _node("prior_col_mid",   _grid_mu(rows, cols, lambda r, c: col_weight(c, 1)))
+    prior_col_right = _node("prior_col_right", _grid_mu(rows, cols, lambda r, c: col_weight(c, 2)))
     prior_col_band = _node(
         "prior_col_band",
         _centroid(prior_col_left, prior_col_mid, prior_col_right),
@@ -218,16 +211,37 @@ def make_spatial_organisation_priors() -> tuple[HFN, ...]:
         sigma_scale=2.0,
     )
 
-    # Diagonal: either main diagonal (TL→BR) or anti-diagonal (TR→BL).
-    # Centroid weights both diagonals equally + the centre intersection.
-    prior_diagonal = _node("prior_diagonal", np.array([0.5, 0.0, 0.5,
-                                                        0.0, 1.0, 0.0,
-                                                        0.5, 0.0, 0.5]))
+    # Diagonal: both main (r==c scaled) and anti diagonal weighted.
+    # Use normalised distance to nearest diagonal as the weight.
+    def diagonal_weight(r, c):
+        nr = r / (rows - 1) if rows > 1 else 0.5
+        nc = c / (cols - 1) if cols > 1 else 0.5
+        d_main = abs(nr - nc)           # 0 on main diagonal
+        d_anti = abs(nr + nc - 1.0)     # 0 on anti diagonal
+        d_nearest = min(d_main, d_anti)
+        return float(np.exp(-4 * d_nearest))  # falloff
 
-    # Corners: the four corner positions as salient locations.
-    prior_corners = _node("prior_corners", np.array([0.7, 0.1, 0.7,
-                                                      0.1, 0.1, 0.1,
-                                                      0.7, 0.1, 0.7]))
+    diag_mu = _grid_mu(rows, cols, diagonal_weight)
+    mn, mx = diag_mu.min(), diag_mu.max()
+    diag_mu = 0.0 + 1.0 * (diag_mu - mn) / (mx - mn)
+    prior_diagonal = _node("prior_diagonal", diag_mu)
+
+    # Corners: weight cells by proximity to nearest corner.
+    def corner_weight(r, c):
+        nr = r / (rows - 1) if rows > 1 else 0.5
+        nc = c / (cols - 1) if cols > 1 else 0.5
+        d = min(
+            nr**2 + nc**2,
+            nr**2 + (1 - nc)**2,
+            (1 - nr)**2 + nc**2,
+            (1 - nr)**2 + (1 - nc)**2,
+        )
+        return float(np.exp(-4 * d))
+
+    corner_mu = _grid_mu(rows, cols, corner_weight)
+    mn, mx = corner_mu.min(), corner_mu.max()
+    corner_mu = 0.1 + 0.6 * (corner_mu - mn) / (mx - mn)
+    prior_corners = _node("prior_corners", corner_mu)
 
     prior_spatial_organisation = _node(
         "prior_spatial_organisation",
@@ -245,27 +259,13 @@ def make_spatial_organisation_priors() -> tuple[HFN, ...]:
 
 # ---------------------------------------------------------------------------
 # Grid transform priors
-#
-# Encode the structural relationship between input and output grids.
-# Orthogonal to transformation priors (which describe rule *type*) —
-# these describe the *size relationship* between the two grid objects.
 # ---------------------------------------------------------------------------
 
-def make_grid_transform_priors() -> tuple[HFN, ...]:
-    # Size-preserving: output has same dimensions as input.
-    # In binary space this looks like any density — uniform centroid.
-    prior_size_preserving = _node("prior_size_preserving", _uniform(0.5))
-
-    # Size-changing: output dimensions differ (tiling makes it larger;
-    # cropping makes it smaller). Typically involves sparse inputs (the
-    # object being tiled/cropped is a sub-pattern).
-    prior_size_changing = _node("prior_size_changing", _uniform(2.0 / 9))
-
-    # Content-transform: same spatial shape, different cell values.
-    # Binary encoding collapses this to identity — placeholder for
-    # when colour encoding is added.
-    prior_content_transform = _node("prior_content_transform", _uniform(0.5), sigma_scale=3.0)
-
+def make_grid_transform_priors(rows: int, cols: int) -> tuple[HFN, ...]:
+    D = rows * cols
+    prior_size_preserving  = _node("prior_size_preserving",  _uniform(0.5, D))
+    prior_size_changing    = _node("prior_size_changing",    _uniform(0.20, D))
+    prior_content_transform = _node("prior_content_transform", _uniform(0.5, D), sigma_scale=3.0)
     prior_grid_transform = _node(
         "prior_grid_transform",
         _centroid(prior_size_preserving, prior_size_changing, prior_content_transform),
@@ -277,26 +277,13 @@ def make_grid_transform_priors() -> tuple[HFN, ...]:
 
 # ---------------------------------------------------------------------------
 # Transformation priors
-#
-# Encode the concept that input/output pairs in ARC are related by rules.
-# Three categories of rule:
-#   - Placement: copy a pattern to positions defined by another pattern
-#   - Substitution: replace values while preserving spatial structure
-#   - Geometric: rotate, reflect, scale
 # ---------------------------------------------------------------------------
 
-def make_transformation_priors() -> tuple[HFN, ...]:
-    # Placement rules operate on sparse inputs (the mask is sparse).
-    prior_placement = _node("prior_placement", _uniform(2.0 / 9))
-
-    # Substitution rules preserve shape: binary pattern looks the same
-    # before and after (colour changes, structure doesn't).
-    prior_substitution = _node("prior_substitution", _uniform(0.5))
-
-    # Geometric rules (rotation, reflection) preserve density.
-    # Centroid uniform — rotational symmetry distributes weight equally.
-    prior_geometric = _node("prior_geometric", _uniform(0.5))
-
+def make_transformation_priors(rows: int, cols: int) -> tuple[HFN, ...]:
+    D = rows * cols
+    prior_placement    = _node("prior_placement",    _uniform(0.20, D))
+    prior_substitution = _node("prior_substitution", _uniform(0.5, D))
+    prior_geometric    = _node("prior_geometric",    _uniform(0.5, D))
     prior_transformation = _node(
         "prior_transformation",
         _centroid(prior_placement, prior_substitution, prior_geometric),
@@ -310,29 +297,27 @@ def make_transformation_priors() -> tuple[HFN, ...]:
 # Build prior Forest
 # ---------------------------------------------------------------------------
 
-def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
+def build_prior_forest(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, HFN]]:
     """
-    Returns (forest, node_registry).
+    Returns (forest, node_registry) for a grid of shape (rows, cols).
 
-    Top-level registered nodes are the specific-level priors that can
-    directly explain observations (sigma=I). Conceptual group nodes
-    (sigma=2.0 or 3.0) are registered too — the Observer expands into
-    their children when they're surprising.
+    The same conceptual ontology applies to any grid size — the mu vectors
+    are computed relative to the grid dimensions.
     """
     registry: dict[str, HFN] = {}
 
-    prior_grid, prior_extent = make_grid_priors()
-    prior_density, prior_sparse, prior_medium, prior_dense = make_density_priors()
-    prior_structure, prior_connectivity, prior_symmetry, prior_boundary = make_structure_priors()
-    prior_colour = make_colour_prior()
+    prior_grid, prior_extent = make_grid_priors(rows, cols)
+    prior_density, prior_sparse, prior_medium, prior_dense = make_density_priors(rows, cols)
+    prior_structure, prior_connectivity, prior_symmetry, prior_boundary = make_structure_priors(rows, cols)
+    prior_colour = make_colour_prior(rows, cols)
     (
         prior_spatial_organisation,
         prior_row_band, prior_row_top, prior_row_mid, prior_row_bot,
         prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
         prior_diagonal, prior_corners,
-    ) = make_spatial_organisation_priors()
-    prior_grid_transform, prior_size_preserving, prior_size_changing, prior_content_transform = make_grid_transform_priors()
-    prior_transformation, prior_placement, prior_substitution, prior_geometric = make_transformation_priors()
+    ) = make_spatial_organisation_priors(rows, cols)
+    prior_grid_transform, prior_size_preserving, prior_size_changing, prior_content_transform = make_grid_transform_priors(rows, cols)
+    prior_transformation, prior_placement, prior_substitution, prior_geometric = make_transformation_priors(rows, cols)
 
     # Wire prior_grid as conceptual parent of prior_density and prior_spatial_organisation
     prior_grid._children.append(prior_density)
@@ -353,9 +338,9 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
     for n in all_nodes:
         registry[n.id] = n
 
-    forest = Forest(D=D, forest_id="arc_world_model")
+    forest = Forest(D=rows * cols, forest_id=f"arc_world_model_{rows}x{cols}")
 
-    # Register specific-level priors directly (can explain observations)
+    # Register specific-level priors (can explain observations directly)
     for node in [
         prior_sparse, prior_medium, prior_dense,
         prior_connectivity, prior_symmetry, prior_boundary,
