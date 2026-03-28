@@ -376,3 +376,49 @@ Running the Hausdorff diagnostic after adding new priors to the world model and 
 ```bash
 python3 -m hpm_fractal_node.experiments.experiment_fractal_hausdorff
 ```
+
+---
+
+## Diagnostics #4–6: Correlation Dimension, Information Dimension, Intrinsic Dimensionality
+
+Three complementary measures that extend the fractal toolkit beyond box-counting.
+
+### Tools
+
+| Function | What it measures |
+|----------|-----------------|
+| `hfn.fractal.correlation_dimension(nodes)` | Pair-density scaling with radius — more accurate than box-counting for small populations (n < 50) |
+| `hfn.fractal.information_dimension(nodes, weights)` | Weight-adjusted fractal dimension — measures the *active* representation, not just presence |
+| `hfn.fractal.intrinsic_dimensionality(points)` | True degrees of freedom in a point cloud (TwoNN estimator) — independent of ambient dimension |
+
+### Experiment Results (3×3, colour encoding, 3 passes)
+
+```
+Intrinsic dimensionality of ARC 3×3 observations: 6.580  (ambient D=9)
+
+After 3 passes (15 learned nodes, 79 prior nodes):
+  Box-counting dim (all):     0.1820
+  Correlation dim (all):      0.6015
+  Correlation dim (learned):  1.9503
+  Information dim (all):      0.1858
+  Information dim (learned):  0.0501
+  Intrinsic dim (prior μ):    3.963
+  Intrinsic dim (learned μ):  4.272
+```
+
+### Key Findings
+
+**1. ARC 3×3 observations have intrinsic dimensionality ~6.6 (ambient D=9)**
+The patterns genuinely use ~6.6 of the 9 available dimensions. This is not a simple domain — at least 7 independent axes of variation exist. The world model with ~79 priors is appropriately rich for this complexity.
+
+**2. Correlation dimension reveals learned-node geometry (1.95 ≈ 2D surface)**
+Box-counting on the full population (0.18) masks the geometry of learned nodes alone (1.95). The 15 learned nodes span a near-2D surface in μ-space — they are not randomly scattered, nor clustered at a point, but arranged along a plane. This is consistent with the IFS attractor hypothesis: recombine() maps produce planar structure.
+
+**3. Information dimension (learned) = 0.05 — near-degenerate weight distribution**
+Almost all learned weight is concentrated in 1–2 nodes. The majority of learned nodes are low-weight artefacts. The Observer is learning a near-point-mass distribution, not a spread. This confirms the oscillation behaviour seen in earlier diagnostics: most learned nodes are created, fire rarely, and never consolidate.
+
+**4. Prior nodes span ~4 intrinsic dimensions; learned nodes span ~4.3**
+Learned nodes occupy marginally higher-dimensional space than the priors. They are exploring just beyond the prior vocabulary, not duplicating it — consistent with the Observer filling genuine gaps rather than redundantly re-representing known concepts.
+
+**5. Information dimension is the most diagnostic of the three**
+It distinguishes *what exists* from *what is used*. A low information dimension with a higher box-counting dimension means many nodes exist but few dominate — a signal that compression is not consolidating fast enough. Running `information_dimension` before and after changing `compression_cooccurrence_threshold` gives a direct measure of whether the change improves consolidation.

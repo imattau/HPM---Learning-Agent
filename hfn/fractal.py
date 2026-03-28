@@ -227,6 +227,173 @@ def hausdorff_distance(nodes_a, nodes_b) -> float:
     return float(max(dists_ab.max(), dists_ba.max()))
 
 
+def correlation_dimension(
+    nodes,
+    n_scales: int = 8,
+    eps_min: float | None = None,
+    eps_max: float | None = None,
+) -> float:
+    """
+    Estimate the correlation dimension of an HFN node population (Grassberger-Procaccia).
+
+    More accurate than box-counting for small populations (n < 50). Measures
+    how the fraction of node pairs within distance r scales with r:
+
+        C(r) = (# pairs with ||μᵢ - μⱼ|| < r) / (n*(n-1)/2)
+        correlation_dimension ≈ slope of log C(r) vs log r
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+    n_scales : int
+        Number of r values to evaluate.
+
+    Returns
+    -------
+    float
+        Estimated correlation dimension. Returns 0.0 if fewer than 3 nodes.
+    """
+    mus = np.array([n.mu for n in nodes])
+    if len(mus) < 3:
+        return 0.0
+
+    # Pairwise distances (upper triangle only)
+    n = len(mus)
+    dists = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dists.append(float(np.linalg.norm(mus[i] - mus[j])))
+    dists = np.array(dists)
+
+    max_d = dists.max()
+    min_d = dists[dists > 0].min() if (dists > 0).any() else 1e-9
+    if eps_max is None:
+        eps_max = max_d * 0.5
+    if eps_min is None:
+        eps_min = min_d
+    if eps_min >= eps_max:
+        eps_min = eps_max / 100
+
+    radii = np.geomspace(eps_min, eps_max, n_scales)
+    log_r = np.log(radii)
+    log_c = np.zeros(n_scales)
+    total_pairs = len(dists)
+
+    for i, r in enumerate(radii):
+        count = float(np.sum(dists < r))
+        log_c[i] = np.log(max(count / total_pairs, 1e-12))
+
+    trim = max(1, n_scales // 5)
+    return float(_fit_slope(log_r[trim:-trim], log_c[trim:-trim]))
+
+
+def information_dimension(nodes, weights: dict[str, float], n_scales: int = 8) -> float:
+    """
+    Estimate the information dimension of an HFN node population.
+
+    Unlike box-counting (which counts occupied boxes equally), information
+    dimension weights each box by the total weight of nodes inside it:
+
+        I(ε) = -Σ p_i * log(p_i)   where p_i = weight_i / total_weight
+        information_dimension ≈ slope of I(ε) vs log(1/ε)
+
+    This measures the fractal dimension of the *active* representation —
+    heavily-used nodes contribute more than dormant ones.
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+    weights : dict mapping node.id → float weight (from Observer._weights)
+    n_scales : int
+
+    Returns
+    -------
+    float
+        Estimated information dimension. Returns 0.0 if fewer than 2 nodes.
+    """
+    node_list = list(nodes)
+    if len(node_list) < 2:
+        return 0.0
+
+    mus = np.array([n.mu for n in node_list])
+    ws = np.array([max(weights.get(n.id, 0.0), 1e-12) for n in node_list])
+    ws = ws / ws.sum()
+
+    ranges = mus.max(axis=0) - mus.min(axis=0)
+    max_range = float(ranges.max())
+    if max_range == 0:
+        return 0.0
+
+    eps_max = max_range * 0.5
+    eps_min = max_range / (len(mus) * 10)
+    if eps_min >= eps_max:
+        eps_min = eps_max / 100
+
+    epsilons = np.geomspace(eps_max, eps_min, n_scales)
+    log_inv_eps = np.log(1.0 / epsilons)
+    log_info = np.zeros(n_scales)
+
+    for i, eps in enumerate(epsilons):
+        boxes = np.floor(mus / eps).astype(np.int32)
+        box_weights: dict[tuple, float] = {}
+        for idx, box in enumerate(map(tuple, boxes)):
+            box_weights[box] = box_weights.get(box, 0.0) + ws[idx]
+        ps = np.array(list(box_weights.values()))
+        ps = ps[ps > 0]
+        entropy = float(-np.sum(ps * np.log(ps)))
+        log_info[i] = entropy
+
+    trim = max(1, n_scales // 5)
+    return float(_fit_slope(log_inv_eps[trim:-trim], log_info[trim:-trim]))
+
+
+def intrinsic_dimensionality(points: np.ndarray) -> float:
+    """
+    Estimate the intrinsic dimensionality of a point cloud using the TwoNN estimator.
+
+    Measures the true degrees of freedom in the data, independent of the ambient
+    dimension D. For ARC observations this answers: how many independent axes of
+    variation exist in the grid patterns?
+
+        If intrinsic_dim ≈ 2–3: patterns vary along a few dominant axes
+        If intrinsic_dim ≈ D:   patterns fill the full observation space
+
+    Uses the Two Nearest Neighbours (TwoNN) method (Facco et al. 2017):
+        μᵢ = d(x, 2nd-nearest) / d(x, 1st-nearest)
+        empirical CDF of μ fits P(μ) = 1 - μ^(-d)
+        d = 1 / mean(log μ)
+
+    Parameters
+    ----------
+    points : (n, D) array
+        Point cloud in ambient space (e.g. stacked observation vectors).
+
+    Returns
+    -------
+    float
+        Estimated intrinsic dimensionality. Returns nan if fewer than 3 points.
+    """
+    points = np.asarray(points, dtype=float)
+    if points.ndim == 1:
+        points = points.reshape(1, -1)
+    n = len(points)
+    if n < 3:
+        return float("nan")
+
+    mu_vals = []
+    for i in range(n):
+        dists = np.linalg.norm(points - points[i], axis=1)
+        dists[i] = np.inf  # exclude self
+        sorted_d = np.sort(dists)
+        r1, r2 = sorted_d[0], sorted_d[1]
+        if r1 > 0:
+            mu_vals.append(r2 / r1)
+
+    if not mu_vals:
+        return float("nan")
+    return float(1.0 / np.mean(np.log(mu_vals)))
+
+
 def _fit_slope(x: np.ndarray, y: np.ndarray) -> float:
     """Least-squares slope of y vs x."""
     if len(x) < 2:

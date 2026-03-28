@@ -34,7 +34,11 @@ Quick start
 from hfn.hfn import HFN, Edge
 from hfn.forest import Forest
 from hfn.observer import Observer
-from hfn.fractal import box_counting_dimension, population_dimension, dimension_profile, self_similarity_score, hausdorff_distance
+from hfn.fractal import (
+    box_counting_dimension, population_dimension, dimension_profile,
+    self_similarity_score, hausdorff_distance,
+    correlation_dimension, information_dimension, intrinsic_dimensionality,
+)
 
 import numpy as np
 
@@ -66,4 +70,5 @@ __all__ = [
     "HFN", "Edge", "Forest", "Observer", "calibrate_tau",
     "box_counting_dimension", "population_dimension", "dimension_profile",
     "self_similarity_score", "hausdorff_distance",
+    "correlation_dimension", "information_dimension", "intrinsic_dimensionality",
 ]
