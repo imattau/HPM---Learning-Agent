@@ -90,7 +90,7 @@ grammar (root)
   │     └── descriptor    → big, small, little, red, blue, old
   ├── phrase_structure
   │     ├── noun_phrase   → recombine(determiner mu, animate mu, inanimate mu)
-  │     ├── verb_phrase   → recombine(action verb mus, object mu)
+  │     ├── verb_phrase   → recombine(action verb mus, inanimate mu)
   │     └── prep_phrase   → recombine(preposition mu, place mu)
   └── sentence_pattern
         ├── agent_action      → recombine(animate mu, action verb mus)
@@ -100,26 +100,27 @@ grammar (root)
 
 `phrase_structure` and `sentence_pattern` nodes reference composed node mus (from Objects or word_class), not raw atomic mus. This is intentional — these nodes encode cross-tree patterns.
 
-### 5.3 Relationship Sub-Tree
+### 5.3 Capabilities Sub-Tree
 
-Encodes *entity-action relationships* — which specific entities perform which specific actions. These are cross-cutting: a relationship node connects an Objects node to a Grammar node.
+Encodes *entity-specific action capabilities* — which specific entities can perform which specific actions. A capability is a semantic constraint stronger than a grammatical category: `animal_action` (Grammar) says "animals do actions"; `dog_barks` (Capabilities) says "barking is specifically a dog thing." These cross-cut Objects and Grammar.
 
 ```
-relationships (root)
-  ├── dog_barks     → recombine(dog mu, barked mu)
-  ├── cat_meows     → recombine(cat mu, meowed mu)
-  ├── bird_chirps   → recombine(bird mu, chirped mu)
-  ├── animal_chases → recombine(animal mu, chased mu)
-  ├── person_walks  → recombine(person mu, walked mu)
-  ├── person_eats   → recombine(person mu, ate mu)
-  ├── person_gives  → recombine(person mu, gave mu)
-  ├── family_helps  → recombine(family mu, helped mu)
-  └── child_plays   → recombine(child mu, played mu)
+capabilities (root)
+  ├── dog_barks     → recombine(dog mu, barked atomic mu)
+  ├── dog_fetches   → recombine(dog mu, fetched atomic mu)
+  ├── cat_meows     → recombine(cat mu, meowed atomic mu)
+  ├── cat_chases    → recombine(cat mu, chased atomic mu)
+  ├── bird_chirps   → recombine(bird mu, chirped atomic mu)
+  ├── person_walks  → recombine(person mu, walked atomic mu)
+  ├── person_eats   → recombine(person mu, ate atomic mu)
+  ├── person_gives  → recombine(person mu, gave atomic mu)
+  ├── family_helps  → recombine(family mu, helped atomic mu)
+  └── child_plays   → recombine(child mu, played atomic mu)
 ```
 
-These nodes encode that *barking is a capability of dogs specifically* (not just that barking is an animal action). The Observer can match an observation to `dog_barks` rather than just `animal_action` — more specific and more discriminative.
+**Mu sources:** The entity side (dog, cat, bird, person, family, child) uses the *composed* node mu from the Objects sub-tree (Section 5.1). The action side (barked, meowed, walked, etc.) uses the *atomic* word node mu — i.e. the one-hot for that verb at D=107. The "atomic mu" label is used above to make this explicit.
 
-Note: relationship node mus reference composed node mus from Objects (e.g., `dog mu` = the dog leaf node mu from 5.1), not atomic word one-hots directly.
+**Weight amplification note:** Dog leaf mu (Section 5.1) is built from context words including "barked", so `dog_barks = recombine(dog_mu, barked_atomic_mu)` gives the "barked" vocabulary dimension extra weight compared to e.g. `cat_chases`. This is intentional — it encodes the stronger association between dogs and barking specifically.
 
 ### 5.4 Sentence Priors (~20 nodes)
 
@@ -149,7 +150,9 @@ Example sentences (implementer selects final list, covering diverse grammar + ob
 
 ## 6. Forest Parent-Child Registration
 
-The existing `Forest` class supports `HFN._children` (list of child HFN nodes). The world model builder registers nodes bottom-up: leaf nodes first, then parent nodes with their children passed at construction time. No changes to `hfn/` are needed — the existing HFN/Forest API supports this.
+The `Forest` class is a flat registry — `forest.register(node)` adds a single HFN node with no children parameter. Parent-child structure is set directly on HFN nodes via `node.add_child(child_node)` or `node.make_parent(parent_node)`, independently of Forest registration.
+
+The world model builder registers nodes bottom-up: leaf nodes first (registered into the Forest), then parent nodes constructed with children wired via `add_child()`, then registered. No changes to `hfn/` are needed — `HFN.add_child()` and `HFN._children` already exist.
 
 ---
 
