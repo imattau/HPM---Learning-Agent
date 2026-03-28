@@ -106,16 +106,24 @@ Encodes *entity-specific action capabilities* — which specific entities can pe
 
 ```
 capabilities (root)
-  ├── dog_barks     → recombine(dog mu, barked atomic mu)
-  ├── dog_fetches   → recombine(dog mu, fetched atomic mu)
-  ├── cat_meows     → recombine(cat mu, meowed atomic mu)
-  ├── cat_chases    → recombine(cat mu, chased atomic mu)
-  ├── bird_chirps   → recombine(bird mu, chirped atomic mu)
-  ├── person_walks  → recombine(person mu, walked atomic mu)
-  ├── person_eats   → recombine(person mu, ate atomic mu)
-  ├── person_gives  → recombine(person mu, gave atomic mu)
-  ├── family_helps  → recombine(family mu, helped atomic mu)
-  └── child_plays   → recombine(child mu, played atomic mu)
+  ├── animal_capabilities
+  │     ├── dog_capabilities
+  │     │     ├── dog_barks   → recombine(dog mu, barked atomic mu)
+  │     │     └── dog_fetches → recombine(dog mu, fetched atomic mu)
+  │     ├── cat_capabilities
+  │     │     ├── cat_meows   → recombine(cat mu, meowed atomic mu)
+  │     │     └── cat_chases  → recombine(cat mu, chased atomic mu)
+  │     └── bird_capabilities
+  │           └── bird_chirps → recombine(bird mu, chirped atomic mu)
+  └── person_capabilities
+        ├── general_person_capabilities
+        │     ├── person_walks → recombine(person mu, walked atomic mu)
+        │     ├── person_eats  → recombine(person mu, ate atomic mu)
+        │     └── person_gives → recombine(person mu, gave atomic mu)
+        ├── family_capabilities
+        │     └── family_helps → recombine(family mu, helped atomic mu)
+        └── child_capabilities
+              └── child_plays  → recombine(child mu, played atomic mu)
 ```
 
 **Mu sources:** The entity side (dog, cat, bird, person, family, child) uses the *composed* node mu from the Objects sub-tree (Section 5.1). The action side (barked, meowed, walked, etc.) uses the *atomic* word node mu — i.e. the one-hot for that verb at D=107. The "atomic mu" label is used above to make this explicit.
