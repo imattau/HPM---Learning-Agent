@@ -55,3 +55,9 @@ Thumbs.db
 
 # Serena
 .serena/
+
+# Claude Code
+.claude/
+
+# Compiled Python
+*.pyc
