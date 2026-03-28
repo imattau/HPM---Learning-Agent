@@ -13,7 +13,7 @@ import numpy as np
 from collections import defaultdict
 
 from hfn.observer import Observer
-from hpm_fractal_node.arc_world_model import build_world_model
+from hpm_fractal_node.arc.arc_world_model import build_world_model
 
 
 def load_3x3_inputs(data_dir: str = "data/ARC-AGI-2/data/training") -> list[tuple[str, np.ndarray]]:

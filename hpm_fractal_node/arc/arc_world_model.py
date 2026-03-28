@@ -33,13 +33,13 @@ from __future__ import annotations
 import numpy as np
 from hfn.hfn import HFN
 from hfn.forest import Forest
-from hpm_fractal_node.arc_perception_priors import build_perception_priors
-from hpm_fractal_node.arc_primitives import build_primitives
-from hpm_fractal_node.arc_relationships import build_relationships
-from hpm_fractal_node.arc_prior_forest import build_prior_forest
-from hpm_fractal_node.arc_colour_priors import build_colour_priors
-from hpm_fractal_node.arc_object_scene_priors import build_object_scene_priors
-from hpm_fractal_node.arc_encoder_hfn import build_encoder_hfn
+from hpm_fractal_node.arc.arc_perception_priors import build_perception_priors
+from hpm_fractal_node.arc.arc_primitives import build_primitives
+from hpm_fractal_node.arc.arc_relationships import build_relationships
+from hpm_fractal_node.arc.arc_prior_forest import build_prior_forest
+from hpm_fractal_node.arc.arc_colour_priors import build_colour_priors
+from hpm_fractal_node.arc.arc_object_scene_priors import build_object_scene_priors
+from hpm_fractal_node.arc.arc_encoder_hfn import build_encoder_hfn
 
 
 def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, HFN]]:

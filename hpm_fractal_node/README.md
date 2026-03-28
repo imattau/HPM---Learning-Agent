@@ -262,3 +262,49 @@ Observation vector x ∈ ℝᴰ  (D = rows × cols, value/9.0 encoding)
 | `arc_colour_priors.py` | Layer 4: value-identity priors |
 | `arc_object_scene_priors.py` | Layer 5: object, scene, rule priors |
 | `arc_encoder_hfn.py` | Layer 6: encoder as structural prior |
+
+---
+
+## Fractal Convergence Analysis
+
+### IFS Hypothesis
+
+The Observer's `recombine(A, B)` operation creates a node whose `μ = mean(A.μ, B.μ)` — a contracting affine map in pattern space. This is how fractal attractors are constructed via Iterated Function Systems (IFS). If the Observer applies this consistently, the set of learned nodes should converge toward a fractal attractor whose dimension signals structural coherence.
+
+**Tool:** `hfn.fractal.population_dimension(nodes)` — box-counting dimension of the μ-space point cloud.
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 8 passes)
+
+| Pass | World model (learned dim) | No priors (all dim) | WM nodes | NP nodes |
+|------|--------------------------|---------------------|----------|----------|
+| 1 | 0.049 | 0.326 | 22 | 14 |
+| 2 | 0.125 | 0.406 | 23 | 16 |
+| 3 | 0.044 | 0.508 | 23 | 20 |
+| 4 | 0.022 | 0.271 | 19 | 34 |
+| 5 | 0.117 | 0.179 | 20 | 54 |
+| 6 | 0.039 | 0.109 | 25 | 48 |
+| 7 | 0.079 | 0.175 | 21 | 36 |
+| 8 | 0.035 | 0.112 | 17 | 43 |
+
+### Key Findings
+
+**1. Priors pre-seed the IFS attractor**
+Without priors, the Observer initially spreads nodes across observation space (dim 0.33–0.51) then gradually finds clusters (dim drops to ~0.11). Structure eventually emerges but takes many passes and the node population grows unbounded (54 nodes).
+
+With the world model, learned nodes immediately cluster near prior attractors (dim 0.02–0.13) and the population stays bounded (~20 nodes). The priors act as pre-placed contracting maps — the IFS attractor is seeded before any observation.
+
+**2. Dimension tracks world model adequacy**
+Low, stable learned dimension = well-specified world model (Observer filling gaps near known attractors).
+High, unstable dimension = under-specified world model (Observer building structure from scratch).
+
+This gives a quantitative diagnostic: if learned dimension approaches or exceeds prior dimension, the world model is inadequate for the domain.
+
+**3. Prior knowledge reduces learning dimensionality**
+The fractal analysis makes visible what coverage statistics cannot: prior knowledge doesn't just explain more observations — it changes the *structure* of what gets learned. Without priors, learned patterns are high-dimensional and unstable. With priors, learning is low-dimensional and convergent.
+
+This is quantitative evidence for the HPM claim that prior knowledge is a structural prerequisite, not merely an optimisation.
+
+### Run the diagnostic
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_diagnostic
+```

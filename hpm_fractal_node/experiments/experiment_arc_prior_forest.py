@@ -22,7 +22,7 @@ from collections import defaultdict
 from hfn.hfn import HFN
 from hfn.forest import Forest
 from hfn.observer import Observer
-from hpm_fractal_node.arc_prior_forest import build_prior_forest, D, CELL_NAMES
+from hpm_fractal_node.arc.arc_prior_forest import build_prior_forest, D, CELL_NAMES
 
 
 # ---------------------------------------------------------------------------

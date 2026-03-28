@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import numpy as np
 from hfn.hfn import HFN
-from hpm_fractal_node.arc_primitives import build_primitives
+from hpm_fractal_node.arc.arc_primitives import build_primitives
 
 
 def _node(name: str, mu: np.ndarray, *children: HFN, sigma_scale: float = 1.0) -> HFN:

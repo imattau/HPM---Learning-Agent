@@ -19,7 +19,7 @@ import numpy as np
 from collections import defaultdict
 
 from hfn.observer import Observer
-from hpm_fractal_node.arc_world_model import build_world_model
+from hpm_fractal_node.arc.arc_world_model import build_world_model
 
 
 D = 100  # 10x10
