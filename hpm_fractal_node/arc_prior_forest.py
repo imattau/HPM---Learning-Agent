@@ -7,28 +7,34 @@ are what the Observer learns within these categories — not what it starts with
 
 Prior hierarchy:
 
-  prior_density
-    ├── prior_sparse   (1-3 cells filled)
-    ├── prior_medium   (4-6 cells filled)
-    └── prior_dense    (7-9 cells filled)
+  prior_grid                    (root frame: this observation is a grid)
+    ├── prior_extent             (grid has dimensions; all density is relative to these)
+    ├── prior_density            (fill level relative to extent)
+    │     ├── prior_sparse       (1-3 cells filled)
+    │     ├── prior_medium       (4-6 cells filled)
+    │     └── prior_dense        (7-9 cells filled)
+    └── prior_spatial_organisation  (cells have positional meaning within extent)
+          ├── prior_row_band     (horizontal organisation: top / mid / bottom row)
+          ├── prior_col_band     (vertical organisation: left / mid / right col)
+          ├── prior_diagonal     (diagonal orientation: either diagonal)
+          └── prior_corners      (corner positions as salient locations)
 
-  prior_structure
-    ├── prior_connectivity   (cells form connected regions)
-    ├── prior_symmetry       (pattern invariant under some transformation)
-    └── prior_boundary       (cells on perimeter vs interior)
+  prior_structure               (how filled cells relate to each other)
+    ├── prior_connectivity       (cells form connected regions)
+    ├── prior_symmetry           (pattern invariant under some transformation)
+    └── prior_boundary           (cells on perimeter vs interior)
 
-  prior_colour          (cells have value-identity beyond presence/absence)
+  prior_colour                  (cells have value-identity beyond presence/absence)
 
-  prior_spatial_organisation  (how cells are arranged directionally)
-    ├── prior_row_band       (horizontal organisation: top / mid / bottom row)
-    ├── prior_col_band       (vertical organisation: left / mid / right col)
-    ├── prior_diagonal       (diagonal orientation: either diagonal)
-    └── prior_corners        (corner positions as salient locations)
+  prior_grid_transform          (input and output grids are related by a rule)
+    ├── prior_size_preserving    (output dimensions match input)
+    ├── prior_size_changing      (output dimensions differ: scale, crop, tile)
+    └── prior_content_transform  (same shape, different values)
 
-  prior_transformation  (grids can be related by rules)
-    ├── prior_placement      (copy pattern to positions)
-    ├── prior_substitution   (replace values while preserving shape)
-    └── prior_geometric      (rotate, reflect, scale)
+  prior_transformation          (categories of transformation rule)
+    ├── prior_placement          (copy pattern to positions)
+    ├── prior_substitution       (replace values while preserving shape)
+    └── prior_geometric          (rotate, reflect, scale)
 
 None of these are specific instances. They define what kinds of properties
 and relationships can exist in the ARC world.
@@ -62,6 +68,27 @@ def _centroid(*nodes: HFN) -> np.ndarray:
 
 def _uniform(value: float) -> np.ndarray:
     return np.full(D, value)
+
+
+# ---------------------------------------------------------------------------
+# Grid priors
+#
+# prior_grid is the root frame: "this observation is a grid-structured space."
+# prior_extent encodes that the grid has dimensions — fill density is only
+# meaningful relative to the total cell count. Both are very broad (sigma=3)
+# because they are conceptual anchors, not pattern detectors.
+# ---------------------------------------------------------------------------
+
+def make_grid_priors() -> tuple[HFN, HFN]:
+    # Extent: grid has a size. mu=0.5 everywhere — maximally uninformative
+    # about which cells are filled, but anchors the concept of spatial extent.
+    prior_extent = _node("prior_extent", _uniform(0.5), sigma_scale=3.0)
+
+    # Grid: root frame prior. Parent of extent, density, spatial organisation.
+    # Very broad — just says "this is a grid-structured observation."
+    prior_grid = _node("prior_grid", _uniform(0.5), prior_extent, sigma_scale=3.0)
+
+    return prior_grid, prior_extent
 
 
 # ---------------------------------------------------------------------------
@@ -104,21 +131,17 @@ def make_density_priors() -> tuple[HFN, HFN, HFN, HFN]:
 def make_structure_priors() -> tuple[HFN, ...]:
     # Connectivity: connected patterns cluster around centre cells.
     # A connected blob typically involves the centre (cell_11 = index 4).
-    # Theoretical centroid for connected patterns: centre-weighted.
     connectivity_mu = np.array([0.3, 0.5, 0.3,
                                  0.5, 0.8, 0.5,
                                  0.3, 0.5, 0.3])
     prior_connectivity = _node("prior_connectivity", connectivity_mu)
 
     # Symmetry: patterns invariant under reflection/rotation.
-    # H-symmetric: col 0 = col 2 → cells 0=2, 3=5, 6=8 are paired.
-    # Centroid of all H-symmetric patterns: equal weight per paired position.
-    # For 9 cells with 3 free columns → uniform centroid = 0.5 everywhere.
+    # Centroid of all symmetric patterns = uniform 0.5.
     prior_symmetry = _node("prior_symmetry", _uniform(0.5))
 
     # Boundary: the perimeter vs interior distinction.
-    # Perimeter cells: 0,1,2,3,5,6,7,8 (all except centre).
-    # Interior (centre): cell 4.
+    # Perimeter cells: 0,1,2,3,5,6,7,8 (all except centre index 4).
     boundary_mu = np.array([0.7, 0.7, 0.7,
                              0.7, 0.3, 0.7,
                              0.7, 0.7, 0.7])
@@ -139,7 +162,6 @@ def make_structure_priors() -> tuple[HFN, ...]:
 # In binary encoding, colour (value identity) is collapsed to presence/absence.
 # This prior encodes the concept that cells HAVE colour — it's a placeholder
 # that tells the system "colour is a meaningful attribute in this domain".
-# It's very broad because in binary space all patterns look "colour-invariant".
 # Its explanatory power activates when the encoding is extended to include colour.
 # ---------------------------------------------------------------------------
 
@@ -157,8 +179,7 @@ def make_colour_prior() -> HFN:
 #
 # Row/col priors: centroid weights the dominant band heavily (0.7),
 # adjacent band lightly (0.3), and opposite band minimally (0.1).
-# Diagonal priors: centroid weights diagonal cells (0.7), centre (1.0),
-# and off-diagonal corners (0.0).
+# Diagonal prior: centroid weights diagonal cells (0.5), centre (1.0).
 # Corner prior: centroid weights the 4 corners (0.7), edges low (0.1).
 # ---------------------------------------------------------------------------
 
@@ -223,6 +244,38 @@ def make_spatial_organisation_priors() -> tuple[HFN, ...]:
 
 
 # ---------------------------------------------------------------------------
+# Grid transform priors
+#
+# Encode the structural relationship between input and output grids.
+# Orthogonal to transformation priors (which describe rule *type*) —
+# these describe the *size relationship* between the two grid objects.
+# ---------------------------------------------------------------------------
+
+def make_grid_transform_priors() -> tuple[HFN, ...]:
+    # Size-preserving: output has same dimensions as input.
+    # In binary space this looks like any density — uniform centroid.
+    prior_size_preserving = _node("prior_size_preserving", _uniform(0.5))
+
+    # Size-changing: output dimensions differ (tiling makes it larger;
+    # cropping makes it smaller). Typically involves sparse inputs (the
+    # object being tiled/cropped is a sub-pattern).
+    prior_size_changing = _node("prior_size_changing", _uniform(2.0 / 9))
+
+    # Content-transform: same spatial shape, different cell values.
+    # Binary encoding collapses this to identity — placeholder for
+    # when colour encoding is added.
+    prior_content_transform = _node("prior_content_transform", _uniform(0.5), sigma_scale=3.0)
+
+    prior_grid_transform = _node(
+        "prior_grid_transform",
+        _centroid(prior_size_preserving, prior_size_changing, prior_content_transform),
+        prior_size_preserving, prior_size_changing, prior_content_transform,
+        sigma_scale=2.0,
+    )
+    return prior_grid_transform, prior_size_preserving, prior_size_changing, prior_content_transform
+
+
+# ---------------------------------------------------------------------------
 # Transformation priors
 #
 # Encode the concept that input/output pairs in ARC are related by rules.
@@ -230,23 +283,18 @@ def make_spatial_organisation_priors() -> tuple[HFN, ...]:
 #   - Placement: copy a pattern to positions defined by another pattern
 #   - Substitution: replace values while preserving spatial structure
 #   - Geometric: rotate, reflect, scale
-#
-# In binary space, the "input side" of these transformations tends to be
-# sparse (placement, geometric) or any density (substitution).
 # ---------------------------------------------------------------------------
 
 def make_transformation_priors() -> tuple[HFN, ...]:
     # Placement rules operate on sparse inputs (the mask is sparse).
     prior_placement = _node("prior_placement", _uniform(2.0 / 9))
 
-    # Substitution rules preserve shape: the binary pattern looks the same
+    # Substitution rules preserve shape: binary pattern looks the same
     # before and after (colour changes, structure doesn't).
-    # Centroid = uniform 0.5 (shape-agnostic).
     prior_substitution = _node("prior_substitution", _uniform(0.5))
 
     # Geometric rules (rotation, reflection) preserve density.
-    # Centroid of geometrically related patterns is uniform (rotational symmetry
-    # distributes weight equally across all positions).
+    # Centroid uniform — rotational symmetry distributes weight equally.
     prior_geometric = _node("prior_geometric", _uniform(0.5))
 
     prior_transformation = _node(
@@ -268,11 +316,12 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
 
     Top-level registered nodes are the specific-level priors that can
     directly explain observations (sigma=I). Conceptual group nodes
-    (sigma=2.0) are registered too — the Observer expands into their
-    children when they're surprising.
+    (sigma=2.0 or 3.0) are registered too — the Observer expands into
+    their children when they're surprising.
     """
     registry: dict[str, HFN] = {}
 
+    prior_grid, prior_extent = make_grid_priors()
     prior_density, prior_sparse, prior_medium, prior_dense = make_density_priors()
     prior_structure, prior_connectivity, prior_symmetry, prior_boundary = make_structure_priors()
     prior_colour = make_colour_prior()
@@ -282,9 +331,15 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
         prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
         prior_diagonal, prior_corners,
     ) = make_spatial_organisation_priors()
+    prior_grid_transform, prior_size_preserving, prior_size_changing, prior_content_transform = make_grid_transform_priors()
     prior_transformation, prior_placement, prior_substitution, prior_geometric = make_transformation_priors()
 
+    # Wire prior_grid as conceptual parent of prior_density and prior_spatial_organisation
+    prior_grid._children.append(prior_density)
+    prior_grid._children.append(prior_spatial_organisation)
+
     all_nodes = [
+        prior_grid, prior_extent,
         prior_density, prior_sparse, prior_medium, prior_dense,
         prior_structure, prior_connectivity, prior_symmetry, prior_boundary,
         prior_colour,
@@ -292,6 +347,7 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
         prior_row_band, prior_row_top, prior_row_mid, prior_row_bot,
         prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
         prior_diagonal, prior_corners,
+        prior_grid_transform, prior_size_preserving, prior_size_changing, prior_content_transform,
         prior_transformation, prior_placement, prior_substitution, prior_geometric,
     ]
     for n in all_nodes:
@@ -307,12 +363,19 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
         prior_row_top, prior_row_mid, prior_row_bot,
         prior_col_left, prior_col_mid, prior_col_right,
         prior_diagonal, prior_corners,
+        prior_size_preserving, prior_size_changing,
         prior_placement, prior_substitution, prior_geometric,
     ]:
         forest.register(node)
 
-    # Register group priors (expanded into by Observer when surprising)
-    for node in [prior_density, prior_structure, prior_spatial_organisation, prior_transformation]:
+    # Register group/frame priors (expanded into by Observer when surprising)
+    for node in [
+        prior_grid, prior_extent,
+        prior_density, prior_structure,
+        prior_spatial_organisation,
+        prior_grid_transform, prior_content_transform,
+        prior_transformation,
+    ]:
         forest.register(node)
 
     return forest, registry
