@@ -73,6 +73,8 @@ def test_generate_sentences_reproducible():
     np.testing.assert_array_equal(s1[0][0], s2[0][0])
 
 
-def test_category_names_returns_8():
+def test_category_names_returns_7():
     cats = category_names()
-    assert len(cats) == 8
+    assert len(cats) == 7
+    expected = {"animal", "adult", "child_person", "family", "food", "object", "place"}
+    assert set(cats) == expected

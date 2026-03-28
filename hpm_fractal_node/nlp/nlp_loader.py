@@ -61,7 +61,7 @@ D: int = 4 * VOCAB_SIZE  # 428
 # ---------------------------------------------------------------------------
 
 _CATEGORIES = [
-    "animal", "person", "adult", "child_person",
+    "animal", "adult", "child_person",
     "family", "food", "object", "place",
 ]
 
@@ -295,9 +295,9 @@ def generate_sentences(
         for animal in _ANIMALS:
             observations.append(_obs(adult, "walked", "the", "<end>", animal))
 
-    # Template 28: "A [MASK:place] is near here ."  (30 obs)
+    # Template 28: "A [MASK:place] is near here ."  (60 obs)
     for place in _PLACES:
-        for _ in range(10):
+        for _ in range(20):
             observations.append(_obs("<start>", "a", "is", "near", place))
 
     # Template 29: "My [MASK:adult] helped me ."  (200 obs)
