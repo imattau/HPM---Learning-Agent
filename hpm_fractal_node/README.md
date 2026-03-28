@@ -472,3 +472,51 @@ Persistence affects absorption; recurrence affects compression. They operate on 
 
 **5. Lacunarity and multifractal spectrum are diagnostic-only**
 These reveal structure in the prior/learned node distribution (gappiness and hot spots) but are not yet integrated into Observer decisions. Lacunarity would inform node-creation suppression in dense regions; the multifractal spectrum would identify which prior layers are geometrically dominant.
+
+---
+
+## Full Fractal Strategy Stack: ARC Results
+
+Grid search over lacunarity and multifractal radii (3×3, 5 passes) found the optimal configuration:
+
+```python
+obs = Observer(forest, tau=tau, protected_ids=prior_ids,
+               recombination_strategy="nearest_prior",
+               hausdorff_absorption_threshold=0.15,
+               persistence_guided_absorption=True,
+               lacunarity_guided_creation=True,       # lacunarity_creation_radius=0.08
+               multifractal_guided_absorption=True)   # multifractal_crowding_radius=0.12
+```
+
+### 3×3 ARC (250 observations, 5 passes)
+
+| Condition | Coverage | Hausdorff | Absorbed |
+|-----------|----------|-----------|----------|
+| baseline (nearest_prior + hausdorff) | 80.2% | 1.515 | 1618 |
+| + persistence | 81.2% | 1.478 | 1647 |
+| + lacunarity + multifractal (r=0.3) | 81.0–81.1% | — | — |
+| **+ lacunarity (r=0.08) + multifractal (r=0.12)** | **81.8%** | **1.462** | — |
+
+Full stack with tuned radii beats persistence-only on both coverage (+0.6pp) and Hausdorff proximity.
+
+### 10×10 ARC (392 observations, 2 passes)
+
+| Metric | Baseline (colour encoding) | Full fractal stack |
+|--------|---------------------------|--------------------|
+| Prior coverage | 90% (352/392) | 90% (352/392) |
+| New node coverage | 0% | 6% (22/392) |
+| Unexplained | 5% (18/392) | 5% (18/392) |
+| Absorbed priors | 0 | 0 |
+
+The full fractal stack maintains the 90% prior coverage baseline and adds 6% coverage from new learned nodes — bringing total explained observations from 90% to 96%. The 5% unexplained observations (18 obs with specific colour/position patterns) remain unresolved; they require more passes or lower `compression_cooccurrence_threshold` to consolidate into compressions.
+
+### Key Findings
+
+**1. Lacunarity-guided creation suppresses redundant nodes in dense regions**
+When local node density exceeds `lacunarity_creation_factor` × mean, the Observer skips creating a new node for residual observations. This reduces low-weight artefact creation, freeing absorption budget for genuinely novel patterns.
+
+**2. Multifractal-guided absorption halves the threshold in crowded regions**
+Nodes near hot spots (many non-protected neighbours within `multifractal_crowding_radius`) get their absorption threshold halved — making the Observer more aggressive about merging locally redundant learned nodes. Combined with lacunarity suppression, this keeps the learned population tighter.
+
+**3. 10×10 new node coverage is the signal, not prior coverage**
+At 10×10 the prior vocabulary covers 90% of observations. The fractal strategies' contribution shows in the new node coverage (0% → 6%): the stack creates better-targeted learned nodes that explain observations the priors miss.
