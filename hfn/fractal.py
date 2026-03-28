@@ -147,6 +147,42 @@ def dimension_profile(
     return np.array([population_dimension(nodes, n_scales) for nodes in nodes_per_pass])
 
 
+def self_similarity_score(nodes, n_scales: int = 8) -> float:
+    """
+    Measure self-similarity of the node population in μ-space.
+
+    For a true IFS attractor, the box counts N(ε_k) satisfy a power law, so
+    the log-count differences Δlog N(ε_k) = log N(ε_k) - log N(ε_{k+1}) should
+    be approximately constant across scales.  The coefficient of variation (CV)
+    of those differences is therefore a scale-free self-similarity score:
+
+        CV = std(Δ) / |mean(Δ)|   (lower ⟹ more self-similar)
+
+    A perfectly self-similar attractor scores 0.0.  A uniform scatter scores
+    close to 1.0 or higher because the count ratios fluctuate erratically.
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+        Active nodes from a Forest.
+    n_scales : int
+        Number of ε scales to evaluate (passed to box_counting_dimension).
+
+    Returns
+    -------
+    float
+        CV of log-count differences; NaN if fewer than 4 nodes.
+    """
+    mus = np.array([n.mu for n in nodes])
+    if len(mus) < 4:
+        return float("nan")
+    _, _log_inv_eps, log_counts = box_counting_dimension(mus, n_scales=n_scales)
+    diffs = np.diff(log_counts)
+    if np.all(diffs == 0):
+        return 0.0
+    return float(np.std(diffs) / (np.abs(np.mean(diffs)) + 1e-9))
+
+
 def _fit_slope(x: np.ndarray, y: np.ndarray) -> float:
     """Least-squares slope of y vs x."""
     if len(x) < 2:
