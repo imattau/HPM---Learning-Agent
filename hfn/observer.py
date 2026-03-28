@@ -11,6 +11,39 @@ It runs the expansion loop (querying the Forest) and handles:
 - Weight updates after each query
 - Structural absorption when persistent overlap is detected
 - Node creation from residual surprise or recurring co-occurrence
+
+## HPM Framework boundary note
+
+The Observer currently combines three distinct responsibilities:
+
+  1. Surprise computation + expansion  — pure perception mechanics
+  2. Weight / score dynamics           — pattern dynamics (HPM layer 2)
+  3. Absorption + compression          — structural evaluation (HPM layer 3)
+
+Items 1 and 2 are unambiguously the Observer's job. Item 3 is evaluator
+territory — deciding *which patterns are worth keeping* relative to prior
+knowledge. The fractal strategies (recombination_strategy, hausdorff_absorption_threshold)
+expose this: they require the Observer to know about the prior structure to
+make structural decisions.
+
+For the hfn library as a standalone tool this is acceptable — the strategies
+are opt-in and the Observer remains domain-agnostic.
+
+When integrating hfn into a full HPM AI, the structural decisions (absorption,
+compression) should move up to the HPM AI's evaluator layer, which has access
+to both Observer state AND fractal diagnostics AND domain knowledge. The
+intended interface at that point:
+
+    HPM AI Evaluator
+        ↓ uses fractal diagnostics to decide
+    Observer  ← exposes candidates, executes decisions on request
+        ↓
+    Forest
+
+The Observer would expose candidate lists (nodes eligible for absorption, pairs
+eligible for compression) and accept explicit directives — obs.absorb(node),
+obs.compress(A, B) — rather than making those decisions itself. The evaluator
+layer would call the fractal tools to inform its choices.
 """
 
 from __future__ import annotations
