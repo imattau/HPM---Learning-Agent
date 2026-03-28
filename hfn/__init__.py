@@ -38,6 +38,7 @@ from hfn.fractal import (
     box_counting_dimension, population_dimension, dimension_profile,
     self_similarity_score, hausdorff_distance,
     correlation_dimension, information_dimension, intrinsic_dimensionality,
+    persistence_scores, RecurrenceTracker, lacunarity, multifractal_spectrum,
 )
 
 import numpy as np
@@ -71,4 +72,5 @@ __all__ = [
     "box_counting_dimension", "population_dimension", "dimension_profile",
     "self_similarity_score", "hausdorff_distance",
     "correlation_dimension", "information_dimension", "intrinsic_dimensionality",
+    "persistence_scores", "RecurrenceTracker", "lacunarity", "multifractal_spectrum",
 ]

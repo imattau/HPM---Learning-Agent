@@ -394,6 +394,248 @@ def intrinsic_dimensionality(points: np.ndarray) -> float:
     return float(1.0 / np.mean(np.log(mu_vals)))
 
 
+def persistence_scores(nodes, weights: dict[str, float]) -> dict[str, float]:
+    """
+    Per-node persistence using a simplified elder-rule approach.
+
+    Persistence = how structurally isolated a node is from higher-weighted nodes.
+    Computed as the distance to the nearest node with a strictly higher weight.
+
+    - High persistence: far from any more significant node → structurally important
+    - Low persistence: close to a more significant node → potentially redundant
+
+    The highest-weight node gets persistence = inf (no more significant node exists).
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+    weights : dict mapping node.id → float weight
+
+    Returns
+    -------
+    dict mapping node.id → float persistence
+    """
+    node_list = sorted(nodes, key=lambda n: -weights.get(n.id, 0.0))
+    if not node_list:
+        return {}
+    mus = np.array([n.mu for n in node_list])
+    scores: dict[str, float] = {}
+    for i, node in enumerate(node_list):
+        if i == 0:
+            scores[node.id] = float("inf")
+        else:
+            prev_mus = mus[:i]
+            dist = float(np.min(np.linalg.norm(prev_mus - mus[i], axis=1)))
+            scores[node.id] = dist
+    return scores
+
+
+class RecurrenceTracker:
+    """
+    Measures how repetitive the observation stream is.
+
+    Maintains a rolling buffer of recent observations and tracks what fraction
+    of new observations fall within epsilon of a previous one (recurrence_rate).
+
+    High recurrence_rate → stream is repetitive → compress more aggressively.
+    Low recurrence_rate → stream is novel → keep observations distinct.
+    """
+
+    def __init__(self, buffer_size: int = 50, epsilon: float = 0.3):
+        self._buffer: list[np.ndarray] = []
+        self.buffer_size = buffer_size
+        self.epsilon = epsilon
+        self.recurrence_rate: float = 0.0
+
+    def update(self, x: np.ndarray) -> float:
+        """
+        Add a new observation and return the updated recurrence rate.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            New observation vector.
+
+        Returns
+        -------
+        float
+            Current recurrence_rate in [0, 1].
+        """
+        if self._buffer:
+            hits = sum(1 for b in self._buffer if np.linalg.norm(x - b) < self.epsilon)
+            self.recurrence_rate = 0.9 * self.recurrence_rate + 0.1 * (hits / len(self._buffer))
+        self._buffer.append(x.copy())
+        if len(self._buffer) > self.buffer_size:
+            self._buffer.pop(0)
+        return self.recurrence_rate
+
+    def recommended_threshold(self, base: int, min_t: int = 2, max_t: int = 10) -> int:
+        """
+        Return an adjusted compression co-occurrence threshold.
+
+        High recurrence → lower threshold (compress more aggressively).
+        Low recurrence → higher threshold (observations are novel, preserve them).
+
+        Parameters
+        ----------
+        base : int
+            Default/base threshold value.
+        min_t, max_t : int
+            Clamp the output to this range.
+
+        Returns
+        -------
+        int
+            Adjusted threshold.
+        """
+        adjusted = base * (1.0 - 0.5 * self.recurrence_rate)
+        return max(min_t, min(max_t, round(adjusted)))
+
+
+def lacunarity(nodes, n_scales: int = 8) -> np.ndarray:
+    """
+    Compute the lacunarity of a node population in μ-space.
+
+    Lacunarity λ(ε) = σ²/μ² of box occupancy counts at each scale ε.
+
+    Low lacunarity → uniformly distributed nodes (regular spacing).
+    High lacunarity → clustered with gaps (heterogeneous structure).
+
+    This is a diagnostic-only measure — it does not drive Observer decisions.
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+    n_scales : int
+        Number of ε scales to evaluate.
+
+    Returns
+    -------
+    (n_scales, 2) array of (ε, λ(ε)) pairs, or empty array if < 2 nodes.
+    """
+    mus = np.array([n.mu for n in nodes])
+    if len(mus) < 2:
+        return np.array([])
+    ranges = mus.max(axis=0) - mus.min(axis=0)
+    max_range = float(ranges.max())
+    if max_range == 0:
+        return np.array([])
+    eps_max = max_range * 0.5
+    eps_min = max_range / (len(mus) * 5)
+    if eps_min >= eps_max:
+        eps_min = eps_max / 100
+    epsilons = np.geomspace(eps_max, eps_min, n_scales)
+    results = []
+    for eps in epsilons:
+        boxes: dict[tuple, int] = {}
+        for mu in mus:
+            key = tuple(np.floor(mu / eps).astype(int))
+            boxes[key] = boxes.get(key, 0) + 1
+        counts = np.array(list(boxes.values()), dtype=float)
+        mean_c = counts.mean()
+        if mean_c > 0:
+            lac = counts.var() / (mean_c ** 2)
+        else:
+            lac = 0.0
+        results.append((eps, lac))
+    return np.array(results)
+
+
+def multifractal_spectrum(
+    nodes,
+    q_values: np.ndarray | None = None,
+    n_scales: int = 8,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the multifractal spectrum (generalised dimensions D_q).
+
+    D_q is the generalised Rényi dimension for moment order q:
+    - D_0 = box-counting dimension
+    - D_1 = information dimension
+    - D_2 = correlation dimension
+
+    For a monofractal all D_q are equal; a spread in D_q indicates multifractal
+    structure (the node population has qualitatively different densities at
+    different scales).
+
+    This is a diagnostic-only measure — it does not drive Observer decisions.
+
+    Parameters
+    ----------
+    nodes : iterable of HFN
+    q_values : array of q moments; defaults to linspace(-3, 5, 17)
+    n_scales : int
+        Number of ε scales to evaluate.
+
+    Returns
+    -------
+    (q_values, D_q) : two arrays of the same length.
+        D_q values are NaN when the node population is too small (< 3 nodes).
+    """
+    if q_values is None:
+        q_values = np.linspace(-3, 5, 17)
+    q_values = np.asarray(q_values, dtype=float)
+
+    mus = np.array([n.mu for n in nodes])
+    if len(mus) < 3:
+        return q_values, np.full(len(q_values), float("nan"))
+
+    ranges = mus.max(axis=0) - mus.min(axis=0)
+    max_range = float(ranges.max())
+    if max_range == 0:
+        return q_values, np.full(len(q_values), float("nan"))
+
+    eps_max = max_range * 0.5
+    eps_min = max_range / (len(mus) * 5)
+    if eps_min >= eps_max:
+        eps_min = eps_max / 100
+    epsilons = np.geomspace(eps_max, eps_min, n_scales)
+
+    D_q = np.full(len(q_values), float("nan"))
+
+    for qi, q in enumerate(q_values):
+        log_inv_eps = np.log(1.0 / epsilons)
+        log_Z = np.zeros(n_scales)
+
+        for i, eps in enumerate(epsilons):
+            boxes: dict[tuple, int] = {}
+            for mu in mus:
+                key = tuple(np.floor(mu / eps).astype(int))
+                boxes[key] = boxes.get(key, 0) + 1
+            counts = np.array(list(boxes.values()), dtype=float)
+            total = counts.sum()
+            if total == 0:
+                log_Z[i] = float("nan")
+                continue
+            ps = counts / total
+            ps = ps[ps > 0]
+
+            if abs(q - 1.0) < 1e-6:
+                # q=1: information dimension — use Shannon entropy
+                log_Z[i] = float(-np.sum(ps * np.log(ps)))
+            else:
+                z = float(np.sum(ps ** q))
+                log_Z[i] = np.log(max(z, 1e-300))
+
+        valid = np.isfinite(log_Z)
+        if valid.sum() < 2:
+            continue
+
+        trim = max(1, n_scales // 5)
+        x = log_inv_eps[trim:-trim][valid[trim:-trim]]
+        y = log_Z[trim:-trim][valid[trim:-trim]]
+        if len(x) < 2:
+            continue
+
+        slope = _fit_slope(x, y)
+        if abs(q - 1.0) < 1e-6:
+            D_q[qi] = slope  # for q=1, slope of entropy vs log(1/eps) = D_1
+        else:
+            D_q[qi] = slope / (q - 1.0)
+
+    return q_values, D_q
+
+
 def _fit_slope(x: np.ndarray, y: np.ndarray) -> float:
     """Least-squares slope of y vs x."""
     if len(x) < 2:

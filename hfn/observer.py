@@ -100,6 +100,10 @@ class Observer:
         recombination_strategy: str = "cooccurrence",  # "cooccurrence" | "nearest_prior"
         hausdorff_absorption_threshold: float | None = None,  # geometric absorption distance
         hausdorff_absorption_weight_floor: float = 0.2,       # min weight to trigger geometric absorption
+        persistence_guided_absorption: bool = False,  # scale miss threshold by node persistence
+        adaptive_compression: bool = False,           # adjust compression threshold by recurrence rate
+        recurrence_buffer_size: int = 50,             # RecurrenceTracker buffer size
+        recurrence_epsilon: float = 0.3,              # RecurrenceTracker neighbourhood radius
     ):
         self.forest = forest
         self.tau = tau
@@ -115,6 +119,16 @@ class Observer:
         self.recombination_strategy = recombination_strategy
         self.hausdorff_absorption_threshold = hausdorff_absorption_threshold
         self.hausdorff_absorption_weight_floor = hausdorff_absorption_weight_floor
+        self.persistence_guided_absorption = persistence_guided_absorption
+        self.adaptive_compression = adaptive_compression
+
+        if adaptive_compression:
+            from hfn.fractal import RecurrenceTracker
+            self._recurrence: "RecurrenceTracker | None" = RecurrenceTracker(
+                recurrence_buffer_size, recurrence_epsilon
+            )
+        else:
+            self._recurrence = None
 
         self._weights: dict[str, float] = {}
         self._scores: dict[str, float] = {}
@@ -168,6 +182,8 @@ class Observer:
         Returns the explanation result.
         """
         result = self._expand(x)
+        if self._recurrence is not None:
+            self._recurrence.update(x)
         self._update_weights(x, result)
         self._update_scores(result)
         self._track_cooccurrence(result.explanation_tree)
@@ -322,7 +338,23 @@ class Observer:
                 continue
 
             # Original miss-count absorption
-            if self._miss_counts.get(node.id, 0) < self.absorption_miss_threshold:
+            effective_miss_threshold = self.absorption_miss_threshold
+            if self.persistence_guided_absorption:
+                from hfn.fractal import persistence_scores
+                p_scores = persistence_scores(
+                    list(self.forest.active_nodes()), self._weights
+                )
+                max_p = max(
+                    (v for v in p_scores.values() if v != float("inf")),
+                    default=1.0,
+                )
+                if max_p > 0:
+                    node_p = p_scores.get(node.id, 0.0)
+                    norm_p = min(node_p, max_p) / max_p  # in [0, 1]
+                    effective_miss_threshold = int(
+                        round(self.absorption_miss_threshold * (1.0 + norm_p))
+                    )
+            if self._miss_counts.get(node.id, 0) < effective_miss_threshold:
                 continue
 
             best_overlap = 0.0
@@ -386,10 +418,13 @@ class Observer:
             self.register(new_node)
 
     def _check_compression_candidates(self) -> None:
+        threshold = self.compression_cooccurrence_threshold
+        if self._recurrence is not None:
+            threshold = self._recurrence.recommended_threshold(threshold)
         # Collect all qualifying pairs
         candidates: list[tuple[frozenset, list[str]]] = []
         for pair, count in list(self._cooccurrence.items()):
-            if count < self.compression_cooccurrence_threshold:
+            if count < threshold:
                 continue
             ids = list(pair)
             if ids[0] not in self.forest or ids[1] not in self.forest:
