@@ -64,6 +64,9 @@ class Observer:
         compression_cooccurrence_threshold: int = 3, # M: co-occurrences to trigger compression
         w_init: float = 0.1,
         protected_ids: set[str] | None = None,      # nodes exempt from all dynamics
+        recombination_strategy: str = "cooccurrence",  # "cooccurrence" | "nearest_prior"
+        hausdorff_absorption_threshold: float | None = None,  # geometric absorption distance
+        hausdorff_absorption_weight_floor: float = 0.2,       # min weight to trigger geometric absorption
     ):
         self.forest = forest
         self.tau = tau
@@ -76,6 +79,9 @@ class Observer:
         self.residual_surprise_threshold = residual_surprise_threshold
         self.compression_cooccurrence_threshold = compression_cooccurrence_threshold
         self.w_init = w_init
+        self.recombination_strategy = recombination_strategy
+        self.hausdorff_absorption_threshold = hausdorff_absorption_threshold
+        self.hausdorff_absorption_weight_floor = hausdorff_absorption_weight_floor
 
         self._weights: dict[str, float] = {}
         self._scores: dict[str, float] = {}
@@ -92,6 +98,10 @@ class Observer:
         # Protected nodes are exempt from all dynamics (weight change, absorption).
         # Use for priors that represent invariant structural knowledge.
         self.protected_ids: set[str] = set(protected_ids) if protected_ids else set()
+
+        # Cache of prior node mu-vectors for fast nearest-prior lookup.
+        # Rebuilt whenever protected_ids is used in recombination_strategy.
+        self._prior_mus: np.ndarray | None = None
 
     # --- Node lifecycle ---
 
@@ -248,6 +258,37 @@ class Observer:
         for node in list(self.forest.active_nodes()):
             if node.id in self.protected_ids:
                 continue
+
+            absorbed = False
+
+            # Geometric shortcut: absorb if node is close to a better-weighted
+            # non-protected node and its own weight is below the floor.
+            if (
+                self.hausdorff_absorption_threshold is not None
+                and self._weights.get(node.id, 0.0) < self.hausdorff_absorption_weight_floor
+            ):
+                for other in self.forest.active_nodes():
+                    if other.id == node.id or other.id in self.protected_ids:
+                        continue
+                    if self._weights.get(other.id, 0.0) <= self._weights.get(node.id, 0.0):
+                        continue
+                    dist = float(np.linalg.norm(node.mu - other.mu))
+                    if dist < self.hausdorff_absorption_threshold:
+                        new_parent = other.recombine(node)
+                        self.forest.deregister(other.id)
+                        self.forest.deregister(node.id)
+                        self.forest.register(new_parent)
+                        self._init_node(new_parent)
+                        self._weights[new_parent.id] = self._weights.get(other.id, self.w_init)
+                        self._scores[new_parent.id] = self._scores.get(other.id, 0.0)
+                        self.absorbed_ids.add(node.id)
+                        absorbed = True
+                        break
+
+            if absorbed:
+                continue
+
+            # Original miss-count absorption
             if self._miss_counts.get(node.id, 0) < self.absorption_miss_threshold:
                 continue
 
@@ -257,7 +298,7 @@ class Observer:
                 if other.id == node.id:
                     continue
                 if other.id in self.protected_ids:
-                    continue  # protected nodes cannot be displaced by absorption
+                    continue
                 kappa = node.overlap(other)
                 if kappa > self.absorption_overlap_threshold and kappa > best_overlap:
                     best_overlap = kappa
@@ -266,7 +307,6 @@ class Observer:
             if best_node is None:
                 continue
 
-            # Create new parent absorbing both
             new_parent = best_node.recombine(node)
             self.forest.deregister(best_node.id)
             self.forest.deregister(node.id)
@@ -275,6 +315,25 @@ class Observer:
             self._weights[new_parent.id] = self._weights.get(best_node.id, self.w_init)
             self._scores[new_parent.id] = self._scores.get(best_node.id, 0.0)
             self.absorbed_ids.add(node.id)
+
+    # --- Fractal geometry helpers ---
+
+    def _build_prior_mus(self) -> np.ndarray | None:
+        """Stack μ vectors of all protected (prior) nodes into a matrix."""
+        prior_nodes = [
+            n for n in self.forest.active_nodes() if n.id in self.protected_ids
+        ]
+        if not prior_nodes:
+            return None
+        return np.array([n.mu for n in prior_nodes])
+
+    def _nearest_prior_dist(self, mu: np.ndarray) -> float:
+        """Distance from mu to the nearest prior node in μ-space."""
+        if self._prior_mus is None:
+            self._prior_mus = self._build_prior_mus()
+        if self._prior_mus is None:
+            return float("inf")
+        return float(np.min(np.linalg.norm(self._prior_mus - mu, axis=1)))
 
     # --- Node creation ---
 
@@ -294,6 +353,8 @@ class Observer:
             self.register(new_node)
 
     def _check_compression_candidates(self) -> None:
+        # Collect all qualifying pairs
+        candidates: list[tuple[frozenset, list[str]]] = []
         for pair, count in list(self._cooccurrence.items()):
             if count < self.compression_cooccurrence_threshold:
                 continue
@@ -303,9 +364,31 @@ class Observer:
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
             if compressed_id in self.forest:
                 continue
+            candidates.append((pair, ids))
+
+        if not candidates:
+            return
+
+        # Rank by nearest-prior proximity when strategy is set
+        if self.recombination_strategy == "nearest_prior" and self.protected_ids:
+            self._prior_mus = self._build_prior_mus()
+            def _rank(item: tuple) -> float:
+                _, ids = item
+                a_mu = self.forest._registry[ids[0]].mu
+                b_mu = self.forest._registry[ids[1]].mu
+                midpoint = (a_mu + b_mu) / 2.0
+                return self._nearest_prior_dist(midpoint)
+            candidates.sort(key=_rank)
+
+        # Process: if nearest_prior, take only the best candidate this pass;
+        # otherwise process all (original behaviour).
+        to_process = candidates[:1] if self.recombination_strategy == "nearest_prior" else candidates
+
+        for pair, ids in to_process:
             node_a = self.forest._registry[ids[0]]
             node_b = self.forest._registry[ids[1]]
             new_node = node_a.recombine(node_b)
+            compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
             new_node.id = compressed_id  # type: ignore[misc]
             self.register(new_node)
             self._cooccurrence[pair] = 0
