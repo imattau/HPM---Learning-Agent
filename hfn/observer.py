@@ -380,9 +380,9 @@ class Observer:
                 return self._nearest_prior_dist(midpoint)
             candidates.sort(key=_rank)
 
-        # Process: if nearest_prior, take only the best candidate this pass;
-        # otherwise process all (original behaviour).
-        to_process = candidates[:1] if self.recombination_strategy == "nearest_prior" else candidates
+        # Process all candidates in ranked order (nearest_prior sorts first,
+        # cooccurrence preserves dict iteration order).
+        to_process = candidates
 
         for pair, ids in to_process:
             node_a = self.forest._registry[ids[0]]
