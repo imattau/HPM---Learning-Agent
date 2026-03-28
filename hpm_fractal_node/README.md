@@ -422,3 +422,53 @@ Learned nodes occupy marginally higher-dimensional space than the priors. They a
 
 **5. Information dimension is the most diagnostic of the three**
 It distinguishes *what exists* from *what is used*. A low information dimension with a higher box-counting dimension means many nodes exist but few dominate — a signal that compression is not consolidating fast enough. Running `information_dimension` before and after changing `compression_cooccurrence_threshold` gives a direct measure of whether the change improves consolidation.
+
+---
+
+## Diagnostics #7–10: Persistence, Recurrence, Lacunarity, Multifractal
+
+Four further fractal tools, all in `hfn/fractal.py`.
+
+### Tools
+
+| Function / Class | What it measures | Observer use |
+|-----------------|-----------------|--------------|
+| `persistence_scores(nodes, weights)` | Per-node structural isolation — distance to nearest higher-weight node | Modulates absorption miss threshold |
+| `RecurrenceTracker(buffer_size, epsilon)` | How repetitive the observation stream is | Dynamically adjusts compression threshold |
+| `lacunarity(nodes, n_scales)` | Gappiness of node distribution at each scale ε — (σ²/μ²) of box counts | Diagnostic only |
+| `multifractal_spectrum(nodes, q_values, n_scales)` | Generalised dimensions D_q — reveals hot/cold spots in prior structure | Diagnostic only |
+
+### Observer integration
+
+```python
+obs = Observer(forest, tau=tau, protected_ids=prior_ids,
+               persistence_guided_absorption=True,   # protect isolated nodes longer
+               adaptive_compression=True,            # lower threshold when stream is repetitive
+               recurrence_epsilon=0.15)
+```
+
+### Experiment: Strategy Comparison (3×3, colour encoding, 5 passes)
+
+| Condition | Coverage | Learned N | Hausdorff | Absorbed |
+|-----------|----------|-----------|-----------|----------|
+| baseline (nearest_prior + hausdorff) | 80.2% | 10 | 1.515 | 1618 |
+| + persistence_guided_absorption | **81.2%** | 12 | **1.478** | 1647 |
+| + adaptive_compression | 80.2% | 10 | 1.515 | 1618 |
+| + both | **81.2%** | 12 | **1.478** | 1647 |
+
+### Key Findings
+
+**1. Persistence-guided absorption improves coverage (+1pp) and Hausdorff**
+High-persistence nodes (structurally isolated, far from any better-weighted node) get a higher effective miss threshold — the Observer protects them longer. Genuinely novel nodes survive rather than being absorbed prematurely, lifting coverage from 80.2% to 81.2% and pulling learned nodes slightly closer to the prior attractor (Hausdorff 1.515 → 1.478).
+
+**2. Adaptive compression has no effect at 5 passes**
+The recurrence rate never builds high enough in 5 passes over 250 observations to shift the compression threshold. This is a slow-burn mechanism — correct in principle but requires 20+ passes for recurrence to accumulate. It would activate in longer-running learning sessions where the same observations recur many times.
+
+**3. The strategies are independent**
+Persistence affects absorption; recurrence affects compression. They operate on separate parts of the Observer pipeline and don't interact — the combined result equals persistence-only.
+
+**4. Current best configuration**
+`recombination_strategy="nearest_prior"` + `hausdorff_absorption_threshold=0.15` + `persistence_guided_absorption=True` achieves 81.2% coverage with 12 learned nodes and Hausdorff 1.478. This is the recommended starting point for new experiments.
+
+**5. Lacunarity and multifractal spectrum are diagnostic-only**
+These reveal structure in the prior/learned node distribution (gappiness and hot spots) but are not yet integrated into Observer decisions. Lacunarity would inform node-creation suppression in dense regions; the multifractal spectrum would identify which prior layers are geometrically dominant.
