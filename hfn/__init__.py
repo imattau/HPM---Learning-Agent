@@ -34,6 +34,7 @@ Quick start
 from hfn.hfn import HFN, Edge
 from hfn.forest import Forest
 from hfn.observer import Observer
+from hfn.fractal import box_counting_dimension, population_dimension, dimension_profile
 
 import numpy as np
 
@@ -61,4 +62,7 @@ def calibrate_tau(D: int, sigma_scale: float = 1.0, margin: float = 1.0) -> floa
     return baseline + margin
 
 
-__all__ = ["HFN", "Edge", "Forest", "Observer", "calibrate_tau"]
+__all__ = [
+    "HFN", "Edge", "Forest", "Observer", "calibrate_tau",
+    "box_counting_dimension", "population_dimension", "dimension_profile",
+]
