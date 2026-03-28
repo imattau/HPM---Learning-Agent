@@ -19,6 +19,12 @@ Prior hierarchy:
 
   prior_colour          (cells have value-identity beyond presence/absence)
 
+  prior_spatial_organisation  (how cells are arranged directionally)
+    ├── prior_row_band       (horizontal organisation: top / mid / bottom row)
+    ├── prior_col_band       (vertical organisation: left / mid / right col)
+    ├── prior_diagonal       (diagonal orientation: either diagonal)
+    └── prior_corners        (corner positions as salient locations)
+
   prior_transformation  (grids can be related by rules)
     ├── prior_placement      (copy pattern to positions)
     ├── prior_substitution   (replace values while preserving shape)
@@ -144,6 +150,79 @@ def make_colour_prior() -> HFN:
 
 
 # ---------------------------------------------------------------------------
+# Spatial organisation priors
+#
+# Encode the concept that cells are arranged directionally — rows, columns,
+# diagonals, and corners are all salient spatial organisations in ARC.
+#
+# Row/col priors: centroid weights the dominant band heavily (0.7),
+# adjacent band lightly (0.3), and opposite band minimally (0.1).
+# Diagonal priors: centroid weights diagonal cells (0.7), centre (1.0),
+# and off-diagonal corners (0.0).
+# Corner prior: centroid weights the 4 corners (0.7), edges low (0.1).
+# ---------------------------------------------------------------------------
+
+def make_spatial_organisation_priors() -> tuple[HFN, ...]:
+    # Row bands: horizontal organisation
+    prior_row_top = _node("prior_row_top", np.array([0.7, 0.7, 0.7,
+                                                      0.3, 0.3, 0.3,
+                                                      0.1, 0.1, 0.1]))
+    prior_row_mid = _node("prior_row_mid", np.array([0.1, 0.1, 0.1,
+                                                      0.7, 0.7, 0.7,
+                                                      0.1, 0.1, 0.1]))
+    prior_row_bot = _node("prior_row_bot", np.array([0.1, 0.1, 0.1,
+                                                      0.3, 0.3, 0.3,
+                                                      0.7, 0.7, 0.7]))
+    prior_row_band = _node(
+        "prior_row_band",
+        _centroid(prior_row_top, prior_row_mid, prior_row_bot),
+        prior_row_top, prior_row_mid, prior_row_bot,
+        sigma_scale=2.0,
+    )
+
+    # Column bands: vertical organisation
+    prior_col_left  = _node("prior_col_left",  np.array([0.7, 0.3, 0.1,
+                                                          0.7, 0.3, 0.1,
+                                                          0.7, 0.3, 0.1]))
+    prior_col_mid   = _node("prior_col_mid",   np.array([0.1, 0.7, 0.1,
+                                                          0.1, 0.7, 0.1,
+                                                          0.1, 0.7, 0.1]))
+    prior_col_right = _node("prior_col_right", np.array([0.1, 0.3, 0.7,
+                                                          0.1, 0.3, 0.7,
+                                                          0.1, 0.3, 0.7]))
+    prior_col_band = _node(
+        "prior_col_band",
+        _centroid(prior_col_left, prior_col_mid, prior_col_right),
+        prior_col_left, prior_col_mid, prior_col_right,
+        sigma_scale=2.0,
+    )
+
+    # Diagonal: either main diagonal (TL→BR) or anti-diagonal (TR→BL).
+    # Centroid weights both diagonals equally + the centre intersection.
+    prior_diagonal = _node("prior_diagonal", np.array([0.5, 0.0, 0.5,
+                                                        0.0, 1.0, 0.0,
+                                                        0.5, 0.0, 0.5]))
+
+    # Corners: the four corner positions as salient locations.
+    prior_corners = _node("prior_corners", np.array([0.7, 0.1, 0.7,
+                                                      0.1, 0.1, 0.1,
+                                                      0.7, 0.1, 0.7]))
+
+    prior_spatial_organisation = _node(
+        "prior_spatial_organisation",
+        _centroid(prior_row_band, prior_col_band, prior_diagonal, prior_corners),
+        prior_row_band, prior_col_band, prior_diagonal, prior_corners,
+        sigma_scale=2.0,
+    )
+    return (
+        prior_spatial_organisation,
+        prior_row_band, prior_row_top, prior_row_mid, prior_row_bot,
+        prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
+        prior_diagonal, prior_corners,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Transformation priors
 #
 # Encode the concept that input/output pairs in ARC are related by rules.
@@ -197,12 +276,22 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
     prior_density, prior_sparse, prior_medium, prior_dense = make_density_priors()
     prior_structure, prior_connectivity, prior_symmetry, prior_boundary = make_structure_priors()
     prior_colour = make_colour_prior()
+    (
+        prior_spatial_organisation,
+        prior_row_band, prior_row_top, prior_row_mid, prior_row_bot,
+        prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
+        prior_diagonal, prior_corners,
+    ) = make_spatial_organisation_priors()
     prior_transformation, prior_placement, prior_substitution, prior_geometric = make_transformation_priors()
 
     all_nodes = [
         prior_density, prior_sparse, prior_medium, prior_dense,
         prior_structure, prior_connectivity, prior_symmetry, prior_boundary,
         prior_colour,
+        prior_spatial_organisation,
+        prior_row_band, prior_row_top, prior_row_mid, prior_row_bot,
+        prior_col_band, prior_col_left, prior_col_mid, prior_col_right,
+        prior_diagonal, prior_corners,
         prior_transformation, prior_placement, prior_substitution, prior_geometric,
     ]
     for n in all_nodes:
@@ -215,12 +304,15 @@ def build_prior_forest() -> tuple[Forest, dict[str, HFN]]:
         prior_sparse, prior_medium, prior_dense,
         prior_connectivity, prior_symmetry, prior_boundary,
         prior_colour,
+        prior_row_top, prior_row_mid, prior_row_bot,
+        prior_col_left, prior_col_mid, prior_col_right,
+        prior_diagonal, prior_corners,
         prior_placement, prior_substitution, prior_geometric,
     ]:
         forest.register(node)
 
     # Register group priors (expanded into by Observer when surprising)
-    for node in [prior_density, prior_structure, prior_transformation]:
+    for node in [prior_density, prior_structure, prior_spatial_organisation, prior_transformation]:
         forest.register(node)
 
     return forest, registry
