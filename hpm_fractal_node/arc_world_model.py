@@ -2,11 +2,17 @@
 ARC World Model — single entry point assembling all layers into one Forest.
 
 Layers (bottom to top):
+  0. Perception    — signal, pixel, spatial adjacency, cell, field
   1. Primitives    — atomic vocabulary (cell, row, col, region, relationship)
   2. Relationships — relational vocabulary (adjacency, mirror, repeat)
-  3. Priors        — world model priors (density, structure, spatial, transform)
-  4. Semantic      — object, scene, rule priors (the concepts ARC tasks require)
-  5. Encoder       — prior that knows how to perceive grids
+  3. Structural    — world model priors (density, structure, spatial, transform)
+  4. Colour        — value-identity priors (background, low, mid, high)
+  5. Semantic      — object, scene, rule priors (the concepts ARC tasks require)
+  6. Encoder       — prior that knows how to perceive grids
+
+The perceptual chain: prior_signal → prior_pixel → prior_cell_concept →
+prior_field → prior_grid (structural layer). This encodes HOW the AI
+perceives the world before any structure is recognised.
 
 All nodes are protected priors. The Observer learns above this layer —
 new nodes it discovers reference these as children, but the layer itself
@@ -19,11 +25,12 @@ from __future__ import annotations
 
 from hpm_fractal_node.hfn import HFN
 from hpm_fractal_node.forest import Forest
+from hpm_fractal_node.arc_perception_priors import build_perception_priors
 from hpm_fractal_node.arc_primitives import build_primitives
 from hpm_fractal_node.arc_relationships import build_relationships
 from hpm_fractal_node.arc_prior_forest import build_prior_forest
-from hpm_fractal_node.arc_object_scene_priors import build_object_scene_priors
 from hpm_fractal_node.arc_colour_priors import build_colour_priors
+from hpm_fractal_node.arc_object_scene_priors import build_object_scene_priors
 from hpm_fractal_node.arc_encoder_hfn import build_encoder_hfn
 
 
@@ -37,19 +44,23 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
     D = rows * cols
     full_registry: dict[str, HFN] = {}
 
-    # Layer 1: Primitives
+    # Layer 0: Perception — how the world is perceived before structure is known
+    prior_signal, perc_registry = build_perception_priors(rows, cols)
+    full_registry.update(perc_registry)
+
+    # Layer 1: Primitives — atomic spatial vocabulary
     primitives_hfn, prim_registry = build_primitives(rows, cols)
     full_registry.update(prim_registry)
 
-    # Layer 2: Relationships (reference primitive nodes)
+    # Layer 2: Relationships — relational vocabulary (reference primitives)
     relationships_hfn, rel_registry = build_relationships(prim_registry, rows, cols)
     full_registry.update(rel_registry)
 
-    # Layer 3: World model priors
+    # Layer 3: Structural priors — density, spatial organisation, structure, transformation
     prior_forest, prior_registry = build_prior_forest(rows, cols)
     full_registry.update(prior_registry)
 
-    # Layer 4: Colour priors (value-identity beyond binary presence/absence)
+    # Layer 4: Colour priors — value-identity beyond binary presence/absence
     prior_colour_group, colour_registry = build_colour_priors(rows, cols)
     full_registry.update(colour_registry)
 
@@ -60,14 +71,27 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
     )
     full_registry.update(sem_registry)
 
-    # Layer 6: Encoder (references world model priors as children)
+    # Layer 6: Encoder — perceives grids through structural concepts
     encoder_hfn, enc_registry = build_encoder_hfn(prior_registry)
     full_registry.update(enc_registry)
+
+    # Wire perceptual chain: prior_field → prior_grid
+    # prior_field (perception layer) is the foundation that prior_grid builds on
+    if "prior_field" in perc_registry and "prior_grid" in prior_registry:
+        prior_grid = prior_registry["prior_grid"]
+        prior_field = perc_registry["prior_field"]
+        if prior_field not in prior_grid.children():
+            prior_grid._children.append(prior_field)
 
     # Assemble into one Forest
     forest = Forest(D=D, forest_id=f"arc_world_model_{rows}x{cols}")
 
-    # Register all prior-forest nodes first (already structured internally)
+    # Register perception layer (foundation)
+    for node in perc_registry.values():
+        if node.id not in forest:
+            forest.register(node)
+
+    # Register structural priors (already internally structured)
     for node in prior_forest.active_nodes():
         if node.id not in forest:
             forest.register(node)
