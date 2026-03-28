@@ -520,3 +520,76 @@ Nodes near hot spots (many non-protected neighbours within `multifractal_crowdin
 
 **3. 10×10 new node coverage is the signal, not prior coverage**
 At 10×10 the prior vocabulary covers 90% of observations. The fractal strategies' contribution shows in the new node coverage (0% → 6%): the stack creates better-targeted learned nodes that explain observations the priors miss.
+
+---
+
+## dSprites Experiment: Generative Factor Alignment
+
+### What is dSprites?
+
+dSprites is a synthetic dataset of 2D shapes defined by 5 independent generative factors:
+
+| Factor | Values |
+|--------|--------|
+| Shape | 3 (square, ellipse, heart) |
+| Scale | 6 levels |
+| Orientation | 40 angles |
+| Pos X | 32 positions |
+| Pos Y | 32 positions |
+
+Images are 64×64 binary sprites, downsampled to 16×16 for the experiment (D=256). There are no labels — only raw pixel observations and the ground-truth generative factor values used post-hoc to evaluate alignment.
+
+### The dSprites World Model
+
+The world model is assembled in `hpm_fractal_node/dsprites/dsprites_world_model.py` as 37 protected priors across 5 layers:
+
+| Layer | Priors | What they encode |
+|-------|--------|-----------------|
+| Perception | 3 | signal, pixel, cell concept |
+| Spatial cells | 16 | 4×4 spatial grid cells |
+| Shape | 4 | background, blob, compact, extended |
+| Scale | 6 | levels 1–6 (sigma 0.02–0.07) |
+| Position/Orientation | 8 | centre, edge N/S/E/W, corner, rotated |
+
+### Experiment Configuration
+
+```python
+n_samples = 2000       # observations drawn from dSprites
+n_passes  = 3          # passes over the sample
+D         = 256        # 16×16 downsampled images
+tau       = 240.25     # surprise threshold
+```
+
+Run with:
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_dsprites
+```
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Total observations | 6000 (2000 × 3 passes) |
+| Covered by learned nodes | 5999 / 6000 (100%) |
+| Learned nodes created | 101 |
+| Hausdorff(learned, priors) | 10.4208 |
+
+**Factor purity (nodes with n ≥ 5 observations):**
+
+| Factor | Mean purity | Max purity | Random baseline | Above chance |
+|--------|------------|-----------|-----------------|-------------|
+| Shape | 0.546 | 1.000 | 0.333 | +64% |
+| Scale | 0.483 | 1.000 | 0.167 | +189% |
+| Pos X | 0.366 | 0.800 | 0.031 | +1081% |
+
+Factor purity measures how often observations assigned to a learned node share the same ground-truth generative factor value (1.0 = all observations in the node come from one factor level).
+
+### Key Finding
+
+The Observer recovers latent generative structure without supervision. Learned nodes are not random partitions of observation space — they align with the underlying factors that generated the images. Pos X purity is 10× above chance, meaning the Observer is discovering spatial position as a structuring principle purely from pixel statistics.
+
+The high Hausdorff distance (10.42) reflects that the 16×16 pixel space is geometrically large relative to the 37 hand-specified priors — the priors cover conceptual roles (shape, scale, position) but the learned nodes are operating at a finer resolution in the full D=256 space. This is expected: the world model provides structural scaffolding, and the Observer fills in the detail.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_dsprites
+```
