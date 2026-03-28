@@ -63,6 +63,7 @@ class Observer:
         residual_surprise_threshold: float = 2.0,   # threshold to spawn new leaf
         compression_cooccurrence_threshold: int = 3, # M: co-occurrences to trigger compression
         w_init: float = 0.1,
+        protected_ids: set[str] | None = None,      # nodes exempt from all dynamics
     ):
         self.forest = forest
         self.tau = tau
@@ -87,6 +88,10 @@ class Observer:
 
         # Track absorbed node ids for test visibility
         self.absorbed_ids: set[str] = set()
+
+        # Protected nodes are exempt from all dynamics (weight change, absorption).
+        # Use for priors that represent invariant structural knowledge.
+        self.protected_ids: set[str] = set(protected_ids) if protected_ids else set()
 
     # --- Node lifecycle ---
 
@@ -205,6 +210,8 @@ class Observer:
             nid = node.id
             if nid not in self._weights:
                 self._init_node(node)
+            if nid in self.protected_ids:
+                continue
 
             if nid in explaining_ids:
                 acc = result.accuracy_scores.get(nid, 0.0)
@@ -239,6 +246,8 @@ class Observer:
 
     def _check_absorption(self) -> None:
         for node in list(self.forest.active_nodes()):
+            if node.id in self.protected_ids:
+                continue
             if self._miss_counts.get(node.id, 0) < self.absorption_miss_threshold:
                 continue
 
@@ -247,6 +256,8 @@ class Observer:
             for other in self.forest.active_nodes():
                 if other.id == node.id:
                     continue
+                if other.id in self.protected_ids:
+                    continue  # protected nodes cannot be displaced by absorption
                 kappa = node.overlap(other)
                 if kappa > self.absorption_overlap_threshold and kappa > best_overlap:
                     best_overlap = kappa
