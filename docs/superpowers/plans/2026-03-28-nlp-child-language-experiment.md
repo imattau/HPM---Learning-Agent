@@ -343,9 +343,10 @@ def generate_sentences(
             observations.append(_obs(child, "ran", "to", "the", place))
 
     # Template 6: "[MASK:person] walked to the [place] ."  (33 obs)
+    # Context: left2=<start>, left1=<start>, right1=walked, right2=place
     for person in _PERSONS + _FAMILY:
         for place in _PLACES:
-            observations.append(_obs("<start>", "<start>", "walked", "to", person))
+            observations.append(_obs("<start>", "<start>", "walked", place, person))
 
     # Template 7: "My [MASK:family] gave me the [object] ."  (18 obs)
     for fam in _FAMILY:
