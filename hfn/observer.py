@@ -104,6 +104,12 @@ class Observer:
         adaptive_compression: bool = False,           # adjust compression threshold by recurrence rate
         recurrence_buffer_size: int = 50,             # RecurrenceTracker buffer size
         recurrence_epsilon: float = 0.3,              # RecurrenceTracker neighbourhood radius
+        lacunarity_guided_creation: bool = False,     # suppress node creation in already-dense regions
+        lacunarity_creation_radius: float = 0.08,     # neighbourhood radius for local density check
+        lacunarity_creation_factor: float = 2.0,      # suppress if local density > factor * mean density
+        multifractal_guided_absorption: bool = False, # lower absorption threshold in hot spots
+        multifractal_crowding_radius: float = 0.12,   # radius for local crowding count
+        multifractal_crowding_threshold: int = 3,     # nodes within radius = hot spot → absorb sooner
     ):
         self.forest = forest
         self.tau = tau
@@ -121,6 +127,12 @@ class Observer:
         self.hausdorff_absorption_weight_floor = hausdorff_absorption_weight_floor
         self.persistence_guided_absorption = persistence_guided_absorption
         self.adaptive_compression = adaptive_compression
+        self.lacunarity_guided_creation = lacunarity_guided_creation
+        self.lacunarity_creation_radius = lacunarity_creation_radius
+        self.lacunarity_creation_factor = lacunarity_creation_factor
+        self.multifractal_guided_absorption = multifractal_guided_absorption
+        self.multifractal_crowding_radius = multifractal_crowding_radius
+        self.multifractal_crowding_threshold = multifractal_crowding_threshold
 
         if adaptive_compression:
             from hfn.fractal import RecurrenceTracker
@@ -354,6 +366,14 @@ class Observer:
                     effective_miss_threshold = int(
                         round(self.absorption_miss_threshold * (1.0 + norm_p))
                     )
+
+            # Multifractal crowding: lower threshold for nodes in hot spots
+            if self.multifractal_guided_absorption:
+                crowding = self._local_crowding(node.mu)
+                if crowding >= self.multifractal_crowding_threshold:
+                    # Hot spot — halve the threshold (absorb sooner)
+                    effective_miss_threshold = max(1, effective_miss_threshold // 2)
+
             if self._miss_counts.get(node.id, 0) < effective_miss_threshold:
                 continue
 
@@ -400,6 +420,43 @@ class Observer:
             return float("inf")
         return float(np.min(np.linalg.norm(self._prior_mus - mu, axis=1)))
 
+    def _local_density_ratio(self, x: np.ndarray) -> float:
+        """
+        Ratio of local node density at x to the mean density across all nodes.
+
+        Used by lacunarity_guided_creation: if ratio > lacunarity_creation_factor,
+        the region is already dense and a new node would be redundant.
+
+        Returns 0.0 if fewer than 3 nodes exist (always allow creation).
+        """
+        nodes = list(self.forest.active_nodes())
+        if len(nodes) < 3:
+            return 0.0
+        mus = np.array([n.mu for n in nodes])
+        dists_to_x = np.linalg.norm(mus - x, axis=1)
+        local_count = float(np.sum(dists_to_x < self.lacunarity_creation_radius))
+        # Mean nearest-neighbour distance as a proxy for global density
+        mean_nn = float(np.mean([
+            np.sort(np.linalg.norm(mus - mus[i], axis=1))[1]
+            for i in range(len(mus))
+        ]))
+        expected_local = self.lacunarity_creation_radius / (mean_nn + 1e-9)
+        return local_count / (expected_local + 1e-9)
+
+    def _local_crowding(self, node_mu: np.ndarray) -> int:
+        """
+        Count non-protected nodes within multifractal_crowding_radius of node_mu.
+
+        Used by multifractal_guided_absorption: high crowding = hot spot = absorb sooner.
+        """
+        count = 0
+        for other in self.forest.active_nodes():
+            if other.id in self.protected_ids:
+                continue
+            if float(np.linalg.norm(other.mu - node_mu)) < self.multifractal_crowding_radius:
+                count += 1
+        return count
+
     # --- Node creation ---
 
     def _check_node_creation(self, x: np.ndarray, result: ExplanationResult) -> None:
@@ -409,6 +466,10 @@ class Observer:
     def _check_residual_surprise(self, x: np.ndarray, result: ExplanationResult) -> None:
         # Bootstrap: empty forest always needs a first node
         if len(self.forest) == 0 or result.residual_surprise >= self.residual_surprise_threshold:
+            # Lacunarity-guided suppression: skip creation in already-dense regions
+            if self.lacunarity_guided_creation and len(self.forest) > 0:
+                if self._local_density_ratio(x) > self.lacunarity_creation_factor:
+                    return  # region is dense — redirect to compression, not creation
             D = x.shape[0]
             new_node = HFN(
                 mu=x.copy(),
