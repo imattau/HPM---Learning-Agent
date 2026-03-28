@@ -53,6 +53,12 @@ Thumbs.db
 *.db
 *.sqlite3
 
+# Downloaded datasets and runtime data artifacts
+data/archives/
+data/*.pkl
+data/*.npz
+data/*.npy
+
 # Serena
 .serena/
 
