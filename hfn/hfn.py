@@ -80,8 +80,12 @@ class HFN:
 
     def overlap(self, other: HFN) -> float:
         """Gaussian overlap integral approx: exp(-0.5 * Mahalanobis(mu_self, mu_other))."""
-        combined_sigma = self.sigma + other.sigma
         diff = self.mu - other.mu
+        # O(D) fast path when both nodes have diagonal sigma (all prior/learned nodes)
+        if self._sigma_diag is not None and other._sigma_diag is not None:
+            combined_diag = self._sigma_diag + other._sigma_diag
+            return float(np.exp(-0.5 * float(np.dot(diff * diff, 1.0 / combined_diag))))
+        combined_sigma = self.sigma + other.sigma
         try:
             val = float(np.exp(-0.5 * diff @ np.linalg.solve(combined_sigma, diff)))
         except np.linalg.LinAlgError:
@@ -90,10 +94,14 @@ class HFN:
 
     def description_length(self) -> float:
         """Complexity proxy: non-zero mu components + off-diagonal sigma entries."""
+        D = self.mu.shape[0]
+        if self._sigma_diag is not None:
+            # Diagonal sigma — off-diagonal is exactly zero, skip the expensive check
+            return float(np.sum(np.abs(self.mu) > 1e-6)) + D
         return float(
             np.sum(np.abs(self.mu) > 1e-6)
             + np.sum(np.abs(self.sigma - np.diag(np.diag(self.sigma))) > 1e-6)
-            + self.sigma.shape[0]
+            + D
         )
 
     # --- Structure operations (read-only) ---

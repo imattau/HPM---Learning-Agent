@@ -316,6 +316,19 @@ class Observer:
     # --- Absorption ---
 
     def _check_absorption(self) -> None:
+        # Compute persistence scores once per absorption pass (not per node)
+        p_scores: dict[str, float] = {}
+        p_max: float = 1.0
+        if self.persistence_guided_absorption:
+            from hfn.fractal import persistence_scores
+            p_scores = persistence_scores(
+                list(self.forest.active_nodes()), self._weights
+            )
+            p_max = max(
+                (v for v in p_scores.values() if v != float("inf")),
+                default=1.0,
+            )
+
         for node in list(self.forest.active_nodes()):
             if node.id in self.protected_ids:
                 continue
@@ -351,21 +364,12 @@ class Observer:
 
             # Original miss-count absorption
             effective_miss_threshold = self.absorption_miss_threshold
-            if self.persistence_guided_absorption:
-                from hfn.fractal import persistence_scores
-                p_scores = persistence_scores(
-                    list(self.forest.active_nodes()), self._weights
+            if self.persistence_guided_absorption and p_max > 0:
+                node_p = p_scores.get(node.id, 0.0)
+                norm_p = min(node_p, p_max) / p_max  # in [0, 1]
+                effective_miss_threshold = int(
+                    round(self.absorption_miss_threshold * (1.0 + norm_p))
                 )
-                max_p = max(
-                    (v for v in p_scores.values() if v != float("inf")),
-                    default=1.0,
-                )
-                if max_p > 0:
-                    node_p = p_scores.get(node.id, 0.0)
-                    norm_p = min(node_p, max_p) / max_p  # in [0, 1]
-                    effective_miss_threshold = int(
-                        round(self.absorption_miss_threshold * (1.0 + norm_p))
-                    )
 
             # Multifractal crowding: lower threshold for nodes in hot spots
             if self.multifractal_guided_absorption:
