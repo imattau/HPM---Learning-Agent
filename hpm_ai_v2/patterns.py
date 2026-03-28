@@ -70,8 +70,10 @@ class CompositePattern:
     @property
     def resource_cost(self) -> float:
         base_cost = SUBSTRATE_REGISTRY[self.substrate_id].resource_cost
-        # Level-based penalty (Working memory load) - Reduced multiplier
-        return base_cost * (1.0 + (self.level - 1) * 0.1)
+        # Level-based penalty (Working memory load)
+        # However, high-level expertise involves compression which reduces load
+        load_multiplier = max(0.1, 1.0 - (self.level - 1) * 0.2)
+        return base_cost * load_multiplier
 
     def __post_init__(self):
         pass
@@ -80,19 +82,18 @@ class CompositePattern:
     def sensitivity(self) -> tuple[float, float]:
         """
         Returns (alpha_L, beta_L): Surface vs Structural sensitivity.
-        Level 1: Surface dominance.
-        Level 4: Internalized Schemas.
-        Level 5: Pure Generative Structure.
+        Level 1: Surface dominance (0.9 / 0.1).
+        Level 3: Structural dominance (0.1 / 5.0) - Amplified beta to overcome noise.
         """
         if self.level == 1:
             return (0.9, 0.1)
         if self.level == 2:
-            return (0.6, 0.4)
+            return (0.6, 1.0)
         if self.level == 3:
-            return (0.2, 0.8)
+            return (0.1, 5.0) # Structural clout
         if self.level == 4:
-            return (0.05, 0.95)
-        return (0.01, 0.99) # Level 5
+            return (0.05, 10.0)
+        return (0.01, 20.0) # Level 5
 
     @property
     def accuracy(self) -> float:
@@ -118,11 +119,14 @@ class CompositePattern:
         epistemic_total = alpha * surface_fitness + beta * structural_fitness
             
         # J_i = E_aff + E_soc - E_res + (Generative_Utility if L5)
-        j_i = self.affective_score + self.social_score - self.resource_cost
+        # In HPM, evaluators guide attention but Epistemic fit is the final arbiter
+        # We scale evaluators down to be a 'tie-breaker' or minor bias (0.1 weight)
+        evaluator_bias = (self.affective_score + self.social_score - self.resource_cost) * 0.1
+        
         if self.level >= 5:
-            j_i += self.generative_utility
+            evaluator_bias += self.generative_utility
             
-        return epistemic_total + j_i
+        return epistemic_total + evaluator_bias
 
 
     def calculate_connectivity(self, dependency_matrix: np.ndarray) -> float:

@@ -34,42 +34,41 @@ class MetaPatternRule:
         # Calculate scores with maturation penalty and stability bias
         scores = []
         for p in patterns:
-            penalty = self.calculate_maturation_gate(p.level, patterns)
+            gate_penalty = self.calculate_maturation_gate(p.level, patterns)
+            gate_multiplier = 1.0 / (1.0 + gate_penalty)
             
             # D(h) = alpha * C(h) + beta * E(h) + gamma * F(h)
             density = p.calculate_density(connectivity=1.0, social_frequency=0.5)
             
-            # Apply subtractive penalty and additive stability bias
-            final_score = p.total_score - penalty + self.stability_kappa * density
+            # Apply Stability Bias to the total score
+            biased_score = p.total_score + self.stability_kappa * density
             
-            scores.append(final_score)
+            # Maturation Gate scales the score (0.0 to 1.0)
+            scores.append(biased_score * gate_multiplier)
         scores = np.array(scores)
         
         # Calculate population average total score
         total_avg = np.sum(weights * scores) / np.sum(weights) if np.sum(weights) > 0 else 0
         
-        new_weights = np.copy(weights)
+        adjusted_scores = np.copy(scores)
         
-        # Calculate exponents for softmax
-        # w_i(t+1) = w_i(t) * exp(learning_rate * score_i) / sum(w_j * exp(learning_rate * score_j))
-        exponents = np.exp(self.learning_rate * scores)
-        new_weights = weights * exponents
-        
-        # Conflict inhibition (subtractive on the result)
-        if kappa_matrix.size > 0:
-            inhibition = self.conflict_scale * (kappa_matrix @ weights)
-            new_weights *= np.maximum(0.1, 1.0 - inhibition)
-            
-        # Apply substrate-specific decay
         for i, p in enumerate(patterns):
-            props = SUBSTRATE_REGISTRY[p.substrate_id]
-            new_weights[i] *= (1.0 - props.decay_rate)
+            # Conflict inhibition term lowers the effective score of mutually incompatible patterns.
+            if kappa_matrix.size > 0:
+                adjusted_scores[i] -= self.conflict_scale * np.sum(kappa_matrix[i, :] * weights)
             
-        # Ensure non-negative weights
-        new_weights = np.maximum(new_weights, 0.0)
-        total_w = np.sum(new_weights)
-        if total_w > 0:
-            new_weights /= total_w
+            # Apply substrate-specific decay as a score penalty.
+            props = SUBSTRATE_REGISTRY[p.substrate_id]
+            adjusted_scores[i] -= props.decay_rate
+        
+        # Softmax-style competition over adjusted scores.
+        competition_temperature = 8.0
+        exponents = np.exp(self.learning_rate * competition_temperature * adjusted_scores)
+        new_weights = exponents / np.sum(exponents)
+        
+        # Maintain a minimal exploration floor to avoid permanent extinction.
+        new_weights = np.maximum(new_weights, 1e-3)
+        new_weights /= np.sum(new_weights)
         
         for i, p in enumerate(patterns):
             p.weight = new_weights[i]
@@ -79,6 +78,7 @@ class MetaPatternRule:
         A pattern shifts substrate when Density D(h) exceeds a threshold.
         INTERNAL_FLEX -> INTERNAL_PROC (Internalization)
         INTERNAL_PROC -> EXTERNAL_SYM (Externalization)
+        Only one shift per call to maintain developmental sequence.
         """
         density = p.calculate_density(connectivity, social_freq)
         
@@ -95,24 +95,28 @@ class MetaPatternRule:
         
     def calculate_maturation_gate(self, level: int, population: List[CompositePattern]) -> float:
         """
-        Returns a penalty value based on lower-level density foundation.
-        Returns 0.0 (no penalty) if lower level foundation is solid.
-        Returns a positive value (subtractive penalty) if foundation is weak.
+        Returns a developmental penalty based on lower-level density foundation.
+        Returns 0.0 when the lower-level foundation is solid.
+        Returns a positive value when the foundation is weak or missing.
         """
         if level <= 1:
             return 0.0
             
-        # Check density of patterns at level - 1
-        lower_level_patterns = [p for p in population if p.level == level - 1]
+        # Check density across all lower-level patterns.
+        # This allows a strong Level 1 foundation to support later levels
+        # even if an intermediate level is not yet instantiated.
+        lower_level_patterns = [p for p in population if p.level < level]
         if not lower_level_patterns:
-            return 5.0 # High subtractive penalty if no lower level patterns exist
+            return 1.0 # Hard lock if no lower level patterns exist
             
-        # Calculate average density of lower level patterns
-        avg_density = np.mean([p.calculate_density(1.0, 0.0) for p in lower_level_patterns])
+        # Calculate the strongest lower-level density.
+        # This treats maturation as requiring at least one solid foundation,
+        # rather than averaging in weak but irrelevant patterns.
+        foundation_density = max(p.calculate_density(1.0, 0.0) for p in lower_level_patterns)
         
-        # If avg_density < threshold, apply subtractive penalty
-        if avg_density < self.density_threshold:
-            return 5.0 * (1.0 - (avg_density / self.density_threshold))
+        # Weak foundations incur a penalty that decays as density approaches the threshold.
+        if foundation_density < self.density_threshold:
+            return self.density_threshold / max(foundation_density, 1e-6)
             
         return 0.0
 
