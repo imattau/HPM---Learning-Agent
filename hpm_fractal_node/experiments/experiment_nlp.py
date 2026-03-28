@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from hfn import Observer, calibrate_tau
 from hfn.fractal import hausdorff_distance
+from hfn.tiered_forest import TieredForest
 from hpm_fractal_node.nlp.nlp_loader import generate_sentences, category_names, D
 from hpm_fractal_node.nlp.nlp_world_model import build_nlp_world_model
 
@@ -61,8 +62,15 @@ def main() -> None:
     print(f"  {len(cats)} semantic categories: {cats}")
 
     print("\nBuilding NLP world model ...")
-    forest, prior_ids = build_nlp_world_model()
-    print(f"  {len(forest._registry)} priors, {len(prior_ids)} protected")
+    _cold_dir = Path(__file__).parents[2] / "data" / "hfn_nlp_cold"
+    _cold_dir.mkdir(parents=True, exist_ok=True)
+    forest, prior_ids = build_nlp_world_model(
+        forest_cls=TieredForest,
+        cold_dir=_cold_dir,
+        max_hot=500,
+    )
+    forest.set_protected(prior_ids)
+    print(f"  {len(forest)} priors, {len(prior_ids)} protected")
 
     tau = calibrate_tau(D, sigma_scale=TAU_SIGMA, margin=TAU_MARGIN)
     print(f"  tau = {tau:.2f}")
@@ -96,6 +104,7 @@ def main() -> None:
             vec, true_word, category = data[i]
             x = vec.astype(np.float64)
             result = obs.observe(x)
+            forest._on_observe()
             if (n_explained + n_unexplained) % 500 == 0:
                 print(f"    {n_explained + n_unexplained}/{N_SAMPLES} ...", flush=True)
 
@@ -162,6 +171,9 @@ def main() -> None:
 
     rows = []
     for node_id in learned_nodes:
+        if node_id not in forest._registry:
+            continue  # absorbed during a later pass
+
         labels = node_explanations[node_id]
         n = len(labels)
 
