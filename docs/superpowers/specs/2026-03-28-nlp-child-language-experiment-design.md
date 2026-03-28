@@ -22,7 +22,7 @@ Each of the 4 slots is encoded as a **one-hot vector** over a **fixed, explicitl
 
 ```
 Special tokens (3):  <start>, <end>, <unknown>
-Function words (14): the, a, an, my, her, his, at, in, to, on, ran, and, is, was
+Function words (14): the, a, an, my, her, his, at, in, to, on, not, and, is, was
 Animals (3):         dog, cat, bird
 People (11):         mum, dad, grandma, grandpa, brother, sister, teacher, doctor, friend, classmate, baby
 Children (2):        boy, girl
