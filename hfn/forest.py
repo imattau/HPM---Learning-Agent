@@ -53,6 +53,10 @@ class Forest(HFN):
     def active_nodes(self) -> list[HFN]:
         return list(self._registry.values())
 
+    def get(self, node_id: str) -> HFN | None:
+        """Return node by id, or None if not found."""
+        return self._registry.get(node_id)
+
     def __contains__(self, node_id: str) -> bool:
         return node_id in self._registry
 

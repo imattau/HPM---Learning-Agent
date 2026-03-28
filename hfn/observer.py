@@ -507,8 +507,8 @@ class Observer:
             self._prior_mus = self._build_prior_mus()
             def _rank(item: tuple) -> float:
                 _, ids = item
-                a_mu = self.forest._registry[ids[0]].mu
-                b_mu = self.forest._registry[ids[1]].mu
+                a_mu = self.forest.get(ids[0]).mu
+                b_mu = self.forest.get(ids[1]).mu
                 midpoint = (a_mu + b_mu) / 2.0
                 return self._nearest_prior_dist(midpoint)
             candidates.sort(key=_rank)
@@ -518,8 +518,8 @@ class Observer:
         to_process = candidates
 
         for pair, ids in to_process:
-            node_a = self.forest._registry[ids[0]]
-            node_b = self.forest._registry[ids[1]]
+            node_a = self.forest.get(ids[0])
+            node_b = self.forest.get(ids[1])
             new_node = node_a.recombine(node_b)
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
             new_node.id = compressed_id  # type: ignore[misc]
