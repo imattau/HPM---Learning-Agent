@@ -36,8 +36,8 @@ N_SAMPLES = 2000
 N_PASSES = 3
 SEED = 42
 
-TAU_SIGMA = 1.5
-TAU_MARGIN = 3.0
+TAU_SIGMA = 1.0
+TAU_MARGIN = 5.0
 
 
 def entropy(counts: dict) -> float:
@@ -66,7 +66,7 @@ def purity(counts: dict) -> float:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print(f"Loading {N_SAMPLES} dSprites samples (16x16, D={D}) ...")
+    print(f"Loading {N_SAMPLES} dSprites samples (16x16, D={D}) ...", flush=True)
     images, latents = load_dsprites(n_samples=N_SAMPLES, seed=SEED)
     print(f"  images: {images.shape}  latents: {latents.shape}")
     print(f"  value range: [{images.min():.3f}, {images.max():.3f}]")
@@ -110,6 +110,8 @@ def main() -> None:
         for i in order:
             x = images[i].astype(np.float64)
             result = obs.observe(x)
+            if (n_explained + n_unexplained) % 500 == 0:
+                print(f"    {n_explained + n_unexplained}/{N_SAMPLES} ...", flush=True)
 
             if result.explanation_tree:
                 # Best-explaining node = highest accuracy score
@@ -222,14 +224,13 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Fractal diagnostics
     # ------------------------------------------------------------------
-    prior_mus = np.array([forest._registry[k].mu for k in prior_ids])
-    learned_mus_list = [forest._registry[k].mu for k in forest._registry if k not in prior_ids]
+    prior_nodes = [forest._registry[k] for k in prior_ids if k in forest._registry]
+    learned_nodes_list = [forest._registry[k] for k in forest._registry if k not in prior_ids]
 
-    if learned_mus_list:
-        learned_mus = np.array(learned_mus_list)
-        hd = hausdorff_distance(learned_mus, prior_mus)
+    if learned_nodes_list:
+        hd = hausdorff_distance(learned_nodes_list, prior_nodes)
         print(f"\n=== Fractal diagnostics ===")
-        print(f"  Learned nodes:          {len(learned_mus_list)}")
+        print(f"  Learned nodes:          {len(learned_nodes_list)}")
         print(f"  Hausdorff(learned, priors): {hd:.4f}")
 
     print(f"\n=== Absorbed nodes: {len(obs.absorbed_ids)} ===")

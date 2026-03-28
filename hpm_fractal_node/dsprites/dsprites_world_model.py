@@ -109,12 +109,12 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     # ------------------------------------------------------------------
     add(HFN(
         mu=_blank(),
-        sigma=np.eye(D) * 2.0,
+        sigma=np.eye(D) * 1.0,
         id="prior_background",
     ))
     add(HFN(
         mu=np.full(D, 0.15, dtype=np.float32),
-        sigma=np.eye(D) * 3.0,
+        sigma=np.eye(D) * 1.0,
         id="prior_signal",
     ))
 
@@ -127,7 +127,7 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
             img[row * 4:(row + 1) * 4, col * 4:(col + 1) * 4] = 1.0
             add(HFN(
                 mu=_render(img),
-                sigma=np.eye(D) * 1.5,
+                sigma=np.eye(D) * 1.0,
                 id=f"prior_cell_r{row}_c{col}",
             ))
 
@@ -136,17 +136,17 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     # ------------------------------------------------------------------
     add(HFN(
         mu=_square(center, center, half=4),
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_shape_square",
     ))
     add(HFN(
         mu=_ellipse(center, center, ry=4.0, rx=4.0),
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_shape_ellipse",
     ))
     add(HFN(
         mu=_heart(center, center, scale=4.5),
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_shape_heart",
     ))
 
@@ -155,17 +155,17 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     # ------------------------------------------------------------------
     add(HFN(
         mu=_square(center, center, half=2),   # 4x4 blob
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_scale_small",
     ))
     add(HFN(
         mu=_square(center, center, half=4),   # 8x8 blob
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_scale_medium",
     ))
     add(HFN(
         mu=_square(center, center, half=6),   # 12x12 blob
-        sigma=np.eye(D) * 1.5,
+        sigma=np.eye(D) * 1.0,
         id="prior_scale_large",
     ))
 
@@ -186,7 +186,7 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     for name, (cy, cx) in positions.items():
         add(HFN(
             mu=_gaussian_blob(cy, cx, sigma=2.0),
-            sigma=np.eye(D) * 2.0,
+            sigma=np.eye(D) * 1.0,
             id=f"prior_position_{name}",
         ))
 
@@ -196,7 +196,7 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     for angle, name in [(90, "vertical"), (0, "horizontal"), (45, "diagonal_nw"), (135, "diagonal_ne")]:
         add(HFN(
             mu=_bar(angle),
-            sigma=np.eye(D) * 1.5,
+            sigma=np.eye(D) * 1.0,
             id=f"prior_orient_{name}",
         ))
 
