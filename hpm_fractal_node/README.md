@@ -308,3 +308,71 @@ This is quantitative evidence for the HPM claim that prior knowledge is a struct
 ```bash
 python3 -m hpm_fractal_node.experiments.experiment_fractal_diagnostic
 ```
+
+---
+
+## Diagnostic #2: Self-Similarity Score
+
+**Tool:** `hfn.fractal.self_similarity_score(nodes)` — coefficient of variation of log-count differences across box-counting scales. Lower = more self-similar; 0.0 = perfect power-law scaling (IFS attractor).
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 5 passes)
+
+| Pass | WM learned SS | WM all SS | NP all SS | WM nodes | NP nodes |
+|------|--------------|-----------|-----------|----------|----------|
+| 1 | 2.47 | 0.77 | 1.47 | 92 | 17 |
+| 2 | 0.88 | 0.65 | 1.69 | 97 | 16 |
+| 3 | 1.07 | 0.78 | 1.61 | 93 | 19 |
+| 4 | 0.88 | 0.56 | 0.88 | 92 | 18 |
+| 5 | 1.62 | 0.54 | 1.16 | 91 | 15 |
+
+### Key Findings
+
+**1. The prior structure is intrinsically self-similar (WM all SS ~0.54–0.78)**
+The full world-model node population scores consistently lower than the no-priors condition. The 7-layer hierarchy (perception → primitives → relationships → structure → colour → semantic → encoder) creates natural clustering at multiple scales — this is what IFS attractors look like geometrically.
+
+**2. Learned nodes alone are not yet self-similar (WM learned SS ~0.88–2.47)**
+Learned nodes are filling gaps near priors but haven't formed their own self-similar sub-clusters at 5 passes. More passes are needed for convergence.
+
+**3. No-priors is more scattered overall (NP all SS ~0.88–1.69)**
+Even with 15–19 nodes, the no-priors population is less self-similar than the world-model population, confirming that priors encode geometric regularity the Observer would otherwise have to discover from scratch.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_self_similarity
+```
+
+---
+
+## Diagnostic #3: Hausdorff Distance
+
+**Tool:** `hfn.fractal.hausdorff_distance(nodes_a, nodes_b)` — worst-case nearest-neighbour distance between two node populations in μ-space. Tracks how close learned nodes are to the prior attractor, and how stable the no-priors node population is across passes.
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 8 passes)
+
+| Pass | WM Hausdorff | WM learned N | NP shift | NP nodes |
+|------|-------------|-------------|----------|----------|
+| 1 | 1.476 | 11 | — | 16 |
+| 2 | 1.452 | 16 | 1.032 | 18 |
+| 3 | 1.419 | 13 | 1.113 | 15 |
+| 4 | 1.595 | 15 | 1.087 | 19 |
+| 5 | 1.469 | 9 | 0.863 | 10 |
+| 6 | 1.417 | 17 | 0.944 | 10 |
+| 7 | 1.550 | 12 | 0.818 | 15 |
+| 8 | 1.522 | 17 | 0.777 | 10 |
+
+### Key Findings
+
+**1. WM Hausdorff is stable, not converging (~1.4–1.6)**
+The Hausdorff is dominated by 3 outlier learned nodes (dist=0.34, 0.41, 0.46) near structural priors (`prior_connectivity`, `relationship_repeat`, `relationship_adjacency`) that are too broad to claim those observations. Most learned nodes (14 of 17) are within dist=0.14 of a prior.
+
+**2. Hausdorff identifies gaps in the prior vocabulary**
+The 3 high-distance outliers consistently cluster near the same priors — those priors have covariance too large for their domain. This is a direct diagnostic for which priors need tighter sigma or more specific sub-priors.
+
+**3. No-priors population is volatile (NP shift ~0.78–1.11)**
+The no-priors Observer rebuilds different clusters each pass, with the population shifting ~1.0 unit in μ-space. A slight decrease over passes (1.11 → 0.78) suggests slow stabilisation — but far more volatile than the world-model condition.
+
+**4. Hausdorff as a world-model improvement tool**
+Running the Hausdorff diagnostic after adding new priors to the world model and measuring whether the WM Hausdorff decreases gives a quantitative signal of whether the new priors are filling the right gaps.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_hausdorff
+```

@@ -38,7 +38,7 @@ from hpm_fractal_node.arc.arc_world_model import build_world_model
 def load_3x3_inputs(
     data_dir: str = "data/ARC-AGI-2/data/training",
 ) -> list[np.ndarray]:
-    """Return all 3×3 ARC training inputs as flat float vectors."""
+    """Return all 3×3 ARC training inputs as flat colour-encoded float vectors."""
     records: list[np.ndarray] = []
     for f in sorted(glob.glob(f"{data_dir}/*.json")):
         d = json.load(open(f))
@@ -47,7 +47,7 @@ def load_3x3_inputs(
             if len(grid) != 3 or len(grid[0]) != 3:
                 continue
             vec = np.array(
-                [[1.0 if cell != 0 else 0.0 for cell in row] for row in grid]
+                [[cell / 9.0 for cell in row] for row in grid]
             ).flatten()
             records.append(vec)
     return records
@@ -82,6 +82,7 @@ def run(
 
     # -----------------------------------------------------------------------
     # Condition B: no priors — single broad uninformative Gaussian
+    # Use same tau as world model so conditions are comparable.
     # -----------------------------------------------------------------------
     forest_np = Forest(D=D, forest_id="no_priors")
     prior_node = HFN(
@@ -90,15 +91,14 @@ def run(
         id="prior_uniform",
     )
     forest_np.register(prior_node)
-    tau_np = calibrate_tau(D, sigma_scale=4.0, margin=1.0)
-    obs_np = Observer(forest_np, tau=tau_np, protected_ids={"prior_uniform"})
+    obs_np = Observer(forest_np, tau=tau_wm, protected_ids={"prior_uniform"})
 
     # -----------------------------------------------------------------------
     # Run passes
     # -----------------------------------------------------------------------
-    print(f"{'Pass':>4}  {'World-model SS':>16}  {'No-priors SS':>14}  "
+    print(f"{'Pass':>4}  {'WM learned SS':>14}  {'WM all SS':>10}  {'NP all SS':>10}  "
           f"{'WM nodes':>9}  {'NP nodes':>9}")
-    print("-" * 62)
+    print("-" * 72)
 
     for p in range(1, n_passes + 1):
         order = rng.permutation(len(observations))
@@ -106,21 +106,31 @@ def run(
             obs_wm.observe(observations[idx])
             obs_np.observe(observations[idx])
 
-        nodes_wm = list(forest_wm.active_nodes())
+        nodes_wm_all = list(forest_wm.active_nodes())
+        nodes_wm_learned = [n for n in nodes_wm_all if n.id not in prior_ids_wm]
         nodes_np = list(forest_np.active_nodes())
 
-        ss_wm = self_similarity_score(nodes_wm, n_scales=n_scales)
+        ss_wm_learned = self_similarity_score(nodes_wm_learned, n_scales=n_scales)
+        ss_wm_all = self_similarity_score(nodes_wm_all, n_scales=n_scales)
         ss_np = self_similarity_score(nodes_np, n_scales=n_scales)
 
+        def fmt(v: float) -> str:
+            return f"{v:>10.4f}" if not (v != v) else f"{'nan':>10}"
+
         print(
-            f"{p:>4}  {ss_wm:>16.4f}  {ss_np:>14.4f}  "
-            f"{len(nodes_wm):>9}  {len(nodes_np):>9}"
+            f"{p:>4}  {fmt(ss_wm_learned):>14}  {fmt(ss_wm_all):>10}  {fmt(ss_np):>10}  "
+            f"{len(nodes_wm_all):>9}  {len(nodes_np):>9}"
         )
 
     print()
+    print("Columns:")
+    print("  WM learned SS — self-similarity of Observer-created nodes only (excl. priors)")
+    print("  WM all SS     — self-similarity of all world-model nodes (priors + learned)")
+    print("  NP all SS     — self-similarity of no-priors Observer nodes")
+    print()
     print("Interpretation:")
-    print("  Lower self-similarity score ⟹ more self-similar (closer to IFS attractor).")
-    print("  HPM prediction: world-model condition converges to lower scores.")
+    print("  Lower score ⟹ more self-similar (closer to IFS attractor; 0.0 = perfect).")
+    print("  HPM prediction: WM learned nodes converge to lower scores than NP.")
 
 
 if __name__ == "__main__":

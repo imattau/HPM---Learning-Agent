@@ -183,6 +183,50 @@ def self_similarity_score(nodes, n_scales: int = 8) -> float:
     return float(np.std(diffs) / (np.abs(np.mean(diffs)) + 1e-9))
 
 
+def hausdorff_distance(nodes_a, nodes_b) -> float:
+    """
+    Compute the Hausdorff distance between two node populations in μ-space.
+
+    Hausdorff(A, B) = max(directed(A→B), directed(B→A))
+    where directed(A→B) = max_{a∈A} min_{b∈B} ||a.μ - b.μ||
+
+    This measures how far the "worst-case" node in each set is from the
+    nearest node in the other set.  When used to track how learned nodes
+    relate to prior nodes over passes:
+
+        decreasing Hausdorff(learned, priors) = learned nodes are getting
+        closer to the prior attractor (convergence)
+
+        stable or increasing = learned nodes are exploring novel territory
+
+    Parameters
+    ----------
+    nodes_a, nodes_b : iterables of HFN
+        Two node populations.
+
+    Returns
+    -------
+    float
+        Hausdorff distance in μ-space.  Returns inf if either set is empty.
+    """
+    mus_a = np.array([n.mu for n in nodes_a])
+    mus_b = np.array([n.mu for n in nodes_b])
+    if len(mus_a) == 0 or len(mus_b) == 0:
+        return float("inf")
+
+    # directed A→B: for each point in A, find minimum distance to any point in B
+    dists_ab = np.array([
+        float(np.min(np.linalg.norm(mus_b - a, axis=1)))
+        for a in mus_a
+    ])
+    # directed B→A
+    dists_ba = np.array([
+        float(np.min(np.linalg.norm(mus_a - b, axis=1)))
+        for b in mus_b
+    ])
+    return float(max(dists_ab.max(), dists_ba.max()))
+
+
 def _fit_slope(x: np.ndarray, y: np.ndarray) -> float:
     """Least-squares slope of y vs x."""
     if len(x) < 2:
