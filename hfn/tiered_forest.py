@@ -141,6 +141,75 @@ class TieredForest(Forest):
             lru_id, _ = next(iter(self._hot.items()))
             self._evict_to_cold(lru_id)
 
+    def _on_observe(self) -> None:
+        """Call once per observation. Triggers sweep every sweep_every calls."""
+        self._obs_count += 1
+        if self._obs_count % self._sweep_every == 0:
+            self._sweep()
+
+    def _sweep(self) -> None:
+        """
+        Two-step sweep:
+
+        Step 1 — Emergency RAM check: if free RAM < min_free_ram_mb,
+        evict the bottom half of hot nodes (LRU = front of OrderedDict).
+        Both protected and unprotected go to cold; neither is deleted.
+
+        Step 2 — Persistence floor (operates on pre-step-1 cold state):
+        Any node that was already cold before step 1 ran is treated as
+        dormant. Unprotected dormant nodes are deleted entirely. Protected
+        dormant nodes stay cold (kept in _mu_index and on disk).
+        """
+        # Snapshot which nodes are already cold before step 1
+        pre_cold_ids = [nid for nid in self._mu_index if nid not in self._hot]
+
+        # Step 1: emergency RAM eviction
+        free_mb = psutil.virtual_memory().available / (1024 * 1024)
+        if free_mb < self._min_free_ram_mb:
+            hot_ids = list(self._hot.keys())
+            n_evict = max(1, len(hot_ids) // 2)
+            for node_id in hot_ids[:n_evict]:
+                self._evict_to_cold(node_id)
+
+        # Step 2: delete unprotected nodes that were already cold before this sweep
+        for node_id in pre_cold_ids:
+            if node_id not in self._protected_ids:
+                self._mu_index.pop(node_id, None)
+                cold_path = self._cold_path(node_id)
+                if cold_path.exists():
+                    cold_path.unlink()
+
+    def retrieve(self, x: np.ndarray, k: int = 5) -> list[HFN]:
+        """
+        Screen _mu_index by Euclidean distance, load cold top-k candidates,
+        return up to k full HFN nodes (hot or promoted from cold).
+        """
+        if not self._mu_index:
+            return []
+        scored = sorted(
+            self._mu_index.keys(),
+            key=lambda nid: float(np.linalg.norm(self._mu_index[nid] - x)),
+        )
+        result = []
+        for node_id in scored[:k]:
+            if node_id in self._hot:
+                self._hot.move_to_end(node_id)  # refresh LRU
+                result.append(self._hot[node_id])
+            else:
+                node = self._load_from_cold(node_id)
+                if node is not None:
+                    result.append(node)
+        return result
+
+    def get(self, node_id: str) -> HFN | None:
+        """Return a full HFN by id, loading from cold if needed."""
+        if node_id in self._hot:
+            self._hot.move_to_end(node_id)
+            return self._hot[node_id]
+        if node_id in self._mu_index:
+            return self._load_from_cold(node_id)
+        return None
+
     def _sync_gaussian(self) -> None:
         """Override: compute from hot nodes only (approximation)."""
         hot = list(self._hot.values())
