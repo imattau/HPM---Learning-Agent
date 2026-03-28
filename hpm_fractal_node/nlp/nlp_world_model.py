@@ -163,7 +163,7 @@ def _avg_mus(mus: list[np.ndarray]) -> np.ndarray:
     return np.mean(mus, axis=0).astype(np.float32)
 
 
-def build_nlp_world_model() -> tuple[Forest, set[str]]:
+def build_nlp_world_model(forest_cls=None, **tiered_kwargs) -> tuple[Forest, set[str]]:
     """
     Build the NLP world model with 38 prior HFN nodes.
 
@@ -174,7 +174,11 @@ def build_nlp_world_model() -> tuple[Forest, set[str]]:
     prior_ids : set[str]
         All node IDs to pass as protected_ids to Observer.
     """
-    forest = Forest(D=D, forest_id="nlp_child_language")
+    from hfn.forest import Forest as _Forest
+    if forest_cls is None:
+        forest_cls = _Forest
+    kwargs = tiered_kwargs if forest_cls is not _Forest else {}
+    forest = forest_cls(D=D, forest_id="nlp_child_language", **kwargs)
     prior_ids: set[str] = set()
 
     def add(node: HFN) -> None:

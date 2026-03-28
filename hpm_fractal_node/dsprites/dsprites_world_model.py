@@ -84,7 +84,7 @@ def _bar(angle_deg: float, width: int = 1) -> np.ndarray:
 # World model builder
 # ---------------------------------------------------------------------------
 
-def build_dsprites_world_model() -> tuple[Forest, set[str]]:
+def build_dsprites_world_model(forest_cls=None, **tiered_kwargs) -> tuple[Forest, set[str]]:
     """
     Build the 5-layer dSprites world model.
 
@@ -95,7 +95,11 @@ def build_dsprites_world_model() -> tuple[Forest, set[str]]:
     prior_ids : set[str]
         All node IDs to pass as protected_ids to Observer.
     """
-    forest = Forest(D=D, forest_id="dsprites_16x16")
+    from hfn.forest import Forest as _Forest
+    if forest_cls is None:
+        forest_cls = _Forest
+    kwargs = tiered_kwargs if forest_cls is not _Forest else {}
+    forest = forest_cls(D=D, forest_id="dsprites_16x16", **kwargs)
     prior_ids: set[str] = set()
 
     def add(node: HFN) -> None:
