@@ -23,6 +23,7 @@ from hpm_fractal_node.arc_primitives import build_primitives
 from hpm_fractal_node.arc_relationships import build_relationships
 from hpm_fractal_node.arc_prior_forest import build_prior_forest
 from hpm_fractal_node.arc_object_scene_priors import build_object_scene_priors
+from hpm_fractal_node.arc_colour_priors import build_colour_priors
 from hpm_fractal_node.arc_encoder_hfn import build_encoder_hfn
 
 
@@ -48,14 +49,18 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
     prior_forest, prior_registry = build_prior_forest(rows, cols)
     full_registry.update(prior_registry)
 
-    # Layer 4: Semantic priors — object, scene, rule (share nodes from layers 1-3)
+    # Layer 4: Colour priors (value-identity beyond binary presence/absence)
+    prior_colour_group, colour_registry = build_colour_priors(rows, cols)
+    full_registry.update(colour_registry)
+
+    # Layer 5: Semantic priors — object, scene, rule (share nodes from layers 1-3)
     shared = {**prim_registry, **prior_registry}
     object_hfn, scene_hfn, rule_hfn, sem_registry = build_object_scene_priors(
         rows, cols, shared
     )
     full_registry.update(sem_registry)
 
-    # Layer 5: Encoder (references world model priors as children)
+    # Layer 6: Encoder (references world model priors as children)
     encoder_hfn, enc_registry = build_encoder_hfn(prior_registry)
     full_registry.update(enc_registry)
 
@@ -74,6 +79,11 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
 
     # Register relationships
     for node in rel_registry.values():
+        if node.id not in forest:
+            forest.register(node)
+
+    # Register colour priors
+    for node in colour_registry.values():
         if node.id not in forest:
             forest.register(node)
 
