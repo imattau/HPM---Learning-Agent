@@ -14,6 +14,13 @@ The perceptual chain: prior_signal → prior_pixel → prior_cell_concept →
 prior_field → prior_grid (structural layer). This encodes HOW the AI
 perceives the world before any structure is recognised.
 
+Cross-layer bridge:
+  prior_pixel_colour — a pixel has both a position AND a colour identity.
+  Children: prior_pixel (Layer 0) + prior_colour_group (Layer 4).
+  This is the concept that makes ARC colour-encoded observations coherent:
+  each cell is not just "present/absent" but "present with a specific colour
+  at a specific position".
+
 All nodes are protected priors. The Observer learns above this layer —
 new nodes it discovers reference these as children, but the layer itself
 is invariant structural knowledge.
@@ -23,6 +30,7 @@ Run experiment: python3 -m hpm_fractal_node.experiment_arc_world_model
 
 from __future__ import annotations
 
+import numpy as np
 from hpm_fractal_node.hfn import HFN
 from hpm_fractal_node.forest import Forest
 from hpm_fractal_node.arc_perception_priors import build_perception_priors
@@ -64,8 +72,23 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
     prior_colour_group, colour_registry = build_colour_priors(rows, cols)
     full_registry.update(colour_registry)
 
+    # Bridge: prior_pixel_colour — a pixel has both position AND colour identity.
+    # Children: prior_pixel (perception) + prior_colour_group (colour layer).
+    # This is the concept that each ARC cell carries a colour at a specific position,
+    # not merely a binary presence/absence signal.
+    prior_pixel = perc_registry["prior_pixel"]
+    pixel_colour_mu = np.mean([prior_pixel.mu, prior_colour_group.mu], axis=0)
+    prior_pixel_colour = HFN(
+        mu=pixel_colour_mu,
+        sigma=np.eye(D) * 2.0,
+        id="prior_pixel_colour",
+    )
+    prior_pixel_colour._children.append(prior_pixel)
+    prior_pixel_colour._children.append(prior_colour_group)
+    full_registry["prior_pixel_colour"] = prior_pixel_colour
+
     # Layer 5: Semantic priors — object, scene, rule (share nodes from layers 1-3)
-    shared = {**prim_registry, **prior_registry}
+    shared = {**prim_registry, **prior_registry, "prior_colour": prior_pixel_colour}
     object_hfn, scene_hfn, rule_hfn, sem_registry = build_object_scene_priors(
         rows, cols, shared
     )
@@ -110,6 +133,9 @@ def build_world_model(rows: int = 3, cols: int = 3) -> tuple[Forest, dict[str, H
     for node in colour_registry.values():
         if node.id not in forest:
             forest.register(node)
+
+    # Register pixel-colour bridge
+    forest.register(prior_pixel_colour)
 
     # Register semantic priors
     for node in sem_registry.values():
