@@ -2,7 +2,7 @@
 NLP loader for the child language experiment.
 
 Fixed vocabulary of 107 tokens, D=428 (4 context slots × 107).
-Generates ≥2000 synthetic child-directed sentences with masked slots.
+Generates exactly 2000 synthetic child-directed sentences with masked slots.
 """
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ def generate_sentences(
     seed: int = 42,
 ) -> list[tuple[np.ndarray, str, str]]:
     """
-    Generate ≥2000 synthetic masked sentences.
+    Generate exactly 2000 synthetic masked sentences.
 
     Returns list of (context_vector, true_word, semantic_category).
     Labels are for evaluation only — never fed to the Observer.
@@ -188,7 +188,7 @@ def generate_sentences(
     # Template 7: "My [MASK:family] gave me the [object] ."  (18 obs)
     for fam in _FAMILY:
         for obj in _OBJECTS:
-            observations.append(_obs("<start>", "my", "gave", "me", fam))
+            observations.append(_obs("<start>", "my", "gave", obj, fam))
 
     # Template 8: "The [MASK:animal] chased/fetched the [object] ."  (18 obs)
     for animal in _ANIMALS:

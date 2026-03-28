@@ -52,9 +52,9 @@ def test_encode_unknown_word():
     assert vec[107 + unk_idx] == 1.0
 
 
-def test_generate_sentences_returns_list():
+def test_generate_sentences_returns_2000():
     sentences = generate_sentences(seed=42)
-    assert len(sentences) >= 2000  # must reach N_SAMPLES
+    assert len(sentences) == 2000
 
 
 def test_generate_sentences_has_labels():
