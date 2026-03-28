@@ -20,8 +20,8 @@ sharing a common structural node.
 
 import numpy as np
 import pytest
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
+from hfn.hfn import HFN
+from hfn.forest import Forest
 
 
 # ---------------------------------------------------------------------------

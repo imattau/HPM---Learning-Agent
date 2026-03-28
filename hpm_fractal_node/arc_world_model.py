@@ -31,8 +31,8 @@ Run experiment: python3 -m hpm_fractal_node.experiment_arc_world_model
 from __future__ import annotations
 
 import numpy as np
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
+from hfn.hfn import HFN
+from hfn.forest import Forest
 from hpm_fractal_node.arc_perception_priors import build_perception_priors
 from hpm_fractal_node.arc_primitives import build_primitives
 from hpm_fractal_node.arc_relationships import build_relationships

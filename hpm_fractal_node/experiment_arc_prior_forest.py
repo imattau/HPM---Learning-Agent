@@ -19,9 +19,9 @@ import glob
 import numpy as np
 from collections import defaultdict
 
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
-from hpm_fractal_node.observer import Observer
+from hfn.hfn import HFN
+from hfn.forest import Forest
+from hfn.observer import Observer
 from hpm_fractal_node.arc_prior_forest import build_prior_forest, D, CELL_NAMES
 
 

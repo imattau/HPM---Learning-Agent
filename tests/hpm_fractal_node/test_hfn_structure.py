@@ -17,7 +17,7 @@ in both trajectory_model and grip_action — not a copy.
 
 import numpy as np
 import pytest
-from hpm_fractal_node.hfn import HFN, Edge, make_leaf, make_parent
+from hfn.hfn import HFN, Edge, make_leaf, make_parent
 
 
 # ---------------------------------------------------------------------------

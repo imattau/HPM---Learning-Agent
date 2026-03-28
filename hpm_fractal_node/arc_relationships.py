@@ -22,7 +22,7 @@ type — typed relationship slots the Observer fills with specific instances.
 from __future__ import annotations
 
 import numpy as np
-from hpm_fractal_node.hfn import HFN
+from hfn.hfn import HFN
 from hpm_fractal_node.arc_primitives import build_primitives
 
 

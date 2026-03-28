@@ -15,7 +15,7 @@ encode the concept of each primitive type — not specific instances.
 from __future__ import annotations
 
 import numpy as np
-from hpm_fractal_node.hfn import HFN
+from hfn.hfn import HFN
 
 
 def _node(name: str, mu: np.ndarray, *children: HFN, sigma_scale: float = 1.0) -> HFN:

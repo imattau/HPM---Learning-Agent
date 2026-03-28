@@ -18,7 +18,7 @@ import glob
 import numpy as np
 from collections import defaultdict
 
-from hpm_fractal_node.observer import Observer
+from hfn.observer import Observer
 from hpm_fractal_node.arc_world_model import build_world_model
 
 

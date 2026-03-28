@@ -8,8 +8,8 @@ Dynamic behaviour (weights, absorption, creation) is tested in test_observer.py.
 
 import numpy as np
 import pytest
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
+from hfn.hfn import HFN
+from hfn.forest import Forest
 
 
 def test_forest_is_hfn():

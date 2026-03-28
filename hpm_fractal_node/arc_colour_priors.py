@@ -30,7 +30,7 @@ ARC colour constants (0-9):
 from __future__ import annotations
 
 import numpy as np
-from hpm_fractal_node.hfn import HFN
+from hfn.hfn import HFN
 
 
 N_COLOURS = 10  # ARC uses values 0-9

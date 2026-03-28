@@ -4,9 +4,9 @@ Tests for the Observer — all dynamic behaviour.
 
 import numpy as np
 import pytest
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
-from hpm_fractal_node.observer import Observer
+from hfn.hfn import HFN
+from hfn.forest import Forest
+from hfn.observer import Observer
 
 
 def make_forest_with_nodes(*nodes, D=2):

@@ -46,8 +46,8 @@ conceptual ontology applies to any grid dimension.
 from __future__ import annotations
 
 import numpy as np
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
+from hfn.hfn import HFN
+from hfn.forest import Forest
 
 
 # Default grid size (kept for backwards compatibility)

@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from hpm_fractal_node.arc_world_model import build_world_model
-from hpm_fractal_node.observer import Observer
+from hfn.observer import Observer
 
 
 # Grid sizes to test: (rows, cols)

@@ -21,9 +21,9 @@ import glob
 import numpy as np
 from collections import defaultdict
 
-from hpm_fractal_node.hfn import HFN
-from hpm_fractal_node.forest import Forest
-from hpm_fractal_node.observer import Observer
+from hfn.hfn import HFN
+from hfn.forest import Forest
+from hfn.observer import Observer
 
 
 D = 9
@@ -58,7 +58,7 @@ class ArcObserver(Observer):
     """
 
     def _check_residual_surprise(self, x: np.ndarray, result) -> None:
-        from hpm_fractal_node.observer import ExplanationResult  # avoid circular
+        from hfn.observer import ExplanationResult  # avoid circular
         should_create = (
             len(self.forest) == 0
             or result.residual_surprise >= self.residual_surprise_threshold
