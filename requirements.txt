@@ -5,3 +5,4 @@ scipy>=1.11        # MathSubstrate optional
 scikit-learn>=1.3  # Benchmark 3: GaussianMixture, BIC
 datasets>=2.0      # ARC benchmark: HuggingFace dataset loading
 pymunk>=6.0        # PhyRE physics benchmark (SP7): 2D rigid-body simulation
+psutil>=5.9        # TieredForest: memory monitoring and disk paging
