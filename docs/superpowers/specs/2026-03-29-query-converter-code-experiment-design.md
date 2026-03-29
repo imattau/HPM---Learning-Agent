@@ -90,28 +90,41 @@ Observer gains two new optional constructor parameters:
 ```python
 query: Query | None = None
 converter: Converter | None = None
+gap_query_threshold: float = 0.7   # only query when coverage_gap exceeds this
 ```
 
-Both default to `None`. No behaviour changes for existing experiments.
+Both `query` and `converter` default to `None`. No behaviour changes for existing experiments.
 
-When both are set, Observer calls the query pipeline at the end of `_check_residual_surprise` — after the normal node creation decision, only when a gap signal is high:
+`_check_gap_query` is called as a third step inside `_check_node_creation`, alongside (not inside) `_check_residual_surprise` and `_check_compression_candidates`:
+
+```python
+def _check_node_creation(self, x, result):
+    self._check_residual_surprise(x, result)
+    self._check_compression_candidates()
+    self._check_gap_query(x)
+```
+
+**Reentrancy guard:** `_check_gap_query` feeds new observations into the Observer pipeline. To prevent recursion, Observer holds a `_in_gap_query: bool = False` flag. `_check_gap_query` returns immediately if already set.
+
+**`_mu_hash(mu)`:** Returns `str(int(np.argmax(mu)))` — the index of the highest-weighted vocabulary dimension. Stable, cheap, and appropriate for the one-hot-ish vocabulary space used in both NLP and code experiments. Collisions are intentional: two gaps near the same vocabulary token resolve to the same query, which is correct.
 
 ```python
 def _check_gap_query(self, x: np.ndarray) -> None:
     if self.query is None or self.converter is None:
         return
+    if self._in_gap_query:
+        return  # reentrancy guard
+
     gap = self.evaluator.coverage_gap(x, self.forest.active_nodes(),
                                        self.lacunarity_creation_radius)
-    if gap < self._gap_query_threshold:
+    if gap < self.gap_query_threshold:
         return
 
-    # Check if we've queried this region before
-    gap_hash = _mu_hash(x)
+    gap_hash = str(int(np.argmax(x)))
     query_id = f"query_{gap_hash}"
     if query_id in self.forest:
         return  # already explored this region
 
-    # Fetch + encode
     raw = self.query.fetch(x)
     if not raw:
         return
@@ -119,23 +132,35 @@ def _check_gap_query(self, x: np.ndarray) -> None:
     if not observations:
         return
 
-    # Store Query HFN
-    query_node = HFN(mu=x.copy(), sigma=np.eye(x.shape[0]), id=query_id)
+    D = x.shape[0]
 
-    # Store Knowledge Gap children + observe them
-    for i, obs_vec in enumerate(observations):
-        gap_node = HFN(mu=obs_vec, sigma=np.eye(obs_vec.shape[0]),
-                       id=f"gap_{gap_hash}_{i}")
-        query_node.add_child(gap_node)
-        self.register(gap_node)
-        self.observe(obs_vec)  # feed through normal pipeline
-
+    # Register Query HFN first — anchors the query event before any children
+    query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
     self.register(query_node)
+
+    # Knowledge Gap HFNs are priors: they come from a stable external source
+    # and should not be subject to Observer absorption/compression dynamics.
+    self._in_gap_query = True
+    try:
+        for i, obs_vec in enumerate(observations):
+            gap_id = f"gap_{gap_hash}_{i}"
+            gap_node = HFN(mu=obs_vec, sigma=np.eye(obs_vec.shape[0]), id=gap_id)
+            query_node.add_child(gap_node)
+            self.register(gap_node)
+            self.protected_ids.add(gap_id)  # treat as prior — stable external knowledge
+            # Feed through pipeline without triggering another gap query
+            result = self._expand(obs_vec)
+            self._update_weights(obs_vec, result)
+            self._update_scores(result)
+            self._track_cooccurrence(result.explanation_tree)
+            self._check_absorption()
+            self._check_residual_surprise(obs_vec, result)
+            self._check_compression_candidates()
+    finally:
+        self._in_gap_query = False
 ```
 
-`_gap_query_threshold` is a new Observer config parameter (default: 0.7 — only query when the region is substantially underrepresented).
-
-`_mu_hash(mu)` is a private helper that produces a stable short hash from a mu-vector for use in node ids.
+**Knowledge Gap HFNs as priors:** Query responses come from a stable external source (stdlib, LLM). The encoded observations they produce represent grounded external knowledge — they should not be absorbed or compressed away by Observer dynamics. Adding their ids to `protected_ids` gives them the same status as world model priors. The Query HFN itself (what was asked) is NOT protected — it can be absorbed if the gap region becomes well-covered by other nodes.
 
 ---
 
@@ -212,6 +237,7 @@ Same structure as `experiment_nlp.py`:
 | `tests/hfn/test_converter.py` | New |
 | `tests/hpm_fractal_node/code/test_code_loader.py` | New |
 | `tests/hpm_fractal_node/code/test_query_stdlib.py` | New |
+| `tests/hpm_fractal_node/code/test_converter_code.py` | New |
 
 ---
 
