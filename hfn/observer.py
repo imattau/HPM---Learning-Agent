@@ -38,6 +38,8 @@ from hfn.hfn import HFN
 from hfn.forest import Forest
 from hfn.evaluator import Evaluator
 from hfn.recombination import Recombination
+from hfn.query import Query
+from hfn.converter import Converter
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,11 @@ class Observer:
         multifractal_crowding_threshold: int = 3,     # nodes within radius = hot spot → absorb sooner
         evaluator: Evaluator | None = None,           # injectable evaluator (default: Evaluator())
         recombination: Recombination | None = None,   # injectable recombination (default: Recombination())
+        query: Query | None = None,                   # gap query plugin (default: None = disabled)
+        converter: Converter | None = None,           # raw-to-vector encoder (default: None = disabled)
+        gap_query_threshold: float = 0.7,             # min coverage gap to trigger a query
+        max_expand_depth: int = 2,                    # retry budget multiplier for gap queries
+        vocab: list | None = None,                    # optional token vocabulary for gap_hash lookup
     ):
         self.forest = forest
         self.tau = tau
@@ -120,6 +127,14 @@ class Observer:
         self.multifractal_guided_absorption = multifractal_guided_absorption
         self.multifractal_crowding_radius = multifractal_crowding_radius
         self.multifractal_crowding_threshold = multifractal_crowding_threshold
+
+        # Gap query collaborators
+        self.query: Query | None = query
+        self.converter: Converter | None = converter
+        self.gap_query_threshold = gap_query_threshold
+        self.max_expand_depth = max_expand_depth
+        self.vocab: list | None = vocab
+        self._in_gap_query: bool = False
 
         # Collaborators (HPM layer 3 + structural executor)
         self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
@@ -407,6 +422,7 @@ class Observer:
     def _check_node_creation(self, x: np.ndarray, result: ExplanationResult) -> None:
         self._check_residual_surprise(x, result)
         self._check_compression_candidates()
+        self._check_gap_query(x, result)
 
     def _check_residual_surprise(self, x: np.ndarray, result: ExplanationResult) -> None:
         # Bootstrap: empty forest always needs a first node
@@ -474,3 +490,101 @@ class Observer:
             )
             self._init_node(new_node)
             self._cooccurrence[pair] = 0
+
+    # --- Gap query ---
+
+    def _expand_with_budget(self, x: np.ndarray, budget: int) -> ExplanationResult:
+        """Run _expand with a temporary budget override."""
+        original_budget = self.budget
+        self.budget = budget
+        try:
+            return self._expand(x)
+        finally:
+            self.budget = original_budget
+
+    def _check_gap_query(self, x: np.ndarray, result: ExplanationResult) -> None:
+        """
+        Third step of _check_node_creation: if coverage is low and a Query/Converter
+        are configured, fetch external knowledge and inject it into the Forest.
+        """
+        if self.query is None or self.converter is None:
+            return
+        if self._in_gap_query:
+            return
+
+        # Coverage gap = 1 - best accuracy in explanation tree
+        coverage_gap = 1.0 - max(result.accuracy_scores.values(), default=0.0)
+        if coverage_gap < self.gap_query_threshold:
+            return
+
+        gap_hash = str(int(np.argmax(x)))
+        query_id = f"query_{gap_hash}"
+        if query_id in self.forest:
+            return
+
+        # Retry expansion with increasing budget to get a richer explanation context
+        raw: list[str] = []
+        for depth in range(self.max_expand_depth):
+            expanded_result = self._expand_with_budget(x, self.budget * (depth + 1))
+            raw = self.query.fetch(x, context=expanded_result)
+            if raw:
+                break
+
+        if not raw:
+            return
+
+        D = x.shape[0]
+
+        # Register the Query HFN (not protected — can be absorbed by dynamics)
+        query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
+        self.register(query_node)
+
+        # Separate signature raws from context raws
+        sig_raws = [r for r in raw if r.startswith("sig: ")]
+        ctx_raws = [r for r in raw if not r.startswith("sig: ")]
+
+        sig_node = None
+        if sig_raws:
+            # Build bag-of-tokens mu for the Signature HFN
+            sig_vecs = []
+            for r in sig_raws:
+                vecs = self.converter.encode(r, D)
+                sig_vecs.extend(vecs)
+            if sig_vecs:
+                sig_mu = np.mean(sig_vecs, axis=0)
+                sig_id = f"sig_{gap_hash}"
+                sig_node = HFN(mu=sig_mu, sigma=np.eye(D), id=sig_id)
+                self.register(sig_node)
+                self.protected_ids.add(sig_id)
+                # Wire: sig_node is a child of query_node
+                query_node.add_child(sig_node)
+
+                # If a function token name is known, wire it as child of sig_node
+                if self.vocab is not None and int(gap_hash) < len(self.vocab):
+                    token_name = f"word_{self.vocab[int(gap_hash)]}"
+                    if token_name in self.forest:
+                        sig_node.add_child(self.forest.get(token_name))
+
+        parent_node = sig_node if sig_node is not None else query_node
+
+        # Inject knowledge-graph observations under the parent node
+        self._in_gap_query = True
+        try:
+            for i, r in enumerate(ctx_raws):
+                vecs = self.converter.encode(r, D)
+                for j, vec in enumerate(vecs):
+                    kg_id = f"gap_{gap_hash}_{i}_{j}"
+                    kg_node = HFN(mu=vec, sigma=np.eye(D), id=kg_id)
+                    self.register(kg_node)
+                    self.protected_ids.add(kg_id)
+                    parent_node.add_child(kg_node)
+
+                    # Run inner observation pipeline for this KG node
+                    inner_result = self._expand_with_budget(vec, self.budget)
+                    self._update_weights(vec, inner_result)
+                    self._track_cooccurrence(inner_result.explanation_tree)
+                    self._check_absorption()
+                    self._check_residual_surprise(vec, inner_result)
+                    self._check_compression_candidates()
+        finally:
+            self._in_gap_query = False

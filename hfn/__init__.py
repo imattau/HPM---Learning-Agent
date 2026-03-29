@@ -36,6 +36,8 @@ from hfn.forest import Forest
 from hfn.observer import Observer
 from hfn.evaluator import Evaluator
 from hfn.recombination import Recombination
+from hfn.query import Query
+from hfn.converter import Converter
 from hfn.fractal import (
     box_counting_dimension, population_dimension, dimension_profile,
     self_similarity_score, hausdorff_distance,
@@ -71,6 +73,7 @@ def calibrate_tau(D: int, sigma_scale: float = 1.0, margin: float = 1.0) -> floa
 
 __all__ = [
     "HFN", "Edge", "Forest", "Observer", "Evaluator", "Recombination", "calibrate_tau",
+    "Query", "Converter",
     "box_counting_dimension", "population_dimension", "dimension_profile",
     "self_similarity_score", "hausdorff_distance",
     "correlation_dimension", "information_dimension", "intrinsic_dimensionality",
