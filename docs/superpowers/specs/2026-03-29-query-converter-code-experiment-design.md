@@ -70,25 +70,47 @@ The base class provides no default implementation — subclasses must define `en
 
 ---
 
-## 5. Query HFNs and Knowledge Gap HFNs
+## 5. Query HFNs, Signature HFNs, and Knowledge Gap HFNs
 
-Every query event is stored as a pair of HFN nodes in the Observer's Forest:
+Every query event produces a tree of HFN nodes stored in the Observer's Forest:
+
+```
+Query HFN  (what was asked)
+  └── Signature HFN  (function structure discovered — only exists after first query)
+        ├── Function Token HFN  (the atomic word node — already in Forest, wired as child)
+        └── Knowledge Gap HFNs  (context window observations from stdlib source)
+```
 
 **Query HFN**
-- `id`: `query_{hash}` where hash is derived from the gap_mu (stable across repeated identical gaps)
+- `id`: `query_{hash}` — hash = `argmax(gap_mu)`, stable across repeated identical gaps
 - `mu`: the gap_mu vector — encodes what was asked
-- Subject to normal Observer dynamics (not protected) — stale queries can be absorbed
+- Not protected — subject to normal Observer dynamics (can be absorbed if gap becomes well-covered)
 
-**Knowledge Gap HFN** (child of Query HFN)
-- `id`: `gap_{hash}_{i}` for each encoded observation returned
-- `mu`: the encoded observation from the library response
-- Wired as a child of its Query HFN via `query_node.add_child(gap_node)` before registration
-- Also fed through `Observer.observe()` as a new observation — the Observer learns from it immediately
+**Signature HFN** (child of Query HFN, created on first query only)
+- `id`: `sig_{hash}` — one per function discovered
+- `mu`: bag-of-tokens encoding — `(1/N) * sum(one_hot(token) for token in signature_tokens)`
+- Protected — stable external knowledge from the stdlib
+- Only created after `QueryStdlib` returns a function definition. On the first query the signature does not yet exist; it is discovered as a byproduct of scanning the stdlib source.
+- `QueryStdlib` returns signature strings prefixed `"sig: "` to distinguish from context window strings
 
-The parent-child relationship captures provenance: "this knowledge came from that query." Multiple queries about similar gaps may produce similar Knowledge Gap HFNs — Observer compression naturally handles deduplication over time.
+**Function Token HFN** (child of Signature HFN)
+- The atomic word node for the function name (e.g. `word_range`) — already exists in the code world model Forest
+- Wired as child via `signature_node.add_child(forest.get(f"word_{token}"))` — no new node created
+- Captures provenance: "this signature is about this token"
 
-**Query HFNs answer:** "Have I asked about this before?" — find nearest Query HFN to current gap_mu.
-**Knowledge Gap children answer:** "What did I learn from that query?"
+**Knowledge Gap HFNs** (children of Signature HFN)
+- `id`: `gap_{hash}_{i}` — one per context window observation
+- `mu`: `compose_context_node(left2, left1, right1, right2)` — identical format to main training data
+- Protected — stable external knowledge
+- Wired as children of the Signature HFN (not directly of Query HFN)
+
+The full provenance chain: gap → Query → Signature → Function Token + KG observations.
+
+**Query HFNs answer:** "Have I asked about this before?"
+**Signature HFNs answer:** "What function structure did I discover?"
+**KG HFNs answer:** "What real usage patterns did I find?"
+
+Multiple queries about similar gaps may produce similar KG HFNs — Observer compression handles deduplication naturally.
 
 ---
 
@@ -163,16 +185,38 @@ def _check_gap_query(self, x: np.ndarray) -> None:
     query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
     self.register(query_node)
 
-    # Knowledge Gap HFNs are priors: stable external knowledge, not subject to dynamics
+    # Separate signature strings ("sig: ...") from context window strings
+    sig_raws = [r[5:] for r in raw if r.startswith("sig: ")]
+    ctx_raws = [r for r in raw if not r.startswith("sig: ")]
+
+    # Build Signature HFN if a function definition was discovered
+    # (only exists after first query — not available before stdlib is scanned)
+    sig_node = None
+    if sig_raws:
+        sig_vecs = self.converter.encode(sig_raws, D=D)
+        if sig_vecs:
+            sig_id = f"sig_{gap_hash}"
+            sig_node = HFN(mu=sig_vecs[0], sigma=np.eye(D), id=sig_id)
+            # Wire function token as child if it exists in the Forest
+            token_name = f"word_{VOCAB[int(gap_hash)]}" if int(gap_hash) < len(VOCAB) else None
+            if token_name and self.forest.get(token_name):
+                sig_node.add_child(self.forest.get(token_name))
+            query_node.add_child(sig_node)
+            self.register(sig_node)
+            self.protected_ids.add(sig_id)
+
+    # KG HFNs are children of Signature HFN (if present) or Query HFN directly
+    parent_node = sig_node if sig_node is not None else query_node
+    observations = self.converter.encode(ctx_raws, D=D)
+
     self._in_gap_query = True
     try:
         for i, obs_vec in enumerate(observations):
             gap_id = f"gap_{gap_hash}_{i}"
             gap_node = HFN(mu=obs_vec, sigma=np.eye(obs_vec.shape[0]), id=gap_id)
-            query_node.add_child(gap_node)
+            parent_node.add_child(gap_node)
             self.register(gap_node)
             self.protected_ids.add(gap_id)
-            # Feed through pipeline without triggering another gap query
             inner = self._expand(obs_vec)
             self._update_weights(obs_vec, inner)
             self._update_scores(inner)
