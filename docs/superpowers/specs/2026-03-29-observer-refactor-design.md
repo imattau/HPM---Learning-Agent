@@ -158,7 +158,9 @@ Observer shrinks significantly. Changes:
 `_update_scores` delegates score formula to `evaluator.score()`.
 `_check_absorption` takes a **snapshot** of `forest.active_nodes()` at the start of the pass (converts to list), then calls `evaluator.hausdorff_candidates()`, `evaluator.crowding()`, `evaluator.persistence_scores()` against that snapshot. Calls `recombination.absorb()` for confirmed candidates. Iterating a snapshot prevents mid-pass invalidation when nodes are deregistered.
 
-`_check_compression_candidates` retains `_recurrence.recommended_threshold()` on Observer (recurrence state stays with Observer). Constructs `compressed_id` before calling `recombination.compress()`. Zeroes `_cooccurrence[pair]` after each compress call to prevent repeated processing.
+`_check_compression_candidates` retains `_recurrence.recommended_threshold()` on Observer (recurrence state stays with Observer). Constructs `compressed_id` (format: `compressed({id_a[:8]},{id_b[:8]})`) before calling `recombination.compress()`. Checks that `compressed_id` is not already active in the Forest and skips the pair if it is. Zeroes `_cooccurrence[pair]` after each compress call to prevent repeated processing.
+
+`recombination.absorb()` returns a bare structural HFN with no weight or score state. Observer calls `_init_node()` on the returned node, then explicitly copies weight/score from `dominant`.
 
 `_check_residual_surprise` delegates density check to `evaluator.density_ratio()`, and may also query `evaluator.coverage_gap()` to calibrate creation threshold.
 
