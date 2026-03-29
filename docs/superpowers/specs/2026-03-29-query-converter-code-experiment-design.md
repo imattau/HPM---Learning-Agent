@@ -220,9 +220,17 @@ class QueryStdlib(Query):
     def fetch(self, gap_mu: np.ndarray, context: dict | None = None) -> list[str]
 ```
 
-Converts gap_mu to a token (nearest vocab token to gap_mu), then queries Python's `inspect` module for functions in the stdlib that involve that token. Returns a list of function signatures as strings.
+Queries the Python stdlib **source code** for real token co-occurrence patterns near the gap.
 
-Example: gap near `range` token → queries `inspect.getmembers(builtins)` for functions with `range`-related signatures → returns `["range(stop)", "range(start, stop[, step])"]`
+1. `gap_mu → argmax → nearest vocab token` (e.g. `"range"`)
+2. Optionally uses `context["explanation_tree"]` to refine the target token if the argmax is ambiguous
+3. Scans stdlib `.py` files (via `sysconfig.get_paths()["stdlib"]`) for occurrences of that token using Python's `tokenize` module
+4. For each occurrence, extracts the 4-token context window as a space-separated string: `"left2 left1 right1 right2"` — keeping only tokens present in VOCAB, substituting `"<unk>"` for out-of-vocabulary tokens
+5. Returns up to `max_results` (default: 20) context window strings
+
+Returns empty list if no occurrences found — Observer will deepen expansion and retry with broader context.
+
+The stdlib source IS Python code with the same token patterns the experiment is learning. This produces observations in exactly the format the main training pipeline expects.
 
 ### 7.4 ConverterCode (`hpm_fractal_node/code/converter_code.py`)
 
@@ -231,7 +239,9 @@ class ConverterCode(Converter):
     def encode(self, raw: list[str], D: int) -> list[np.ndarray]
 ```
 
-Tokenises each raw string using the code vocabulary. For each tokenised string, calls `compose_context_node` on the tokens to produce a D-dimensional observation. Returns list of observation vectors.
+Each raw string is a space-separated 4-token context window (`"left2 left1 right1 right2"`). Splits the string, looks up each token in `VOCAB_INDEX` (skips `"<unk>"`), calls `compose_context_node(left2, left1, right1, right2)` directly. Returns one D-dimensional observation per raw string.
+
+This is the same encoding as `code_loader.py` — no separate tokenisation step. Observations from the stdlib query are identical in format to observations from the main training data. World model priors and Knowledge Gap HFNs live in the same representation space naturally.
 
 ### 7.5 Experiment (`hpm_fractal_node/experiments/experiment_code.py`)
 
