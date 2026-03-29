@@ -134,14 +134,14 @@ Hook for external reward/reinforcement input. Default implementation returns 0.0
 Pure structural executor. No decision logic. Takes nodes and a Forest, performs the merge, returns the new node. Observer updates its own weights/scores for the new node after the call.
 
 ```python
-def absorb(node: HFN, target: HFN, forest: Forest) -> HFN
+def absorb(absorbed: HFN, dominant: HFN, forest: Forest) -> HFN
 ```
-Recombines `node` into `target`. Deregisters both from Forest, registers merged node, returns it. Observer transfers `target`'s weight/score to the new node.
+Recombines `absorbed` into `dominant`. `dominant` is the surviving node (higher weight). Deregisters both from Forest, registers merged node, returns it. Observer transfers `dominant`'s weight/score to the new node.
 
 ```python
 def compress(node_a: HFN, node_b: HFN, forest: Forest, compressed_id: str) -> HFN
 ```
-Creates a compressed node from co-occurring pair. Registers it in Forest (does not deregister originals — Observer may keep them). Returns new node.
+Creates a compressed node from a co-occurring pair. `compressed_id` is constructed by Observer before calling (format: `compressed({id_a[:8]},{id_b[:8]})`). Registers new node in Forest (does not deregister originals — they remain active). Returns new node.
 
 ---
 
@@ -156,8 +156,10 @@ Observer shrinks significantly. Changes:
 - **Add:** `evaluator: Evaluator` and `recombination: Recombination` as collaborators, constructed at `__init__` time or injected.
 
 `_update_scores` delegates score formula to `evaluator.score()`.
-`_check_absorption` delegates geometry queries to `evaluator.hausdorff_candidates()`, `evaluator.crowding()`, `evaluator.persistence_scores()`, then calls `recombination.absorb()` for confirmed candidates.
-`_check_compression_candidates` delegates ranking to `evaluator.nearest_prior_dist()`, then calls `recombination.compress()`.
+`_check_absorption` takes a **snapshot** of `forest.active_nodes()` at the start of the pass (converts to list), then calls `evaluator.hausdorff_candidates()`, `evaluator.crowding()`, `evaluator.persistence_scores()` against that snapshot. Calls `recombination.absorb()` for confirmed candidates. Iterating a snapshot prevents mid-pass invalidation when nodes are deregistered.
+
+`_check_compression_candidates` retains `_recurrence.recommended_threshold()` on Observer (recurrence state stays with Observer). Constructs `compressed_id` before calling `recombination.compress()`. Zeroes `_cooccurrence[pair]` after each compress call to prevent repeated processing.
+
 `_check_residual_surprise` delegates density check to `evaluator.density_ratio()`, and may also query `evaluator.coverage_gap()` to calibrate creation threshold.
 
 ---
@@ -172,7 +174,7 @@ Observer shrinks significantly. Changes:
 | `hfn/__init__.py` | Export Evaluator, Recombination |
 | `tests/hfn/test_evaluator.py` | New — unit tests for each Evaluator method |
 | `tests/hfn/test_recombination.py` | New — unit tests for absorb + compress |
-| `tests/hfn/test_observer.py` | Update — existing Observer tests should pass unchanged |
+| `tests/hpm_fractal_node/test_observer.py` | Update — existing Observer tests should pass unchanged |
 
 ---
 
