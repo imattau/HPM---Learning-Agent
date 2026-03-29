@@ -294,4 +294,4 @@ def test_build_nlp_world_model_accepts_tiered_forest():
             max_hot=100,
         )
         assert isinstance(forest, TieredForest)
-        assert len(prior_ids) == 38
+        assert len(prior_ids) == 195

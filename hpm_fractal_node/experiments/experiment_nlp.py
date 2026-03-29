@@ -171,7 +171,7 @@ def main() -> None:
 
     rows = []
     for node_id in learned_nodes:
-        if node_id not in forest._registry:
+        if forest.get(node_id) is None:
             continue  # absorbed during a later pass
 
         labels = node_explanations[node_id]
@@ -189,11 +189,14 @@ def main() -> None:
         dom_word = max(word_counts, key=lambda k: word_counts[k]) if word_counts else "none"
 
         # Nearest prior by Euclidean distance to prior mus
-        node_mu = forest._registry[node_id].mu
+        node_mu = forest.get(node_id).mu
         best_prior = None
         best_dist = float("inf")
         for pid in prior_ids:
-            d = float(np.linalg.norm(node_mu - forest._registry[pid].mu))
+            prior_node = forest.get(pid)
+            if prior_node is None:
+                continue
+            d = float(np.linalg.norm(node_mu - prior_node.mu))
             if d < best_dist:
                 best_dist = d
                 best_prior = pid
@@ -239,8 +242,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Fractal diagnostics
     # ------------------------------------------------------------------
-    prior_node_list = [forest._registry[k] for k in prior_ids if k in forest._registry]
-    learned_node_list = [forest._registry[k] for k in forest._registry if k not in prior_ids]
+    prior_node_list = [forest.get(k) for k in prior_ids if forest.get(k) is not None]
+    learned_node_list = [n for n in forest.active_nodes() if n.id not in prior_ids]
 
     if learned_node_list:
         hd = hausdorff_distance(learned_node_list, prior_node_list)
