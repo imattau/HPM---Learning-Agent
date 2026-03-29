@@ -12,38 +12,19 @@ It runs the expansion loop (querying the Forest) and handles:
 - Structural absorption when persistent overlap is detected
 - Node creation from residual surprise or recurring co-occurrence
 
-## HPM Framework boundary note
+## HPM Framework boundaries
 
-The Observer currently combines three distinct responsibilities:
+After the Evaluator/Recombination refactor:
 
-  1. Surprise computation + expansion  — pure perception mechanics
-  2. Weight / score dynamics           — pattern dynamics (HPM layer 2)
-  3. Absorption + compression          — structural evaluation (HPM layer 3)
+  1. Surprise computation + expansion  — pure perception mechanics (Observer)
+  2. Weight / score dynamics           — pattern dynamics, HPM layer 2 (Observer)
+  3. Structural evaluation             — evaluator/gatekeeper, HPM layer 3 (Evaluator)
+  4. Structural execution              — absorption + compression (Recombination)
 
-Items 1 and 2 are unambiguously the Observer's job. Item 3 is evaluator
-territory — deciding *which patterns are worth keeping* relative to prior
-knowledge. The fractal strategies (recombination_strategy, hausdorff_absorption_threshold)
-expose this: they require the Observer to know about the prior structure to
-make structural decisions.
-
-For the hfn library as a standalone tool this is acceptable — the strategies
-are opt-in and the Observer remains domain-agnostic.
-
-When integrating hfn into a full HPM AI, the structural decisions (absorption,
-compression) should move up to the HPM AI's evaluator layer, which has access
-to both Observer state AND fractal diagnostics AND domain knowledge. The
-intended interface at that point:
-
-    HPM AI Evaluator
-        ↓ uses fractal diagnostics to decide
-    Observer  ← exposes candidates, executes decisions on request
-        ↓
-    Forest
-
-The Observer would expose candidate lists (nodes eligible for absorption, pairs
-eligible for compression) and accept explicit directives — obs.absorb(node),
-obs.compress(A, B) — rather than making those decisions itself. The evaluator
-layer would call the fractal tools to inform its choices.
+Observer.evaluator holds all fractal geometry, gap detection, and HPM
+framework evaluations.  Observer.recombination executes all structural merges.
+Observer retains all HPM strategy flags — they are Observer configuration
+for when to invoke which Evaluator method.
 """
 
 from __future__ import annotations
@@ -55,6 +36,8 @@ from typing import NamedTuple
 
 from hfn.hfn import HFN
 from hfn.forest import Forest
+from hfn.evaluator import Evaluator
+from hfn.recombination import Recombination
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +61,8 @@ class Observer:
     Separation of concerns:
     - Forest (HFN): pure structural container. No mutable dynamic state.
     - Observer: all dynamic state — weights, scores, co-occurrence, absorption.
+    - Evaluator: pure evaluation service — stateless queries, no Forest mutation.
+    - Recombination: structural executor — absorb/compress operations.
 
     The Observer can watch any HFN, including a Forest-of-Forests, using
     the same interface. Fractal uniformity applies to observation too.
@@ -110,6 +95,8 @@ class Observer:
         multifractal_guided_absorption: bool = False, # lower absorption threshold in hot spots
         multifractal_crowding_radius: float = 0.12,   # radius for local crowding count
         multifractal_crowding_threshold: int = 3,     # nodes within radius = hot spot → absorb sooner
+        evaluator: Evaluator | None = None,           # injectable evaluator (default: Evaluator())
+        recombination: Recombination | None = None,   # injectable recombination (default: Recombination())
     ):
         self.forest = forest
         self.tau = tau
@@ -134,6 +121,10 @@ class Observer:
         self.multifractal_crowding_radius = multifractal_crowding_radius
         self.multifractal_crowding_threshold = multifractal_crowding_threshold
 
+        # Collaborators (HPM layer 3 + structural executor)
+        self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
+        self.recombination: Recombination = recombination if recombination is not None else Recombination()
+
         if adaptive_compression:
             from hfn.fractal import RecurrenceTracker
             self._recurrence: "RecurrenceTracker | None" = RecurrenceTracker(
@@ -157,10 +148,6 @@ class Observer:
         # Protected nodes are exempt from all dynamics (weight change, absorption).
         # Use for priors that represent invariant structural knowledge.
         self.protected_ids: set[str] = set(protected_ids) if protected_ids else set()
-
-        # Cache of prior node mu-vectors for fast nearest-prior lookup.
-        # Rebuilt whenever protected_ids is used in recombination_strategy.
-        self._prior_mus: np.ndarray | None = None
 
     # --- Node lifecycle ---
 
@@ -229,7 +216,7 @@ class Observer:
             for n in good:
                 if n.id not in seen_ids:
                     explanation_tree.append(n)
-                    accuracy_scores[n.id] = self._accuracy(x, n)
+                    accuracy_scores[n.id] = self.evaluator.accuracy(x, n)
                     seen_ids.add(n.id)
 
             # No surprising nodes left — fully explained
@@ -267,11 +254,6 @@ class Observer:
         """KL divergence proxy: negative log probability under node's Gaussian."""
         return -node.log_prob(x)
 
-    def _accuracy(self, x: np.ndarray, node: HFN) -> float:
-        """Accuracy: normalised log probability (higher = better fit)."""
-        lp = node.log_prob(x)
-        return float(1.0 / (1.0 + abs(lp)))
-
     # --- Dynamic updates ---
 
     def _update_weights(self, x: np.ndarray, result: ExplanationResult) -> None:
@@ -304,8 +286,14 @@ class Observer:
         explaining_ids = {n.id for n in result.explanation_tree}
         for node in self.forest.active_nodes():
             nid = node.id
-            acc = result.accuracy_scores.get(nid, 0.0) if nid in explaining_ids else 0.0
-            self._scores[nid] = acc - self.lambda_complexity * node.description_length()
+            if nid in explaining_ids:
+                # Use the accuracy from the explanation tree for explaining nodes
+                x_proxy = None  # score formula via evaluator.score requires x
+                # Delegate to evaluator.score using stored accuracy
+                acc = result.accuracy_scores.get(nid, 0.0)
+                self._scores[nid] = acc - self.lambda_complexity * self.evaluator.description_length(node)
+            else:
+                self._scores[nid] = 0.0 - self.lambda_complexity * self.evaluator.description_length(node)
 
     def _track_cooccurrence(self, explanation_tree: list[HFN]) -> None:
         ids = [n.id for n in explanation_tree]
@@ -315,51 +303,55 @@ class Observer:
 
     # --- Absorption ---
 
+    def _build_prior_mus_matrix(self) -> np.ndarray | None:
+        """Stack μ vectors of all protected (prior) nodes into a (K, D) matrix."""
+        prior_nodes = [
+            n for n in self.forest.active_nodes() if n.id in self.protected_ids
+        ]
+        if not prior_nodes:
+            return None
+        return np.array([n.mu for n in prior_nodes], dtype=float)
+
     def _check_absorption(self) -> None:
+        # Take a snapshot to prevent mid-pass invalidation when nodes are deregistered
+        snapshot = list(self.forest.active_nodes())
+
         # Compute persistence scores once per absorption pass (not per node)
         p_scores: dict[str, float] = {}
         p_max: float = 1.0
         if self.persistence_guided_absorption:
-            from hfn.fractal import persistence_scores
-            p_scores = persistence_scores(
-                list(self.forest.active_nodes()), self._weights
-            )
+            p_scores = self.evaluator.persistence_scores(snapshot, self._weights)
             p_max = max(
                 (v for v in p_scores.values() if v != float("inf")),
                 default=1.0,
             )
 
-        for node in list(self.forest.active_nodes()):
+        # Hausdorff geometric absorption — use evaluator.hausdorff_candidates
+        if self.hausdorff_absorption_threshold is not None:
+            candidates = self.evaluator.hausdorff_candidates(
+                snapshot,
+                self._weights,
+                threshold=self.hausdorff_absorption_threshold,
+                weight_floor=self.hausdorff_absorption_weight_floor,
+                protected_ids=self.protected_ids,
+            )
+            for node, best_match in candidates:
+                # Only absorb if both are still active (snapshot may be stale after earlier absorbs)
+                if node.id not in self.forest or best_match.id not in self.forest:
+                    continue
+                new_node = self.recombination.absorb(
+                    absorbed=node, dominant=best_match, forest=self.forest
+                )
+                self._init_node(new_node)
+                self._weights[new_node.id] = self._weights.get(best_match.id, self.w_init)
+                self._scores[new_node.id] = self._scores.get(best_match.id, 0.0)
+                self.absorbed_ids.add(node.id)
+
+        for node in snapshot:
             if node.id in self.protected_ids:
                 continue
-
-            absorbed = False
-
-            # Geometric shortcut: absorb if node is close to a better-weighted
-            # non-protected node and its own weight is below the floor.
-            if (
-                self.hausdorff_absorption_threshold is not None
-                and self._weights.get(node.id, 0.0) < self.hausdorff_absorption_weight_floor
-            ):
-                for other in self.forest.active_nodes():
-                    if other.id == node.id or other.id in self.protected_ids:
-                        continue
-                    if self._weights.get(other.id, 0.0) <= self._weights.get(node.id, 0.0):
-                        continue
-                    dist = float(np.linalg.norm(node.mu - other.mu))
-                    if dist < self.hausdorff_absorption_threshold:
-                        new_parent = other.recombine(node)
-                        self.forest.deregister(other.id)
-                        self.forest.deregister(node.id)
-                        self.forest.register(new_parent)
-                        self._init_node(new_parent)
-                        self._weights[new_parent.id] = self._weights.get(other.id, self.w_init)
-                        self._scores[new_parent.id] = self._scores.get(other.id, 0.0)
-                        self.absorbed_ids.add(node.id)
-                        absorbed = True
-                        break
-
-            if absorbed:
+            # Skip if already absorbed in this pass
+            if node.id not in self.forest:
                 continue
 
             # Original miss-count absorption
@@ -373,7 +365,11 @@ class Observer:
 
             # Multifractal crowding: lower threshold for nodes in hot spots
             if self.multifractal_guided_absorption:
-                crowding = self._local_crowding(node.mu)
+                # Exclude protected nodes from crowding count
+                non_protected = [n for n in snapshot if n.id not in self.protected_ids]
+                crowding = self.evaluator.crowding(
+                    node.mu, non_protected, self.multifractal_crowding_radius
+                )
                 if crowding >= self.multifractal_crowding_threshold:
                     # Hot spot — halve the threshold (absorb sooner)
                     effective_miss_threshold = max(1, effective_miss_threshold // 2)
@@ -383,10 +379,12 @@ class Observer:
 
             best_overlap = 0.0
             best_node = None
-            for other in self.forest.active_nodes():
+            for other in snapshot:
                 if other.id == node.id:
                     continue
                 if other.id in self.protected_ids:
+                    continue
+                if other.id not in self.forest:
                     continue
                 kappa = node.overlap(other)
                 if kappa > self.absorption_overlap_threshold and kappa > best_overlap:
@@ -396,70 +394,13 @@ class Observer:
             if best_node is None:
                 continue
 
-            new_parent = best_node.recombine(node)
-            self.forest.deregister(best_node.id)
-            self.forest.deregister(node.id)
-            self.forest.register(new_parent)
-            self._init_node(new_parent)
-            self._weights[new_parent.id] = self._weights.get(best_node.id, self.w_init)
-            self._scores[new_parent.id] = self._scores.get(best_node.id, 0.0)
+            new_node = self.recombination.absorb(
+                absorbed=node, dominant=best_node, forest=self.forest
+            )
+            self._init_node(new_node)
+            self._weights[new_node.id] = self._weights.get(best_node.id, self.w_init)
+            self._scores[new_node.id] = self._scores.get(best_node.id, 0.0)
             self.absorbed_ids.add(node.id)
-
-    # --- Fractal geometry helpers ---
-
-    def _build_prior_mus(self) -> np.ndarray | None:
-        """Stack μ vectors of all protected (prior) nodes into a matrix."""
-        prior_nodes = [
-            n for n in self.forest.active_nodes() if n.id in self.protected_ids
-        ]
-        if not prior_nodes:
-            return None
-        return np.array([n.mu for n in prior_nodes])
-
-    def _nearest_prior_dist(self, mu: np.ndarray) -> float:
-        """Distance from mu to the nearest prior node in μ-space."""
-        if self._prior_mus is None:
-            self._prior_mus = self._build_prior_mus()
-        if self._prior_mus is None:
-            return float("inf")
-        return float(np.min(np.linalg.norm(self._prior_mus - mu, axis=1)))
-
-    def _local_density_ratio(self, x: np.ndarray) -> float:
-        """
-        Ratio of local node density at x to the mean density across all nodes.
-
-        Used by lacunarity_guided_creation: if ratio > lacunarity_creation_factor,
-        the region is already dense and a new node would be redundant.
-
-        Returns 0.0 if fewer than 3 nodes exist (always allow creation).
-        """
-        nodes = list(self.forest.active_nodes())
-        if len(nodes) < 3:
-            return 0.0
-        mus = np.array([n.mu for n in nodes])
-        dists_to_x = np.linalg.norm(mus - x, axis=1)
-        local_count = float(np.sum(dists_to_x < self.lacunarity_creation_radius))
-        # Mean nearest-neighbour distance as a proxy for global density
-        mean_nn = float(np.mean([
-            np.sort(np.linalg.norm(mus - mus[i], axis=1))[1]
-            for i in range(len(mus))
-        ]))
-        expected_local = self.lacunarity_creation_radius / (mean_nn + 1e-9)
-        return local_count / (expected_local + 1e-9)
-
-    def _local_crowding(self, node_mu: np.ndarray) -> int:
-        """
-        Count non-protected nodes within multifractal_crowding_radius of node_mu.
-
-        Used by multifractal_guided_absorption: high crowding = hot spot = absorb sooner.
-        """
-        count = 0
-        for other in self.forest.active_nodes():
-            if other.id in self.protected_ids:
-                continue
-            if float(np.linalg.norm(other.mu - node_mu)) < self.multifractal_crowding_radius:
-                count += 1
-        return count
 
     # --- Node creation ---
 
@@ -472,7 +413,12 @@ class Observer:
         if len(self.forest) == 0 or result.residual_surprise >= self.residual_surprise_threshold:
             # Lacunarity-guided suppression: skip creation in already-dense regions
             if self.lacunarity_guided_creation and len(self.forest) > 0:
-                if self._local_density_ratio(x) > self.lacunarity_creation_factor:
+                ratio = self.evaluator.density_ratio(
+                    x,
+                    list(self.forest.active_nodes()),
+                    self.lacunarity_creation_radius,
+                )
+                if ratio > self.lacunarity_creation_factor:
                     return  # region is dense — redirect to compression, not creation
             D = x.shape[0]
             new_node = HFN(
@@ -504,24 +450,27 @@ class Observer:
 
         # Rank by nearest-prior proximity when strategy is set
         if self.recombination_strategy == "nearest_prior" and self.protected_ids:
-            self._prior_mus = self._build_prior_mus()
-            def _rank(item: tuple) -> float:
-                _, ids = item
-                a_mu = self.forest.get(ids[0]).mu
-                b_mu = self.forest.get(ids[1]).mu
-                midpoint = (a_mu + b_mu) / 2.0
-                return self._nearest_prior_dist(midpoint)
-            candidates.sort(key=_rank)
+            prior_mus = self._build_prior_mus_matrix()
+            if prior_mus is not None:
+                def _rank(item: tuple) -> float:
+                    _, ids = item
+                    a_mu = self.forest.get(ids[0]).mu
+                    b_mu = self.forest.get(ids[1]).mu
+                    midpoint = (a_mu + b_mu) / 2.0
+                    return self.evaluator.nearest_prior_dist(midpoint, prior_mus)
+                candidates.sort(key=_rank)
 
         # Process all candidates in ranked order (nearest_prior sorts first,
         # cooccurrence preserves dict iteration order).
-        to_process = candidates
-
-        for pair, ids in to_process:
+        for pair, ids in candidates:
             node_a = self.forest.get(ids[0])
             node_b = self.forest.get(ids[1])
-            new_node = node_a.recombine(node_b)
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
-            new_node.id = compressed_id  # type: ignore[misc]
-            self.register(new_node)
+            # Re-check compressed_id is not already active (may have been added in earlier iteration)
+            if compressed_id in self.forest:
+                continue
+            new_node = self.recombination.compress(
+                node_a, node_b, self.forest, compressed_id
+            )
+            self._init_node(new_node)
             self._cooccurrence[pair] = 0
