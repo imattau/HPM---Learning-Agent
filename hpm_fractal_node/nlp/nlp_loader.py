@@ -1,7 +1,7 @@
 """
 NLP loader for the child language experiment.
 
-Fixed vocabulary of 107 tokens, D=428 (4 context slots × 107).
+Fixed vocabulary of 107 tokens, D=107 (slot-weighted composition).
 Generates exactly 2000 synthetic child-directed sentences with masked slots.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ assert len(set(VOCAB)) == 107, "Vocabulary has duplicate entries"
 
 VOCAB_INDEX: dict[str, int] = {w: i for i, w in enumerate(VOCAB)}
 VOCAB_SIZE: int = len(VOCAB)
-D: int = 4 * VOCAB_SIZE  # 428
+D: int = VOCAB_SIZE  # 107
 
 
 # ---------------------------------------------------------------------------
@@ -91,29 +91,32 @@ def word_category(word: str) -> str:
 
 def _encode_word(word: str) -> np.ndarray:
     idx = VOCAB_INDEX.get(word.lower(), VOCAB_INDEX["<unknown>"])
-    vec = np.zeros(VOCAB_SIZE, dtype=np.float32)
+    vec = np.zeros(VOCAB_SIZE, dtype=np.float64)
     vec[idx] = 1.0
     return vec
 
 
-def encode_context_window(
+def compose_context_node(
+    left2: str,
     left1: str,
     right1: str,
-    left2: str = "<start>",
-    right2: str = "<end>",
+    right2: str,
 ) -> np.ndarray:
     """
-    Encode 4-slot context window as concatenated one-hot vectors.
+    Compose 4-slot context window into a single D=107 vector via slot-weighted recombination.
 
-    Slot order: [left2, left1, right1, right2]
-    Returns shape (D,) = (428,) float32 vector.
+    Slot weights encode proximity to the masked position:
+        left2=0.20, left1=0.35, right1=0.35, right2=0.10  (sum=1.0)
+
+    Returns shape (D,) = (107,) float64 vector.
+    Repeated words across slots accumulate weight at their index.
     """
-    return np.concatenate([
-        _encode_word(left2),
-        _encode_word(left1),
-        _encode_word(right1),
-        _encode_word(right2),
-    ])
+    return (
+        0.20 * _encode_word(left2)
+        + 0.35 * _encode_word(left1)
+        + 0.35 * _encode_word(right1)
+        + 0.10 * _encode_word(right2)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +139,7 @@ _DETERMINERS = ["the", "a", "my", "her"]
 
 def _obs(left2: str, left1: str, right1: str, right2: str,
          true_word: str) -> tuple[np.ndarray, str, str]:
-    vec = encode_context_window(left1, right1, left2=left2, right2=right2)
+    vec = compose_context_node(left2, left1, right1, right2)
     return vec, true_word, word_category(true_word)
 
 
