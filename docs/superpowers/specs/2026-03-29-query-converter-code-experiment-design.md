@@ -40,7 +40,16 @@ class Query:
     def fetch(self, gap_mu: np.ndarray, context: dict | None = None) -> list[str]
 ```
 
-Takes the mu-vector of the detected gap (what region of observation space is underrepresented) and optional context. Returns a list of raw strings — the raw response from the external field. No encoding, no HFN logic — just retrieval.
+Takes the mu-vector of the detected gap and an optional context dict. Returns a list of raw strings — the raw response from the external field. No encoding, no HFN logic — just retrieval.
+
+**Context dict** (provided by Observer, Query uses what it needs):
+- `explanation_tree`: list of HFN nodes that explained `gap_mu` at the current expansion depth
+- `accuracy_scores`: dict of node_id → accuracy for those nodes
+- `residual_surprise`: float — how much of gap_mu remains unexplained
+
+Query subclasses use `context["explanation_tree"]` to understand what the Observer already knows near the gap before deciding what to fetch. If `context` is `None` or `explanation_tree` is empty, Query fetches based on `gap_mu` alone.
+
+Returning an empty list signals insufficient information — Observer will deepen expansion and retry.
 
 Subclasses: `QueryStdlib`, `QueryLLM`, `QueryWebSearch` (all in experiment layer).
 
@@ -85,12 +94,13 @@ The parent-child relationship captures provenance: "this knowledge came from tha
 
 ## 6. Observer Integration
 
-Observer gains two new optional constructor parameters:
+Observer gains these new optional constructor parameters:
 
 ```python
 query: Query | None = None
 converter: Converter | None = None
-gap_query_threshold: float = 0.7   # only query when coverage_gap exceeds this
+gap_query_threshold: float = 0.7      # only query when coverage_gap exceeds this
+max_expand_depth: int = 2             # max expansion retries before giving up
 ```
 
 Both `query` and `converter` default to `None`. No behaviour changes for existing experiments.
@@ -106,7 +116,9 @@ def _check_node_creation(self, x, result):
 
 **Reentrancy guard:** `_check_gap_query` feeds new observations into the Observer pipeline. To prevent recursion, Observer holds a `_in_gap_query: bool = False` flag. `_check_gap_query` returns immediately if already set.
 
-**`_mu_hash(mu)`:** Returns `str(int(np.argmax(mu)))` — the index of the highest-weighted vocabulary dimension. Stable, cheap, and appropriate for the one-hot-ish vocabulary space used in both NLP and code experiments. Collisions are intentional: two gaps near the same vocabulary token resolve to the same query, which is correct.
+**`_mu_hash(mu)`:** Returns `str(int(np.argmax(mu)))` — the index of the highest-weighted vocabulary dimension. Stable, cheap, and appropriate for the one-hot-ish vocabulary space. Collisions are intentional: two gaps near the same vocabulary token resolve to the same query.
+
+**Expansion retry loop:** Observer runs `_expand(gap_mu)` and passes the `ExplanationResult` as context to `query.fetch()`. If fetch returns empty, Observer deepens expansion by one budget level and retries, up to `max_expand_depth` attempts. Observer owns this loop entirely — Query just receives richer context on each retry.
 
 ```python
 def _check_gap_query(self, x: np.ndarray) -> None:
@@ -125,9 +137,22 @@ def _check_gap_query(self, x: np.ndarray) -> None:
     if query_id in self.forest:
         return  # already explored this region
 
-    raw = self.query.fetch(x)
+    # Expansion retry loop — deepen until Query has enough context or limit reached
+    raw = []
+    for depth in range(self.max_expand_depth):
+        result = self._expand_with_budget(x, budget=self.budget + depth)
+        context = {
+            "explanation_tree": result.explanation_tree,
+            "accuracy_scores": result.accuracy_scores,
+            "residual_surprise": result.residual_surprise,
+        }
+        raw = self.query.fetch(x, context=context)
+        if raw:
+            break  # Query has enough context
+
     if not raw:
-        return
+        return  # exhausted expansion depth, nothing to query
+
     observations = self.converter.encode(raw, D=x.shape[0])
     if not observations:
         return
@@ -138,8 +163,7 @@ def _check_gap_query(self, x: np.ndarray) -> None:
     query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
     self.register(query_node)
 
-    # Knowledge Gap HFNs are priors: they come from a stable external source
-    # and should not be subject to Observer absorption/compression dynamics.
+    # Knowledge Gap HFNs are priors: stable external knowledge, not subject to dynamics
     self._in_gap_query = True
     try:
         for i, obs_vec in enumerate(observations):
@@ -147,20 +171,22 @@ def _check_gap_query(self, x: np.ndarray) -> None:
             gap_node = HFN(mu=obs_vec, sigma=np.eye(obs_vec.shape[0]), id=gap_id)
             query_node.add_child(gap_node)
             self.register(gap_node)
-            self.protected_ids.add(gap_id)  # treat as prior — stable external knowledge
+            self.protected_ids.add(gap_id)
             # Feed through pipeline without triggering another gap query
-            result = self._expand(obs_vec)
-            self._update_weights(obs_vec, result)
-            self._update_scores(result)
-            self._track_cooccurrence(result.explanation_tree)
+            inner = self._expand(obs_vec)
+            self._update_weights(obs_vec, inner)
+            self._update_scores(inner)
+            self._track_cooccurrence(inner.explanation_tree)
             self._check_absorption()
-            self._check_residual_surprise(obs_vec, result)
+            self._check_residual_surprise(obs_vec, inner)
             self._check_compression_candidates()
     finally:
         self._in_gap_query = False
 ```
 
-**Knowledge Gap HFNs as priors:** Query responses come from a stable external source (stdlib, LLM). The encoded observations they produce represent grounded external knowledge — they should not be absorbed or compressed away by Observer dynamics. Adding their ids to `protected_ids` gives them the same status as world model priors. The Query HFN itself (what was asked) is NOT protected — it can be absorbed if the gap region becomes well-covered by other nodes.
+**`_expand_with_budget(x, budget)`:** A thin variant of `_expand` that accepts an explicit budget override, used only in the expansion retry loop. Implemented as `_expand` with a temporary budget substitution.
+
+**Knowledge Gap HFNs as priors:** Query responses come from a stable external source. They should not be absorbed or compressed by Observer dynamics. The Query HFN itself is NOT protected — it can be absorbed if the gap becomes well-covered.
 
 ---
 
