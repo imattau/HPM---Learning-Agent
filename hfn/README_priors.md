@@ -2,9 +2,11 @@
 
 ## What Is a Prior?
 
-A prior is an HFN node that is **registered in the Forest before any observations begin** and **protected from all dynamics** for the lifetime of the agent. It represents structural knowledge the agent arrives with — the equivalent of evolved neural architecture, innate reflexes, or species-level pattern endowment in HPM terms.
+A prior is an HFN node that is **registered in the Forest before any observations begin** and **protected from absorption and deregistration** for the lifetime of the agent. It represents structural knowledge the agent arrives with — the equivalent of evolved neural architecture, innate reflexes, or species-level pattern endowment in HPM terms.
 
 Priors are ordinary `HFN` instances (Gaussian identity + DAG polygraph body). What makes them priors is not their type but their status: they are registered with the Forest and their IDs are added to the Observer's `protected_ids` set.
+
+By default (`prior_plasticity=False`) priors are completely static — their geometry never changes. When `prior_plasticity=True`, low-density priors can slowly drift their `mu` toward observations they keep missing, while remaining permanently protected from absorption. See [Graduated Prior Protection](#graduated-prior-protection-prior-plasticity) below.
 
 ---
 
@@ -18,6 +20,93 @@ Once a node's ID is in `protected_ids`, it is exempt from:
 - **Deregistration** — `TieredForest.deregister()` silently ignores protected IDs; they are never evicted to cold storage or removed
 
 A prior node therefore has **permanent presence** in the Forest. Every `observe()` call includes it as a candidate explainer, regardless of how many observations it has or hasn't explained.
+
+**Note:** when `prior_plasticity=True`, a prior's `mu` can slowly drift (see below), but absorption protection is **never** lifted. The prior remains in `protected_ids` for its entire lifetime regardless of plasticity settings.
+
+---
+
+## Graduated Prior Protection (Prior Plasticity)
+
+### The Default: Binary Protection
+
+By default (`prior_plasticity=False`), protection is fully binary. A prior is either protected or it is not. Protected priors are exempt from all dynamics forever — their geometry (`mu`, `sigma`) never changes, regardless of how poorly they explain incoming observations. This is appropriate when priors encode truly invariant structural knowledge that should anchor the agent's world model permanently.
+
+### The Plasticity Model (`prior_plasticity=True`)
+
+When `prior_plasticity=True`, priors can undergo **density-guided mu drift**. The core idea comes from HPM Section 2.6: high-density patterns (those that frequently explain observations) resist revision, while low-density patterns (those that keep missing) are eligible for gradual update. Section 2.5.2 further motivates this: forgetting and decay apply to all patterns, priors included — only the rate and mechanism differ.
+
+The mechanism works as follows:
+
+1. During each `observe()` call, the Observer tracks per-prior **hit counts** (times a prior was in the explanation tree) and **miss counts** (times it was not).
+2. After weight updates, `_check_prior_plasticity()` evaluates each prior:
+   - If `miss_count < prior_revision_threshold`: prior is stable — no drift.
+   - If `miss_count >= prior_revision_threshold` AND `hit_rate >= 0.5`: prior explains enough observations — no drift (high density protects it).
+   - If `miss_count >= prior_revision_threshold` AND `hit_rate < 0.5`: prior is low-density and persistently missing — **drift is triggered**.
+3. Drift: `mu += prior_drift_rate * (x - mu)` — the prior's centre nudges toward the current observation.
+4. Hit and miss counts reset after drift, giving the prior a fresh chance to stabilise at its new position.
+
+Absorption protection is **never** affected. A drifting prior remains in `protected_ids` and cannot be absorbed, merged, or deregistered.
+
+### Three Conceptual Tiers
+
+When plasticity is enabled, priors fall into three informal tiers based on their observed density:
+
+| Tier | Condition | Behaviour |
+|------|-----------|-----------|
+| **Anchored** | High hit rate (≥ 0.5) | Stable — geometry does not change |
+| **Plastic** | Low hit rate, misses above threshold | Eligible for drift — mu nudges toward observations |
+| **Fragile** | New / recently reset | Accumulating counts — tier not yet determined |
+
+These tiers are dynamic. A prior that drifts to a better-fitting region will accumulate hits and stabilise as Anchored. A prior placed in a region that diverges from the data distribution will remain Plastic and keep drifting slowly.
+
+### Parameters
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `prior_plasticity` | `False` | Enable/disable density-guided drift entirely |
+| `prior_drift_rate` | `0.01` | Step size for mu update: larger = faster drift, less stable |
+| `prior_revision_threshold` | `200` | Consecutive misses before eligibility check: larger = more patient before drifting |
+
+### When to Use Prior Plasticity
+
+Use `prior_plasticity=True` when:
+- The agent will operate across **domain shift** — the observation distribution changes over the agent's lifetime and innate priors may no longer be well-placed.
+- Priors were seeded with approximate geometry (e.g. random initialisation within a region) and should self-correct during early exposure.
+- You want priors to act as **soft attractors** rather than fixed landmarks.
+
+Keep `prior_plasticity=False` (the default) when:
+- Priors encode truly invariant structure that must never shift (e.g. hardwired sensory filters, safety constraints).
+- The observation distribution is stationary and priors were carefully placed to match it.
+- You want fully deterministic, reproducible prior behaviour.
+
+### Code Example
+
+```python
+from hfn.tiered_forest import TieredForest
+from hfn.observer import Observer
+
+forest = TieredForest()
+prior_ids = set()
+for node in my_prior_nodes:
+    forest.register(node)
+    prior_ids.add(node.id)
+forest.set_protected(prior_ids)
+
+# Default: fully static priors
+obs_static = Observer(forest, tau=tau, protected_ids=prior_ids)
+
+# Plasticity enabled: low-density priors can drift
+obs_plastic = Observer(
+    forest,
+    tau=tau,
+    protected_ids=prior_ids,
+    prior_plasticity=True,
+    prior_drift_rate=0.01,        # small step — slow, stable drift
+    prior_revision_threshold=200, # patience before eligibility
+)
+```
+
+---
 
 ### How to Register
 
