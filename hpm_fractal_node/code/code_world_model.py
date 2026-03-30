@@ -8,15 +8,92 @@ Five sub-trees, all nodes at D=70:
   Builtin sub-tree: print, len, range, type, input, open, map, filter, zip, enumerate
   Pattern sub-tree: for_loop, if_condition, function_def, assignment (recombined pairs)
   Sentence priors (~15): short synthetic code snippet mus
+  Stdlib priors: real context windows for all vocab tokens (single scan, cached)
+  Co-occurrence pairs: top-30 (l1, r1) pairs from stdlib windows
 
 All composed node mus are equal-weight recombinations of child mus unless noted.
+
+Serialization:
+  save_world_model(forest, prior_ids, path)  — write to .npz + .json
+  load_world_model(path) -> (Forest, set[str]) — load without rebuilding
 """
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import numpy as np
 
 from hfn import HFN, Forest
 from hpm_fractal_node.code.code_loader import D, VOCAB_INDEX, VOCAB_SIZE, VOCAB
+
+
+# ---------------------------------------------------------------------------
+# Serialization helpers
+# ---------------------------------------------------------------------------
+
+def save_world_model(
+    forest: Forest,
+    prior_ids: set[str],
+    path: str | Path,
+) -> None:
+    """
+    Serialize a world model to disk.
+
+    Writes two files:
+      <path>.npz   — all mu/sigma arrays, keyed by node index
+      <path>.json  — node registry: id, children, prior flag
+    """
+    path = Path(path)
+    nodes = list(forest.active_nodes())
+    id_to_idx = {n.id: i for i, n in enumerate(nodes)}
+
+    mus = np.stack([n.mu for n in nodes], axis=0)       # (N, D)
+    sigmas = np.stack([n.sigma for n in nodes], axis=0)  # (N, D, D)
+    np.savez_compressed(str(path) + ".npz", mus=mus, sigmas=sigmas)
+
+    registry = {
+        "ids": [n.id for n in nodes],
+        "prior_ids": sorted(prior_ids),
+        "children": {
+            n.id: [c.id for c in n.children()] for n in nodes if n.children()
+        },
+    }
+    Path(str(path) + ".json").write_text(json.dumps(registry))
+
+
+def load_world_model(path: str | Path) -> tuple[Forest, set[str]]:
+    """
+    Load a serialized world model from disk.
+
+    Returns (forest, prior_ids) — ready to pass directly to Observer.
+    """
+    path = Path(path)
+    data = np.load(str(path) + ".npz")
+    registry = json.loads(Path(str(path) + ".json").read_text())
+
+    mus: np.ndarray = data["mus"]       # (N, D)
+    sigmas: np.ndarray = data["sigmas"]  # (N, D, D)
+    ids: list[str] = registry["ids"]
+    prior_ids: set[str] = set(registry["prior_ids"])
+    children_map: dict[str, list[str]] = registry.get("children", {})
+
+    forest = Forest(D=int(mus.shape[1]), forest_id="code_python")
+    nodes: dict[str, HFN] = {}
+
+    for i, node_id in enumerate(ids):
+        node = HFN(mu=mus[i].copy(), sigma=sigmas[i].copy(), id=node_id)
+        nodes[node_id] = node
+        forest.register(node)
+
+    # Wire child relationships (add_child is a method call)
+    for parent_id, child_ids in children_map.items():
+        parent = nodes[parent_id]
+        for child_id in child_ids:
+            if child_id in nodes:
+                parent.add_child(nodes[child_id])
+
+    return forest, prior_ids
 
 
 # ---------------------------------------------------------------------------
@@ -299,5 +376,60 @@ def build_code_world_model() -> tuple[Forest, list[HFN]]:
     for nid, tokens in snippet_defs:
         n = _node(nid, snippet_mu(*tokens))
         add(n)
+
+    # ==================================================================
+    # STDLIB PRIORS — Phase 1 field loading
+    #
+    # Scan all 70 vocab tokens in a single stdlib pass (cached to disk).
+    # For each token: add context window HFNs as priors.
+    # Then derive co-occurrence pair nodes from the most frequent (l1, r1)
+    # pairs across all windows — these encode structural relationships.
+    # ==================================================================
+
+    from collections import Counter
+    from hpm_fractal_node.code.query_stdlib import scan_tokens
+    from hpm_fractal_node.code.converter_code import ConverterCode
+
+    _converter = ConverterCode()
+    # Single pass for all vocab tokens — cached after first run
+    stdlib_windows = scan_tokens(VOCAB, max_results=15)
+
+    # --- Per-token context window priors ---
+    for token in VOCAB:
+        ctx_raws = [r for r in stdlib_windows.get(token, []) if not r.startswith("sig: ")]
+        node_idx = 0
+        for raw in ctx_raws:
+            vecs = _converter.encode(raw, D)
+            for vec in vecs:
+                nid = f"stdlib_{token}_{node_idx}"
+                node_idx += 1
+                add(_node(nid, vec))
+
+    # --- Co-occurrence pair priors ---
+    # Count (l1, r1) pairs across all stdlib windows — the two nearest
+    # neighbours to the masked position capture the strongest associations.
+    pair_counts: Counter = Counter()
+    for token in VOCAB:
+        for raw in stdlib_windows.get(token, []):
+            if raw.startswith("sig: "):
+                continue
+            parts = raw.split()
+            if len(parts) == 4:
+                _, l1, r1, _ = parts
+                if l1 != "<unk>" and r1 != "<unk>" and l1 != r1:
+                    pair_counts[(l1, r1)] += 1
+
+    # Add top-30 pairs as recombined HFNs
+    for (t_a, t_b), _ in pair_counts.most_common(30):
+        if t_a not in token_nodes or t_b not in token_nodes:
+            continue
+        pair_id = f"cooc_{t_a}_{t_b}"
+        if pair_id in forest:
+            continue
+        pair_mu = _recombine(wmu(t_a), wmu(t_b))
+        pair_node = _node(pair_id, pair_mu)
+        pair_node.add_child(token_nodes[t_a])
+        pair_node.add_child(token_nodes[t_b])
+        add(pair_node)
 
     return forest, prior_nodes

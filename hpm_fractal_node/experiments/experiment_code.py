@@ -14,11 +14,33 @@ from __future__ import annotations
 import numpy as np
 from collections import defaultdict
 
+from pathlib import Path
+
 from hfn import Observer, calibrate_tau
-from hpm_fractal_node.code.code_world_model import build_code_world_model
+from hpm_fractal_node.code.code_world_model import (
+    build_code_world_model, save_world_model, load_world_model,
+)
 from hpm_fractal_node.code.code_loader import (
     D, VOCAB, generate_code_snippets,
 )
+
+_WORLD_MODEL_PATH = Path(__file__).parent.parent.parent / "data" / "code_world_model"
+
+
+def _get_world_model():
+    """Load world model from disk if available, otherwise build and save."""
+    npz = Path(str(_WORLD_MODEL_PATH) + ".npz")
+    jsn = Path(str(_WORLD_MODEL_PATH) + ".json")
+    if npz.exists() and jsn.exists():
+        print("Loading world model from disk ...")
+        return load_world_model(_WORLD_MODEL_PATH)
+    print("Building world model (first run — will be cached) ...")
+    forest, prior_nodes = build_code_world_model()
+    prior_ids = {n.id for n in prior_nodes}
+    _WORLD_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    save_world_model(forest, prior_ids, _WORLD_MODEL_PATH)
+    print(f"  Saved to {_WORLD_MODEL_PATH}")
+    return forest, prior_ids
 from hpm_fractal_node.code.query_stdlib import QueryStdlib
 from hpm_fractal_node.code.converter_code import ConverterCode
 
@@ -37,48 +59,54 @@ SEED = 42
 # ---------------------------------------------------------------------------
 
 _CATEGORY_TOKENS: dict[str, set[str]] = {
-    "syntax": {
-        "if", "elif", "else", "for", "while", "break", "continue", "pass",
+    "functions": {
         "def", "class", "return", "lambda", "yield",
         "import", "from", "as", "with", "try", "except",
+    },
+    "control_flow": {
+        "if", "elif", "else", "for", "while", "break", "continue", "pass",
         "and", "or", "not", "in", "is", "assert", "raise", "del", "global",
         "=", "==", "!=", "<", ">", "<=", ">=",
         "+", "-", "*", "/", "//", "%", "**", "&", "|", "^", "~",
         "(", ")", ":", ",", ".", "[", "]", "{", "}",
     },
-    "type": {"int", "str", "float", "bool", "list"},
-    "builtin": {
+    "data": {"int", "str", "float", "bool", "list"},
+    "builtins": {
         "print", "len", "range", "type", "input", "open",
         "map", "filter", "zip", "enumerate",
-    },
-    "pattern": {
-        "for", "if", "def", "=",  # overlap is OK for experiment
     },
 }
 
 
 def token_to_category(token: str) -> str:
-    if token in _CATEGORY_TOKENS["builtin"]:
-        return "builtin"
-    if token in _CATEGORY_TOKENS["type"]:
-        return "type"
-    if token in _CATEGORY_TOKENS["pattern"]:
-        return "pattern"
-    if token in _CATEGORY_TOKENS["syntax"]:
-        return "syntax"
+    if token in _CATEGORY_TOKENS["builtins"]:
+        return "builtins"
+    if token in _CATEGORY_TOKENS["data"]:
+        return "data"
+    if token in _CATEGORY_TOKENS["functions"]:
+        return "functions"
+    if token in _CATEGORY_TOKENS["control_flow"]:
+        return "control_flow"
     return "unknown"
 
 
 def compute_purity(
     obs_list: list[tuple[np.ndarray, str, str]],
     observer: Observer,
+    forest: Forest,
 ) -> dict[str, float]:
     """
-    For each category, compute purity = fraction of observations where the
-    top-weight explaining node's true category matches the observation category.
+    For each observation, find the best explaining node, then find the nearest
+    word node to that node's mu. Category purity = fraction of observations where
+    the nearest word category matches the observation category.
     """
     category_correct: dict[str, int] = defaultdict(int)
     category_total: dict[str, int] = defaultdict(int)
+
+    word_nodes = [n for n in forest.active_nodes() if n.id.startswith("word_")]
+    if not word_nodes:
+        return {}
+    word_mus = np.stack([n.mu for n in word_nodes], axis=0)  # (V, D)
 
     for vec, true_token, obs_category in obs_list:
         result = observer._expand(vec)
@@ -86,20 +114,19 @@ def compute_purity(
             continue
 
         # Best explaining node by weight
-        best_node = max(
-            result.explanation_tree,
-            key=lambda n: observer.get_weight(n.id),
-        )
-        predicted_category = token_to_category(
-            best_node.id.replace("word_", "")
-        )
+        best_node = max(result.explanation_tree, key=lambda n: observer.get_weight(n.id))
+
+        # Nearest word node to best_node's mu
+        dists = np.linalg.norm(word_mus - best_node.mu, axis=1)
+        nearest_word = word_nodes[int(np.argmin(dists))]
+        predicted_category = token_to_category(nearest_word.id.replace("word_", ""))
 
         category_total[obs_category] += 1
         if predicted_category == obs_category:
             category_correct[obs_category] += 1
 
     purity: dict[str, float] = {}
-    for cat in ["syntax", "type", "builtin", "pattern", "control_flow", "functions", "data", "builtins"]:
+    for cat in ["control_flow", "functions", "data", "builtins"]:
         total = category_total.get(cat, 0)
         correct = category_correct.get(cat, 0)
         if total > 0:
@@ -117,10 +144,9 @@ def run_experiment() -> None:
     print(f"  D={D}, N_SAMPLES={N_SAMPLES}, N_PASSES={N_PASSES}, SEED={SEED}")
     print("=" * 60)
 
-    # Build world model
-    forest, prior_nodes = build_code_world_model()
-    prior_ids = {n.id for n in prior_nodes}
-    print(f"World model: {len(forest)} nodes ({len(prior_ids)} priors)")
+    # Load or build world model
+    forest, prior_ids = _get_world_model()
+    print(f"World model: {len(list(forest.active_nodes()))} nodes ({len(prior_ids)} priors)")
 
     # Calibrate tau
     tau = calibrate_tau(D, sigma_scale=1.0, margin=1.0)
@@ -158,24 +184,25 @@ def run_experiment() -> None:
             vec, true_token, category = obs_list[idx]
             observer.observe(vec)
 
-        n_query = sum(1 for nid in forest if nid.startswith("query_"))
-        n_gap = sum(1 for nid in forest if nid.startswith("gap_"))
-        print(f"Pass {pass_num}: forest={len(forest)}, query_nodes={n_query}, gap_nodes={n_gap}")
+        n_query = sum(1 for n in forest.active_nodes() if n.id.startswith("query_"))
+        n_gap = sum(1 for n in forest.active_nodes() if n.id.startswith("gap_"))
+        print(f"Pass {pass_num}: forest={len(list(forest.active_nodes()))}, query_nodes={n_query}, gap_nodes={n_gap}")
 
     # Category purity
     print("\nCategory purity:")
-    purity = compute_purity(obs_list[:200], observer)
+    purity = compute_purity(obs_list[:200], observer, forest)
     for cat, p in sorted(purity.items()):
         print(f"  {cat:12s}: {p:.3f}")
 
     # Count query/gap HFNs
-    query_count = sum(1 for nid in forest if nid.startswith("query_"))
-    gap_count = sum(1 for nid in forest if nid.startswith("gap_"))
-    sig_count = sum(1 for nid in forest if nid.startswith("sig_"))
+    active = list(forest.active_nodes())
+    query_count = sum(1 for n in active if n.id.startswith("query_"))
+    gap_count = sum(1 for n in active if n.id.startswith("gap_"))
+    sig_count = sum(1 for n in active if n.id.startswith("sig_"))
     print(f"\nQuery HFN count:        {query_count}")
     print(f"Signature HFN count:    {sig_count}")
     print(f"Knowledge Gap HFN count:{gap_count}")
-    print(f"Total forest size:      {len(forest)}")
+    print(f"Total forest size:      {len(active)}")
     print("\nExperiment completed successfully.")
 
 
