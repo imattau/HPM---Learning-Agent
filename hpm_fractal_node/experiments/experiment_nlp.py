@@ -114,12 +114,13 @@ def main() -> None:
         tau=tau,
         protected_ids=prior_ids,
         recombination_strategy="nearest_prior",
-        hausdorff_absorption_threshold=0.15,
+        hausdorff_absorption_threshold=0.35,      # raised: let injected nodes establish before geometric absorption
+        hausdorff_absorption_weight_floor=0.4,     # only absorb lower-weight nodes geometrically
+        absorption_miss_threshold=20,              # raised: nodes need 20 consecutive misses before absorption
         persistence_guided_absorption=True,
         lacunarity_guided_creation=True,
         lacunarity_creation_radius=0.08,
-        multifractal_guided_absorption=True,
-        multifractal_crowding_radius=0.12,
+        multifractal_guided_absorption=False,      # disabled: was halving miss threshold in hot spots
         query=_query,
         converter=_converter,
         gap_query_threshold=0.05,
@@ -148,11 +149,6 @@ def main() -> None:
             result = obs.observe(x)
             if _query is not None:
                 _query.current_target = None
-            # Debug: print accuracy scores for first 3 unknown corpus obs
-            if p == 0 and category == "unknown" and (n_explained + n_unexplained) < 10:
-                scores = result.accuracy_scores
-                best = max(scores.values(), default=0.0) if scores else 0.0
-                print(f"    [debug] '{true_word}' best_acc={best:.3f} gap={1-best:.3f} nodes={len(scores)}", flush=True)
             forest._on_observe()
             if (n_explained + n_unexplained) % 500 == 0:
                 print(f"    {n_explained + n_unexplained}/{N_SAMPLES} ...", flush=True)

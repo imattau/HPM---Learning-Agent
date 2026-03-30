@@ -5,11 +5,12 @@ AI learning agents built on the **Hierarchical Pattern Modelling (HPM)** framewo
 ---
 
 
-## Repository Overview (Concise)
+## Repository Overview
 
-- `hpm/` is the baseline HPM framework implementation (core agents, field dynamics, hierarchy, benchmarks).
-- `hpm_ai_v1/` is a specialized extension line focused on structured multi-agent self-repair and project-manifold reasoning.
-- Current status: baseline is active for continued iteration; HPM AI v1 is largely complete with strong issue coverage and documented architectural insights.
+- `hpm/` — baseline HPM framework (core agents, field dynamics, hierarchy, benchmarks)
+- `hpm_ai_v1/` — structured multi-agent self-repair and project-manifold reasoning
+- `hpm_fractal_node/` — HFN (Hierarchical Fractal Node) substrate: a new pattern substrate implementing HPM principles as a forest of probabilistic nodes with fractal geometry, Observer dynamics, and a 13-experiment suite
+- `hfn/` — the core HFN library (nodes, forest, observer, fractal metrics, query/converter pipeline)
 
 ## What is HPM?
 
@@ -295,6 +296,36 @@ The open question is whether these properties, demonstrated here in lightweight 
 
 ---
 
+## HPM Fractal Node (HFN)
+
+The **HFN** is a new pattern substrate developed in this repo that implements HPM principles directly as a forest of probabilistic Gaussian nodes. Unlike the `hpm/` agents (which use closed-form pattern updates), HFN gives every pattern its own geometric identity in a shared observation space.
+
+### Core components
+
+- **HFN node** — a Gaussian `N(μ, Σ)` plus a DAG polygraph body (children + typed edges). The geometry *is* the knowledge: where μ sits in observation space determines what the node explains.
+- **Forest / TieredForest** — collection of HFN nodes; TieredForest supports hot/cold tiering so large prior libraries (tens of thousands of nodes) don't exhaust RAM.
+- **Observer** — drives all dynamics: log-probability gating by τ, weight gain/loss, Hausdorff-based absorption, co-occurrence compression, gap queries for genuinely novel observations.
+- **Prior library** — protected nodes that encode pre-existing knowledge. Priors are permanent attractors; learned nodes form in the gaps between them.
+- **Query / Converter pipeline** — when no node explains an observation well enough, an external source is queried (LLM via ollama, Python stdlib) and the response is converted into new HFN nodes near the gap.
+
+### Experiment results
+
+13 experiments across ARC-AGI-2, dSprites, NLP, Python code tokens, and integer arithmetic:
+
+| Experiment | Domain | Key finding |
+|---|---|---|
+| `experiment_math.py` | Integer arithmetic | 306 priors across 6 abstraction levels; agent discovers perfect-power clusters, GCD identity, modular prime regions — 18× above random baseline (purity 0.793 mean) |
+| `experiment_nlp.py` | Child language / LLM | 195 priors; 257 LLM queries; semantic category purity 0.780 mean with QueryLLM via ollama TinyLlama |
+| `experiment_dsprites.py` | dSprites generative factors | Learned nodes align with shape/scale/position without supervision |
+| `experiment_arc_world_model.py` | ARC-AGI-2 | Full layered world model; prior forest improves explanation coverage vs bare Observer |
+| Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
+
+For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
+
+For prior library design principles, see [`hfn/README_priors.md`](hfn/README_priors.md).
+
+---
+
 ## HPM AI — Sovereign Recursive Intelligence (v3.0)
 
 The **HPM AI** (implemented in `hpm_ai_v1/`) has been promoted from a research tool to a **Sovereign Multi-Agent Hierarchy**. It has "stepped into the dish," treating the entire HPM codebase as its primary algebraic substrate.
@@ -400,6 +431,21 @@ python benchmarks/multi_domain_alignment.py
 
 # SP16 — Geometric Rosetta (Concept Discovery)
 python benchmarks/rosetta_geometric_benchmark.py
+```
+
+### Run HFN experiments
+
+```bash
+# Math arithmetic — algebraic rule discovery (no LLM required)
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_math.py
+
+# NLP semantic categories (requires ollama + tinyllama:latest)
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_nlp.py
+
+# ARC-AGI-2 world model (requires data/ARC-AGI-2/)
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_arc_world_model.py
+
+# See hpm_fractal_node/experiments/README.md for the full suite
 ```
 
 ### Run tests

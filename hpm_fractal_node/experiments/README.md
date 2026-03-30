@@ -43,6 +43,7 @@ substrate. The core components are:
 | `experiment_dsprites.py` | dSprites (16x16 binary) | Generative factor alignment: do learned nodes align with shape/scale/position? | Working |
 | `experiment_nlp.py` | NLP / child language | Semantic category alignment; QueryLLM gap-filling; TieredForest | Working |
 | `experiment_code.py` | Python code tokens | Category purity (control_flow, functions, builtins, data); QueryStdlib gap-filling | Working |
+| `experiment_math.py` | Integer arithmetic | Algebraic rule discovery; 306-prior library across 6 abstraction levels; no LLM | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -152,19 +153,22 @@ in the world model when observations fall outside the current node coverage.
 | HPM concept | Experiments that test it |
 |---|---|
 | Pattern substrates (HFN nodes as encodings) | All |
-| Prior knowledge shapes what is learned | `arc_prior_forest`, `arc_world_model`, fractal trio |
+| Prior knowledge shapes what is learned | `arc_prior_forest`, `arc_world_model`, fractal trio, `experiment_math` |
 | Hierarchical decomposition (children) | `arc_priors` |
 | Weight dynamics (gain on match, loss on miss) | All Observer experiments |
 | Absorption (redundant nodes removed) | All Observer experiments |
 | Compression (co-occurrence creates higher nodes) | All Observer experiments |
 | Gap queries (external knowledge injection) | `experiment_code`, `experiment_nlp` |
 | Fractal attractor convergence | Fractal trio |
-| Unsupervised category discovery | `experiment_dsprites`, `experiment_nlp` |
+| Unsupervised category discovery | `experiment_dsprites`, `experiment_nlp`, `experiment_math` |
 | Latent generative factor alignment | `experiment_dsprites` |
+| Algebraic rule discovery (pure geometry) | `experiment_math` |
+| Large structured prior library (6 levels) | `experiment_math` |
 
 ---
 
-For detailed documentation of the two most developed experiments, see:
+For detailed documentation of the most developed experiments, see:
 
 - [`README_code.md`](README_code.md) — Python code token experiment
 - [`README_nlp.md`](README_nlp.md) — NLP semantic category experiment
+- [`README_math.md`](README_math.md) — Math arithmetic / algebraic rule discovery experiment
