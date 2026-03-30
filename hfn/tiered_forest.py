@@ -116,6 +116,7 @@ class TieredForest(Forest):
             mu=node.mu,
             sigma=node.sigma,
             node_id=np.array([node.id]),
+            use_diag=np.array([node.use_diag]),
         )
 
     def _load_from_cold(self, node_id: str) -> HFN | None:
@@ -124,10 +125,13 @@ class TieredForest(Forest):
         if not path.exists():
             return None
         data = np.load(path)
+        # use_diag may be absent in files serialised before this change
+        use_diag = bool(data["use_diag"][0]) if "use_diag" in data else False
         node = HFN(
             mu=data["mu"].copy(),
             sigma=data["sigma"].copy(),
             id=str(data["node_id"][0]),
+            use_diag=use_diag,
         )
         path.unlink()
         self._hot[node_id] = node
@@ -219,5 +223,6 @@ class TieredForest(Forest):
         else:
             mus = np.stack([n.mu for n in hot])
             self.mu = mus.mean(axis=0)
-            sigmas = np.stack([n.sigma for n in hot])
-            self.sigma = sigmas.mean(axis=0)
+            # Expand diag nodes to full matrices before averaging
+            sigmas = [np.diag(n.sigma) if n.use_diag else n.sigma for n in hot]
+            self.sigma = np.mean(sigmas, axis=0)

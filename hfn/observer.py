@@ -107,6 +107,7 @@ class Observer:
         prior_plasticity: bool = False,        # enable density-based prior revision
         prior_drift_rate: float = 0.01,        # mu drift step when revision triggered
         prior_revision_threshold: int = 200,   # misses before eligible for drift
+        node_use_diag: bool = False,           # use O(D) diagonal sigma for all dynamically created nodes
     ):
         self.forest = forest
         self.tau = tau
@@ -173,6 +174,9 @@ class Observer:
         self.prior_revision_threshold: int = prior_revision_threshold
         self._prior_miss_counts: dict[str, int] = defaultdict(int)
         self._prior_hit_counts: dict[str, int] = defaultdict(int)
+
+        # Diagonal sigma storage for dynamically created nodes
+        self.node_use_diag: bool = node_use_diag
 
     # --- Node lifecycle ---
 
@@ -484,11 +488,19 @@ class Observer:
                 if ratio > self.lacunarity_creation_factor:
                     return  # region is dense — redirect to compression, not creation
             D = x.shape[0]
-            new_node = HFN(
-                mu=x.copy(),
-                sigma=np.eye(D),
-                id=f"leaf_{len(self.forest)}",
-            )
+            if self.node_use_diag:
+                new_node = HFN(
+                    mu=x.copy(),
+                    sigma=np.ones(D),
+                    id=f"leaf_{len(self.forest)}",
+                    use_diag=True,
+                )
+            else:
+                new_node = HFN(
+                    mu=x.copy(),
+                    sigma=np.eye(D),
+                    id=f"leaf_{len(self.forest)}",
+                )
             self.register(new_node)
 
     def _check_compression_candidates(self) -> None:
@@ -583,7 +595,10 @@ class Observer:
         D = x.shape[0]
 
         # Register the Query HFN (not protected — can be absorbed by dynamics)
-        query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
+        if self.node_use_diag:
+            query_node = HFN(mu=x.copy(), sigma=np.ones(D), id=query_id, use_diag=True)
+        else:
+            query_node = HFN(mu=x.copy(), sigma=np.eye(D), id=query_id)
         self.register(query_node)
 
         # Separate signature raws from context raws
@@ -600,7 +615,10 @@ class Observer:
             if sig_vecs:
                 sig_mu = np.mean(sig_vecs, axis=0)
                 sig_id = f"sig_{gap_hash}"
-                sig_node = HFN(mu=sig_mu, sigma=np.eye(D), id=sig_id)
+                if self.node_use_diag:
+                    sig_node = HFN(mu=sig_mu, sigma=np.ones(D), id=sig_id, use_diag=True)
+                else:
+                    sig_node = HFN(mu=sig_mu, sigma=np.eye(D), id=sig_id)
                 self.register(sig_node)
                 self.protected_ids.add(sig_id)
                 # Wire: sig_node is a child of query_node
@@ -621,7 +639,10 @@ class Observer:
                 vecs = self.converter.encode(r, D)
                 for j, vec in enumerate(vecs):
                     kg_id = f"gap_{gap_hash}_{i}_{j}"
-                    kg_node = HFN(mu=vec, sigma=np.eye(D), id=kg_id)
+                    if self.node_use_diag:
+                        kg_node = HFN(mu=vec, sigma=np.ones(D), id=kg_id, use_diag=True)
+                    else:
+                        kg_node = HFN(mu=vec, sigma=np.eye(D), id=kg_id)
                     self.register(kg_node)
                     self.protected_ids.add(kg_id)
                     parent_node.add_child(kg_node)

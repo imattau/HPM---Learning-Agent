@@ -32,23 +32,33 @@ class HFN:
     - No mutation from queries.
     - Same node can be child of multiple parents simultaneously.
     - Identical interface at every depth (fractal uniformity).
+
+    Memory modes:
+    - use_diag=False (default): sigma is a D×D matrix. Backward-compatible.
+    - use_diag=True: sigma is a D-vector (diagonal). O(D) storage instead of O(D²).
     """
     mu: np.ndarray
     sigma: np.ndarray
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    use_diag: bool = False
     _children: list[HFN] = field(default_factory=list, repr=False)
     _edges: list[Edge] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
         # Cache diagonal for O(D) log_prob fast path.
         # All prior nodes use diagonal sigma; this avoids O(D³) Cholesky per call.
-        diag = np.diag(self.sigma)
-        if np.allclose(self.sigma, np.diag(diag)):
-            self._sigma_diag: np.ndarray | None = np.maximum(diag, 1e-9)
+        if self.use_diag:
+            # sigma is already a D-vector diagonal — use directly
+            self._sigma_diag: np.ndarray | None = np.maximum(self.sigma, 1e-9)
             self._log_det_cached: float = float(np.sum(np.log(self._sigma_diag)))
         else:
-            self._sigma_diag = None
-            self._log_det_cached = 0.0
+            diag = np.diag(self.sigma)
+            if np.allclose(self.sigma, np.diag(diag)):
+                self._sigma_diag = np.maximum(diag, 1e-9)
+                self._log_det_cached = float(np.sum(np.log(self._sigma_diag)))
+            else:
+                self._sigma_diag = None
+                self._log_det_cached = 0.0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, HFN):
@@ -85,7 +95,10 @@ class HFN:
         if self._sigma_diag is not None and other._sigma_diag is not None:
             combined_diag = self._sigma_diag + other._sigma_diag
             return float(np.exp(-0.5 * float(np.dot(diff * diff, 1.0 / combined_diag))))
-        combined_sigma = self.sigma + other.sigma
+        # Mixed case: one diag, one full — expand diag to full matrix for the full path
+        s_sigma = np.diag(self._sigma_diag) if (self.use_diag and self._sigma_diag is not None) else self.sigma
+        o_sigma = np.diag(other._sigma_diag) if (other.use_diag and other._sigma_diag is not None) else other.sigma
+        combined_sigma = s_sigma + o_sigma
         try:
             val = float(np.exp(-0.5 * diff @ np.linalg.solve(combined_sigma, diff)))
         except np.linalg.LinAlgError:
@@ -134,10 +147,18 @@ class HFN:
         Produce a new parent HFN whose children are self and other.
         Gaussian is derived from the mean of both children's mu and sigma.
         Neither input node is mutated.
+        If both nodes use_diag, the parent also uses diagonal storage.
         """
         new_mu = 0.5 * (self.mu + other.mu)
-        new_sigma = 0.5 * (self.sigma + other.sigma)
-        parent = HFN(mu=new_mu, sigma=new_sigma)
+        if self.use_diag and other.use_diag:
+            new_sigma = 0.5 * (self.sigma + other.sigma)
+            parent = HFN(mu=new_mu, sigma=new_sigma, use_diag=True)
+        else:
+            # Expand diag node to full matrix if mixed
+            s_sigma = np.diag(self.sigma) if self.use_diag else self.sigma
+            o_sigma = np.diag(other.sigma) if other.use_diag else other.sigma
+            new_sigma = 0.5 * (s_sigma + o_sigma)
+            parent = HFN(mu=new_mu, sigma=new_sigma)
         parent._children = [self, other]
         parent._edges = [Edge(source=self, target=other, relation="recombined")]
         return parent
@@ -167,23 +188,50 @@ class HFN:
 
 # --- Factory helpers ---
 
-def make_leaf(label: str, D: int = 4, rng: np.random.Generator | None = None) -> HFN:
-    """Create a named leaf node with a stub Gaussian in R^D."""
+def make_leaf(
+    label: str,
+    D: int = 4,
+    rng: np.random.Generator | None = None,
+    use_diag: bool = False,
+) -> HFN:
+    """Create a named leaf node with a stub Gaussian in R^D.
+
+    use_diag=True: sigma stored as D-vector (diagonal), O(D) memory.
+    use_diag=False (default): sigma stored as D×D matrix, backward-compatible.
+    """
     rng = rng or np.random.default_rng(abs(hash(label)) % (2**31))
     mu = rng.standard_normal(D)
-    sigma = np.eye(D) * rng.uniform(0.5, 2.0, D)
-    node = HFN(mu=mu, sigma=sigma, id=label)
+    variances = rng.uniform(0.5, 2.0, D)
+    if use_diag:
+        sigma = variances
+    else:
+        sigma = np.eye(D) * variances
+    node = HFN(mu=mu, sigma=sigma, id=label, use_diag=use_diag)
     return node
 
 
-def make_parent(label: str, children: list[HFN], edges: list[tuple] | None = None) -> HFN:
+def make_parent(
+    label: str,
+    children: list[HFN],
+    edges: list[tuple] | None = None,
+) -> HFN:
     """
     Create an internal node whose Gaussian is derived from its children.
     edges: list of (source_label, target_label, relation) strings.
+    If all children use diagonal storage, the parent also uses diagonal storage.
     """
     mu = np.mean([c.mu for c in children], axis=0)
-    sigma = np.mean([c.sigma for c in children], axis=0)
-    node = HFN(mu=mu, sigma=sigma, id=label)
+    all_diag = all(c.use_diag for c in children)
+    if all_diag:
+        sigma = np.mean([c.sigma for c in children], axis=0)
+        node = HFN(mu=mu, sigma=sigma, id=label, use_diag=True)
+    else:
+        # Expand any diag children to full matrices before averaging
+        sigmas = []
+        for c in children:
+            sigmas.append(np.diag(c.sigma) if c.use_diag else c.sigma)
+        sigma = np.mean(sigmas, axis=0)
+        node = HFN(mu=mu, sigma=sigma, id=label)
     node._children = list(children)
     if edges:
         child_by_id = {c.id: c for c in children}

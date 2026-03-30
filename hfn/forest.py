@@ -94,5 +94,6 @@ class Forest(HFN):
         else:
             mus = np.stack([n.mu for n in self._registry.values()])
             self.mu = mus.mean(axis=0)
-            sigmas = np.stack([n.sigma for n in self._registry.values()])
-            self.sigma = sigmas.mean(axis=0)
+            # Expand diag nodes to full matrices before averaging
+            sigmas = [np.diag(n.sigma) if n.use_diag else n.sigma for n in self._registry.values()]
+            self.sigma = np.mean(sigmas, axis=0)

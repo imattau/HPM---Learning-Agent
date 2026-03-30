@@ -421,3 +421,113 @@ def test_roots_are_independent(ball_trees):
     # shared nodes appear in both
     assert t["motion"].id in catch_ids
     assert t["motion"].id in throw_ids
+
+
+# ---------------------------------------------------------------------------
+# sigma_diag storage tests (use_diag=True)
+# ---------------------------------------------------------------------------
+
+class TestSigmaDiag:
+    """Tests for O(D) diagonal covariance storage mode."""
+
+    def test_use_diag_sigma_is_1d(self):
+        """A use_diag node stores sigma as a D-vector, not a D×D matrix."""
+        D = 8
+        node = HFN(mu=np.zeros(D), sigma=np.ones(D), use_diag=True)
+        assert node.sigma.ndim == 1
+        assert node.sigma.shape == (D,)
+
+    def test_use_diag_log_prob_matches_full_matrix(self):
+        """log_prob with use_diag=True must equal log_prob of equivalent full-matrix node."""
+        D = 6
+        rng = np.random.default_rng(42)
+        mu = rng.standard_normal(D)
+        variances = rng.uniform(0.5, 2.0, D)
+        x = rng.standard_normal(D)
+
+        node_diag = HFN(mu=mu.copy(), sigma=variances.copy(), use_diag=True)
+        node_full = HFN(mu=mu.copy(), sigma=np.diag(variances))
+
+        lp_diag = node_diag.log_prob(x)
+        lp_full = node_full.log_prob(x)
+        assert abs(lp_diag - lp_full) < 1e-10, f"log_prob mismatch: diag={lp_diag}, full={lp_full}"
+
+    def test_use_diag_overlap_matches_full_matrix(self):
+        """overlap() with two use_diag nodes must match full-matrix result."""
+        D = 5
+        rng = np.random.default_rng(7)
+        mu_a = rng.standard_normal(D)
+        mu_b = rng.standard_normal(D)
+        var_a = rng.uniform(0.5, 2.0, D)
+        var_b = rng.uniform(0.5, 2.0, D)
+
+        a_diag = HFN(mu=mu_a.copy(), sigma=var_a.copy(), use_diag=True)
+        b_diag = HFN(mu=mu_b.copy(), sigma=var_b.copy(), use_diag=True)
+        a_full = HFN(mu=mu_a.copy(), sigma=np.diag(var_a))
+        b_full = HFN(mu=mu_b.copy(), sigma=np.diag(var_b))
+
+        assert abs(a_diag.overlap(b_diag) - a_full.overlap(b_full)) < 1e-10
+
+    def test_make_leaf_use_diag(self):
+        """make_leaf with use_diag=True produces a 1D sigma."""
+        node = make_leaf("test_leaf", D=10, use_diag=True)
+        assert node.use_diag is True
+        assert node.sigma.ndim == 1
+        assert node.sigma.shape == (10,)
+
+    def test_make_leaf_default_is_full_matrix(self):
+        """make_leaf default (use_diag=False) still produces a D×D sigma."""
+        node = make_leaf("default_leaf", D=4)
+        assert node.use_diag is False
+        assert node.sigma.ndim == 2
+        assert node.sigma.shape == (4, 4)
+
+    def test_make_parent_all_diag_children_produces_diag_parent(self):
+        """make_parent with all use_diag children produces a use_diag parent."""
+        a = make_leaf("a", D=4, use_diag=True)
+        b = make_leaf("b", D=4, use_diag=True)
+        parent = make_parent("parent", [a, b])
+        assert parent.use_diag is True
+        assert parent.sigma.ndim == 1
+
+    def test_make_parent_mixed_children_produces_full_matrix_parent(self):
+        """make_parent with mixed children produces a full-matrix parent."""
+        a = make_leaf("a", D=4, use_diag=True)
+        b = make_leaf("b", D=4, use_diag=False)
+        parent = make_parent("parent", [a, b])
+        assert parent.use_diag is False
+        assert parent.sigma.ndim == 2
+
+    def test_recombine_both_diag_produces_diag(self):
+        """recombine() of two use_diag nodes produces a use_diag parent."""
+        a = make_leaf("a", D=4, use_diag=True)
+        b = make_leaf("b", D=4, use_diag=True)
+        parent = a.recombine(b)
+        assert parent.use_diag is True
+        assert parent.sigma.ndim == 1
+
+    def test_recombine_mixed_produces_full(self):
+        """recombine() of mixed diag/full nodes produces a full-matrix parent."""
+        a = make_leaf("a", D=4, use_diag=True)
+        b = make_leaf("b", D=4, use_diag=False)
+        parent = a.recombine(b)
+        assert parent.use_diag is False
+        assert parent.sigma.ndim == 2
+
+    def test_description_length_diag_node(self):
+        """description_length works for use_diag nodes."""
+        D = 6
+        node = HFN(mu=np.ones(D), sigma=np.ones(D), use_diag=True)
+        dl = node.description_length()
+        # All mu components are 1.0 > 1e-6, plus D for diagonal entries
+        assert dl == float(D + D)
+
+    def test_backward_compat_default_use_diag_false(self):
+        """Existing code creating HFN without use_diag works unchanged."""
+        D = 4
+        node = HFN(mu=np.zeros(D), sigma=np.eye(D))
+        assert node.use_diag is False
+        assert node.sigma.ndim == 2
+        # log_prob should still work via the existing diagonal fast-path
+        lp = node.log_prob(np.ones(D))
+        assert np.isfinite(lp)
