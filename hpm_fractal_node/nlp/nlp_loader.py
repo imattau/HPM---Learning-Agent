@@ -318,3 +318,93 @@ def generate_sentences(
     idx = rng.permutation(len(observations))
     observations = [observations[i] for i in idx]
     return observations[:2000]
+
+
+# ---------------------------------------------------------------------------
+# Real corpus observation generation
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase, strip punctuation, split on whitespace."""
+    text = text.lower()
+    text = _re.sub(r"[^a-z\s]", " ", text)
+    return [w for w in text.split() if w]
+
+
+def _encode_corpus_word(word: str) -> np.ndarray:
+    """
+    Encode a word for corpus context windows.
+    Known vocab words: one-hot at their index.
+    Unknown words: character-hash spread across 3 slots — makes each unknown
+    word land at distinct positions so word_<unknown> can't absorb them all.
+    """
+    idx = VOCAB_INDEX.get(word, None)
+    if idx is not None:
+        vec = np.zeros(VOCAB_SIZE, dtype=np.float64)
+        vec[idx] = 1.0
+        return vec
+    # Spread unknown word across 3 character-derived slots
+    vec = np.zeros(VOCAB_SIZE, dtype=np.float64)
+    for i, ch in enumerate(word[:4]):
+        slot = (ord(ch) * (i + 1) * 31 + 7) % VOCAB_SIZE
+        vec[slot] += 0.4
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec /= norm
+    return vec
+
+
+def compose_corpus_context(
+    left2: str, left1: str, right1: str, right2: str,
+) -> np.ndarray:
+    """Like compose_context_node but uses character-hash for unknown words."""
+    return (
+        0.20 * _encode_corpus_word(left2)
+        + 0.35 * _encode_corpus_word(left1)
+        + 0.35 * _encode_corpus_word(right1)
+        + 0.10 * _encode_corpus_word(right2)
+    )
+
+
+def generate_corpus_observations(
+    corpus_path,
+    max_obs: int = 1000,
+    seed: int = 42,
+) -> list[tuple[np.ndarray, str, str]]:
+    """
+    Generate context-window observations from a plain-text corpus file.
+
+    For each token in the corpus, create a 4-slot context window observation
+    using compose_context_node.  The target word and its category are recorded
+    for evaluation; unknown words get category 'unknown'.
+
+    Returns list of (context_vector, true_word, category).
+    """
+    from pathlib import Path as _Path
+    text = _Path(corpus_path).read_text(encoding="utf-8", errors="ignore")
+    tokens = _tokenize(text)
+    if len(tokens) < 5:
+        return []
+
+    pad = "<start>"
+    padded = [pad, pad] + tokens + [pad, pad]
+
+    observations: list[tuple[np.ndarray, str, str]] = []
+    for i in range(2, len(padded) - 2):
+        target = padded[i]
+        left2 = padded[i - 2]
+        left1 = padded[i - 1]
+        right1 = padded[i + 1]
+        right2 = padded[i + 2]
+        # Use character-hash encoding so unknown context words are distinct
+        vec = compose_corpus_context(left2, left1, right1, right2)
+        cat = _WORD_TO_CATEGORY.get(target, "unknown")
+        observations.append((vec, target, cat))
+
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(len(observations))
+    observations = [observations[i] for i in idx]
+    return observations[:max_obs]

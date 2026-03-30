@@ -25,8 +25,16 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 from hfn import Observer, calibrate_tau
 from hfn.fractal import hausdorff_distance
 from hfn.tiered_forest import TieredForest
-from hpm_fractal_node.nlp.nlp_loader import generate_sentences, category_names, D
+from hpm_fractal_node.nlp.nlp_loader import (
+    generate_sentences, generate_corpus_observations, category_names, D, VOCAB,
+)
 from hpm_fractal_node.nlp.nlp_world_model import build_nlp_world_model
+from hpm_fractal_node.nlp.query_llm import QueryLLM
+from hpm_fractal_node.nlp.converter_llm import ConverterLLM
+from hpm_fractal_node.nlp.download_corpus import corpus_path, download as download_corpus
+
+OLLAMA_HOST = "http://127.0.0.1:11434"
+OLLAMA_MODEL = "tinyllama:latest"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -57,7 +65,21 @@ def purity(counts: dict) -> float:
 def main() -> None:
     print(f"Loading {N_SAMPLES} NLP observations (D={D}) ...", flush=True)
     data = generate_sentences(seed=SEED)
-    print(f"  {len(data)} observations loaded")
+    print(f"  {len(data)} synthetic observations loaded")
+
+    # Mix in real corpus observations if available
+    _corpus = corpus_path()
+    if not _corpus.exists():
+        print("  Corpus not found — downloading Peter Rabbit ...", flush=True)
+        try:
+            download_corpus()
+        except SystemExit:
+            print("  Corpus download failed — running with synthetic only")
+    if _corpus.exists():
+        corpus_obs = generate_corpus_observations(_corpus, max_obs=500, seed=SEED)
+        data = data + corpus_obs
+        print(f"  +{len(corpus_obs)} corpus observations (real text, unknown words)")
+    print(f"  {len(data)} total observations")
     cats = category_names()
     print(f"  {len(cats)} semantic categories: {cats}")
 
@@ -75,6 +97,18 @@ def main() -> None:
     tau = calibrate_tau(D, sigma_scale=TAU_SIGMA, margin=TAU_MARGIN)
     print(f"  tau = {tau:.2f}")
 
+    # Wire in QueryLLM via ollama
+    _test_query = QueryLLM(host=OLLAMA_HOST, model=OLLAMA_MODEL)
+    _test_resp = _test_query._call_ollama("say hi")
+    if _test_resp:
+        print(f"  Ollama ({OLLAMA_MODEL}) reachable at {OLLAMA_HOST} — QueryLLM active")
+        _query = _test_query
+        _converter = ConverterLLM()
+    else:
+        print(f"  Ollama not reachable at {OLLAMA_HOST} — running without QueryLLM")
+        _query = None
+        _converter = None
+
     obs = Observer(
         forest,
         tau=tau,
@@ -86,6 +120,11 @@ def main() -> None:
         lacunarity_creation_radius=0.08,
         multifractal_guided_absorption=True,
         multifractal_crowding_radius=0.12,
+        query=_query,
+        converter=_converter,
+        gap_query_threshold=0.05,
+        max_expand_depth=2,
+        vocab=VOCAB,
     )
 
     # ------------------------------------------------------------------
@@ -103,7 +142,17 @@ def main() -> None:
         for i in order:
             vec, true_word, category = data[i]
             x = vec.astype(np.float64)
+            # Give QueryLLM the actual word for unknown corpus tokens
+            if _query is not None and category == "unknown":
+                _query.current_target = true_word
             result = obs.observe(x)
+            if _query is not None:
+                _query.current_target = None
+            # Debug: print accuracy scores for first 3 unknown corpus obs
+            if p == 0 and category == "unknown" and (n_explained + n_unexplained) < 10:
+                scores = result.accuracy_scores
+                best = max(scores.values(), default=0.0) if scores else 0.0
+                print(f"    [debug] '{true_word}' best_acc={best:.3f} gap={1-best:.3f} nodes={len(scores)}", flush=True)
             forest._on_observe()
             if (n_explained + n_unexplained) % 500 == 0:
                 print(f"    {n_explained + n_unexplained}/{N_SAMPLES} ...", flush=True)
@@ -252,6 +301,61 @@ def main() -> None:
         print(f"  Hausdorff(learned, priors): {hd:.4f}")
 
     print(f"\n=== Absorbed nodes: {len(obs.absorbed_ids)} ===")
+
+    # ------------------------------------------------------------------
+    # Abstraction metrics
+    # ------------------------------------------------------------------
+    word_ids = prior_ids  # word_ priors are the leaf level
+
+    # BFS depth from nearest prior
+    from collections import deque
+    depth_map: dict[str, int] = {pid: 0 for pid in word_ids}
+    queue: deque = deque(word_ids)
+    visited = set(word_ids)
+    while queue:
+        nid = queue.popleft()
+        node = forest.get(nid)
+        if node is None:
+            continue
+        try:
+            children = list(node.children()) if callable(node.children) else list(node.children)
+        except Exception:
+            children = []
+        for child in children:
+            if child.id not in visited:
+                depth_map[child.id] = depth_map[nid] + 1
+                visited.add(child.id)
+                queue.append(child.id)
+
+    # Non-prior active nodes
+    active_non_prior = [
+        n for n in forest.active_nodes() if n.id not in prior_ids
+    ]
+
+    # Per-node category coverage
+    n_depth2 = 0
+    n_cross_cat = 0
+    n_stable = 0  # appeared in node_explanations (survived all passes)
+
+    for node in active_non_prior:
+        depth = depth_map.get(node.id, 0)
+        if depth >= 2:
+            n_depth2 += 1
+
+        labels = node_explanations.get(node.id, [])
+        cats = {cat for _, cat in labels}
+        if len(cats) >= 2:
+            n_cross_cat += 1
+
+        if node.id in node_explanations:
+            n_stable += 1
+
+    print(f"\n=== Abstraction candidates ({len(active_non_prior)} non-prior nodes) ===")
+    print(f"  depth >= 2:              {n_depth2}")
+    print(f"  cross-category (>=2):    {n_cross_cat}")
+    print(f"  stable (appeared in exp):{n_stable}")
+    if _query is not None and hasattr(_query, "_cache"):
+        print(f"  LLM queries cached:      {len(_query._cache)}")
 
 
 if __name__ == "__main__":
