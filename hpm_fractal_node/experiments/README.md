@@ -181,3 +181,10 @@ For detailed documentation of the most developed experiments, see:
 - [`README_code.md`](README_code.md) — Python code token experiment
 - [`README_nlp.md`](README_nlp.md) — NLP semantic category experiment
 - [`README_math.md`](README_math.md) — Math arithmetic / algebraic rule discovery experiment
+
+For detailed documentation of the lexical experiments, see:
+
+- [`README_lexical_semantic_forest.md`](README_lexical_semantic_forest.md) — large WordNet-backed prior forest
+- [`README_lexical_transfer.md`](README_lexical_transfer.md) — in-domain vs out-of-domain lexical transfer
+- [`README_lexical_curriculum.md`](README_lexical_curriculum.md) — staged lexical stretching over time
+
