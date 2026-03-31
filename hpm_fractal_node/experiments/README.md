@@ -44,6 +44,7 @@ substrate. The core components are:
 | `experiment_nlp.py` | NLP / child language | Semantic category alignment; QueryLLM gap-filling; TieredForest | Working |
 | `experiment_lexical_semantic_forest.py` | WordNet lexical ontology + Peter Rabbit corpus | Several-thousand-node external prior library grounded in real text; lemma, synset, relation, and abstraction roots; compact vs large prior comparison | Working |
 | `experiment_lexical_transfer.py` | WordNet lexical transfer + mixed corpus | Compares in-domain Peter Rabbit/repo text against out-of-domain vocabulary over the WordNet ontology; measures coverage, learned-node recovery, and abstraction transfer | Working |
+| `experiment_lexical_curriculum.py` | WordNet lexical curriculum + persistent forest | Reuses the same WordNet forest across easy, medium, and hard text streams to test whether stretching the model leaves behind reusable learned structure | Working |
 | `experiment_code.py` | Python code tokens | Category purity (control_flow, functions, builtins, data); QueryStdlib gap-filling | Working |
 | `experiment_math.py` | Integer arithmetic | Algebraic rule discovery; 306-prior library across 6 abstraction levels; no LLM | Working |
 
@@ -52,6 +53,7 @@ substrate. The core components are:
 > The NLP experiment downloads Peter Rabbit automatically on first run.
 > The lexical-semantic experiment reuses the same Peter Rabbit corpus as real text observations over the WordNet ontology.
 > The lexical-transfer experiment compares in-domain Peter Rabbit/repo text with out-of-domain vocabulary over the WordNet ontology.
+> The lexical-curriculum experiment runs the same WordNet forest across progressively harder stages to test cumulative improvement over time.
 > The code experiment builds a world model on first run and caches it to `data/code_world_model.*`.
 
 ---
@@ -170,6 +172,7 @@ in the world model when observations fall outside the current node coverage.
 | Large structured prior library (6 levels) | `experiment_math` |
 | Large lexical-semantic prior library (WordNet external ontology + corpus) | `experiment_lexical_semantic_forest` |
 | Lexical transfer across in-domain and out-of-domain vocabularies | `experiment_lexical_transfer` |
+| Curriculum stretching over progressively harder lexical stages | `experiment_lexical_curriculum` |
 
 ---
 
