@@ -5,9 +5,9 @@ Runs the math arithmetic experiment in two modes:
   - Baseline: node_use_diag=False  (full D×D covariance matrices for learned nodes)
   - Diagonal: node_use_diag=True   (D-vector diagonal covariance for learned nodes)
 
-For each mode measures wall-clock time, peak memory (via tracemalloc), final node
-counts, coverage %, and mean category purity.  Prints a side-by-side comparison
-table and a theoretical scaling projection for D=512, 50 000 priors.
+For each mode measures wall-clock time, peak RSS delta, final node counts,
+coverage %, and mean category purity.  Prints a side-by-side comparison table
+and a theoretical scaling projection for D=512, 50 000 priors.
 
 Usage:
     PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_sigma_diag_scaling.py
@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import sys
 import time
-import tracemalloc
+import gc
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import psutil
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
@@ -102,7 +103,10 @@ def run_experiment(use_diag: bool) -> dict:
     node_explanations: dict[str, list] = defaultdict(list)
 
     # -- Start timing and memory tracking -----------------------------------
-    tracemalloc.start()
+    process = psutil.Process()
+    gc.collect()
+    start_rss = process.memory_info().rss
+    peak_rss = start_rss
     t0 = time.perf_counter()
 
     for p in range(N_PASSES):
@@ -128,13 +132,17 @@ def run_experiment(use_diag: bool) -> dict:
             else:
                 n_unexplained += 1
 
+            rss = process.memory_info().rss
+            if rss > peak_rss:
+                peak_rss = rss
+
         n_total = len(data)
         print(f"  Pass {p+1}: explained {n_explained}/{n_total} "
               f"({100*n_explained/n_total:.1f}%)")
 
     elapsed = time.perf_counter() - t0
-    _, peak_bytes = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    gc.collect()
+    peak_rss = max(peak_rss, process.memory_info().rss)
 
     # -- Compute metrics ----------------------------------------------------
     n_obs_total = N_PASSES * N_SAMPLES
@@ -144,7 +152,7 @@ def run_experiment(use_diag: bool) -> dict:
     learned_nodes = [k for k in node_explanations if k not in prior_ids]
     active_nodes = list(forest.active_nodes())
     n_active_learned = sum(1 for n in active_nodes if n.id not in prior_ids)
-    final_node_count = n_priors + n_active_learned
+    total_node_count = len(forest)
 
     # Category purity over learned nodes with n >= 5
     cat_purities = []
@@ -163,10 +171,10 @@ def run_experiment(use_diag: bool) -> dict:
         "label": label,
         "use_diag": use_diag,
         "elapsed_s": elapsed,
-        "peak_mb": peak_bytes / (1024 ** 2),
+        "peak_rss_delta_mb": (peak_rss - start_rss) / (1024 ** 2),
         "n_priors": n_priors,
         "n_active_learned": n_active_learned,
-        "final_node_count": final_node_count,
+        "final_node_count": total_node_count,
         "coverage_pct": coverage_pct,
         "mean_purity": mean_purity,
         "n_purity_nodes": len(cat_purities),
@@ -223,13 +231,13 @@ def print_comparison(baseline: dict, diag: dict) -> None:
     row("Wall-clock time (s)",
         f"{baseline['elapsed_s']:.2f}",
         f"{diag['elapsed_s']:.2f}")
-    row("Peak memory (MB)",
-        f"{baseline['peak_mb']:.1f}",
-        f"{diag['peak_mb']:.1f}")
+    row("Peak RSS delta (MB)",
+        f"{baseline['peak_rss_delta_mb']:.1f}",
+        f"{diag['peak_rss_delta_mb']:.1f}")
     row("Prior nodes",
         str(baseline['n_priors']),
         str(diag['n_priors']))
-    row("Active learned nodes",
+    row("Hot learned nodes",
         str(baseline['n_active_learned']),
         str(diag['n_active_learned']))
     row("Total node count",
@@ -247,7 +255,7 @@ def print_comparison(baseline: dict, diag: dict) -> None:
 
     # Derived speedup / memory saving
     speedup = baseline['elapsed_s'] / max(diag['elapsed_s'], 1e-9)
-    mem_saving = (baseline['peak_mb'] - diag['peak_mb']) / max(baseline['peak_mb'], 1e-9) * 100
+    mem_saving = (baseline['peak_rss_delta_mb'] - diag['peak_rss_delta_mb']) / max(baseline['peak_rss_delta_mb'], 1e-9) * 100
     cov_delta = diag['coverage_pct'] - baseline['coverage_pct']
     pur_delta = diag['mean_purity'] - baseline['mean_purity']
 

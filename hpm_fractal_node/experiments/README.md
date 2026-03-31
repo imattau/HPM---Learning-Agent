@@ -42,12 +42,14 @@ substrate. The core components are:
 | `experiment_fractal_self_similarity.py` | ARC-AGI-2 (3x3 colour) | Self-similarity score (CV of log-count differences) per pass; world-model vs no-priors | Working |
 | `experiment_dsprites.py` | dSprites (16x16 binary) | Generative factor alignment: do learned nodes align with shape/scale/position? | Working |
 | `experiment_nlp.py` | NLP / child language | Semantic category alignment; QueryLLM gap-filling; TieredForest | Working |
+| `experiment_lexical_semantic_forest.py` | WordNet lexical ontology + Peter Rabbit corpus | Several-thousand-node external prior library grounded in real text; lemma, synset, relation, and abstraction roots; compact vs large prior comparison | Working |
 | `experiment_code.py` | Python code tokens | Category purity (control_flow, functions, builtins, data); QueryStdlib gap-filling | Working |
 | `experiment_math.py` | Integer arithmetic | Algebraic rule discovery; 306-prior library across 6 abstraction levels; no LLM | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
 > The NLP experiment downloads Peter Rabbit automatically on first run.
+> The lexical-semantic experiment reuses the same Peter Rabbit corpus as real text observations over the WordNet ontology.
 > The code experiment builds a world model on first run and caches it to `data/code_world_model.*`.
 
 ---
@@ -164,6 +166,7 @@ in the world model when observations fall outside the current node coverage.
 | Latent generative factor alignment | `experiment_dsprites` |
 | Algebraic rule discovery (pure geometry) | `experiment_math` |
 | Large structured prior library (6 levels) | `experiment_math` |
+| Large lexical-semantic prior library (WordNet external ontology + corpus) | `experiment_lexical_semantic_forest` |
 
 ---
 
