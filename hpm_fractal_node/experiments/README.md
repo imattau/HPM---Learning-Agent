@@ -43,7 +43,7 @@ substrate. The core components are:
 | `experiment_dsprites.py` | dSprites (16x16 binary) | Generative factor alignment: do learned nodes align with shape/scale/position? | Working |
 | `experiment_nlp.py` | NLP / child language | Semantic category alignment; QueryLLM gap-filling; TieredForest | Working |
 | `experiment_lexical_semantic_forest.py` | WordNet lexical ontology + Peter Rabbit corpus | Several-thousand-node external prior library grounded in real text; lemma, synset, relation, and abstraction roots; compact vs large prior comparison | Working |
-| `experiment_lexical_semantic_holdout.py` | WordNet relation holdout + local text corpus | Masks a slice of relation priors and measures whether HFN keeps coverage while learning around missing semantic bridges | Working |
+| `experiment_lexical_semantic_holdout.py` | WordNet lexical holdout + local text corpus | Masks a slice of lemma priors and measures whether HFN keeps coverage while learning around missing surface anchors | Working |
 | `experiment_code.py` | Python code tokens | Category purity (control_flow, functions, builtins, data); QueryStdlib gap-filling | Working |
 | `experiment_math.py` | Integer arithmetic | Algebraic rule discovery; 306-prior library across 6 abstraction levels; no LLM | Working |
 
@@ -51,7 +51,7 @@ substrate. The core components are:
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
 > The NLP experiment downloads Peter Rabbit automatically on first run.
 > The lexical-semantic experiment reuses the same Peter Rabbit corpus as real text observations over the WordNet ontology.
-> The relation-holdout variant mixes Peter Rabbit with repository markdown and masks a slice of relation priors.
+> The lexical-holdout variant mixes Peter Rabbit with repository markdown and masks a slice of lemma priors.
 > The code experiment builds a world model on first run and caches it to `data/code_world_model.*`.
 
 ---
@@ -169,7 +169,7 @@ in the world model when observations fall outside the current node coverage.
 | Algebraic rule discovery (pure geometry) | `experiment_math` |
 | Large structured prior library (6 levels) | `experiment_math` |
 | Large lexical-semantic prior library (WordNet external ontology + corpus) | `experiment_lexical_semantic_forest` |
-| Relation holdout over broader local corpus | `experiment_lexical_semantic_holdout` |
+| Lexical holdout over broader local corpus | `experiment_lexical_semantic_holdout` |
 
 ---
 

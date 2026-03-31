@@ -1,12 +1,12 @@
 """
-WordNet relation-holdout experiment.
+WordNet lexical-holdout experiment.
 
 This experiment reuses the WordNet-backed lexical-semantic prior forest, but
-masks a slice of relation priors and exercises the model on a broader local
+masks a slice of lemma priors and exercises the model on a broader local
 text corpus assembled from repository documentation plus Peter Rabbit.
 
 The goal is to test whether HFN can preserve coverage while learning around
-missing semantic bridges instead of relying entirely on the full relation set.
+missing surface anchors instead of relying entirely on the full lexical set.
 
 Usage:
     PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_semantic_holdout.py
@@ -94,10 +94,10 @@ def _broad_corpus_segments() -> tuple[str, ...]:
     return tuple(segments)
 
 
-def _holdout_relation_kept(rel_id: str, holdout_ratio: float) -> bool:
+def _holdout_lemma_kept(lemma_id: str, holdout_ratio: float) -> bool:
     if holdout_ratio <= 0.0:
         return True
-    bucket = base._stable_int(rel_id) % 1000 / 1000.0
+    bucket = base._stable_int(lemma_id) % 1000 / 1000.0
     return bucket >= holdout_ratio
 
 
@@ -117,7 +117,7 @@ def _build_holdout_world_model(holdout_ratio: float):
     )
 
     prior_ids: set[str] = set()
-    heldout_relation_ids: set[str] = set()
+    heldout_lemma_ids: set[str] = set()
 
     def add(node):
         forest.register(node)
@@ -143,15 +143,15 @@ def _build_holdout_world_model(holdout_ratio: float):
                 node.add_child(lemma_node)
 
     for src_name, rel_tag, tgt_name in inventory.relation_specs:
-        rel_id = f"rel_{rel_tag}_{src_name.replace('.', '_')}__{tgt_name.replace('.', '_')}"
-        if not _holdout_relation_kept(rel_id, holdout_ratio):
-            heldout_relation_ids.add(rel_id)
+        lemma_id = f"rel_{rel_tag}_{src_name.replace('.', '_')}__{tgt_name.replace('.', '_')}"
+        if not _holdout_lemma_kept(lemma_id, holdout_ratio):
+            heldout_lemma_ids.add(lemma_id)
             continue
         src = synset_nodes.get(src_name)
         tgt = synset_nodes.get(tgt_name)
         if src is None or tgt is None:
             continue
-        if rel_id in relation_nodes:
+        if lemma_id in relation_nodes:
             continue
         text = f"relation {rel_tag} {src_name.replace('_', ' ')} {tgt_name.replace('_', ' ')}"
         rel_mu = base._compose_mu(
@@ -160,10 +160,10 @@ def _build_holdout_world_model(holdout_ratio: float):
             text,
             relation_tag=rel_tag,
         )
-        rel_node = add(base._node(rel_id, rel_mu, sigma_scale=0.32))
+        rel_node = add(base._node(lemma_id, rel_mu, sigma_scale=0.32))
         rel_node.add_child(src)
         rel_node.add_child(tgt)
-        relation_nodes[rel_id] = rel_node
+        relation_nodes[lemma_id] = rel_node
 
     pos_roots: dict[str, object] = {}
     pos_groups: dict[str, list] = defaultdict(list)
@@ -211,7 +211,7 @@ def _build_holdout_world_model(holdout_ratio: float):
 
     forest.set_protected(prior_ids)
     return forest, prior_ids, inventory, {
-        "heldout_relation_ids": heldout_relation_ids,
+        "heldout_lemma_ids": heldout_lemma_ids,
         "synset_nodes": synset_nodes,
         "lemma_nodes": lemma_nodes,
         "relation_nodes": relation_nodes,
@@ -225,7 +225,7 @@ def _build_holdout_world_model(holdout_ratio: float):
 def _generate_observations(inventory, n_samples: int, seed: int):
     segments = _broad_corpus_segments()
     if not segments:
-        raise ValueError("No corpus segments were found for the relation-holdout experiment")
+        raise ValueError("No corpus segments were found for the lexical-holdout experiment")
 
     rng = np.random.default_rng(seed)
     idxs = rng.choice(len(segments), size=n_samples, replace=True)
@@ -251,7 +251,7 @@ def _run_variant(name: str, holdout_ratio: float, data: list[tuple[np.ndarray, s
     print("\n" + "=" * 72)
 
     forest, prior_ids, inventory, components = _build_holdout_world_model(holdout_ratio)
-    heldout_relation_ids = components["heldout_relation_ids"]
+    heldout_lemma_ids = components["heldout_lemma_ids"]
 
     counts = {
         "lemmas": sum(1 for pid in prior_ids if pid.startswith("lemma_")),
@@ -267,7 +267,7 @@ def _run_variant(name: str, holdout_ratio: float, data: list[tuple[np.ndarray, s
         f"relations={counts['relations']}  pos={counts['pos']}  lex={counts['lex']}  "
         f"depth={counts['depth']}  ontology={counts['ontology']}"
     )
-    print(f"  Held-out relation priors: {len(heldout_relation_ids)}")
+    print(f"  Held-out lemma priors: {len(heldout_lemma_ids)}")
     print(f"  Hot priors on start: {forest.hot_count()}")
 
     tau = calibrate_tau(D, sigma_scale=TAU_SIGMA, margin=TAU_MARGIN)
@@ -356,7 +356,7 @@ def _run_variant(name: str, holdout_ratio: float, data: list[tuple[np.ndarray, s
         "elapsed_s": elapsed,
         "peak_rss_delta_mb": (peak_rss - start_rss) / (1024 ** 2),
         "n_priors": len(prior_ids),
-        "heldout_relation_priors": len(heldout_relation_ids),
+        "heldout_lemma_priors": len(heldout_lemma_ids),
         "learned_nodes_surviving": sum(1 for k in learned_nodes if forest.get(k) is not None),
         "learned_nodes_explained": len(learned_nodes),
         "final_node_count": len(forest),
@@ -369,7 +369,7 @@ def _run_variant(name: str, holdout_ratio: float, data: list[tuple[np.ndarray, s
         "prior_explained": prior_explained,
         "learned_explained": learned_explained,
         "total_attributed": total_attributed,
-        "relation_layer_explanations": layer_counts.get("relation", 0),
+        "lexical_layer_explanations": layer_counts.get("relation", 0),
     }
 
 
@@ -381,12 +381,12 @@ def _print_comparison(baseline: dict, holdout: dict) -> None:
         ("Wall-clock time (s)", f"{baseline['elapsed_s']:.2f}", f"{holdout['elapsed_s']:.2f}"),
         ("Peak RSS delta (MB)", f"{baseline['peak_rss_delta_mb']:.1f}", f"{holdout['peak_rss_delta_mb']:.1f}"),
         ("Prior nodes", f"{baseline['n_priors']}", f"{holdout['n_priors']}"),
-        ("Held-out relation priors", f"{baseline['heldout_relation_priors']}", f"{holdout['heldout_relation_priors']}"),
+        ("Held-out lemma priors", f"{baseline['heldout_lemma_priors']}", f"{holdout['heldout_lemma_priors']}"),
         ("Final node count", f"{baseline['final_node_count']}", f"{holdout['final_node_count']}"),
         ("Learned nodes surviving", f"{baseline['learned_nodes_surviving']}", f"{holdout['learned_nodes_surviving']}"),
         ("Learned nodes explained", f"{baseline['learned_nodes_explained']}", f"{holdout['learned_nodes_explained']}"),
         ("Coverage %", f"{baseline['coverage_pct']:.2f}%", f"{holdout['coverage_pct']:.2f}%"),
-        ("Relation-layer explanations", f"{baseline['relation_layer_explanations']}", f"{holdout['relation_layer_explanations']}"),
+        ("Lexical-layer explanations", f"{baseline['lexical_layer_explanations']}", f"{holdout['lexical_layer_explanations']}"),
         ("Mean category purity (n>=5)", f"{baseline['mean_purity']:.3f}", f"{holdout['mean_purity']:.3f}"),
         ("Purity-eligible nodes", f"{baseline['n_purity_nodes']}", f"{holdout['n_purity_nodes']}"),
         ("Mean explaining layer", f"{baseline['mean_explaining_layer']:.2f}", f"{holdout['mean_explaining_layer']:.2f}"),
@@ -410,7 +410,7 @@ def _print_comparison(baseline: dict, holdout: dict) -> None:
 
 def main() -> None:
     segments = _broad_corpus_segments()
-    print("Relation-holdout WordNet experiment")
+    print("Lexical-holdout WordNet experiment")
     print(f"  D={D}, N_SAMPLES={N_SAMPLES}, N_PASSES={N_PASSES}, SEED={SEED}")
     print("  Observation stream is sampled from a broader local text corpus and grounded in WordNet.")
     print(f"  Corpus segments available: {len(segments)}")
