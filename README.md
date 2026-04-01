@@ -448,6 +448,9 @@ python hpm_fractal_node/experiments/experiment_thematic_anchor.py
 
 # SP21 — Toddler Sentence Generator (Generation)
 python hpm_fractal_node/experiments/experiment_toddler_generator.py
+
+# SP22 — Agnostic Decoder (Synthesis)
+python hpm_fractal_node/experiments/experiment_agnostic_decoder.py
 ```
 
 ### Run HFN experiments

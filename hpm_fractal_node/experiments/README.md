@@ -58,6 +58,7 @@ substrate. The core components are:
 | `experiment_sovereign_meta.py` | Rosetta Grounding | Two-tier hierarchy (L1 Perceptual -> L2 Relational) for cross-domain analogy discovery | Working |
 | `experiment_thematic_anchor.py` | Peter Rabbit (2000 tokens) | Structural summarization and narrative motif discovery via multi-tier synthesis | Working |
 | `experiment_toddler_generator.py` | Top-Down Synthesis | Generates simple sentences ("Mum ate apple") by coordinating an 8-domain "Structural Octet" | Working |
+| `experiment_agnostic_decoder.py` | Variance Collapse | Universal, domain-agnostic top-down resolution via geometric variance and HFN topology | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -199,6 +200,8 @@ in the world model when observations fall outside the current node coverage.
 | Structural Summarization (Information Bottlenecking) | `experiment_thematic_anchor` |
 | Top-Down Synthesis (Generation) | `experiment_toddler_generator` |
 | Multi-Domain Constraint Resolution | `experiment_toddler_generator` |
+| Variance Collapse (abstraction as variance) | `experiment_agnostic_decoder` |
+| Universal HFN Decoding (domain-agnostic) | `experiment_agnostic_decoder` |
 
 ---
 
@@ -226,4 +229,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_sovereign_cluster.md`](README_sovereign_cluster.md) — the "Foundational Five" parallel cluster and Sovereignty Spectrum
 - [`README_sovereign_arc.md`](README_sovereign_arc.md) — ARC "Stereo Vision" multi-process experiment
 - [`README_sovereign_meta.md`](README_sovereign_meta.md) — hierarchical synthesis and cross-domain analogy stabilization
+- [`README_agnostic_decoder.md`](README_agnostic_decoder.md) — universal Variance Collapse decoding
 
