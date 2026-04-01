@@ -59,6 +59,7 @@ substrate. The core components are:
 | `experiment_thematic_anchor.py` | Peter Rabbit (2000 tokens) | Structural summarization and narrative motif discovery via multi-tier synthesis | Working |
 | `experiment_toddler_generator.py` | Top-Down Synthesis | Generates simple sentences ("Mum ate apple") by coordinating an 8-domain "Structural Octet" | Working |
 | `experiment_agnostic_decoder.py` | Variance Collapse | Universal, domain-agnostic top-down resolution via geometric variance and HFN topology | Working |
+| `experiment_sovereign_decoder.py` | Stereo Action | Multi-process, mixed-modal (Lexical + Motor) top-down synthesis of a "Say and Point" goal | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -202,6 +203,8 @@ in the world model when observations fall outside the current node coverage.
 | Multi-Domain Constraint Resolution | `experiment_toddler_generator` |
 | Variance Collapse (abstraction as variance) | `experiment_agnostic_decoder` |
 | Universal HFN Decoding (domain-agnostic) | `experiment_agnostic_decoder` |
+| Stereo Action (mixed-modal synthesis) | `experiment_sovereign_decoder` |
+| Parallel Variance Collapse | `experiment_sovereign_decoder` |
 
 ---
 
@@ -230,4 +233,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_sovereign_arc.md`](README_sovereign_arc.md) — ARC "Stereo Vision" multi-process experiment
 - [`README_sovereign_meta.md`](README_sovereign_meta.md) — hierarchical synthesis and cross-domain analogy stabilization
 - [`README_agnostic_decoder.md`](README_agnostic_decoder.md) — universal Variance Collapse decoding
+- [`README_sovereign_decoder.md`](README_sovereign_decoder.md) — multi-process "Stereo Action" generation
 

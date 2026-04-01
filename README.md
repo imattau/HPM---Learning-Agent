@@ -451,6 +451,9 @@ python hpm_fractal_node/experiments/experiment_toddler_generator.py
 
 # SP22 — Agnostic Decoder (Synthesis)
 python hpm_fractal_node/experiments/experiment_agnostic_decoder.py
+
+# SP23 — Sovereign Decoder (Stereo Action)
+python hpm_fractal_node/experiments/experiment_sovereign_decoder.py
 ```
 
 ### Run HFN experiments
