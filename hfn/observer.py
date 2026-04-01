@@ -108,6 +108,7 @@ class Observer:
         prior_drift_rate: float = 0.01,        # mu drift step when revision triggered
         prior_revision_threshold: int = 200,   # misses before eligible for drift
         node_use_diag: bool = False,           # use O(D) diagonal sigma for all dynamically created nodes
+        node_prefix: str = "leaf_",            # prefix for dynamically created leaf nodes
     ):
         self.forest = forest
         self.tau = tau
@@ -177,6 +178,7 @@ class Observer:
 
         # Diagonal sigma storage for dynamically created nodes
         self.node_use_diag: bool = node_use_diag
+        self.node_prefix: str = node_prefix
 
     # --- Node lifecycle ---
 
@@ -294,6 +296,7 @@ class Observer:
             if nid not in self._weights:
                 self._init_node(node)
             if nid in self.protected_ids:
+
                 if self.prior_plasticity:
                     if nid in explaining_ids:
                         self._prior_hit_counts[nid] += 1
@@ -488,18 +491,27 @@ class Observer:
                 if ratio > self.lacunarity_creation_factor:
                     return  # region is dense — redirect to compression, not creation
             D = x.shape[0]
+            # Use self.forest._mu_index to get actual current count including cold
+            # but Observer might be watching an HFN that isn't a Forest.
+            # For TieredForest, len(self.forest) is correct (len of _mu_index).
+            # To be safe, we'll use a high-resolution ID.
+            node_id = f"{self.node_prefix}{len(self.forest)}"
+            # If collision, append random or use increment
+            while node_id in self.forest:
+                node_id = f"{node_id}_{np.random.randint(1000)}"
+            
             if self.node_use_diag:
                 new_node = HFN(
                     mu=x.copy(),
                     sigma=np.ones(D),
-                    id=f"leaf_{len(self.forest)}",
+                    id=node_id,
                     use_diag=True,
                 )
             else:
                 new_node = HFN(
                     mu=x.copy(),
                     sigma=np.eye(D),
-                    id=f"leaf_{len(self.forest)}",
+                    id=node_id,
                 )
             self.register(new_node)
 

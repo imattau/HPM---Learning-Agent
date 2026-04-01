@@ -56,6 +56,8 @@ substrate. The core components are:
 | `experiment_multi_observer_lifecycle.py` | Math + Text (216D) | Parallelized multi-process observers (Math, Text, and Mixed) across a 6-stage lifecycle | Working |
 | `experiment_sovereign_arc.py` | ARC-AGI-2 (10x10) | Multi-process "Stereo Vision" cluster (Spatial, Symbolic, Explorer) for ARC tasks | Working |
 | `experiment_sovereign_meta.py` | Rosetta Grounding | Two-tier hierarchy (L1 Perceptual -> L2 Relational) for cross-domain analogy discovery | Working |
+| `experiment_thematic_anchor.py` | Peter Rabbit (2000 tokens) | Structural summarization and narrative motif discovery via multi-tier synthesis | Working |
+| `experiment_toddler_generator.py` | Top-Down Synthesis | Generates simple sentences ("Mum ate apple") by coordinating an 8-domain "Structural Octet" | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -193,6 +195,10 @@ in the world model when observations fall outside the current node coverage.
 | Stereo Vision (cross-domain synthesis) | `experiment_sovereign_arc` |
 | Hierarchical message passing (L1 -> L2) | `experiment_sovereign_meta` |
 | Analogy stabilization (Joint Identities) | `experiment_sovereign_meta` |
+| Negative Selection via Priors | `experiment_thematic_anchor` |
+| Structural Summarization (Information Bottlenecking) | `experiment_thematic_anchor` |
+| Top-Down Synthesis (Generation) | `experiment_toddler_generator` |
+| Multi-Domain Constraint Resolution | `experiment_toddler_generator` |
 
 ---
 

@@ -442,6 +442,12 @@ python hpm_fractal_node/experiments/experiment_sovereign_arc.py
 
 # SP19 — Sovereign Meta-Hierarchy (Analogy Synthesis)
 python hpm_fractal_node/experiments/experiment_sovereign_meta.py
+
+# SP20 — Thematic Anchor Extraction (Summarization)
+python hpm_fractal_node/experiments/experiment_thematic_anchor.py
+
+# SP21 — Toddler Sentence Generator (Generation)
+python hpm_fractal_node/experiments/experiment_toddler_generator.py
 ```
 
 ### Run HFN experiments
