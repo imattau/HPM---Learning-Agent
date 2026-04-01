@@ -4,11 +4,19 @@ Resides in the core hfn/ folder. Knows only geometry and topology.
 """
 from __future__ import annotations
 import numpy as np
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Union
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
-    from hfn.hfn import HFN
+    from hfn.hfn import HFN, Edge
     from hfn.forest import Forest
+
+@dataclass
+class ResolutionRequest:
+    """Emitted by Decoder when a generative goal cannot be met by the current Target Forest."""
+    missing_mu: np.ndarray
+    missing_sigma: np.ndarray
+    required_edges: list[Edge]
 
 class Decoder:
     """
@@ -25,9 +33,10 @@ class Decoder:
         self.sigma_threshold = sigma_threshold
         self.k_candidates = k_candidates
 
-    def decode(self, node: HFN) -> List[HFN]:
+    def decode(self, node: HFN) -> Union[List[HFN], ResolutionRequest]:
         """
         Recursively collapses node into concrete leaves from target_forest.
+        Returns a ResolutionRequest if no suitable concrete candidate is found.
         """
         # 1. Concrete Check: Is this node already an output?
         # Use mean of diagonal sigma as variance proxy for uniformity
@@ -41,14 +50,22 @@ class Decoder:
         if children:
             results = []
             for child in children:
-                results.extend(self.decode(child))
+                child_result = self.decode(child)
+                if isinstance(child_result, ResolutionRequest):
+                    # If any child fails, the whole expansion stalls. Pass request up.
+                    return child_result
+                results.extend(child_result)
             return results
 
         # 3. Implicit Resolution: It's abstract but has no children. Resolve it.
         # Find candidates in the target forest near this abstract node's mu
         candidates = self.target_forest.retrieve(node.mu, k=self.k_candidates)
         if not candidates:
-            return []
+            return ResolutionRequest(
+                missing_mu=node.mu,
+                missing_sigma=node.sigma,
+                required_edges=node.edges()
+            )
 
         # Score candidates by topological fit
         best_candidate = None
@@ -59,6 +76,15 @@ class Decoder:
             if score > best_score:
                 best_score = score
                 best_candidate = cand
+
+        # If best_score <= 0.0, we found NO candidate that satisfies the topological requirements
+        # (even if they were geometrically close). This is a Semantic Gap.
+        if best_score <= 0.0 and node.edges():
+             return ResolutionRequest(
+                missing_mu=node.mu,
+                missing_sigma=node.sigma,
+                required_edges=node.edges()
+            )
 
         return [best_candidate] if best_candidate else []
 

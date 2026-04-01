@@ -454,6 +454,9 @@ python hpm_fractal_node/experiments/experiment_agnostic_decoder.py
 
 # SP23 — Sovereign Decoder (Stereo Action)
 python hpm_fractal_node/experiments/experiment_sovereign_decoder.py
+
+# SP24 — Demand-Driven Learning (Curiosity Engine)
+python hpm_fractal_node/experiments/experiment_demand_driven_learning.py
 ```
 
 ### Run HFN experiments
