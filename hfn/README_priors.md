@@ -8,6 +8,8 @@ Priors are ordinary `HFN` instances (Gaussian identity + DAG polygraph body). Wh
 
 By default (`prior_plasticity=False`) priors are completely static — their geometry never changes. When `prior_plasticity=True`, low-density priors can slowly drift their `mu` toward observations they keep missing, while remaining permanently protected from absorption. See [Graduated Prior Protection](#graduated-prior-protection-prior-plasticity) below.
 
+The async [`AsyncHFNController`](./hfn_controller.py) sits above this core. It does not change prior semantics; it only coordinates ingest, replay, prefetch, gap queries, and state export around the same protected prior forest.
+
 ---
 
 ## Protection Mechanics

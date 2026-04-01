@@ -45,8 +45,17 @@ substrate. The core components are:
 | `experiment_lexical_semantic_forest.py` | WordNet lexical ontology + Peter Rabbit corpus | Several-thousand-node external prior library grounded in real text; lemma, synset, relation, and abstraction roots; compact vs large prior comparison | Working |
 | `experiment_lexical_transfer.py` | WordNet lexical transfer + mixed corpus | Compares in-domain Peter Rabbit/repo text against out-of-domain vocabulary over the WordNet ontology; measures coverage, learned-node recovery, and abstraction transfer | Working |
 | `experiment_lexical_curriculum.py` | WordNet lexical curriculum + persistent forest | Reuses the same WordNet forest across easy, medium, and hard text streams to test whether stretching the model leaves behind reusable learned structure | Working |
+| `experiment_lexical_consolidation.py` | WordNet lexical consolidation + persistent forest | Replays the original seed stream after stretching the same forest through harder lexical stages to test retention, reuse, and consolidation | Working |
+| `experiment_lexical_pressure_revisit.py` | WordNet lexical pressure + revisit | Applies an explicit hot-cache shock before replaying the seed stream to test whether learned nodes survive actual forgetting pressure | Working |
+| `experiment_lexical_cross_domain_replay.py` | WordNet lexical cross-domain replay | Switches from lexical pressure into code-like observations, then selectively replays high-utility seed nodes before revisiting the original lexical stream | Working |
+| `experiment_lexical_math_cross_stream_replay.py` | WordNet lexical cross-stream replay + math stream | Switches from lexical pressure into a math-text observation stream, then selectively replays high-utility seed nodes before revisiting the original lexical stream | Working |
 | `experiment_code.py` | Python code tokens | Category purity (control_flow, functions, builtins, data); QueryStdlib gap-filling | Working |
 | `experiment_math.py` | Integer arithmetic | Algebraic rule discovery; 306-prior library across 6 abstraction levels; no LLM | Working |
+| `experiment_math_throughput.py` | Integer arithmetic throughput sweep | Measures observations/sec, warm-pass slowdown, and full vs diagonal sigma storage across sample sizes | Working |
+| `experiment_math_controller.py` | Integer arithmetic controller adapter | Compares direct HFN math execution against the async controller layer with ingest, replay, prefetch, and snapshot/export | Working |
+| `experiment_multi_observer_lifecycle.py` | Math + Text (216D) | Parallelized multi-process observers (Math, Text, and Mixed) across a 6-stage lifecycle | Working |
+| `experiment_sovereign_arc.py` | ARC-AGI-2 (10x10) | Multi-process "Stereo Vision" cluster (Spatial, Symbolic, Explorer) for ARC tasks | Working |
+| `experiment_sovereign_meta.py` | Rosetta Grounding | Two-tier hierarchy (L1 Perceptual -> L2 Relational) for cross-domain analogy discovery | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -54,7 +63,13 @@ substrate. The core components are:
 > The lexical-semantic experiment reuses the same Peter Rabbit corpus as real text observations over the WordNet ontology.
 > The lexical-transfer experiment compares in-domain Peter Rabbit/repo text with out-of-domain vocabulary over the WordNet ontology.
 > The lexical-curriculum experiment runs the same WordNet forest across progressively harder stages to test cumulative improvement over time.
+> The lexical-consolidation experiment replays the original seed stream after stretching the same forest to test whether earlier learned structure is retained and reused.
+> The lexical-pressure experiment applies a hot-cache shock before the replay to test whether learned nodes survive actual forgetting pressure.
+> The lexical cross-domain replay experiment switches to code-like observations and selectively replays high-utility seed nodes before returning to the lexical stream.
+> The lexical math cross-stream replay experiment switches to a math-text stream and then selectively replays high-utility seed nodes before returning to the lexical stream.
 > The code experiment builds a world model on first run and caches it to `data/code_world_model.*`.
+> The math throughput experiment measures observations/sec and warm-pass slowdown across sample sizes, with full vs diagonal sigma storage.
+> The math controller experiment compares the direct math loop against the new async controller layer.
 
 ---
 
@@ -173,6 +188,11 @@ in the world model when observations fall outside the current node coverage.
 | Large lexical-semantic prior library (WordNet external ontology + corpus) | `experiment_lexical_semantic_forest` |
 | Lexical transfer across in-domain and out-of-domain vocabularies | `experiment_lexical_transfer` |
 | Curriculum stretching over progressively harder lexical stages | `experiment_lexical_curriculum` |
+| Multi-process parallelization (one core per observer) | `experiment_multi_observer_lifecycle` |
+| Cross-domain orchestration and on-demand specialist creation | `experiment_multi_observer_lifecycle` |
+| Stereo Vision (cross-domain synthesis) | `experiment_sovereign_arc` |
+| Hierarchical message passing (L1 -> L2) | `experiment_sovereign_meta` |
+| Analogy stabilization (Joint Identities) | `experiment_sovereign_meta` |
 
 ---
 
@@ -181,10 +201,23 @@ For detailed documentation of the most developed experiments, see:
 - [`README_code.md`](README_code.md) — Python code token experiment
 - [`README_nlp.md`](README_nlp.md) — NLP semantic category experiment
 - [`README_math.md`](README_math.md) — Math arithmetic / algebraic rule discovery experiment
+- [`README_math_throughput.md`](README_math_throughput.md) — math observations/sec benchmark
+- [`README_math_controller.md`](README_math_controller.md) — async controller adapter comparison
 
 For detailed documentation of the lexical experiments, see:
 
 - [`README_lexical_semantic_forest.md`](README_lexical_semantic_forest.md) — large WordNet-backed prior forest
 - [`README_lexical_transfer.md`](README_lexical_transfer.md) — in-domain vs out-of-domain lexical transfer
 - [`README_lexical_curriculum.md`](README_lexical_curriculum.md) — staged lexical stretching over time
+- [`README_lexical_consolidation.md`](README_lexical_consolidation.md) — revisit after stretching to test retention and reuse
+- [`README_lexical_pressure_revisit.md`](README_lexical_pressure_revisit.md) — explicit memory shock before replay
+- [`README_lexical_cross_domain_replay.md`](README_lexical_cross_domain_replay.md) — code-domain shift with selective replay
+- [`README_lexical_math_cross_stream_replay.md`](README_lexical_math_cross_stream_replay.md) — math-text stream with selective replay
+
+For detailed documentation of the Sovereign AI (multi-process) experiments, see:
+
+- [`README_lifecycle.md`](README_lifecycle.md) — multi-observer lifecycle and multi-core orchestration
+- [`README_sovereign_cluster.md`](README_sovereign_cluster.md) — the "Foundational Five" parallel cluster and Sovereignty Spectrum
+- [`README_sovereign_arc.md`](README_sovereign_arc.md) — ARC "Stereo Vision" multi-process experiment
+- [`README_sovereign_meta.md`](README_sovereign_meta.md) — hierarchical synthesis and cross-domain analogy stabilization
 

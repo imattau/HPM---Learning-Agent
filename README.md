@@ -10,7 +10,7 @@ AI learning agents built on the **Hierarchical Pattern Modelling (HPM)** framewo
 - `hpm/` — baseline HPM framework (core agents, field dynamics, hierarchy, benchmarks)
 - `hpm_ai_v1/` — structured multi-agent self-repair and project-manifold reasoning
 - `hpm_fractal_node/` — HFN (Hierarchical Fractal Node) substrate: a new pattern substrate implementing HPM principles as a forest of probabilistic nodes with fractal geometry, Observer dynamics, and a 13-experiment suite
-- `hfn/` — the core HFN library (nodes, forest, observer, fractal metrics, query/converter pipeline)
+- `hfn/` — the core HFN library (nodes, forest, observer, async controller, fractal metrics, query/converter pipeline)
 
 ## What is HPM?
 
@@ -300,6 +300,8 @@ The open question is whether these properties, demonstrated here in lightweight 
 
 The **HFN** is a new pattern substrate developed in this repo that implements HPM principles directly as a forest of probabilistic Gaussian nodes. Unlike the `hpm/` agents (which use closed-form pattern updates), HFN gives every pattern its own geometric identity in a shared observation space.
 
+For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/`: a single-writer async layer for ingest, replay, prefetch, gap queries, and state export. It does not change the core learning semantics; it sits above the forest as the adapter layer for a larger system.
+
 ### Core components
 
 - **HFN node** — a Gaussian `N(μ, Σ)` plus a DAG polygraph body (children + typed edges). The geometry *is* the knowledge: where μ sits in observation space determines what the node explains.
@@ -431,6 +433,15 @@ python benchmarks/multi_domain_alignment.py
 
 # SP16 — Geometric Rosetta (Concept Discovery)
 python benchmarks/rosetta_geometric_benchmark.py
+
+# SP17 — Multi-Observer Lifecycle (Parallelism)
+python hpm_fractal_node/experiments/experiment_multi_observer_lifecycle.py
+
+# SP18 — Sovereign ARC (Stereo Vision)
+python hpm_fractal_node/experiments/experiment_sovereign_arc.py
+
+# SP19 — Sovereign Meta-Hierarchy (Analogy Synthesis)
+python hpm_fractal_node/experiments/experiment_sovereign_meta.py
 ```
 
 ### Run HFN experiments

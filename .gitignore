@@ -67,3 +67,4 @@ data/*.npy
 
 # Compiled Python
 *.pyc
+data/

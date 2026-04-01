@@ -11,12 +11,13 @@ Public API
 HFN          — a single node: Gaussian identity + DAG body
 Forest       — a collection of active HFN nodes (the world model)
 Observer     — holds all dynamic learning state; call obs.observe(x) to learn
+AsyncHFNController — async orchestration around the single-writer HFN core
 calibrate_tau — compute a sensible tau threshold for a given D and sigma scale
 
 Quick start
 -----------
     import numpy as np
-    from hfn import HFN, Forest, Observer, calibrate_tau
+    from hfn import HFN, Forest, Observer, AsyncHFNController, calibrate_tau
 
     D = 9  # e.g. flattened 3x3 grid
     forest = Forest(D=D, forest_id="my_domain")
@@ -29,6 +30,9 @@ Quick start
     obs = Observer(forest, tau=tau, protected_ids={"prior_uniform"})
 
     obs.observe(np.random.rand(D))
+
+    # Optional: wrap the core with an async controller for replay/prefetch/state export
+    controller = AsyncHFNController(forest, obs)
 """
 
 from hfn.hfn import HFN, Edge
@@ -44,6 +48,7 @@ from hfn.fractal import (
     correlation_dimension, information_dimension, intrinsic_dimensionality,
     persistence_scores, RecurrenceTracker, lacunarity, multifractal_spectrum,
 )
+from hfn.hfn_controller import AsyncHFNController
 
 import numpy as np
 
@@ -72,7 +77,7 @@ def calibrate_tau(D: int, sigma_scale: float = 1.0, margin: float = 1.0) -> floa
 
 
 __all__ = [
-    "HFN", "Edge", "Forest", "Observer", "Evaluator", "Recombination", "calibrate_tau",
+    "HFN", "Edge", "Forest", "Observer", "AsyncHFNController", "Evaluator", "Recombination", "calibrate_tau",
     "Query", "Converter",
     "box_counting_dimension", "population_dimension", "dimension_profile",
     "self_similarity_score", "hausdorff_distance",
