@@ -61,6 +61,8 @@ substrate. The core components are:
 | `experiment_agnostic_decoder.py` | Variance Collapse | Universal, domain-agnostic top-down resolution via geometric variance and HFN topology | Working |
 | `experiment_sovereign_decoder.py` | Stereo Action | Multi-process, mixed-modal (Lexical + Motor) top-down synthesis of a "Say and Point" goal | Working |
 | `experiment_demand_driven_learning.py` | Fail-Learn-Retry | Active learning triggered by generative gaps (Curiosity Engine) with hallucination guarding | Working |
+| `experiment_dynamic_promotion.py` | Emergent Sovereignty | Autonomous specialist process spawning via decoder-led sub-tree extraction | Working |
+| `experiment_emergent_routing.py` | Decentralized Sovereignty | Multi-process broadcast and claim model using HFN competence gates | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -208,6 +210,10 @@ in the world model when observations fall outside the current node coverage.
 | Parallel Variance Collapse | `experiment_sovereign_decoder` |
 | Demand-Driven Learning (Active Curiosity) | `experiment_demand_driven_learning` |
 | Generative Anti-Hallucination Guarding | `experiment_demand_driven_learning` |
+| Emergent Sovereignty (autonomous scaling) | `experiment_dynamic_promotion` |
+| Natural Forgetting via Redirection | `experiment_dynamic_promotion` |
+| Decentralized Sovereignty (broadcast and claim) | `experiment_emergent_routing` |
+| HFN Competence Gating (global typicality) | `experiment_emergent_routing` |
 
 ---
 
@@ -238,4 +244,6 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_agnostic_decoder.md`](README_agnostic_decoder.md) — universal Variance Collapse decoding
 - [`README_sovereign_decoder.md`](README_sovereign_decoder.md) — multi-process "Stereo Action" generation
 - [`README_demand_driven_learning.md`](README_demand_driven_learning.md) — fail-learn-retry curiosity loop
+- [`README_dynamic_promotion.md`](README_dynamic_promotion.md) — emergent sovereignty and autonomous process scaling
+- [`README_emergent_routing.md`](README_emergent_routing.md) — decentralized broadcast and claim model
 

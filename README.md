@@ -457,6 +457,12 @@ python hpm_fractal_node/experiments/experiment_sovereign_decoder.py
 
 # SP24 — Demand-Driven Learning (Curiosity Engine)
 python hpm_fractal_node/experiments/experiment_demand_driven_learning.py
+
+# SP25 — Dynamic Specialist Promotion (Emergent Sovereignty)
+python hpm_fractal_node/experiments/experiment_dynamic_promotion.py
+
+# SP26 — Emergent Routing (Decentralized Sovereignty)
+python hpm_fractal_node/experiments/experiment_emergent_routing.py
 ```
 
 ### Run HFN experiments

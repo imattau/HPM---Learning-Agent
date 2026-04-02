@@ -79,7 +79,12 @@ class SentenceSynthesizer:
         # Traverse Relational -> Token
         for edge in identity.edges():
             if edge.relation == "HAS_TOKEN":
-                return edge.target.id.replace("word_", "")
+                token_node = edge.target
+                # If it's a proxy (re-instantiated in a new forest), 
+                # we might need to find its match in the Token Forest
+                best_match = self.forests["token"].retrieve(token_node.mu, k=1)
+                if best_match:
+                    return best_match[0].id.replace("word_", "")
         return "???"
 
     def _apply_morphology(self, base: str, tense: str) -> str:

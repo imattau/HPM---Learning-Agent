@@ -109,6 +109,7 @@ class Observer:
         prior_revision_threshold: int = 200,   # misses before eligible for drift
         node_use_diag: bool = False,           # use O(D) diagonal sigma for all dynamically created nodes
         node_prefix: str = "leaf_",            # prefix for dynamically created leaf nodes
+        weight_decay_rate: float = 0.0,        # global weight decay rate (0.0 = disabled)
     ):
         self.forest = forest
         self.tau = tau
@@ -179,6 +180,7 @@ class Observer:
         # Diagonal sigma storage for dynamically created nodes
         self.node_use_diag: bool = node_use_diag
         self.node_prefix: str = node_prefix
+        self.weight_decay_rate: float = weight_decay_rate
 
     # --- Node lifecycle ---
 
@@ -295,6 +297,11 @@ class Observer:
             nid = node.id
             if nid not in self._weights:
                 self._init_node(node)
+            
+            # Apply global decay to all non-protected nodes
+            if self.weight_decay_rate > 0 and nid not in self.protected_ids:
+                self._weights[nid] *= (1.0 - self.weight_decay_rate)
+
             if nid in self.protected_ids:
 
                 if self.prior_plasticity:
@@ -368,7 +375,8 @@ class Observer:
         ids = [n.id for n in explanation_tree]
         for i in range(len(ids)):
             for j in range(i + 1, len(ids)):
-                self._cooccurrence[frozenset([ids[i], ids[j]])] += 1
+                pair = frozenset([ids[i], ids[j]])
+                self._cooccurrence[pair] += 1
 
     # --- Absorption ---
 
