@@ -64,6 +64,7 @@ substrate. The core components are:
 | `experiment_dynamic_promotion.py` | Emergent Sovereignty | Autonomous specialist process spawning via decoder-led sub-tree extraction | Working |
 | `experiment_emergent_routing.py` | Decentralized Sovereignty | Multi-process broadcast and claim model using HFN competence gates | Working |
 | `experiment_thinking_arc_solver.py` | Thinking Solver | Iterative hypothesis testing and negative anchoring for ARC 30x30 | Working |
+| `experiment_study_and_test.py` | Study-and-Test | Meta-transfer learning across a curriculum of persistent ARC tasks | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -217,6 +218,8 @@ in the world model when observations fall outside the current node coverage.
 | HFN Competence Gating (global typicality) | `experiment_emergent_routing` |
 | Iterative Hypothesis Testing (Thinking) | `experiment_thinking_arc_solver` |
 | Negative Anchoring (falsified knowledge) | `experiment_thinking_arc_solver` |
+| Meta-Transfer Learning (Study and Test) | `experiment_study_and_test` |
+| Structural motif persistence across tasks | `experiment_study_and_test` |
 
 ---
 
@@ -250,4 +253,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_dynamic_promotion.md`](README_dynamic_promotion.md) — emergent sovereignty and autonomous process scaling
 - [`README_emergent_routing.md`](README_emergent_routing.md) — decentralized broadcast and claim model
 - [`README_thinking_arc_solver.md`](README_thinking_arc_solver.md) — iterative hypothesis testing and negative anchoring
+- [`README_study_and_test.md`](README_study_and_test.md) — meta-transfer learning across persistent tasks
 

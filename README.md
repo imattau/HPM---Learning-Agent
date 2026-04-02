@@ -466,6 +466,9 @@ python hpm_fractal_node/experiments/experiment_emergent_routing.py
 
 # SP28 — Thinking ARC Solver (Iterative Reasoning)
 python hpm_fractal_node/experiments/experiment_thinking_arc_solver.py
+
+# SP29 — Sovereign Study-and-Test (Meta-Transfer)
+python hpm_fractal_node/experiments/experiment_study_and_test.py
 ```
 
 ### Run HFN experiments
