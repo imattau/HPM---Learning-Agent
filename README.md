@@ -463,6 +463,9 @@ python hpm_fractal_node/experiments/experiment_dynamic_promotion.py
 
 # SP26 — Emergent Routing (Decentralized Sovereignty)
 python hpm_fractal_node/experiments/experiment_emergent_routing.py
+
+# SP28 — Thinking ARC Solver (Iterative Reasoning)
+python hpm_fractal_node/experiments/experiment_thinking_arc_solver.py
 ```
 
 ### Run HFN experiments
