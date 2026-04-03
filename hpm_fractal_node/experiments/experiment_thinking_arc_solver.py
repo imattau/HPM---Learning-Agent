@@ -27,7 +27,7 @@ from hfn.observer import Observer
 from hfn.decoder import Decoder, ResolutionRequest
 from hfn import calibrate_tau, Evaluator
 from hpm_fractal_node.arc.arc_sovereign_loader import (
-    load_sovereign_tasks, COMMON_D, S_SLICE, M_SLICE, C_SLICE, S_DIM
+    load_sovereign_tasks, COMMON_D, S_SLICE, M_SLICE, C_SLICE, S_DIM, D_SLICE, I_SLICE
 )
 from hpm_fractal_node.arc.arc_prior_forest import build_prior_forest
 from hpm_fractal_node.math.math_world_model import build_math_world_model
@@ -57,7 +57,9 @@ class SovereignARCWorker(mp.Process):
         if self.config.cold_dir.exists(): shutil.rmtree(self.config.cold_dir)
         self.config.cold_dir.mkdir(parents=True, exist_ok=True)
         
+        print(f"  [DEBUG] Worker {self.config.name} starting with {len(self.config.source_nodes)} source nodes.")
         self.forest = TieredForest(D=self.config.common_d, forest_id=self.config.forest_id, cold_dir=self.config.cold_dir)
+
         
         def reg(n):
             if n.id in self.forest: return
@@ -65,15 +67,31 @@ class SovereignARCWorker(mp.Process):
             for c in n.children():
                 reg(c)
                 clone.add_child(self.forest.get(c.id))
-            self.forest.register(clone)
+            self.forest.register(clone, skip_cache=True)
             
         for node in self.config.source_nodes: reg(node)
+        self.forest.rebuild_hierarchy_cache()
         if self.config.source_prior_ids: self.forest.set_protected(self.config.source_prior_ids)
 
         self.evaluator = Evaluator()
         tau = calibrate_tau(self.config.common_d, sigma_scale=1.0, margin=5.0)
-        self.observer = Observer(forest=self.forest, tau=tau, node_use_diag=True, protected_ids=self.config.source_prior_ids)
+        self.observer = Observer(
+            forest=self.forest, tau=tau, node_use_diag=True, protected_ids=self.config.source_prior_ids,
+            adaptive_compression=True, compression_cooccurrence_threshold=10
+        )
         self.decoder = Decoder(target_forest=self.forest, sigma_threshold=self.config.sigma_threshold)
+        
+        def arc_validator(raw_ex: dict, predicted_vector: np.ndarray) -> bool:
+            # predicted_vector is full manifold (1850D) or target_slice (930D).
+            # reconstruct_grid expects [delta(900), attrs(30+)]; slice from offset 900.
+            offset = 900 if predicted_vector.shape[0] > 930 else 0
+            delta_attrs = predicted_vector[offset:offset+930].copy()
+            # delta_attrs[920]/[921] = predicted output origin from symbolic slice — do NOT override.
+            pred_grid = reconstruct_grid(raw_ex["input"], delta_attrs, target_shape=raw_ex["output"].shape)
+            return np.array_equal(pred_grid, raw_ex["output"])
+
+        from hfn.reasoning import CognitiveSolver
+        self.solver = CognitiveSolver(self.observer, self.decoder, self.evaluator, validator=arc_validator)
 
         while True:
             task = self.task_queue.get()
@@ -83,11 +101,9 @@ class SovereignARCWorker(mp.Process):
             if cmd == "OBSERVE":
                 x_full = task["x"]
                 if self.config.name == "Spatial_Spec": x = x_full[S_SLICE]
-                elif self.config.name == "Symbolic_Spec": 
-                    x = np.zeros(109)
-                    x[:30] = x_full[M_SLICE]
-                else: x = x_full # Explorer
-                
+                elif self.config.name == "Symbolic_Spec": x = x_full[M_SLICE]
+                else: x = x_full
+
                 acc = self.evaluator.accuracy(x, self.forest)
                 if acc < self.config.competence_threshold:
                     self.result_queue.put({"name": self.config.name, "competent": False})
@@ -95,38 +111,166 @@ class SovereignARCWorker(mp.Process):
                     res = self.observer.observe(x)
                     self.forest._on_observe()
                     winners = [{"id": n.id, "mu": n.mu.copy()} for n in res.explanation_tree[:3]]
+                    if winners:
+                        print(f"      [DEBUG] {self.config.name} winners: {[w['id'] for w in winners]}")
                     self.result_queue.put({"name": self.config.name, "competent": True, "winners": winners})
             
+            elif cmd == "SOLVE":
+                history_full = task["history"]
+                test_input_full = task["test_input"]
+                history_raw = task.get("history_raw")
+                test_input_raw = task.get("test_input_raw")
+                
+                # Slicing
+                if self.config.name == "Spatial_Spec":
+                    # Manifold: [Input(900), Delta(900)]
+                    history = [h[S_SLICE] for h in history_full]
+                    test_input = test_input_full[S_SLICE]
+                    # Target is the DELTA portion (900:1800)
+                    target_slice = slice(900, 1800)
+                elif self.config.name == "Symbolic_Spec":
+                    history = [h[M_SLICE] for h in history_full]
+                    test_input = test_input_full[M_SLICE]
+                    target_slice = slice(None)
+                else:
+                    history = history_full
+                    test_input = test_input_full
+                    # Explorer targets Delta (900:1800) + Symbolic (1800:1830)
+                    target_slice = slice(900, 1830) 
+                
+                res = self.solver.solve(history, test_input, target_slice, history_raw=history_raw, test_input_raw=test_input_raw)
+                self.result_queue.put({"name": self.config.name, "result": res})
+
             elif cmd == "DECODE":
                 goal = task["goal"]
                 res = self.decoder.decode(goal)
                 self.result_queue.put({"name": self.config.name, "result": res})
-            
             elif cmd == "LEARN_FROM_BUFFER":
+                # SP24 Demand-Driven Learning
                 buffer = task["buffer"]
                 target_mu = task["mu"]
                 edges = task["edges"]
                 found = False
                 for obs in buffer:
-                    if np.linalg.norm(obs - target_mu) < 0.5:
-                        leaf = HFN(mu=obs, sigma=np.ones(self.config.common_d)*0.001, id=f"discovered_{int(np.sum(obs))}", use_diag=True)
+                    # Tighter threshold for ARC precision
+                    if np.linalg.norm(obs - target_mu) < 0.1:
+                        leaf = HFN(mu=obs, sigma=np.ones(self.config.common_d)*0.001, id=f"discovered_{int(np.sum(obs*100))}", use_diag=True)
                         for e in edges: leaf.add_edge(leaf, e.target, e.relation)
                         self.forest.register(leaf)
                         found = True; break
                 self.result_queue.put({"name": self.config.name, "success": found})
+
             
             elif cmd == "STATS":
                 self.result_queue.put({"name": self.config.name, "status": "OK"})
+            
+            elif cmd == "GET_NODE":
+                nid = task["id"]
+                node = self.forest.get(nid)
+                self.result_queue.put({"name": self.config.name, "node": node})
+            
+            elif cmd == "REGISTER_NODE":
+                node = task["node"]
+                # Deep register
+                def reg_recursive(n):
+                    if n.id in self.forest: return
+                    # DIMENSION CHECK
+                    if n.mu.shape[0] != self.config.common_d:
+                        return # Skip cross-domain nodes for now
+                    
+                    clone = HFN(mu=n.mu.copy(), sigma=n.sigma.copy(), id=n.id, use_diag=n.use_diag)
+                    for c in n.children():
+                        reg_recursive(c)
+                        # Only add child if it was successfully cloned (matched dim)
+                        child_node = self.forest.get(c.id)
+                        if child_node:
+                            clone.add_child(child_node)
+                    self.forest.register(clone)
+                reg_recursive(node)
+                self.result_queue.put({"name": self.config.name, "status": "OK"})
+def predict_shape(task: dict) -> tuple[int, int]:
+    """Look at train examples to predict output shape."""
+    # Logic: If all train examples have the same shape ratio or delta, use it.
+    # For now, simplest: if input_shape == output_shape for all, return test_input.shape
+    ratios = []
+    for ex in task["train"]:
+        in_r, in_c = ex["input"].shape
+        out_r, out_c = ex["output"].shape
+        ratios.append((out_r / in_r, out_c / in_c))
 
-def reconstruct_grid(input_grid: np.ndarray, delta_900d: np.ndarray) -> np.ndarray:
-    delta_2d = (delta_900d * 9.0).reshape(30, 30)
-    padded_in = np.zeros((30, 30))
-    r, c = min(30, input_grid.shape[0]), min(30, input_grid.shape[1])
-    padded_in[:r, :c] = input_grid[:r, :c]
-    
-    out_30x30 = np.clip(np.round(padded_in + delta_2d), 0, 9).astype(int)
-    orig_r, orig_c = input_grid.shape
-    return out_30x30[:orig_r, :orig_c]
+    if len(set(ratios)) == 1:
+        # Consistent ratio found
+        rr, rc = ratios[0]
+        test_in_r, test_in_c = task["test"][0]["input"].shape
+        return int(np.round(test_in_r * rr)), int(np.round(test_in_c * rc))
+
+    return task["test"][0]["input"].shape
+
+def reconstruct_grid(input_grid: np.ndarray, delta_900d: np.ndarray, rule_node: HFN | None = None, target_shape: tuple[int, int] | None = None) -> np.ndarray:
+    # 1. Build canonical input (centered 30x30), matching grid_to_vec encoding
+    in_coords = np.argwhere(input_grid > 0)
+    canon_in = np.zeros((30, 30))
+    if in_coords.size > 0:
+        iy0, ix0 = in_coords.min(axis=0)
+        iy1, ix1 = in_coords.max(axis=0) + 1
+        content = input_grid[iy0:iy1, ix0:ix1]
+        cr, cc = content.shape
+        r_start = (30 - cr) // 2
+        c_start = (30 - cc) // 2
+        r_size, c_size = min(cr, 30), min(cc, 30)
+        canon_in[r_start:r_start+r_size, c_start:c_start+c_size] = content[:r_size, :c_size]
+
+    # 2. Apply delta in canonical space
+    delta_2d = (delta_900d[:900] * 9.0).reshape(30, 30)
+    canon_out = np.clip(np.rint(canon_in + delta_2d), 0, 9).astype(int)
+
+    # 3. Find output content bounding box in canonical canvas
+    out_coords = np.argwhere(canon_out > 0)
+    if out_coords.size == 0:
+        out_r, out_c = target_shape if target_shape else input_grid.shape
+        return np.zeros((max(1, out_r), max(1, out_c)), dtype=int)
+
+    cy0, cx0 = out_coords.min(axis=0)
+    cy1, cx1 = out_coords.max(axis=0) + 1
+    out_content = canon_out[cy0:cy1, cx0:cx1]
+
+    # 4. Determine world output origin.
+    # The canonical output content is centered around the same position as the
+    # canonical input content (both centered in the 30x30 canvas). The canonical
+    # center offset of the output content maps directly to a world offset from the
+    # input content center. This is input-position-independent.
+    #
+    # World output top-left = world input center + (canonical output top-left - canonical center 14.5)
+    out_r, out_c = target_shape if target_shape else input_grid.shape
+    out_r, out_c = max(1, min(30, out_r)), max(1, min(30, out_c))
+
+    # Canonical center of the 30x30 canvas
+    canon_center = 14.5
+
+    if in_coords.size > 0:
+        # World input center (float)
+        w_in_center_r = (in_coords[:, 0].min() + in_coords[:, 0].max()) / 2.0
+        w_in_center_c = (in_coords[:, 1].min() + in_coords[:, 1].max()) / 2.0
+    else:
+        w_in_center_r, w_in_center_c = 0.0, 0.0
+
+    # Canonical output top-left offset from canvas center
+    can_out_offset_r = cy0 - canon_center
+    can_out_offset_c = cx0 - canon_center
+
+    wy0 = int(np.rint(w_in_center_r + can_out_offset_r))
+    wx0 = int(np.rint(w_in_center_c + can_out_offset_c))
+
+    # 5. Place output content at world origin in final grid
+    final = np.zeros((out_r, out_c), dtype=int)
+    wy0 = max(0, min(out_r - 1, wy0))
+    wx0 = max(0, min(out_c - 1, wx0))
+    r_fit = min(out_content.shape[0], out_r - wy0)
+    c_fit = min(out_content.shape[1], out_c - wx0)
+    if r_fit > 0 and c_fit > 0:
+        final[wy0:wy0+r_fit, wx0:wx0+c_fit] = out_content[:r_fit, :c_fit]
+
+    return final
 
 def run_experiment():
     print("SP28: Thinking ARC Solver Experiment (Iterative & Negative Anchoring)\n")
@@ -143,9 +287,9 @@ def run_experiment():
     mp.set_start_method("spawn", force=True)
 
     configs = [
-        WorkerConfig("Spatial_Spec", "s_think_sp28", Path("data/think_s_sp28"), "OBSERVER", common_d=900, competence_threshold=0.0, source_nodes=list(spatial_forest.active_nodes()), source_prior_ids=spatial_priors),
+        WorkerConfig("Spatial_Spec", "s_think_sp28", Path("data/think_s_sp28"), "OBSERVER", common_d=1800, competence_threshold=0.0, source_nodes=list(spatial_forest.active_nodes()), source_prior_ids=spatial_priors),
         WorkerConfig("Symbolic_Spec", "m_think_sp28", Path("data/think_m_sp28"), "OBSERVER", common_d=109, competence_threshold=0.0, source_nodes=list(math_base.active_nodes()), source_prior_ids=math_priors),
-        WorkerConfig("Spatial_Decoder", "d_think_sp28", Path("data/think_d_sp28"), "DECODER", common_d=900, sigma_threshold=0.1)
+        WorkerConfig("Spatial_Decoder", "d_think_sp28", Path("data/think_d_sp28"), "DECODER", common_d=1800, sigma_threshold=0.1)
     ]
     
     queues = {c.name: mp.Queue() for c in configs}
