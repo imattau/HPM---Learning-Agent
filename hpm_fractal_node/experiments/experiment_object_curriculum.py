@@ -15,6 +15,7 @@ WorkerConfig uses common_d=420.
 from __future__ import annotations
 
 import multiprocessing as mp
+import random
 import numpy as np
 import shutil
 import sys
@@ -448,6 +449,47 @@ def calculate_object_complexity(task: dict) -> float:
     return evaluator.task_complexity(vecs)
 
 
+# ── Pre-training ─────────────────────────────────────────────────────────────
+
+def pre_train_phase(queues, res_queues, all_tasks, n=150, exclude_ids=None):
+    """
+    Pre-train the HFN on n diverse tasks by observing their training examples.
+    Tasks are sampled to maximise rule_summary diversity (k-means on rule_summaries).
+    """
+    if exclude_ids is None:
+        exclude_ids = set()
+    pool = [t for t in all_tasks if t['id'] not in exclude_ids]
+
+    # Compute rule_summary for each task (mean of training vecs rule_summary slice)
+    rule_vecs = []
+    for t in pool:
+        rs = np.mean([task_pair_to_vec(ex["input"], ex["output"])[400:420] for ex in t["train"]], axis=0)
+        rule_vecs.append(rs)
+    rule_vecs = np.stack(rule_vecs)
+
+    # Stratified sampling: k-means with k=20 clusters, sample n/20 from each
+    from sklearn.cluster import KMeans
+    k = min(20, len(pool))
+    km = KMeans(n_clusters=k, n_init=5, random_state=42).fit(rule_vecs)
+    labels = km.labels_
+
+    sampled = []
+    per_cluster = max(1, n // k)
+    for c in range(k):
+        idxs = [i for i, l in enumerate(labels) if l == c]
+        chosen = random.sample(idxs, min(per_cluster, len(idxs)))
+        sampled.extend([pool[i] for i in chosen])
+    sampled = sampled[:n]
+
+    print(f"  Pre-training on {len(sampled)} diverse tasks ({k} rule clusters)...")
+    for task in sampled:
+        for ex in task["train"]:
+            vec = task_pair_to_vec(ex["input"], ex["output"])
+            queues["Object_Spec"].put({"cmd": "OBSERVE", "x": vec})
+            res_queues["Object_Spec"].get()
+    print("  Pre-training complete.\n")
+
+
 # ── Experiment ────────────────────────────────────────────────────────────────
 
 def run_experiment():
@@ -506,11 +548,16 @@ def run_experiment():
         res_queues[name].get()
     print("  [PASS] Worker heartbeat OK.\n")
 
+    # Pre-train on diverse tasks to build rule-type clusters
+    print("--- PHASE 0: CROSS-TASK PRE-TRAINING ---")
+    exclude = {t['id'] for t in study_set} | {t['id'] for t in test_set}
+    pre_train_phase(queues, res_queues, all_tasks, n=150, exclude_ids=exclude)
+
     # ── PHASE 1: STUDY ───────────────────────────────────────────────────────
     print("--- PHASE 1: OBJECT-SPACE STUDY (Target: 6/10 Correct) ---")
     solved_ids = set()
 
-    for iteration in range(1, 11):
+    for iteration in range(1, 16):
         if len(solved_ids) >= 6:
             break
         print(f"\n  Iteration {iteration} (Mastery: {len(solved_ids)}/10)...")
