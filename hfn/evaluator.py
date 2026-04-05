@@ -82,42 +82,42 @@ class Evaluator:
         return count
 
     def density_ratio(
-    self,
-    x: np.ndarray,
-    nodes: Sequence[HFN],
-    radius: float,
-    k: int = 5,
-) -> float:
-    """
-    Local vs shell density ratio (k→2k neighbors). Scale-invariant, region-aware.
-    
-    Replaces global mean NN reference with local k→2k shell density.
-    Dense clusters no longer over-suppressed; suppression is relative to neighborhood.
-    """
-    node_list = list(nodes)
-    if len(node_list) < 3:
-        return 0.0
-    x = np.asarray(x, dtype=float)
-    mus = np.array([n.mu for n in node_list], dtype=float)
-    dists_to_x = np.sort(np.linalg.norm(mus - x, axis=1))
-    
-    # Local density: distance from x to its k-th nearest neighbour
-    k_actual = min(k, len(dists_to_x) - 1)
-    k2_actual = min(k * 2, len(dists_to_x) - 1)
-    
-    d_k = dists_to_x[k_actual] + 1e-9
-    d_2k = dists_to_x[k2_actual] + 1e-9
-    
-    # Relative density ratio: > 1 means locally denser than the surrounding shell
-    # Scale-invariant: compares k-NN vs 2k-NN distance
-    local_count = float(np.sum(dists_to_x < radius))
-    local_density = local_count / (radius ** 2 + 1e-9)   # area-normalised
-    
-    # Reference: density implied by the k→2k shell
-    shell_count = float(np.sum((dists_to_x >= d_k) & (dists_to_x < d_2k)))
-    shell_density = (shell_count + 1e-9) / ((d_2k ** 2 - d_k ** 2) + 1e-9)
-    
-    return local_density / (shell_density + 1e-9)
+        self,
+        x: np.ndarray,
+        nodes: Sequence[HFN],
+        radius: float,
+        k: int = 5,
+    ) -> float:
+        """
+        Local vs shell density ratio (k→2k neighbors). Scale-invariant, region-aware.
+
+        Replaces global mean NN reference with local k→2k shell density.
+        Dense clusters no longer over-suppressed; suppression is relative to neighborhood.
+        """
+        node_list = list(nodes)
+        if len(node_list) < 3:
+            return 0.0
+        x = np.asarray(x, dtype=float)
+        mus = np.array([n.mu for n in node_list], dtype=float)
+        dists_to_x = np.sort(np.linalg.norm(mus - x, axis=1))
+
+        # Local density: distance from x to its k-th nearest neighbour
+        k_actual = min(k, len(dists_to_x) - 1)
+        k2_actual = min(k * 2, len(dists_to_x) - 1)
+
+        d_k = dists_to_x[k_actual] + 1e-9
+        d_2k = dists_to_x[k2_actual] + 1e-9
+
+        # Relative density ratio: > 1 means locally denser than the surrounding shell
+        # Scale-invariant: compares k-NN vs 2k-NN distance
+        local_count = float(np.sum(dists_to_x < radius))
+        local_density = local_count / (radius ** 2 + 1e-9)   # area-normalised
+
+        # Reference: density implied by the k→2k shell
+        shell_count = float(np.sum((dists_to_x >= d_k) & (dists_to_x < d_2k)))
+        shell_density = (shell_count + 1e-9) / ((d_2k ** 2 - d_k ** 2) + 1e-9)
+
+        return local_density / (shell_density + 1e-9)
 
     def nearest_prior_dist(
         self,

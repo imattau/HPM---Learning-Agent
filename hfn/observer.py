@@ -323,73 +323,73 @@ class Observer:
         return result
 
     def _expand(self, x: np.ndarray, exhaustive: bool = False) -> ExplanationResult:
-    """
-    Run the expansion loop and return the explanation tree.
-    """
-    query_node = HFN(mu=x, sigma=np.ones_like(x), id="__query__", use_diag=True)
-    frontier = list(self.retriever.retrieve(query_node, k=10))
-    explanation_tree: list[HFN] = []
-    accuracy_scores: dict[str, float] = {}
-    seen_ids: set[str] = set()
-    surprising_leaves: list[HFN] = []
-    budget = self.budget
+        """
+        Run the expansion loop and return the explanation tree.
+        """
+        query_node = HFN(mu=x, sigma=np.ones_like(x), id="__query__", use_diag=True)
+        frontier = list(self.retriever.retrieve(query_node, k=10))
+        explanation_tree: list[HFN] = []
+        accuracy_scores: dict[str, float] = {}
+        seen_ids: set[str] = set()
+        surprising_leaves: list[HFN] = []
+        budget = self.budget
 
-    # Memoize surprise scores to avoid re-computing during sort + pop
-    surprise_cache: dict[str, float] = {}
+        # Memoize surprise scores to avoid re-computing during sort + pop
+        surprise_cache: dict[str, float] = {}
 
-    def surprise(n: HFN) -> float:
-        if n.id not in surprise_cache:
-            surprise_cache[n.id] = self._kl_surprise(x, n)
-        return surprise_cache[n.id]
+        def surprise(n: HFN) -> float:
+            if n.id not in surprise_cache:
+                surprise_cache[n.id] = self._kl_surprise(x, n)
+            return surprise_cache[n.id]
 
-    while frontier:
-        # Priority = surprise - node_weight  (high surprise + low weight = expand first)
-        # This makes the search cost-aware: trusted nodes explored last
-        frontier.sort(
-            key=lambda n: surprise(n) - self.get_weight(n.id),
-            reverse=True
-        )
+        while frontier:
+            # Priority = surprise - node_weight  (high surprise + low weight = expand first)
+            # This makes the search cost-aware: trusted nodes explored last
+            frontier.sort(
+                key=lambda n: surprise(n) - self.get_weight(n.id),
+                reverse=True
+            )
 
-        n = frontier.pop(0)
-        if n.id in seen_ids:
-            continue
-
-        s = surprise(n)
-
-        if s < self.tau:
-            explanation_tree.append(n)
-            accuracy_scores[n.id] = self.evaluator.accuracy(x, n)
-            seen_ids.add(n.id)
-            if not exhaustive:
+            n = frontier.pop(0)
+            if n.id in seen_ids:
                 continue
 
-        children = n.children()
-        if children and budget > 0:
-            # Beam: only add top-k children by surprise to bound branching
-            unseen = [c for c in children if c.id not in seen_ids]
-            if len(unseen) > 5:
-                unseen.sort(key=lambda c: surprise(c), reverse=True)
-                unseen = unseen[:5]
-            frontier.extend(unseen)
-            budget -= 1
-        elif s >= self.tau:
-            seen_ids.add(n.id)
-            surprising_leaves.append(n)
+            s = surprise(n)
 
-    residual_nodes = surprising_leaves + [
-        n for n in frontier if n.id not in seen_ids and surprise(n) >= self.tau
-    ]
-    residual = float(np.mean([surprise(n) for n in residual_nodes])) if residual_nodes else 0.0
+            if s < self.tau:
+                explanation_tree.append(n)
+                accuracy_scores[n.id] = self.evaluator.accuracy(x, n)
+                seen_ids.add(n.id)
+                if not exhaustive:
+                    continue
 
-    if hasattr(self.retriever, 'notify_active'):
-        self.retriever.notify_active([n.id for n in explanation_tree])
+            children = n.children()
+            if children and budget > 0:
+                # Beam: only add top-k children by surprise to bound branching
+                unseen = [c for c in children if c.id not in seen_ids]
+                if len(unseen) > 5:
+                    unseen.sort(key=lambda c: surprise(c), reverse=True)
+                    unseen = unseen[:5]
+                frontier.extend(unseen)
+                budget -= 1
+            elif s >= self.tau:
+                seen_ids.add(n.id)
+                surprising_leaves.append(n)
 
-    return ExplanationResult(
-        explanation_tree=explanation_tree,
-        accuracy_scores=accuracy_scores,
-        residual_surprise=residual,
-        surprising_leaves=surprising_leaves
-    )
+        residual_nodes = surprising_leaves + [
+            n for n in frontier if n.id not in seen_ids and surprise(n) >= self.tau
+        ]
+        residual = float(np.mean([surprise(n) for n in residual_nodes])) if residual_nodes else 0.0
+
+        if hasattr(self.retriever, 'notify_active'):
+            self.retriever.notify_active([n.id for n in explanation_tree])
+
+        return ExplanationResult(
+            explanation_tree=explanation_tree,
+            accuracy_scores=accuracy_scores,
+            residual_surprise=residual,
+            surprising_leaves=surprising_leaves
+        )
 
     def predict(self, result: ExplanationResult) -> np.ndarray | None:
         """Generate a prediction from current explanation (predictive coding step)."""
