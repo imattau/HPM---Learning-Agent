@@ -14,10 +14,12 @@ substrate. The core components are:
   (mu) and covariance (sigma). Nodes can have children, forming a hierarchy.
 - **Forest**: A collection of HFNs forming the world model — the agent's prior knowledge about
   structure in a domain.
-- **Observer**: Drives pattern dynamics. For each observation vector it (1) finds which nodes
-  explain it (log-probability gating by tau), (2) updates weights by a gain/loss rule, (3)
-  absorbs redundant nodes, (4) compresses co-occurring nodes, and (5) creates new nodes for
-  genuinely novel observations (residual surprise).
+- **Meta-Forest**: A second-order learning layer `TieredForest(D=4)` that tracks node performance (weight, score, hit/miss counts, co-occurrence, recurrence) as HFN nodes themselves.
+- **Observer (Dynamics + Control + Policy)**: Drives all pattern dynamics. Features include:
+  - *Cost-aware attention*: `priority = surprise - weight` (attention is learned, trusted nodes are explored last).
+  - *Stability mechanisms*: active pruning, global weight decay, and absorption thresholds to prevent structural explosion.
+  - *Density-aware creation*: incorporates lacunarity and multifractal behavior to suppress redundant node creation.
+  - *Dynamic Priors*: Prior nodes are not entirely static; they can undergo plasticity (drift) under consistent failure.
 - **Query / Converter**: Gap-driven knowledge injection. When no node explains an observation
   well enough, a "gap" query is fired to an external source (Python stdlib, LLM), and the
   response is converted into new HFN nodes seeded near the gap.
@@ -74,6 +76,7 @@ substrate. The core components are:
 | `experiment_study_and_test.py` | Study-and-Test | Meta-transfer learning across a curriculum of persistent ARC tasks | Working |
 | `experiment_closed_loop.py` | Closed-Loop Learning | `observe → explain → fail → create → re-observe` cycle; Tracks surprise reduction and structural compression over time | Working |
 | `experiment_meta_hfn.py` | Meta-HFN Utilisation | A/B tests self-representation (`meta_forest`) vs ablated baseline under resource pressure to measure adaptation speed and structural efficiency | Working |
+| `experiment_goal_reasoning.py` | Goal-Conditioned Reasoning | First step to agency: `goal + input → plan → execute → evaluate` loop using GoalConditionedRetriever | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -231,6 +234,8 @@ in the world model when observations fall outside the current node coverage.
 | Structural motif persistence across tasks | `experiment_study_and_test` |
 | Closed-Loop Learning & Adaptive Compression | `experiment_closed_loop` |
 | Meta-HFN Self-Representation under Pressure | `experiment_meta_hfn` |
+| Goal-Conditioned Reasoning (Agency) | `experiment_goal_reasoning` |
+| Intent-Driven Retrieval & Planning | `experiment_goal_reasoning` |
 
 ---
 
@@ -270,3 +275,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_study_and_test.md`](README_study_and_test.md) — meta-transfer learning across persistent tasks
 - [`README_closed_loop.md`](README_closed_loop.md) — `observe → explain → fail → create → re-observe` cycle and adaptive compression
 - [`README_meta_hfn.md`](README_meta_hfn.md) — A/B testing self-representation vs ablated baseline under resource pressure
+- [`README_goal_reasoning.md`](README_goal_reasoning.md) — intent-driven retrieval and planning loop
+

@@ -306,8 +306,12 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 
 - **HFN node** — a Gaussian `N(μ, Σ)` plus a DAG polygraph body (children + typed edges). The geometry *is* the knowledge: where μ sits in observation space determines what the node explains.
 - **Forest / TieredForest** — collection of HFN nodes; TieredForest supports hot/cold tiering so large prior libraries (tens of thousands of nodes) don't exhaust RAM.
-- **Observer** — drives all dynamics: log-probability gating by τ, weight gain/loss, Hausdorff-based absorption, co-occurrence compression, gap queries for genuinely novel observations.
-- **Prior library** — protected nodes that encode pre-existing knowledge. Priors are permanent attractors; learned nodes form in the gaps between them.
+- **Meta-Forest** — second-order learning layer. A `TieredForest(D=4)` that represents the primary forest's state as HFN nodes themselves, tracking weight, score, hit/miss counts, co-occurrence, and recurrence.
+- **Observer (Dynamics + Control + Policy)** — drives all pattern dynamics. Features include:
+  - *Cost-aware attention*: `priority = surprise - weight` (attention is learned, trusted nodes are explored last).
+  - *Stability mechanisms*: active pruning, global weight decay, and overlapping absorption thresholds to prevent structural explosion.
+  - *Density-aware creation*: incorporates lacunarity and multifractal behavior to suppress redundant node creation in already-dense regions.
+- **Prior library** — protected nodes that encode pre-existing knowledge. While protected from immediate deletion, priors can undergo *density-based plasticity (drift)* if they consistently miss targets, preventing permanent rigid failure modes.
 - **Query / Converter pipeline** — when no node explains an observation well enough, an external source is queried (LLM via ollama, Python stdlib) and the response is converted into new HFN nodes near the gap.
 
 ### Experiment results
@@ -475,6 +479,9 @@ python hpm_fractal_node/experiments/experiment_closed_loop.py
 
 # SP32 — Meta-HFN Utilisation (Adaptation & Substrate Efficiency)
 python hpm_fractal_node/experiments/experiment_meta_hfn.py
+
+# SP33 — Goal-Conditioned Reasoning (Agency)
+python hpm_fractal_node/experiments/experiment_goal_reasoning.py
 ```
 
 ### Run HFN experiments

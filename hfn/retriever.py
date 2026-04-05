@@ -81,3 +81,42 @@ class ContextualRetriever(Retriever):
 
         candidates.sort(key=score)
         return candidates[:k]
+
+
+class GoalConditionedRetriever(Retriever):
+    """
+    Retrieval weighted by a specific goal or target slice.
+
+    Useful for intent-driven search where specific dimensions (e.g., Delta)
+    must match precisely, while others (e.g., Input) are context.
+    """
+
+    def __init__(
+        self,
+        forest: Forest,
+        target_slice: slice | None = None,
+        target_weight: float = 10.0,
+    ):
+        super().__init__(forest)
+        self.target_slice = target_slice or slice(None)
+        self.target_weight = target_weight
+
+    def retrieve(self, query: HFN, k: int = 10) -> list[HFN]:
+        # Fetch a larger pool via standard forest lookup (fast index)
+        candidates = self.forest.retrieve(query.mu, k=max(k * 5, 50))
+        if not candidates:
+            return []
+
+        def goal_score(node: HFN) -> float:
+            # Weighted Euclidean distance
+            # High weight on target_slice increases its influence on ranking
+            diff = node.mu - query.mu
+            
+            # Apply target weight to the specific slice
+            weighted_diff = diff.copy()
+            weighted_diff[self.target_slice] *= self.target_weight
+            
+            return float(np.sum(weighted_diff**2))
+
+        candidates.sort(key=goal_score)
+        return candidates[:k]
