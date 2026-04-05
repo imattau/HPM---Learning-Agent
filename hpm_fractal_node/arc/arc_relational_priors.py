@@ -3,7 +3,7 @@ ARC Relational Priors — 80D rule-family HFN nodes.
 """
 from __future__ import annotations
 import numpy as np
-from hfn.loader import HFNLoader
+from hfn.loader import HFNLoader, LoadItem
 from hfn.hfn import HFN
 from hpm_fractal_node.arc.arc_relational_encoder import RD_DIM, K, D_SLOT
 
@@ -11,17 +11,19 @@ from hpm_fractal_node.arc.arc_relational_encoder import RD_DIM, K, D_SLOT
 class RelationalPriorLoader(HFNLoader):
     """Loader for the 5 relational-delta priors in 80D space."""
 
+    namespace = "arc_rel"
+
     @property
     def dim(self) -> int:
         return RD_DIM
 
-    def build(self) -> list[HFN]:
+    def build(self) -> list[HFN] | list[LoadItem]:
         return [
-            self._identity(),
-            self._translate(),
-            self._recolor(),
-            self._count_up(),
-            self._count_down(),
+            self._item(self._identity(), role="prior", protected=True),
+            self._item(self._translate(), role="prior", protected=True),
+            self._item(self._recolor(), role="prior", protected=True),
+            self._item(self._count_up(), role="prior", protected=True),
+            self._item(self._count_down(), role="prior", protected=True),
         ]
 
     def _make_prior(self, pid: str, mu: np.ndarray, sigma_base: float,
@@ -79,4 +81,4 @@ class RelationalPriorLoader(HFNLoader):
 
 def build_relational_priors() -> list[HFN]:
     """Convenience wrapper — returns the 5 relational prior HFNs."""
-    return RelationalPriorLoader().build()
+    return RelationalPriorLoader().build_nodes()

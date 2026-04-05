@@ -1,12 +1,12 @@
 """
-Experiment 3: Competing Explanations (critical).
+Experiment 4: Competing Explanations (critical).
 
 Goal:
-- Option A: reuse a known node (cheap, slightly wrong)
-- Option B: build a new node (expensive, more correct)
+- Option A: reuse a simple but incorrect pattern (cheap)
+- Option B: choose a complex but correct structure (accurate)
 
-The experiment keeps decision logic local to this harness. Core HFN/Observer
-modules are not modified.
+The experiment keeps decision logic local to this harness while using
+Evaluator and DecisionPolicy primitives for score/weight evolution.
 """
 from __future__ import annotations
 
@@ -18,51 +18,63 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from hfn.evaluator import Evaluator
-from hfn.forest import Forest
 from hfn.hfn import HFN
+from hfn.policy import DecisionPolicy, LearningPolicyConfig
 
 
 @dataclass
 class ExperimentConfig:
-    dim: int = 2
+    dim: int = 4
     seed: int = 7
     samples: int = 220
     early_window: int = 40
+    late_window: int = 40
+    transition_window: int = 12
+    transition_threshold: float = 0.7
+    premature_window: int = 12
+    premature_threshold: float = 0.7
     noise_std: float = 0.08
-    lambda_complexity: float = 0.03
-    structural_penalty: float = 0.05
-    mismatch_threshold: float = 0.22
-    pressure_increment: float = 1.0
-    pressure_decay: float = 0.97
-    pressure_gain: float = 0.010
-    cheap_pressure_penalty_gain: float = 0.050
-    base_creation_cost: float = 0.55
-    min_creation_cost: float = 0.10
-    max_new_nodes: int = 2
+    lambda_complexity: float = 0.08
+    weight_gain: float = 0.80
+    alpha_gain: float = 0.10
+    beta_loss: float = 0.04
+    explainer_relative_accuracy_floor: float = 0.50
+    initial_cheap_weight: float = 0.95
+    initial_complex_weight: float = 0.15
+    cheap_sigma: float = 0.80
+    complex_sigma: float = 0.35
+    complex_offdiag: float = 0.0
+    evidence_gain: float = 0.06
+    evidence_decay: float = 0.96
+    evidence_scale: float = 0.5
 
 
 @dataclass
 class StepRecord:
     step: int
     decision: str
-    cheap_error: float
-    chosen_error: float
-    pressure_evidence: float
-    create_cost_effective: float
+    cheap_score: float
+    complex_score: float
+    cheap_weight: float
+    complex_weight: float
+    cheap_accuracy: float
+    complex_accuracy: float
 
 
 @dataclass
 class ExperimentSummary:
     samples: int
-    cheap_reuse_count: int
-    new_reuse_count: int
-    creation_step: int | None
-    created_nodes: int
-    early_reuse_rate: float
-    pre_creation_error_mean: float
-    post_creation_error_mean: float
+    cheap_choice_count: int
+    complex_choice_count: int
+    transition_step: int | None
+    early_cheap_rate: float
+    late_complex_rate: float
+    cheap_weight_trace: list[float]
+    complex_weight_trace: list[float]
+    cheap_score_trace: list[float]
+    complex_score_trace: list[float]
     stagnation: bool
-    explosion: bool
+    premature_complexity: bool
     records: list[StepRecord]
 
 
@@ -70,150 +82,198 @@ def _make_node(node_id: str, mu: np.ndarray, sigma_diag: float, d: int) -> HFN:
     return HFN(mu=mu.copy(), sigma=np.ones(d) * sigma_diag, id=node_id, use_diag=True)
 
 
+def _make_complex(node_id: str, mu: np.ndarray, sigma_diag: float, offdiag: float, children: list[HFN]) -> HFN:
+    D = mu.shape[0]
+    if offdiag <= 0.0:
+        node = HFN(mu=mu.copy(), sigma=np.ones(D) * sigma_diag, id=node_id, use_diag=True)
+    else:
+        sigma = np.eye(D) * sigma_diag
+        sigma += (np.ones((D, D)) - np.eye(D)) * offdiag
+        node = HFN(mu=mu.copy(), sigma=sigma, id=node_id, use_diag=False)
+    for child in children:
+        node.add_child(child)
+    return node
+
+
 def run_experiment(config: ExperimentConfig | None = None) -> ExperimentSummary:
     cfg = config or ExperimentConfig()
     rng = np.random.default_rng(cfg.seed)
     evaluator = Evaluator()
+    policy = DecisionPolicy(
+        learning=LearningPolicyConfig(
+            alpha_gain=cfg.alpha_gain,
+            beta_loss=cfg.beta_loss,
+            lambda_complexity=cfg.lambda_complexity,
+            explainer_relative_accuracy_floor=cfg.explainer_relative_accuracy_floor,
+        )
+    )
 
-    forest = Forest(D=cfg.dim, forest_id="competing_explanations")
-    cheap_node = _make_node("cheap_known", np.array([0.0, 0.0]), sigma_diag=0.32, d=cfg.dim)
-    forest.register(cheap_node)
+    true_center = np.array([0.42, 0.08, 0.08, 0.08])
+    cheap_mu = np.array([0.30, 0.0, 0.0, 0.0])
+    cheap_node = _make_node("cheap_wrong", cheap_mu, sigma_diag=cfg.cheap_sigma, d=cfg.dim)
+    c1 = _make_node("c1", true_center, sigma_diag=cfg.complex_sigma, d=cfg.dim)
+    c2 = _make_node("c2", true_center, sigma_diag=cfg.complex_sigma, d=cfg.dim)
+    complex_node = _make_complex(
+        "complex_correct",
+        true_center,
+        cfg.complex_sigma,
+        cfg.complex_offdiag,
+        [c1, c2],
+    )
 
-    # Ground truth cluster lives away from cheap_known: reusable but wrong early.
-    true_center = np.array([0.45, 0.0])
-
+    weights = {
+        cheap_node.id: cfg.initial_cheap_weight,
+        complex_node.id: cfg.initial_complex_weight,
+    }
     records: list[StepRecord] = []
-    cheap_reuse_count = 0
-    new_reuse_count = 0
-    created_nodes = 0
-    creation_step: int | None = None
-    pressure_evidence = 0.0
-    precise_node: HFN | None = None
+    cheap_choice_count = 0
+    complex_choice_count = 0
+    cheap_weight_trace: list[float] = []
+    complex_weight_trace: list[float] = []
+    cheap_score_trace: list[float] = []
+    complex_score_trace: list[float] = []
+    decisions: list[str] = []
+    transition_step: int | None = None
+
+    evidence = 0.0
 
     for step in range(cfg.samples):
         x = true_center + rng.normal(0.0, cfg.noise_std, size=cfg.dim)
-        cheap_error = float(np.linalg.norm(x - cheap_node.mu))
-        cheap_fit = evaluator.accuracy(x, cheap_node)
-        cheap_utility = cheap_fit - (cfg.lambda_complexity * evaluator.description_length(cheap_node))
+        cheap_accuracy = evaluator.accuracy(x, cheap_node)
+        complex_accuracy = evaluator.accuracy(x, complex_node)
+        cheap_complexity = evaluator.description_length(cheap_node)
+        complex_complexity = evaluator.description_length(complex_node)
 
-        if cheap_error > cfg.mismatch_threshold:
-            pressure_evidence += cfg.pressure_increment
-        pressure_evidence *= cfg.pressure_decay
-
-        create_cost_effective = max(
-            cfg.min_creation_cost,
-            cfg.base_creation_cost - (cfg.pressure_gain * pressure_evidence),
-        )
-        cheap_utility -= (
-            cfg.cheap_pressure_penalty_gain
-            * pressure_evidence
-            * max(0.0, cheap_error - cfg.mismatch_threshold)
+        evidence = (evidence * cfg.evidence_decay) + cfg.evidence_gain * max(
+            0.0, complex_accuracy - cheap_accuracy
         )
 
-        if precise_node is None:
-            candidate_precise = _make_node("candidate_precise", x, sigma_diag=0.035, d=cfg.dim)
-            build_fit = evaluator.accuracy(x, candidate_precise)
-            build_utility = (
-                build_fit
-                - (cfg.lambda_complexity * evaluator.description_length(candidate_precise))
-                - cfg.structural_penalty
-                - create_cost_effective
-            )
-            if build_utility > cheap_utility and created_nodes < cfg.max_new_nodes:
-                created_nodes += 1
-                creation_step = step
-                precise_node = _make_node(f"precise_{created_nodes}", x, sigma_diag=0.035, d=cfg.dim)
-                forest.register(precise_node)
-                decision = "build_new"
-                chosen_error = float(np.linalg.norm(x - precise_node.mu))
-                new_reuse_count += 1
-            else:
-                decision = "reuse_cheap"
-                chosen_error = cheap_error
-                cheap_reuse_count += 1
+        cheap_score = (
+            cheap_accuracy
+            + cfg.weight_gain * weights[cheap_node.id]
+            - cfg.lambda_complexity * cheap_complexity
+        )
+        complex_score = (
+            complex_accuracy
+            + cfg.weight_gain * weights[complex_node.id]
+            - cfg.lambda_complexity * complex_complexity
+            + cfg.evidence_scale * evidence
+        )
+
+        if complex_score > cheap_score:
+            decision = "complex"
+            complex_choice_count += 1
         else:
-            precise_fit = evaluator.accuracy(x, precise_node)
-            precise_utility = precise_fit - (
-                cfg.lambda_complexity * evaluator.description_length(precise_node)
-            )
-            if precise_utility >= cheap_utility:
-                decision = "reuse_new"
-                chosen_error = float(np.linalg.norm(x - precise_node.mu))
-                new_reuse_count += 1
+            decision = "cheap"
+            cheap_choice_count += 1
+
+        decisions.append(decision)
+
+        # Update weights using observer-style "explaining" gating.
+        accuracy_scores = {
+            cheap_node.id: cheap_accuracy,
+            complex_node.id: complex_accuracy,
+        }
+        explaining_ids = policy.active_explaining_ids(accuracy_scores)
+        for node in (cheap_node, complex_node):
+            if node.id in explaining_ids:
+                weights[node.id] = policy.weight_update(
+                    current_weight=weights[node.id],
+                    explaining=True,
+                    accuracy=accuracy_scores[node.id],
+                    overlap_sum=0.0,
+                )
             else:
-                decision = "reuse_cheap"
-                chosen_error = cheap_error
-                cheap_reuse_count += 1
+                overlap_sum = 0.0
+                for eid in explaining_ids:
+                    other_node = cheap_node if eid == cheap_node.id else complex_node
+                    overlap_sum += node.overlap(other_node)
+                weights[node.id] = policy.weight_update(
+                    current_weight=weights[node.id],
+                    explaining=False,
+                    accuracy=0.0,
+                    overlap_sum=overlap_sum,
+                )
 
         records.append(
             StepRecord(
                 step=step,
                 decision=decision,
-                cheap_error=cheap_error,
-                chosen_error=chosen_error,
-                pressure_evidence=pressure_evidence,
-                create_cost_effective=create_cost_effective,
+                cheap_score=cheap_score,
+                complex_score=complex_score,
+                cheap_weight=weights[cheap_node.id],
+                complex_weight=weights[complex_node.id],
+                cheap_accuracy=cheap_accuracy,
+                complex_accuracy=complex_accuracy,
             )
         )
 
-    early_n = min(cfg.early_window, len(records))
-    early_reuse_rate = (
-        sum(1 for r in records[:early_n] if r.decision == "reuse_cheap") / float(early_n)
+        cheap_weight_trace.append(weights[cheap_node.id])
+        complex_weight_trace.append(weights[complex_node.id])
+        cheap_score_trace.append(cheap_score)
+        complex_score_trace.append(complex_score)
+
+        if transition_step is None and len(decisions) >= cfg.transition_window:
+            window = decisions[-cfg.transition_window:]
+            complex_rate = sum(1 for d in window if d == "complex") / len(window)
+            if complex_rate >= cfg.transition_threshold:
+                transition_step = step
+
+    early_n = min(cfg.early_window, len(decisions))
+    early_cheap_rate = (
+        sum(1 for d in decisions[:early_n] if d == "cheap") / float(early_n)
         if early_n > 0
         else 0.0
     )
-
-    if creation_step is None:
-        pre_creation_errors = [r.chosen_error for r in records]
-        post_creation_errors: list[float] = []
-    else:
-        pre_creation_errors = [r.chosen_error for r in records[:creation_step]]
-        post_creation_errors = [r.chosen_error for r in records[creation_step + 1 :]]
-
-    pre_creation_error_mean = (
-        float(np.mean(pre_creation_errors)) if pre_creation_errors else 0.0
+    late_n = min(cfg.late_window, len(decisions))
+    late_complex_rate = (
+        sum(1 for d in decisions[-late_n:] if d == "complex") / float(late_n)
+        if late_n > 0
+        else 0.0
     )
-    post_creation_error_mean = (
-        float(np.mean(post_creation_errors)) if post_creation_errors else pre_creation_error_mean
+    stagnation = transition_step is None
+    premature_window = min(cfg.premature_window, len(decisions))
+    premature_rate = (
+        sum(1 for d in decisions[:premature_window] if d == "complex") / float(premature_window)
+        if premature_window > 0
+        else 0.0
     )
-
-    stagnation = creation_step is None
-    explosion = created_nodes > 1
+    premature_complexity = premature_rate >= cfg.premature_threshold
 
     return ExperimentSummary(
         samples=cfg.samples,
-        cheap_reuse_count=cheap_reuse_count,
-        new_reuse_count=new_reuse_count,
-        creation_step=creation_step,
-        created_nodes=created_nodes,
-        early_reuse_rate=early_reuse_rate,
-        pre_creation_error_mean=pre_creation_error_mean,
-        post_creation_error_mean=post_creation_error_mean,
+        cheap_choice_count=cheap_choice_count,
+        complex_choice_count=complex_choice_count,
+        transition_step=transition_step,
+        early_cheap_rate=early_cheap_rate,
+        late_complex_rate=late_complex_rate,
+        cheap_weight_trace=cheap_weight_trace,
+        complex_weight_trace=complex_weight_trace,
+        cheap_score_trace=cheap_score_trace,
+        complex_score_trace=complex_score_trace,
         stagnation=stagnation,
-        explosion=explosion,
+        premature_complexity=premature_complexity,
         records=records,
     )
 
 
 def _print_summary(summary: ExperimentSummary) -> None:
-    print("Experiment 3: Competing Explanations")
+    print("Experiment 4: Competing Explanations")
     print(f"  samples:                {summary.samples}")
-    print(f"  cheap reuse count:      {summary.cheap_reuse_count}")
-    print(f"  new-structure reuse:    {summary.new_reuse_count}")
-    print(f"  creation step:          {summary.creation_step}")
-    print(f"  created nodes:          {summary.created_nodes}")
-    print(f"  early cheap reuse rate: {summary.early_reuse_rate:.3f}")
-    print(f"  error mean (pre):       {summary.pre_creation_error_mean:.4f}")
-    print(f"  error mean (post):      {summary.post_creation_error_mean:.4f}")
+    print(f"  cheap choice count:     {summary.cheap_choice_count}")
+    print(f"  complex choice count:   {summary.complex_choice_count}")
+    print(f"  transition step:        {summary.transition_step}")
+    print(f"  early cheap rate:       {summary.early_cheap_rate:.3f}")
+    print(f"  late complex rate:      {summary.late_complex_rate:.3f}")
     print(f"  stagnation:             {summary.stagnation}")
-    print(f"  explosion:              {summary.explosion}")
+    print(f"  premature complexity:   {summary.premature_complexity}")
 
     if summary.stagnation:
-        print("  verdict: STAGNATION (always picked cheap reuse)")
-    elif summary.explosion:
-        print("  verdict: EXPLOSION (kept creating new structure)")
+        print("  verdict: STAGNATION (never shifted to complex explanation)")
+    elif summary.premature_complexity:
+        print("  verdict: PREMATURE_COMPLEXITY (skipped cheap early phase)")
     else:
-        print("  verdict: BALANCED (cheap early, new structure under pressure)")
+        print("  verdict: BALANCED (cheap early, complex after experience)")
 
 
 def main() -> int:

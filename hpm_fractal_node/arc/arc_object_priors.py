@@ -12,7 +12,7 @@ objects under a named transformation rule.
 from __future__ import annotations
 
 import numpy as np
-from hfn.loader import HFNLoader
+from hfn.loader import HFNLoader, LoadItem
 from hfn.hfn import HFN
 from hpm_fractal_node.arc.arc_object_encoder import TOTAL_DIM, IN_SLICE, OUT_SLICE, RULE_SLICE, D_OBJ, K
 
@@ -29,22 +29,24 @@ _IDX_AREA    = 5
 class ObjectPriorLoader(HFNLoader):
     """Loader for the 10 object-level priors in 420D space."""
 
+    namespace = "arc_obj"
+
     @property
     def dim(self) -> int:
         return TOTAL_DIM
 
-    def build(self) -> list[HFN]:
+    def build(self) -> list[HFN] | list[LoadItem]:
         return [
-            self._identity(),
-            self._recolor(),
-            self._translate(),
-            self._reflect_h(),
-            self._reflect_v(),
-            self._sort_by_size(),
-            self._stamp(),
-            self._fill_column(),
-            self._fill_row(),
-            self._count_rule(),
+            self._item(self._identity(), role="prior", protected=True),
+            self._item(self._recolor(), role="prior", protected=True),
+            self._item(self._translate(), role="prior", protected=True),
+            self._item(self._reflect_h(), role="prior", protected=True),
+            self._item(self._reflect_v(), role="prior", protected=True),
+            self._item(self._sort_by_size(), role="prior", protected=True),
+            self._item(self._stamp(), role="prior", protected=True),
+            self._item(self._fill_column(), role="prior", protected=True),
+            self._item(self._fill_row(), role="prior", protected=True),
+            self._item(self._count_rule(), role="prior", protected=True),
         ]
 
     def _base_mu_sigma(self, default_sigma: float = 5.0) -> tuple[np.ndarray, np.ndarray]:  # type: ignore[override]
@@ -199,4 +201,4 @@ class ObjectPriorLoader(HFNLoader):
 
 def build_object_level_priors() -> list[HFN]:
     """Convenience wrapper — returns the 10 object-level prior HFNs."""
-    return ObjectPriorLoader().build()
+    return ObjectPriorLoader().build_nodes()

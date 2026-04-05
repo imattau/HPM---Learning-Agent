@@ -469,6 +469,12 @@ python hpm_fractal_node/experiments/experiment_thinking_arc_solver.py
 
 # SP29 — Sovereign Study-and-Test (Meta-Transfer)
 python hpm_fractal_node/experiments/experiment_study_and_test.py
+
+# SP31 — Closed-Loop Learning (World Model Refinement)
+python hpm_fractal_node/experiments/experiment_closed_loop.py
+
+# SP32 — Meta-HFN Utilisation (Adaptation & Substrate Efficiency)
+python hpm_fractal_node/experiments/experiment_meta_hfn.py
 ```
 
 ### Run HFN experiments

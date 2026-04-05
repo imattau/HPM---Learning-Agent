@@ -1,9 +1,9 @@
-# Competing Explanations Experiment (Experiment 3)
+# Competing Explanations Experiment (Experiment 4)
 
 This experiment creates a controlled conflict between two explanations for the same stream:
 
-- `Option A`: reuse a known node (`cheap_known`) that is cheap but slightly wrong
-- `Option B`: create a new precise node that is expensive but more correct
+- `Option A`: reuse a simple incorrect node (`cheap_wrong`)
+- `Option B`: choose a complex but correct structure (`complex_correct`)
 
 The policy is local to the experiment harness. Core HFN modules are unchanged.
 
@@ -12,30 +12,28 @@ The policy is local to the experiment harness. Core HFN modules are unchanged.
 The experiment measures a three-way tradeoff:
 
 - fit quality
-- complexity/structure penalty
-- creation cost
+- complexity penalty
+- accumulated weight
 
-Creation cost starts high and is reduced by repeated mismatch pressure. This
-implements the desired behavior:
+The expected behavior:
 
 - early: cheap reuse should dominate
-- under sustained pressure: building a new structure should eventually win
+- under sustained evidence: the complex correct structure should win
 
 ## Failure modes
 
-- **Stagnation**: the run never creates a new structure despite persistent mismatch.
-- **Explosion**: the run keeps creating duplicate new structures instead of converging.
+- **Stagnation**: the run never shifts to the complex structure.
+- **Premature complexity**: the complex structure dominates immediately.
 
 ## Output summary
 
 The script reports:
 
-- cheap reuse count
-- new-structure creation step
-- post-creation reuse count
-- mean error before/after creation
-- stagnation and explosion flags
-- final verdict (`BALANCED`, `STAGNATION`, `EXPLOSION`)
+- transition step
+- weight traces for both explanations
+- early cheap rate and late complex rate
+- stagnation and premature complexity flags
+- final verdict
 
 ## Usage
 

@@ -63,11 +63,17 @@ substrate. The core components are:
 | `experiment_demand_driven_learning.py` | Fail-Learn-Retry | Active learning triggered by generative gaps (Curiosity Engine) with hallucination guarding | Working |
 | `experiment_competing_explanations.py` | Competing Explanations | Cheap-reuse vs expensive-correct structure under repeated ambiguity pressure | Working |
 | `experiment_compression_vs_memorisation.py` | Compression vs Memorisation | AB then ABC streams to test composite emergence and reuse | Working |
+| `experiment_absorption_as_generalisation.py` | Absorption as Generalisation | ABC/ABD/ABE variants under shared AB pressure; tests absorption as abstraction | Working |
+| `experiment_near_miss_learning.py` | Near-Miss Learning | Train on ABC then probe AB? to test predictive completion vs creation | Working |
 | `experiment_local_density_stress.py` | Local Density Stress | Dense cluster vs sparse region; tests local differentiation under lacunarity suppression | Working |
+| `experiment_multifractal_learning.py` | Multifractal Learning | Dense inputs vs sparse uniques; compression dominance vs creation dominance | Working |
+| `experiment_forgetting_vs_persistence.py` | Forgetting vs Persistence | Phase1 ABC then Phase2 XYZ then replay; weight decay + pruning test continual learning | Working |
 | `experiment_dynamic_promotion.py` | Emergent Sovereignty | Autonomous specialist process spawning via decoder-led sub-tree extraction | Working |
 | `experiment_emergent_routing.py` | Decentralized Sovereignty | Multi-process broadcast and claim model using HFN competence gates | Working |
 | `experiment_thinking_arc_solver.py` | Thinking Solver | Iterative hypothesis testing and negative anchoring for ARC 30x30 | Working |
 | `experiment_study_and_test.py` | Study-and-Test | Meta-transfer learning across a curriculum of persistent ARC tasks | Working |
+| `experiment_closed_loop.py` | Closed-Loop Learning | `observe → explain → fail → create → re-observe` cycle; Tracks surprise reduction and structural compression over time | Working |
+| `experiment_meta_hfn.py` | Meta-HFN Utilisation | A/B tests self-representation (`meta_forest`) vs ablated baseline under resource pressure to measure adaptation speed and structural efficiency | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -223,6 +229,8 @@ in the world model when observations fall outside the current node coverage.
 | Negative Anchoring (falsified knowledge) | `experiment_thinking_arc_solver` |
 | Meta-Transfer Learning (Study and Test) | `experiment_study_and_test` |
 | Structural motif persistence across tasks | `experiment_study_and_test` |
+| Closed-Loop Learning & Adaptive Compression | `experiment_closed_loop` |
+| Meta-HFN Self-Representation under Pressure | `experiment_meta_hfn` |
 
 ---
 
@@ -260,3 +268,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_emergent_routing.md`](README_emergent_routing.md) — decentralized broadcast and claim model
 - [`README_thinking_arc_solver.md`](README_thinking_arc_solver.md) — iterative hypothesis testing and negative anchoring
 - [`README_study_and_test.md`](README_study_and_test.md) — meta-transfer learning across persistent tasks
+- [`README_closed_loop.md`](README_closed_loop.md) — `observe → explain → fail → create → re-observe` cycle and adaptive compression
+- [`README_meta_hfn.md`](README_meta_hfn.md) — A/B testing self-representation vs ablated baseline under resource pressure

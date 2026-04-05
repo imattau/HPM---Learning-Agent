@@ -4,38 +4,39 @@ from hpm_fractal_node.experiments.experiment_competing_explanations import (
 )
 
 
-def test_early_phase_prefers_cheap_reuse():
+def test_early_phase_prefers_simple_explanation():
     summary = run_experiment()
-    assert summary.early_reuse_rate >= 0.70
+    assert summary.early_cheap_rate >= 0.60
 
 
-def test_sustained_ambiguity_triggers_creation():
+def test_late_phase_shifts_to_correct_structure():
     summary = run_experiment()
-    assert summary.creation_step is not None
-    assert summary.creation_step > 0
-    assert summary.creation_step < summary.samples
+    assert summary.late_complex_rate >= 0.60
 
 
-def test_post_creation_error_improves():
+def test_transition_point_is_detected():
     summary = run_experiment()
-    assert summary.creation_step is not None
-    assert summary.post_creation_error_mean < summary.pre_creation_error_mean
+    assert summary.transition_step is not None
+    assert summary.transition_step > 0
+    assert summary.transition_step < summary.samples
 
 
-def test_no_duplicate_structure_explosion():
+def test_complex_weight_overtakes():
     summary = run_experiment()
-    assert summary.created_nodes == 1
-    assert not summary.explosion
+    assert summary.complex_weight_trace[-1] > summary.cheap_weight_trace[-1]
 
 
 def test_explicit_stagnation_mode_is_detected():
     summary = run_experiment(
         ExperimentConfig(
             samples=160,
-            base_creation_cost=1.40,
-            pressure_gain=0.0005,
-            min_creation_cost=0.9,
+            lambda_complexity=0.18,
+            weight_gain=0.30,
+            initial_cheap_weight=0.98,
+            initial_complex_weight=0.02,
+            transition_threshold=0.9,
+            evidence_scale=0.0,
         )
     )
-    assert summary.creation_step is None
+    assert summary.transition_step is None
     assert summary.stagnation
