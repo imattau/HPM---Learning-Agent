@@ -62,6 +62,7 @@ substrate. The core components are:
 | `experiment_sovereign_decoder.py` | Stereo Action | Multi-process, mixed-modal (Lexical + Motor) top-down synthesis of a "Say and Point" goal | Working |
 | `experiment_demand_driven_learning.py` | Fail-Learn-Retry | Active learning triggered by generative gaps (Curiosity Engine) with hallucination guarding | Working |
 | `experiment_competing_explanations.py` | Competing Explanations | Cheap-reuse vs expensive-correct structure under repeated ambiguity pressure | Working |
+| `experiment_compression_vs_memorisation.py` | Compression vs Memorisation | AB then ABC streams to test composite emergence and reuse | Working |
 | `experiment_local_density_stress.py` | Local Density Stress | Dense cluster vs sparse region; tests local differentiation under lacunarity suppression | Working |
 | `experiment_dynamic_promotion.py` | Emergent Sovereignty | Autonomous specialist process spawning via decoder-led sub-tree extraction | Working |
 | `experiment_emergent_routing.py` | Decentralized Sovereignty | Multi-process broadcast and claim model using HFN competence gates | Working |
@@ -233,6 +234,7 @@ For detailed documentation of the most developed experiments, see:
 - [`README_math_throughput.md`](README_math_throughput.md) — math observations/sec benchmark
 - [`README_math_controller.md`](README_math_controller.md) — async controller adapter comparison
 - [`README_competing_explanations.md`](README_competing_explanations.md) — cheap reuse vs expensive correct structure tradeoff
+- [`README_compression_vs_memorisation.md`](README_compression_vs_memorisation.md) — AB/ABC compression vs memorisation test
 - [`README_local_density_stress.md`](README_local_density_stress.md) — local density suppression stress test
 
 For detailed documentation of the lexical experiments, see:

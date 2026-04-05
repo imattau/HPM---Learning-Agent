@@ -39,10 +39,20 @@ from hfn.hfn import HFN
 from hfn.forest import Forest
 from hfn.evaluator import Evaluator
 from hfn.recombination import Recombination
-from hfn.policy import DecisionPolicy, CreateContext, AbsorptionContext
+from hfn.policy import (
+    DecisionPolicy,
+    CreateContext,
+    AbsorptionContext,
+    StructureArbitrationContext,
+    SearchPolicyConfig,
+    LearningPolicyConfig,
+    StructurePolicyConfig,
+    NoveltyPolicyConfig,
+)
 from hfn.query import Query
 from hfn.converter import Converter
 from hfn.retriever import Retriever, GeometricRetriever
+from hfn.observer_state import ObserverStateStore
 from hfn.tiered_forest import TieredForest
 
 
@@ -155,7 +165,25 @@ class Observer:
         # Collaborators (HPM layer 3 + structural executor)
         self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
         self.recombination: Recombination = recombination if recombination is not None else Recombination()
-        self.policy: DecisionPolicy = policy if policy is not None else DecisionPolicy()
+        self.policy: DecisionPolicy = policy if policy is not None else DecisionPolicy(
+            search=SearchPolicyConfig(tau=tau, budget=budget),
+            learning=LearningPolicyConfig(
+                alpha_gain=alpha_gain,
+                beta_loss=beta_loss,
+                lambda_complexity=lambda_complexity,
+                weight_decay_rate=weight_decay_rate,
+            ),
+            structure=StructurePolicyConfig(
+                absorption_miss_threshold=absorption_miss_threshold,
+                compression_cooccurrence_threshold=compression_cooccurrence_threshold,
+            ),
+            novelty=NoveltyPolicyConfig(
+                residual_surprise_threshold=residual_surprise_threshold,
+                gap_query_threshold=gap_query_threshold,
+                lacunarity_enabled=lacunarity_guided_creation,
+                lacunarity_creation_factor=lacunarity_creation_factor,
+            ),
+        )
 
         if adaptive_compression:
             from hfn.fractal import RecurrenceTracker
@@ -172,6 +200,7 @@ class Observer:
         self.meta_forest: TieredForest = TieredForest(
             D=4, cold_dir=self._meta_dir / "cold", forest_id="meta"
         )
+        self.state_store = ObserverStateStore(self.meta_forest)
 
         # Cooccurrence tracking via meta_forest (prefix "cooc:")
         # mu=[count, recency, pair_score, 0] — padded to D=4
@@ -413,7 +442,7 @@ class Observer:
     # --- Dynamic updates ---
 
     def _update_weights(self, x: np.ndarray, result: ExplanationResult) -> None:
-        explaining_ids = {n.id for n in result.explanation_tree}
+        effective_explaining_ids = self.policy.active_explaining_ids(result.accuracy_scores)
 
         for node in self.forest.active_nodes():
             nid = node.id
@@ -429,26 +458,36 @@ class Observer:
             if nid in self.protected_ids:
 
                 if self.prior_plasticity:
-                    if nid in explaining_ids:
+                    if nid in effective_explaining_ids:
                         self._prior_hit_counts[nid] += 1
                         self._prior_miss_counts[nid] = 0
                     else:
                         self._prior_miss_counts[nid] += 1
                 continue
 
-            if nid in explaining_ids:
+            if nid in effective_explaining_ids:
                 acc = result.accuracy_scores.get(nid, 0.0)
-                s.mu[0] += self.alpha_gain * (1.0 - s.mu[0]) * acc
-                s.mu[0] = min(s.mu[0], 1.0)
+                s.mu[0] = self.policy.weight_update(
+                    current_weight=float(s.mu[0]),
+                    explaining=True,
+                    accuracy=acc,
+                    overlap_sum=0.0,
+                )
                 s.mu[2] = 0  # reset miss_count
                 s.mu[3] += 1  # increment hit_count
             else:
+                overlap_sum = 0.0
                 for explaining_node in result.explanation_tree:
                     kappa = node.overlap(explaining_node)
-                    s.mu[0] -= self.beta_loss * kappa * s.mu[0]
-                s.mu[0] = max(s.mu[0], 0.0)
+                    overlap_sum += kappa
+                s.mu[0] = self.policy.weight_update(
+                    current_weight=float(s.mu[0]),
+                    explaining=False,
+                    accuracy=0.0,
+                    overlap_sum=overlap_sum,
+                )
                 if any(
-                    node.overlap(n) > self.absorption_overlap_threshold
+                    n.id in effective_explaining_ids and node.overlap(n) > self.absorption_overlap_threshold
                     for n in result.explanation_tree
                 ):
                     s.mu[2] += 1  # increment miss_count
@@ -484,7 +523,7 @@ class Observer:
             self._prior_hit_counts[nid] = 0
 
     def _update_scores(self, result: ExplanationResult) -> None:
-        explaining_ids = {n.id for n in result.explanation_tree}
+        explaining_ids = self.policy.active_explaining_ids(result.accuracy_scores)
         for node in self.forest.active_nodes():
             nid = node.id
             s = self._get_state(nid)
@@ -570,11 +609,7 @@ class Observer:
 
     def _weights_dict(self) -> dict[str, float]:
         """Build a {node_id: weight} dict from meta_forest for evaluator calls."""
-        out: dict[str, float] = {}
-        for sn in self.meta_forest.active_nodes():
-            if sn.id.startswith("state:"):
-                out[sn.id[len("state:"):]] = float(sn.mu[0])
-        return out
+        return self.state_store.weights_dict()
 
     def _build_prior_mus_matrix(self) -> np.ndarray | None:
         """Stack μ vectors of all protected (prior) nodes into a (K, D) matrix."""
@@ -642,7 +677,7 @@ class Observer:
 
             coh = self.evaluator.coherence(node)
             ctx = AbsorptionContext(
-                miss_count=int(self._get_state_field(node.id, 2)),
+                miss_count=self.state_store.miss_count(node.id),
                 base_miss_threshold=self.absorption_miss_threshold,
                 persistence_guided=self.persistence_guided_absorption,
                 node_persistence=p_scores.get(node.id, 0.0),
@@ -651,9 +686,6 @@ class Observer:
                 coherence=coh,
             )
             effective_miss_threshold = self.policy.effective_miss_threshold(ctx)
-            if ctx.miss_count < effective_miss_threshold:
-                continue
-
             best_overlap = 0.0
             best_node = None
             for other in snapshot:
@@ -667,6 +699,14 @@ class Observer:
                 if kappa > self.absorption_overlap_threshold and kappa > best_overlap:
                     best_overlap = kappa
                     best_node = other
+
+            absorb_score = self.policy.absorb_score(
+                miss_count=ctx.miss_count,
+                effective_threshold=effective_miss_threshold,
+                overlap=best_overlap,
+            )
+            if not self.policy.should_absorb(absorb_score):
+                continue
 
             if best_node is None:
                 continue
@@ -685,12 +725,62 @@ class Observer:
     # --- Node creation ---
 
     def _check_node_creation(self, x: np.ndarray, result: ExplanationResult) -> None:
-        self._check_residual_surprise(x, result)
-        self._check_compression_candidates()
-        self._check_gap_query(x, result)
+        create_allowed, create_score = self._create_signal(x, result)
 
-    def _check_residual_surprise(self, x: np.ndarray, result: ExplanationResult) -> None:
-        # Bootstrap: empty forest always needs a first node
+        comp_threshold = self.policy.compression_threshold(
+            self.compression_cooccurrence_threshold,
+            self._recurrence.recommended_threshold(self.compression_cooccurrence_threshold)
+            if self._recurrence is not None else None,
+        )
+        compression_candidates = self._collect_compression_candidates(comp_threshold)
+        compress_allowed = len(compression_candidates) > 0
+        compress_score = max(
+            (
+                self.policy.compress_score(int(self.meta_forest.get(cid).mu[0]), comp_threshold)
+                for cid, _ in compression_candidates
+                if self.meta_forest.get(cid) is not None
+            ),
+            default=float("-inf"),
+        )
+
+        coverage_gap = 1.0 - max(result.accuracy_scores.values(), default=0.0)
+        gap_allowed = self.policy.should_query_gap(coverage_gap, self.gap_query_threshold)
+
+        actions = self.policy.arbitrate_structure_actions(
+            StructureArbitrationContext(
+                create_allowed=create_allowed,
+                create_score=create_score,
+                compress_allowed=compress_allowed,
+                compress_score=compress_score,
+                gap_allowed=gap_allowed,
+            )
+        )
+
+        did_create = False
+        did_compress = False
+        if actions.compress_first and compress_allowed:
+            self._apply_compression_candidates(compression_candidates)
+            did_compress = True
+            if create_allowed:
+                self._create_node(x)
+                did_create = True
+        elif actions.create_first and create_allowed:
+            self._create_node(x)
+            did_create = True
+            if compress_allowed:
+                self._apply_compression_candidates(compression_candidates)
+                did_compress = True
+        elif compress_allowed:
+            self._apply_compression_candidates(compression_candidates)
+            did_compress = True
+        elif create_allowed:
+            self._create_node(x)
+            did_create = True
+
+        if actions.run_gap_query and not did_create and not did_compress:
+            self._check_gap_query(x, result)
+
+    def _create_signal(self, x: np.ndarray, result: ExplanationResult) -> tuple[bool, float]:
         density_ratio = 0.0
         if self.lacunarity_guided_creation and len(self.forest) > 0:
             density_ratio = self.evaluator.density_ratio(
@@ -706,38 +796,37 @@ class Observer:
             density_ratio=float(density_ratio),
             density_factor=self.lacunarity_creation_factor,
         )
-        if self.policy.should_create(create_ctx):
-            D = x.shape[0]
-            # Use self.forest._mu_index to get actual current count including cold
-            # but Observer might be watching an HFN that isn't a Forest.
-            # For TieredForest, len(self.forest) is correct (len of _mu_index).
-            # To be safe, we'll use a high-resolution ID.
-            node_id = f"{self.node_prefix}{len(self.forest)}"
-            # If collision, append random or use increment
-            while node_id in self.forest:
-                node_id = f"{node_id}_{np.random.randint(1000)}"
-            
-            if self.node_use_diag:
-                new_node = HFN(
-                    mu=x.copy(),
-                    sigma=np.ones(D),
-                    id=node_id,
-                    use_diag=True,
-                )
-            else:
-                new_node = HFN(
-                    mu=x.copy(),
-                    sigma=np.eye(D),
-                    id=node_id,
-                )
-            self.register(new_node)
-
-    def _check_compression_candidates(self) -> None:
-        threshold = self.policy.compression_threshold(
-            self.compression_cooccurrence_threshold,
-            self._recurrence.recommended_threshold(self.compression_cooccurrence_threshold)
-            if self._recurrence is not None else None,
+        return (
+            self.policy.should_create(create_ctx),
+            self.policy.create_score(
+                residual_surprise=result.residual_surprise,
+                density_ratio=float(density_ratio),
+                lacunarity_enabled=self.lacunarity_guided_creation,
+            ),
         )
+
+    def _create_node(self, x: np.ndarray) -> None:
+        D = x.shape[0]
+        node_id = f"{self.node_prefix}{len(self.forest)}"
+        while node_id in self.forest:
+            node_id = f"{node_id}_{np.random.randint(1000)}"
+
+        if self.node_use_diag:
+            new_node = HFN(
+                mu=x.copy(),
+                sigma=np.ones(D),
+                id=node_id,
+                use_diag=True,
+            )
+        else:
+            new_node = HFN(
+                mu=x.copy(),
+                sigma=np.eye(D),
+                id=node_id,
+            )
+        self.register(new_node)
+
+    def _collect_compression_candidates(self, threshold: float) -> list[tuple[str, list[str]]]:
         # Collect all qualifying pairs from cooccurrence HFNs in meta_forest
         candidates: list[tuple[str, list[str]]] = []
         for cooc_node in list(self.meta_forest.active_nodes()):
@@ -757,7 +846,9 @@ class Observer:
             if compressed_id in self.forest:
                 continue
             candidates.append((cooc_node.id, ids))
+        return candidates
 
+    def _apply_compression_candidates(self, candidates: list[tuple[str, list[str]]]) -> None:
         if not candidates:
             return
 
@@ -789,6 +880,15 @@ class Observer:
             if cooc_node is not None:
                 cooc_node.mu[0] = 0
 
+    def _check_compression_candidates(self) -> None:
+        threshold = self.policy.compression_threshold(
+            self.compression_cooccurrence_threshold,
+            self._recurrence.recommended_threshold(self.compression_cooccurrence_threshold)
+            if self._recurrence is not None else None,
+        )
+        candidates = self._collect_compression_candidates(threshold)
+        self._apply_compression_candidates(candidates)
+
     # --- Gap query ---
 
     def _expand_with_budget(self, x: np.ndarray, budget: int) -> ExplanationResult:
@@ -812,7 +912,7 @@ class Observer:
 
         # Coverage gap = 1 - best accuracy in explanation tree
         coverage_gap = 1.0 - max(result.accuracy_scores.values(), default=0.0)
-        if coverage_gap < self.gap_query_threshold:
+        if not self.policy.should_query_gap(coverage_gap, self.gap_query_threshold):
             return
 
         gap_hash = str(int(np.argmax(x)))
@@ -891,7 +991,9 @@ class Observer:
                     self._update_weights(vec, inner_result)
                     self._track_cooccurrence(inner_result.explanation_tree)
                     self._check_absorption()
-                    self._check_residual_surprise(vec, inner_result)
+                    create_allowed, _ = self._create_signal(vec, inner_result)
+                    if create_allowed:
+                        self._create_node(vec)
                     self._check_compression_candidates()
         finally:
             self._in_gap_query = False
