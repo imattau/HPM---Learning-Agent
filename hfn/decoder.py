@@ -72,6 +72,17 @@ class Decoder:
             return results
 
         # 3. Implicit Resolution: It's abstract but has no children. Resolve it.
+        # Check if all edge targets exist in forest
+        for edge in node.edges():
+            target_id = edge.target.id
+            target_nodes = [n for n in self.target_forest.active_nodes() if n.id == target_id]
+            if not target_nodes:
+                return ResolutionRequest(
+                    missing_mu=node.mu,
+                    missing_sigma=node.sigma,
+                    required_edges=node.edges()
+                )
+
         # Find candidates in the target forest near this abstract node's mu
         candidates = self.retriever.retrieve(node, k=self.k_candidates)
         if not candidates:
@@ -118,29 +129,29 @@ class Decoder:
         return [best_candidate] if best_candidate else []
 
     def _score_topological_fit(self, abstract_node: HFN, concrete_node: HFN) -> float:
-    """
-    Scores how well a concrete node satisfies the constraints of an abstract node.
-    Relation types are weighted: structural constraints penalise harder for mismatches.
-    """
-    abstract_edges = abstract_node.edges()
-    if not abstract_edges:
-        return 0.0
+        """
+        Scores how well a concrete node satisfies the constraints of an abstract node.
+        Relation types are weighted: structural constraints penalise harder for mismatches.
+        """
+        abstract_edges = abstract_node.edges()
+        if not abstract_edges:
+            return 0.0
 
-    # Map concrete node's edges: target_id → set of relation types
-    concrete_edge_map: dict[str, set[str]] = {}
-    for e in concrete_node.edges():
-        concrete_edge_map.setdefault(e.target.id, set()).add(e.relation)
+        # Map concrete node's edges: target_id → set of relation types
+        concrete_edge_map: dict[str, set[str]] = {}
+        for e in concrete_node.edges():
+            concrete_edge_map.setdefault(e.target.id, set()).add(e.relation)
 
-    score = 0.0
-    for e in abstract_edges:
-        w = self._RELATION_WEIGHTS.get(e.relation, self._DEFAULT_RELATION_WEIGHT)
-        if e.target.id in concrete_edge_map:
-            # Bonus if relation type also matches
-            if e.relation in concrete_edge_map[e.target.id]:
-                score += w
+        score = 0.0
+        for e in abstract_edges:
+            w = self._RELATION_WEIGHTS.get(e.relation, self._DEFAULT_RELATION_WEIGHT)
+            if e.target.id in concrete_edge_map:
+                # Bonus if relation type also matches
+                if e.relation in concrete_edge_map[e.target.id]:
+                    score += w
+                else:
+                    score += w * 0.5   # target matches but relation differs
             else:
-                score += w * 0.5   # target matches but relation differs
-        else:
-            score -= w * 0.5       # missing edge, weighted penalty
+                score -= w * 2.0       # missing edge is critical — heavy penalty
 
-    return score
+        return score
