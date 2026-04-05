@@ -39,6 +39,7 @@ from hfn.hfn import HFN
 from hfn.forest import Forest
 from hfn.evaluator import Evaluator
 from hfn.recombination import Recombination
+from hfn.policy import DecisionPolicy, CreateContext, AbsorptionContext
 from hfn.query import Query
 from hfn.converter import Converter
 from hfn.retriever import Retriever, GeometricRetriever
@@ -103,6 +104,7 @@ class Observer:
         multifractal_crowding_threshold: int = 3,     # nodes within radius = hot spot → absorb sooner
         evaluator: Evaluator | None = None,           # injectable evaluator (default: Evaluator())
         recombination: Recombination | None = None,   # injectable recombination (default: Recombination())
+        policy: DecisionPolicy | None = None,         # injectable decision policy (default: DecisionPolicy())
         query: Query | None = None,                   # gap query plugin (default: None = disabled)
         converter: Converter | None = None,           # raw-to-vector encoder (default: None = disabled)
         gap_query_threshold: float = 0.7,             # min coverage gap to trigger a query
@@ -153,6 +155,7 @@ class Observer:
         # Collaborators (HPM layer 3 + structural executor)
         self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
         self.recombination: Recombination = recombination if recombination is not None else Recombination()
+        self.policy: DecisionPolicy = policy if policy is not None else DecisionPolicy()
 
         if adaptive_compression:
             from hfn.fractal import RecurrenceTracker
@@ -346,7 +349,7 @@ class Observer:
             # Priority = surprise - node_weight  (high surprise + low weight = expand first)
             # This makes the search cost-aware: trusted nodes explored last
             frontier.sort(
-                key=lambda n: surprise(n) - self.get_weight(n.id),
+                key=lambda n: self.policy.expand_score(surprise(n), self.get_weight(n.id)),
                 reverse=True
             )
 
@@ -489,9 +492,17 @@ class Observer:
                 continue
             if nid in explaining_ids:
                 acc = result.accuracy_scores.get(nid, 0.0)
-                s.mu[1] = acc - self.lambda_complexity * self.evaluator.description_length(node)
+                s.mu[1] = self.policy.node_utility(
+                    acc,
+                    self.evaluator.description_length(node),
+                    self.lambda_complexity,
+                )
             else:
-                s.mu[1] = 0.0 - self.lambda_complexity * self.evaluator.description_length(node)
+                s.mu[1] = self.policy.node_utility(
+                    0.0,
+                    self.evaluator.description_length(node),
+                    self.lambda_complexity,
+                )
 
     def _cooc_id(self, pair: frozenset) -> str:
         """Deterministic id for a cooccurrence edge HFN."""
@@ -620,29 +631,27 @@ class Observer:
                 continue
 
             # Original miss-count absorption
-            effective_miss_threshold = self.absorption_miss_threshold
-            if self.persistence_guided_absorption and p_max > 0:
-                node_p = p_scores.get(node.id, 0.0)
-                norm_p = min(node_p, p_max) / p_max  # in [0, 1]
-                effective_miss_threshold = int(
-                    round(self.absorption_miss_threshold * (1.0 + norm_p))
-                )
-
             # Multifractal crowding: lower threshold for nodes in hot spots
+            crowding_hotspot = False
             if self.multifractal_guided_absorption:
-                # Exclude protected nodes from crowding count
                 non_protected = [n for n in snapshot if n.id not in self.protected_ids]
                 crowding = self.evaluator.crowding(
                     node.mu, non_protected, self.multifractal_crowding_radius
                 )
-                if crowding >= self.multifractal_crowding_threshold:
-                    # Hot spot — halve the threshold (absorb sooner)
-                    effective_miss_threshold = max(1, effective_miss_threshold // 2)
+                crowding_hotspot = crowding >= self.multifractal_crowding_threshold
 
-            # Coherence gate: incoherent nodes are absorbed at a lower miss threshold
             coh = self.evaluator.coherence(node)
-            coherence_scaled_threshold = max(1, int(effective_miss_threshold * (0.5 + 0.5 * coh)))
-            if self._get_state_field(node.id, 2) < coherence_scaled_threshold:
+            ctx = AbsorptionContext(
+                miss_count=int(self._get_state_field(node.id, 2)),
+                base_miss_threshold=self.absorption_miss_threshold,
+                persistence_guided=self.persistence_guided_absorption,
+                node_persistence=p_scores.get(node.id, 0.0),
+                persistence_max=p_max,
+                crowding_hotspot=crowding_hotspot,
+                coherence=coh,
+            )
+            effective_miss_threshold = self.policy.effective_miss_threshold(ctx)
+            if ctx.miss_count < effective_miss_threshold:
                 continue
 
             best_overlap = 0.0
@@ -682,16 +691,22 @@ class Observer:
 
     def _check_residual_surprise(self, x: np.ndarray, result: ExplanationResult) -> None:
         # Bootstrap: empty forest always needs a first node
-        if len(self.forest) == 0 or result.residual_surprise >= self.residual_surprise_threshold:
-            # Lacunarity-guided suppression: skip creation in already-dense regions
-            if self.lacunarity_guided_creation and len(self.forest) > 0:
-                ratio = self.evaluator.density_ratio(
-                    x,
-                    list(self.forest.active_nodes()),
-                    self.lacunarity_creation_radius,
-                )
-                if ratio > self.lacunarity_creation_factor:
-                    return  # region is dense — redirect to compression, not creation
+        density_ratio = 0.0
+        if self.lacunarity_guided_creation and len(self.forest) > 0:
+            density_ratio = self.evaluator.density_ratio(
+                x,
+                list(self.forest.active_nodes()),
+                self.lacunarity_creation_radius,
+            )
+        create_ctx = CreateContext(
+            forest_size=len(self.forest),
+            residual_surprise=result.residual_surprise,
+            residual_threshold=self.residual_surprise_threshold,
+            lacunarity_enabled=self.lacunarity_guided_creation,
+            density_ratio=float(density_ratio),
+            density_factor=self.lacunarity_creation_factor,
+        )
+        if self.policy.should_create(create_ctx):
             D = x.shape[0]
             # Use self.forest._mu_index to get actual current count including cold
             # but Observer might be watching an HFN that isn't a Forest.
@@ -718,16 +733,18 @@ class Observer:
             self.register(new_node)
 
     def _check_compression_candidates(self) -> None:
-        threshold = self.compression_cooccurrence_threshold
-        if self._recurrence is not None:
-            threshold = self._recurrence.recommended_threshold(threshold)
+        threshold = self.policy.compression_threshold(
+            self.compression_cooccurrence_threshold,
+            self._recurrence.recommended_threshold(self.compression_cooccurrence_threshold)
+            if self._recurrence is not None else None,
+        )
         # Collect all qualifying pairs from cooccurrence HFNs in meta_forest
         candidates: list[tuple[str, list[str]]] = []
         for cooc_node in list(self.meta_forest.active_nodes()):
             if not cooc_node.id.startswith("cooc:"):
                 continue
             count = int(cooc_node.mu[0])
-            if count < threshold:
+            if not self.policy.should_compress(count, threshold):
                 continue
             # Parse ids from "cooc:idA|idB"
             pair_str = cooc_node.id[len("cooc:"):]
