@@ -40,6 +40,7 @@ from hpm_fractal_node.arc.arc_relational_encoder import (
     find_objects_with_masks,
 )
 from hpm_fractal_node.arc.arc_relational_priors import build_relational_priors
+from hpm_fractal_node.arc.arc_object_encoder import task_pair_to_vec as obj_pair_to_vec
 
 # All prior names for brute-force fallback
 _ALL_RD_PRIORS = [
@@ -530,9 +531,26 @@ def pre_train_phase(q, rq, all_tasks, n: int = 150, exclude_ids=None):
     print("  Pre-training complete.\n")
 
 
+# ── Complexity metric (module-level for external use) ─────────────────────────
+
+def calculate_rd_complexity(task: dict) -> float:
+    """Rank by object-space complexity (same as SP31) for fair comparison."""
+    try:
+        vecs = []
+        for ex in task["train"]:
+            v = obj_pair_to_vec(ex["input"], ex["output"])
+            vecs.append(v)
+        if not vecs:
+            return 0.0
+        arr = np.stack(vecs)
+        return float(np.mean(np.var(arr, axis=0)))
+    except Exception:
+        return 0.0
+
+
 # ── Main experiment ────────────────────────────────────────────────────────────
 
-def run_experiment(pretrain_n: int = 150):
+def run_experiment(pretrain_n: int = 50):
     print("SP32: Relational Delta Curriculum Experiment\n")
 
     # Clean worker data dirs
@@ -549,14 +567,8 @@ def run_experiment(pretrain_n: int = 150):
     prior_ids   = {n.id for n in prior_nodes}
     print(f"Built {len(prior_nodes)} relational priors: {[n.id for n in prior_nodes]}\n")
 
-    # Rank tasks by mean RD L2 norm (larger delta = more complex transformation)
-    def task_complexity(task):
-        vecs = [compute_relational_delta(ex["input"], ex["output"])
-                for ex in task["train"]]
-        return float(np.mean([np.linalg.norm(v) for v in vecs]))
-
     print(f"Ranking {len(all_tasks)} tasks by relational delta complexity...")
-    ranked    = sorted(all_tasks, key=task_complexity)
+    ranked    = sorted(all_tasks, key=calculate_rd_complexity)
     study_set = ranked[:10]
     test_set  = ranked[-10:]
     print(f"Study Set IDs: {[t['id'] for t in study_set]}")
@@ -571,7 +583,7 @@ def run_experiment(pretrain_n: int = 150):
         source_nodes=prior_nodes,
         source_prior_ids=prior_ids,
         sigma_threshold=0.01,
-        compression_cooccurrence_threshold=10,
+        compression_cooccurrence_threshold=2,
     )
     q  = mp.Queue()
     rq = mp.Queue()

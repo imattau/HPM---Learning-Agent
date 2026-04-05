@@ -161,17 +161,16 @@ class TieredForest(Forest):
         return len(self._mu_index)
 
     def _load_index(self) -> None:
-        """Scan cold_dir to rebuild _mu_index and _summary_ids."""
+        """Scan cold_dir to rebuild _mu_index, then restore hierarchy cache."""
         for p in self._cold_dir.glob("*.npz"):
             try:
                 data = np.load(p)
                 node_id = p.stem
                 self._mu_index[node_id] = data["mu"]
-                # We can't know children without loading, so we assume 
-                # everything in cold might be a summary if we don't track it.
-                # In a more advanced version, we'd store summary status in a separate index file.
             except Exception:
                 continue
+        if self._mu_index:
+            self.rebuild_hierarchy_cache()
 
     def _cold_path(self, node_id: str) -> Path:
         return self._cold_dir / f"{node_id}.npz"
@@ -187,6 +186,12 @@ class TieredForest(Forest):
                 id=node_id,
                 use_diag=bool(data["use_diag"])
             )
+            # Restore child links if saved
+            child_ids_str = str(data["child_ids_str"]) if "child_ids_str" in data else ""
+            for cid in (child_ids_str.split(",") if child_ids_str else []):
+                child = self.get(cid)
+                if child is not None:
+                    node.add_edge(node, child, "PART_OF")
             # Re-register locally
             self._hot[node_id] = node
             if len(self._hot) > self._hot_cap: self._evict_lru()
@@ -201,11 +206,14 @@ class TieredForest(Forest):
             return
         # Save to cold
         path = self._cold_path(nid)
+        # Store child IDs as a comma-joined string to avoid pickle
+        child_ids_str = ",".join(c.id for c in node.children()) if node.children() else ""
         np.savez_compressed(
             path,
             mu=node.mu,
             sigma=node.sigma,
-            use_diag=node.use_diag
+            use_diag=node.use_diag,
+            child_ids_str=np.array(child_ids_str),
         )
 
     def _on_observe(self) -> None:

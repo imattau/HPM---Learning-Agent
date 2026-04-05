@@ -418,8 +418,15 @@ class Evaluator:
         """
         sigma = np.asarray(node.sigma, dtype=float)
         try:
-            cond = float(np.linalg.cond(sigma))
-        except np.linalg.LinAlgError:
+            if node.use_diag or sigma.ndim == 1:
+                # Diagonal storage: condition number is max/min of diagonal entries
+                diag = sigma.ravel()
+                min_d = float(np.min(np.abs(diag)))
+                max_d = float(np.max(np.abs(diag)))
+                cond = (max_d / min_d) if min_d > 0 else float('inf')
+            else:
+                cond = float(np.linalg.cond(sigma))
+        except (np.linalg.LinAlgError, ZeroDivisionError):
             return 0.0
         if not np.isfinite(cond) or cond <= 0.0:
             return 0.0
@@ -526,3 +533,39 @@ class Evaluator:
             Reinforcement signal in any range (default 0.0).
         """
         return 0.0
+
+    def task_complexity(self, observations: list[np.ndarray]) -> float:
+        """
+        Measure the average complexity of a set of observations.
+        Uses intrinsic dimensionality and mean L2 norm as proxies.
+        """
+        if not observations:
+            return 0.0
+        data = np.array(observations)
+        # 1. Variance as a measure of change (Signal strength)
+        signal_complexity = float(np.mean(np.linalg.norm(data, axis=1)))
+        
+        # 2. Intrinsic Dimensionality (Degrees of Freedom)
+        from hfn.fractal import intrinsic_dimensionality
+        idim = intrinsic_dimensionality(data)
+        if np.isnan(idim): idim = 1.0
+        
+        return signal_complexity * idim
+
+    def prediction_error(self, true_x: np.ndarray, pred_x: np.ndarray) -> float:
+        """
+        Calculates the normalized error between true and predicted vectors.
+        """
+        return float(np.linalg.norm(true_x - pred_x))
+
+    def shape_accuracy(self, true_shape: tuple[int, ...], pred_shape: tuple[int, ...]) -> float:
+        """
+        Measure how well the predicted grid dimensions match the truth.
+        """
+        if true_shape == pred_shape:
+            return 1.0
+        # Euclidean distance between shape vectors, normalized
+        t = np.array(true_shape)
+        p = np.array(pred_shape)
+        dist = np.linalg.norm(t - p)
+        return float(1.0 / (1.0 + dist))

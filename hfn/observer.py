@@ -32,6 +32,7 @@ from __future__ import annotations
 import numpy as np
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import NamedTuple
 
 from hfn.hfn import HFN
@@ -40,6 +41,8 @@ from hfn.evaluator import Evaluator
 from hfn.recombination import Recombination
 from hfn.query import Query
 from hfn.converter import Converter
+from hfn.retriever import Retriever, GeometricRetriever
+from hfn.tiered_forest import TieredForest
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +53,7 @@ class ExplanationResult(NamedTuple):
     explanation_tree: list[HFN]
     accuracy_scores: dict[str, float]
     residual_surprise: float
+    surprising_leaves: list[HFN]
 
 
 # ---------------------------------------------------------------------------
@@ -110,8 +114,12 @@ class Observer:
         node_use_diag: bool = False,           # use O(D) diagonal sigma for all dynamically created nodes
         node_prefix: str = "leaf_",            # prefix for dynamically created leaf nodes
         weight_decay_rate: float = 0.0,        # global weight decay rate (0.0 = disabled)
+        retriever: Retriever = None,           # injectable retriever (default: GeometricRetriever)
+        decoder = None,                        # injectable decoder for predictive coding
     ):
         self.forest = forest
+        self.retriever = retriever or GeometricRetriever(forest)
+        self.decoder = decoder
         self.tau = tau
         self.budget = budget
         self.lambda_complexity = lambda_complexity
@@ -154,10 +162,17 @@ class Observer:
         else:
             self._recurrence = None
 
-        self._weights: dict[str, float] = {}
-        self._scores: dict[str, float] = {}
-        self._miss_counts: dict[str, int] = defaultdict(int)
-        self._cooccurrence: dict[frozenset, int] = defaultdict(int)
+        # --- Meta-forest: NodeState HFNs ---
+        # Each domain node gets a companion 4D HFN: mu=[weight, score, miss_count, hit_count]
+        import tempfile
+        self._meta_dir = Path(tempfile.mkdtemp(prefix="hfn_meta_"))
+        self.meta_forest: TieredForest = TieredForest(
+            D=4, cold_dir=self._meta_dir / "cold", forest_id="meta"
+        )
+
+        # Cooccurrence tracking via meta_forest (prefix "cooc:")
+        # mu=[count, recency, pair_score, 0] — padded to D=4
+        self._observation_step: int = 0
 
         # Initialise weights for any nodes already in the forest
         for node in forest.active_nodes():
@@ -190,32 +205,115 @@ class Observer:
         self._init_node(node)
 
     def _init_node(self, node: HFN) -> None:
-        if node.id not in self._weights:
-            self._weights[node.id] = self.w_init
-            self._scores[node.id] = 0.0
+        state_id = f"state:{node.id}"
+        if state_id not in self.meta_forest:
+            state_node = HFN(
+                mu=np.array([self.w_init, 0.0, 0.0, 0.0]),
+                sigma=np.ones(4),
+                id=state_id,
+                use_diag=True,
+            )
+            self.meta_forest.register(state_node)
+
+    # --- NodeState HFN helpers ---
+    # mu layout: [0]=weight, [1]=score, [2]=miss_count, [3]=hit_count
+
+    def _get_state(self, node_id: str) -> HFN | None:
+        return self.meta_forest.get(f"state:{node_id}")
+
+    def _set_state_field(self, node_id: str, idx: int, value: float) -> None:
+        s = self._get_state(node_id)
+        if s is not None:
+            s.mu[idx] = value
+
+    def _get_state_field(self, node_id: str, idx: int, default: float = 0.0) -> float:
+        s = self._get_state(node_id)
+        return float(s.mu[idx]) if s is not None else default
 
     # --- Weight / score access ---
 
     def get_weight(self, node_id: str) -> float:
-        return self._weights.get(node_id, 0.0)
+        return self._get_state_field(node_id, 0)
 
     def get_score(self, node_id: str) -> float:
-        return self._scores.get(node_id, 0.0)
+        return self._get_state_field(node_id, 1)
+
+    def penalize_id(self, node_id: str, penalty: float = 0.5) -> None:
+        """Manually decrease the weight of a node (e.g. after a reasoning failure)."""
+        s = self._get_state(node_id)
+        if s is not None:
+            s.mu[0] *= (1.0 - penalty)
+            s.mu[0] = max(s.mu[0], 1e-6)
+
+    def boost_id(self, node_id: str, gain: float = 0.1) -> None:
+        """Increase the weight of a node after a successful outcome."""
+        s = self._get_state(node_id)
+        if s is not None:
+            s.mu[0] += self.alpha_gain * gain * (1.0 - s.mu[0])
+            s.mu[0] = min(s.mu[0], 1.0)
+
+    def save_state(self, path) -> None:
+        """Persist weights and scores to a JSON file (reads from meta_forest)."""
+        import json
+        weights = {}
+        scores = {}
+        for node in self.meta_forest.active_nodes():
+            if node.id.startswith("state:"):
+                domain_id = node.id[len("state:"):]
+                weights[domain_id] = float(node.mu[0])
+                scores[domain_id] = float(node.mu[1])
+        state = {"weights": weights, "scores": scores}
+        Path(path).write_text(json.dumps(state))
+
+    def load_state(self, path) -> None:
+        """Restore weights and scores from a JSON file if it exists."""
+        import json
+        p = Path(path)
+        if not p.exists():
+            return
+        state = json.loads(p.read_text())
+        for nid, w in state.get("weights", {}).items():
+            s = self._get_state(nid)
+            if s is not None:
+                s.mu[0] = w
+        for nid, sc in state.get("scores", {}).items():
+            s = self._get_state(nid)
+            if s is not None:
+                s.mu[1] = sc
+
+    def prune(self, min_weight: float = 1e-4) -> int:
+        """
+        Remove leaf nodes whose weight falls below min_weight.
+        Protected nodes are never pruned. Returns the count removed.
+        """
+        to_remove = []
+        for node in self.meta_forest.active_nodes():
+            if not node.id.startswith("state:"):
+                continue
+            domain_id = node.id[len("state:"):]
+            w = float(node.mu[0])
+            if w >= min_weight or domain_id in self.protected_ids:
+                continue
+            domain_node = self.forest.get(domain_id)
+            if domain_node is not None and domain_node.children():
+                continue  # only prune leaves
+            to_remove.append(domain_id)
+        for nid in to_remove:
+            self.forest.deregister(nid)
+            self.meta_forest.deregister(f"state:{nid}")
+        return len(to_remove)
 
     # --- Observation loop ---
 
-    def observe(self, x: np.ndarray) -> ExplanationResult:
+    def observe(self, x: np.ndarray, exhaustive: bool = False) -> ExplanationResult:
         """
-        Run one observation pass for signal x:
-        1. Retrieve candidate nodes from the Forest
-        2. Expand nodes greedily by surprise + utility
-        3. Update weights, scores, co-occurrence
-        4. Trigger absorption and node creation if warranted
-        Returns the explanation result.
+        Run one observation pass for signal x.
+        If exhaustive=True, explores deep into the hierarchy even if parents match.
         """
-        result = self._expand(x)
+        result = self._expand(x, exhaustive=exhaustive)
         if self._recurrence is not None:
             self._recurrence.update(x)
+            self._sync_recurrence_hfn()
         self._update_weights(x, result)
         self._check_prior_plasticity(x)
         self._update_scores(result)
@@ -224,18 +322,12 @@ class Observer:
         self._check_node_creation(x, result)
         return result
 
-    def _expand(self, x: np.ndarray) -> ExplanationResult:
+    def _expand(self, x: np.ndarray, exhaustive: bool = False) -> ExplanationResult:
         """
         Run the expansion loop and return the explanation tree.
-
-        A node is a GOOD EXPLAINER (added to explanation_tree) when its
-        surprise is BELOW tau — it adequately explains x.
-
-        A node is SURPRISING (above tau) — it needs expanding into its
-        children to find a better explanation. If it's a leaf, it can't
-        be expanded and contributes to residual surprise.
         """
-        frontier = list(self.forest.retrieve(x, k=5))
+        query_node = HFN(mu=x, sigma=np.ones_like(x), id="__query__", use_diag=True)
+        frontier = list(self.retriever.retrieve(query_node, k=10))
         explanation_tree: list[HFN] = []
         accuracy_scores: dict[str, float] = {}
         seen_ids: set[str] = set()
@@ -243,31 +335,33 @@ class Observer:
         budget = self.budget
 
         while frontier:
-            good     = [n for n in frontier if self._kl_surprise(x, n) < self.tau]
-            surprising = [n for n in frontier if self._kl_surprise(x, n) >= self.tau]
-
-            # Good explainers go into the explanation tree
-            for n in good:
-                if n.id not in seen_ids:
-                    explanation_tree.append(n)
-                    accuracy_scores[n.id] = self.evaluator.accuracy(x, n)
-                    seen_ids.add(n.id)
-
-            # No surprising nodes left — fully explained
-            if not surprising or budget == 0:
-                break
-
-            # Expand the most surprising node (highest potential utility)
-            best = max(surprising, key=lambda n: self._kl_surprise(x, n))
-            frontier = [n for n in frontier if n.id != best.id]
-            children = best.children()
-            if children:
+            # Sort by surprise so we expand most surprising first
+            frontier.sort(key=lambda n: self._kl_surprise(x, n), reverse=True)
+            
+            n = frontier.pop(0)
+            if n.id in seen_ids: continue
+            
+            surprise = self._kl_surprise(x, n)
+            
+            if surprise < self.tau:
+                # Good explainer
+                explanation_tree.append(n)
+                accuracy_scores[n.id] = self.evaluator.accuracy(x, n)
+                seen_ids.add(n.id)
+                
+                # If NOT exhaustive, we stop at the first good explainer in this branch
+                if not exhaustive:
+                    continue
+            
+            # If we reach here, we are either surprising OR we are in exhaustive mode
+            children = n.children()
+            if children and budget > 0:
                 frontier.extend(c for c in children if c.id not in seen_ids)
                 budget -= 1
-            else:
-                # Leaf with high surprise — can't expand, becomes residual
-                seen_ids.add(best.id)
-                surprising_leaves.append(best)
+            elif surprise >= self.tau:
+                # Surprising leaf
+                seen_ids.add(n.id)
+                surprising_leaves.append(n)
 
         # Residual: mean surprise of surprising leaf nodes that couldn't be expanded
         # plus any remaining frontier nodes still above tau
@@ -278,15 +372,31 @@ class Observer:
         residual = float(np.mean([self._kl_surprise(x, n) for n in residual_nodes])) \
             if residual_nodes else 0.0
 
+        if hasattr(self.retriever, 'notify_active'):
+            self.retriever.notify_active([n.id for n in explanation_tree])
+
         return ExplanationResult(
             explanation_tree=explanation_tree,
             accuracy_scores=accuracy_scores,
             residual_surprise=residual,
+            surprising_leaves=surprising_leaves
         )
 
+    def predict(self, result: ExplanationResult) -> np.ndarray | None:
+        """Generate a prediction from current explanation (predictive coding step)."""
+        if not result.explanation_tree or self.decoder is None:
+            return None
+        best = result.explanation_tree[0]
+        dec = self.decoder.decode(best)
+        if isinstance(dec, list) and dec:
+            return dec[0].mu
+        return None
+
     def _kl_surprise(self, x: np.ndarray, node: HFN) -> float:
-        """KL divergence proxy: negative log probability under node's Gaussian."""
-        return -node.log_prob(x)
+        """Dimension-normalized KL divergence proxy."""
+        D = x.shape[0]
+        # Normalize by D to keep surprise in a range comparable to tau (usually ~1.0)
+        return -node.log_prob(x) / D
 
     # --- Dynamic updates ---
 
@@ -295,12 +405,14 @@ class Observer:
 
         for node in self.forest.active_nodes():
             nid = node.id
-            if nid not in self._weights:
+            s = self._get_state(nid)
+            if s is None:
                 self._init_node(node)
-            
+                s = self._get_state(nid)
+
             # Apply global decay to all non-protected nodes
             if self.weight_decay_rate > 0 and nid not in self.protected_ids:
-                self._weights[nid] *= (1.0 - self.weight_decay_rate)
+                s.mu[0] *= (1.0 - self.weight_decay_rate)
 
             if nid in self.protected_ids:
 
@@ -314,19 +426,20 @@ class Observer:
 
             if nid in explaining_ids:
                 acc = result.accuracy_scores.get(nid, 0.0)
-                self._weights[nid] += self.alpha_gain * (1.0 - self._weights[nid]) * acc
-                self._weights[nid] = min(self._weights[nid], 1.0)
-                self._miss_counts[nid] = 0
+                s.mu[0] += self.alpha_gain * (1.0 - s.mu[0]) * acc
+                s.mu[0] = min(s.mu[0], 1.0)
+                s.mu[2] = 0  # reset miss_count
+                s.mu[3] += 1  # increment hit_count
             else:
                 for explaining_node in result.explanation_tree:
                     kappa = node.overlap(explaining_node)
-                    self._weights[nid] -= self.beta_loss * kappa * self._weights[nid]
-                self._weights[nid] = max(self._weights[nid], 0.0)
+                    s.mu[0] -= self.beta_loss * kappa * s.mu[0]
+                s.mu[0] = max(s.mu[0], 0.0)
                 if any(
                     node.overlap(n) > self.absorption_overlap_threshold
                     for n in result.explanation_tree
                 ):
-                    self._miss_counts[nid] += 1
+                    s.mu[2] += 1  # increment miss_count
 
     def _check_prior_plasticity(self, x: np.ndarray) -> None:
         """Drift low-density priors toward observations they keep missing (HPM Section 2.6).
@@ -362,23 +475,86 @@ class Observer:
         explaining_ids = {n.id for n in result.explanation_tree}
         for node in self.forest.active_nodes():
             nid = node.id
+            s = self._get_state(nid)
+            if s is None:
+                continue
             if nid in explaining_ids:
-                # Use the accuracy from the explanation tree for explaining nodes
-                x_proxy = None  # score formula via evaluator.score requires x
-                # Delegate to evaluator.score using stored accuracy
                 acc = result.accuracy_scores.get(nid, 0.0)
-                self._scores[nid] = acc - self.lambda_complexity * self.evaluator.description_length(node)
+                s.mu[1] = acc - self.lambda_complexity * self.evaluator.description_length(node)
             else:
-                self._scores[nid] = 0.0 - self.lambda_complexity * self.evaluator.description_length(node)
+                s.mu[1] = 0.0 - self.lambda_complexity * self.evaluator.description_length(node)
+
+    def _cooc_id(self, pair: frozenset) -> str:
+        """Deterministic id for a cooccurrence edge HFN."""
+        a, b = sorted(pair)
+        return f"cooc:{a}|{b}"
+
+    def _get_cooc(self, pair: frozenset) -> HFN | None:
+        return self.meta_forest.get(self._cooc_id(pair))
+
+    def _get_cooc_count(self, pair: frozenset) -> int:
+        c = self._get_cooc(pair)
+        return int(c.mu[0]) if c is not None else 0
 
     def _track_cooccurrence(self, explanation_tree: list[HFN]) -> None:
+        self._observation_step += 1
         ids = [n.id for n in explanation_tree]
         for i in range(len(ids)):
             for j in range(i + 1, len(ids)):
                 pair = frozenset([ids[i], ids[j]])
-                self._cooccurrence[pair] += 1
+                cid = self._cooc_id(pair)
+                c = self.meta_forest.get(cid)
+                if c is None:
+                    c = HFN(
+                        mu=np.array([1.0, float(self._observation_step), 0.0, 0.0]),
+                        sigma=np.ones(4),
+                        id=cid,
+                        use_diag=True,
+                    )
+                    self.meta_forest.register(c)
+                else:
+                    c.mu[0] += 1  # count
+                    c.mu[1] = float(self._observation_step)  # recency
+
+    def _sync_recurrence_hfn(self) -> None:
+        """Sync RecurrenceTracker statistics into a RecurrencePattern HFN in meta_forest."""
+        if self._recurrence is None:
+            return
+        rec_id = "recurrence:global"
+        rate = self._recurrence.recurrence_rate
+        # Mean distance: average pairwise distance of buffer entries (approximated)
+        buf = self._recurrence._buffer
+        if len(buf) >= 2:
+            dists = [float(np.linalg.norm(buf[-1] - b)) for b in buf[:-1]]
+            mean_dist = float(np.mean(dists))
+        else:
+            mean_dist = 0.0
+        rec_threshold = float(self._recurrence.recommended_threshold(
+            self.compression_cooccurrence_threshold
+        ))
+        rec_node = self.meta_forest.get(rec_id)
+        if rec_node is None:
+            rec_node = HFN(
+                mu=np.array([rate, mean_dist, rec_threshold, 0.0]),
+                sigma=np.ones(4),
+                id=rec_id,
+                use_diag=True,
+            )
+            self.meta_forest.register(rec_node)
+        else:
+            rec_node.mu[0] = rate
+            rec_node.mu[1] = mean_dist
+            rec_node.mu[2] = rec_threshold
 
     # --- Absorption ---
+
+    def _weights_dict(self) -> dict[str, float]:
+        """Build a {node_id: weight} dict from meta_forest for evaluator calls."""
+        out: dict[str, float] = {}
+        for sn in self.meta_forest.active_nodes():
+            if sn.id.startswith("state:"):
+                out[sn.id[len("state:"):]] = float(sn.mu[0])
+        return out
 
     def _build_prior_mus_matrix(self) -> np.ndarray | None:
         """Stack μ vectors of all protected (prior) nodes into a (K, D) matrix."""
@@ -397,7 +573,7 @@ class Observer:
         p_scores: dict[str, float] = {}
         p_max: float = 1.0
         if self.persistence_guided_absorption:
-            p_scores = self.evaluator.persistence_scores(snapshot, self._weights)
+            p_scores = self.evaluator.persistence_scores(snapshot, self._weights_dict())
             p_max = max(
                 (v for v in p_scores.values() if v != float("inf")),
                 default=1.0,
@@ -407,7 +583,7 @@ class Observer:
         if self.hausdorff_absorption_threshold is not None:
             candidates = self.evaluator.hausdorff_candidates(
                 snapshot,
-                self._weights,
+                self._weights_dict(),
                 threshold=self.hausdorff_absorption_threshold,
                 weight_floor=self.hausdorff_absorption_weight_floor,
                 protected_ids=self.protected_ids,
@@ -420,8 +596,11 @@ class Observer:
                     absorbed=node, dominant=best_match, forest=self.forest
                 )
                 self._init_node(new_node)
-                self._weights[new_node.id] = self._weights.get(best_match.id, self.w_init)
-                self._scores[new_node.id] = self._scores.get(best_match.id, 0.0)
+                bm_s = self._get_state(best_match.id)
+                new_s = self._get_state(new_node.id)
+                if bm_s is not None and new_s is not None:
+                    new_s.mu[0] = bm_s.mu[0]
+                    new_s.mu[1] = bm_s.mu[1]
                 self.absorbed_ids.add(node.id)
 
         for node in snapshot:
@@ -451,7 +630,10 @@ class Observer:
                     # Hot spot — halve the threshold (absorb sooner)
                     effective_miss_threshold = max(1, effective_miss_threshold // 2)
 
-            if self._miss_counts.get(node.id, 0) < effective_miss_threshold:
+            # Coherence gate: incoherent nodes are absorbed at a lower miss threshold
+            coh = self.evaluator.coherence(node)
+            coherence_scaled_threshold = max(1, int(effective_miss_threshold * (0.5 + 0.5 * coh)))
+            if self._get_state_field(node.id, 2) < coherence_scaled_threshold:
                 continue
 
             best_overlap = 0.0
@@ -475,8 +657,11 @@ class Observer:
                 absorbed=node, dominant=best_node, forest=self.forest
             )
             self._init_node(new_node)
-            self._weights[new_node.id] = self._weights.get(best_node.id, self.w_init)
-            self._scores[new_node.id] = self._scores.get(best_node.id, 0.0)
+            bn_s = self._get_state(best_node.id)
+            nn_s = self._get_state(new_node.id)
+            if bn_s is not None and nn_s is not None:
+                nn_s.mu[0] = bn_s.mu[0]
+                nn_s.mu[1] = bn_s.mu[1]
             self.absorbed_ids.add(node.id)
 
     # --- Node creation ---
@@ -527,18 +712,25 @@ class Observer:
         threshold = self.compression_cooccurrence_threshold
         if self._recurrence is not None:
             threshold = self._recurrence.recommended_threshold(threshold)
-        # Collect all qualifying pairs
-        candidates: list[tuple[frozenset, list[str]]] = []
-        for pair, count in list(self._cooccurrence.items()):
+        # Collect all qualifying pairs from cooccurrence HFNs in meta_forest
+        candidates: list[tuple[str, list[str]]] = []
+        for cooc_node in list(self.meta_forest.active_nodes()):
+            if not cooc_node.id.startswith("cooc:"):
+                continue
+            count = int(cooc_node.mu[0])
             if count < threshold:
                 continue
-            ids = list(pair)
+            # Parse ids from "cooc:idA|idB"
+            pair_str = cooc_node.id[len("cooc:"):]
+            ids = pair_str.split("|", 1)
+            if len(ids) != 2:
+                continue
             if ids[0] not in self.forest or ids[1] not in self.forest:
                 continue
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
             if compressed_id in self.forest:
                 continue
-            candidates.append((pair, ids))
+            candidates.append((cooc_node.id, ids))
 
         if not candidates:
             return
@@ -555,20 +747,21 @@ class Observer:
                     return self.evaluator.nearest_prior_dist(midpoint, prior_mus)
                 candidates.sort(key=_rank)
 
-        # Process all candidates in ranked order (nearest_prior sorts first,
-        # cooccurrence preserves dict iteration order).
-        for pair, ids in candidates:
+        # Process all candidates in ranked order
+        for cooc_id, ids in candidates:
             node_a = self.forest.get(ids[0])
             node_b = self.forest.get(ids[1])
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
-            # Re-check compressed_id is not already active (may have been added in earlier iteration)
             if compressed_id in self.forest:
                 continue
             new_node = self.recombination.compress(
                 node_a, node_b, self.forest, compressed_id
             )
             self._init_node(new_node)
-            self._cooccurrence[pair] = 0
+            # Reset cooccurrence count
+            cooc_node = self.meta_forest.get(cooc_id)
+            if cooc_node is not None:
+                cooc_node.mu[0] = 0
 
     # --- Gap query ---
 

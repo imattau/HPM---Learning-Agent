@@ -10,6 +10,7 @@ Integrates:
 from __future__ import annotations
 import multiprocessing as mp
 import numpy as np
+import re
 import time
 import shutil
 import sys
@@ -45,6 +46,7 @@ class WorkerConfig:
     sigma_threshold: float = 0.01
     source_nodes: list[HFN] = field(default_factory=list)
     source_prior_ids: set[str] = field(default_factory=set)
+    compression_cooccurrence_threshold: int = 10
 
 class SovereignARCWorker(mp.Process):
     def __init__(self, config: WorkerConfig, task_queue: mp.Queue, result_queue: mp.Queue):
@@ -77,7 +79,7 @@ class SovereignARCWorker(mp.Process):
         tau = calibrate_tau(self.config.common_d, sigma_scale=1.0, margin=5.0)
         self.observer = Observer(
             forest=self.forest, tau=tau, node_use_diag=True, protected_ids=self.config.source_prior_ids,
-            adaptive_compression=True, compression_cooccurrence_threshold=10
+            adaptive_compression=True, compression_cooccurrence_threshold=self.config.compression_cooccurrence_threshold
         )
         self.decoder = Decoder(target_forest=self.forest, sigma_threshold=self.config.sigma_threshold)
         
@@ -90,8 +92,55 @@ class SovereignARCWorker(mp.Process):
             pred_grid = reconstruct_grid(raw_ex["input"], delta_attrs, target_shape=raw_ex["output"].shape)
             return np.array_equal(pred_grid, raw_ex["output"])
 
+        def arc_rule_applier(rule_id: str, test_input: np.ndarray) -> np.ndarray | None:
+            """Apply a named geometric rule to compute delta for the test input.
+            Handles both functional prior IDs (prior_flip_v, prior_rot_180, prior_identity)
+            and compressed/abbreviated IDs (prior_fl, prior_ro, prior_id) from arc_prior_forest.
+            """
+            input_norm = test_input[0:900]
+            input_30x30 = (input_norm.reshape(30, 30) * 9.0)
+            rid = rule_id.lower()
+
+            # Determine transform — check both full names and abbreviations
+            # identity: 'prior_identity', 'prior_id', but NOT 'prior_identity_rule'
+            is_identity = ('prior_identity' in rid and 'prior_identity_r' not in rid) or \
+                          (re.search(r'\bprior_id\b|prior_id[,)]', rid) is not None)
+            is_flip_v   = 'prior_flip_v' in rid or 'prior_fl_v' in rid or \
+                          re.search(r'\bprior_fv\b|prior_fv[,)]', rid) is not None
+            is_flip_h   = 'prior_flip_h' in rid or 'prior_fl_h' in rid or \
+                          re.search(r'\bprior_fh\b|prior_fh[,)]', rid) is not None
+            # prior_fl without _v or _h suffix — treat as flip_h by convention
+            is_flip_gen = (re.search(r'\bprior_fl\b|prior_fl[,)]', rid) is not None) and \
+                          'prior_fl_v' not in rid and 'prior_fl_h' not in rid and \
+                          'prior_flip' not in rid
+            is_rot_180  = 'rot_180' in rid or \
+                          re.search(r'\bprior_ro\b|prior_ro[,)]', rid) is not None
+            is_rot_90   = 'rot_90' in rid and 'rot_270' not in rid and 'rot_180' not in rid
+            is_rot_270  = 'rot_270' in rid
+
+            if is_identity:
+                transform = lambda g: g.copy()
+            elif is_flip_v:
+                transform = lambda g: np.flip(g, axis=0).copy()
+            elif is_flip_h or is_flip_gen:
+                transform = lambda g: np.flip(g, axis=1).copy()
+            elif is_rot_180:
+                transform = lambda g: np.rot90(g, k=2).copy()
+            elif is_rot_90:
+                transform = lambda g: np.rot90(g, k=1).copy()
+            elif is_rot_270:
+                transform = lambda g: np.rot90(g, k=3).copy()
+            else:
+                return None
+            output_30x30 = transform(input_30x30)
+            delta = output_30x30.flatten() / 9.0 - input_norm
+            result = np.zeros(930)
+            result[:900] = delta
+            return result
+
         from hfn.reasoning import CognitiveSolver
-        self.solver = CognitiveSolver(self.observer, self.decoder, self.evaluator, validator=arc_validator)
+        self.solver = CognitiveSolver(self.observer, self.decoder, self.evaluator,
+                                      validator=arc_validator, rule_applier=arc_rule_applier)
 
         while True:
             task = self.task_queue.get()

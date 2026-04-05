@@ -35,8 +35,13 @@ class Forest(HFN):
         )
         self._D = D
         self._registry: dict[str, HFN] = {}
+        self._protected_ids: set[str] = set()
 
     # --- Registry ---
+
+    def set_protected(self, ids: set[str]) -> None:
+        """Mark node IDs as protected from certain dynamics (e.g. eviction)."""
+        self._protected_ids = set(ids)
 
     def register(self, node: HFN) -> None:
         """Add a node to the Forest. Idempotent."""
@@ -56,6 +61,15 @@ class Forest(HFN):
     def get(self, node_id: str) -> HFN | None:
         """Return node by id, or None if not found."""
         return self._registry.get(node_id)
+
+    def get_parents(self, node_id: str) -> list[HFN]:
+        """Find all nodes in the Forest that have this node as a child."""
+        if node_id not in self: return []
+        parents = []
+        for node in self.active_nodes():
+            if any(c.id == node_id for c in node.children()):
+                parents.append(node)
+        return parents
 
     def __contains__(self, node_id: str) -> bool:
         return node_id in self._registry
