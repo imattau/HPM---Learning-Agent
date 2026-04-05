@@ -1,40 +1,99 @@
-# Session State — Plan Execution Complete
+# Session State — Complete 3 HFN Fixes (2 Remaining)
 
 execution_mode: unattended
 auto_continue: true
 
-## Status: ALL IMPLEMENTATION COMPLETE
+## Status
+✅ Fix 1: observer.py _expand() (lines 324-382) — DONE
+⏳ Fix 2: evaluator.py density_ratio() (lines 83-125) — IN PROGRESS
+⏳ Fix 3: decoder.py _score_topological_fit() (lines 109-130) — PENDING
 
-### Part A: Retriever Wiring (7 steps) — DONE
-All 7 steps executed successfully:
-1. observer.py: Added `from hfn.retriever import Retriever, GeometricRetriever`
-2. observer.py: Added `retriever` and `decoder` params to `__init__`
-3. observer.py: Replaced `forest.retrieve(x, k=10)` with `retriever.retrieve(query_node, k=10)` in `_expand()`
-4. observer.py: Added `notify_active` call before return in `_expand()`
-5. observer.py: Added `predict()` method
-6. decoder.py: Added `from hfn.retriever import Retriever, GeometricRetriever`, `retriever` param to `__init__`
-7. decoder.py: Replaced `target_forest.retrieve(node.mu, ...)` with `retriever.retrieve(node, ...)`
+## Current Progress
+- Read evaluator.py lines 1-130 to identify current density_ratio() method
+- Current method at lines 84-126 uses mean nearest-neighbour distance approach
+- Need to replace with k-neighbor shell-based approach from spec below
 
-Verification: 4/4 tests pass (Observer default, Observer contextual, Decoder default, Decoder contextual)
+## Fix 2: evaluator.py density_ratio() (lines 83-125)
+REPLACE entire method (lines 84-126) with:
 
-### Part B Phase 1: NodeState HFN — DONE
-- Added `meta_forest: TieredForest(D=4)` to Observer
-- Each domain node gets companion HFN: `state:{node_id}` with mu=[weight, score, miss_count, hit_count]
-- Replaced all `_weights`, `_scores`, `_miss_counts` dict access with meta_forest reads/writes
-- Updated: `_init_node`, `get_weight`, `get_score`, `penalize_id`, `boost_id`, `save_state`, `load_state`, `prune`, `_update_weights`, `_update_scores`, `_check_absorption`
-- Added `_get_state()`, `_set_state_field()`, `_get_state_field()`, `_weights_dict()` helpers
+```python
+def density_ratio(
+    self,
+    x: np.ndarray,
+    nodes: Sequence[HFN],
+    radius: float,
+    k: int = 5,
+) -> float:
+    """Local vs shell density ratio (k→2k neighbors). Scale-invariant, region-aware."""
+    node_list = list(nodes)
+    if len(node_list) < 3:
+        return 0.0
+    x = np.asarray(x, dtype=float)
+    mus = np.array([n.mu for n in node_list], dtype=float)
+    dists_to_x = np.sort(np.linalg.norm(mus - x, axis=1))
+    
+    k_actual = min(k, len(dists_to_x) - 1)
+    k2_actual = min(k * 2, len(dists_to_x) - 1)
+    d_k = dists_to_x[k_actual] + 1e-9
+    d_2k = dists_to_x[k2_actual] + 1e-9
+    
+    local_count = float(np.sum(dists_to_x < radius))
+    local_density = local_count / (radius ** 2 + 1e-9)
+    
+    shell_count = float(np.sum((dists_to_x >= d_k) & (dists_to_x < d_2k)))
+    shell_density = (shell_count + 1e-9) / ((d_2k ** 2 - d_k ** 2) + 1e-9)
+    
+    return local_density / (shell_density + 1e-9)
+```
 
-### Part B Phase 2: CooccurrenceEdge HFN — DONE
-- Replaced `_cooccurrence` dict with HFN nodes prefixed `cooc:` in meta_forest
-- mu=[count, recency, pair_score, 0] (padded to D=4)
-- Updated `_track_cooccurrence` and `_check_compression_candidates`
+## Fix 3: decoder.py _score_topological_fit() (lines 109-130)
+First add to Decoder class (above __init__):
+```python
+_RELATION_WEIGHTS: dict[str, float] = {
+    "MUST_SATISFY": 3.0,
+    "PART_OF": 2.0,
+    "spatial": 1.5,
+    "temporal": 1.5,
+    "recombined": 0.5,
+}
+_DEFAULT_RELATION_WEIGHT = 1.0
+```
 
-### Part B Phase 3: RecurrencePattern HFN — DONE
-- Added `_sync_recurrence_hfn()` called after `_recurrence.update(x)`
-- Creates `recurrence:global` HFN with mu=[recurrence_rate, mean_distance, recommended_threshold, 0]
-- Ephemeral buffer stays in RecurrenceTracker; statistics are now observable in meta_forest
+Then REPLACE method with:
+```python
+def _score_topological_fit(self, abstract_node: HFN, concrete_node: HFN) -> float:
+    """Score topological fit with relation-weighted edges."""
+    abstract_edges = abstract_node.edges()
+    if not abstract_edges:
+        return 0.0
+    
+    concrete_edge_map: dict[str, set[str]] = {}
+    for e in concrete_node.edges():
+        concrete_edge_map.setdefault(e.target.id, set()).add(e.relation)
+    
+    score = 0.0
+    for e in abstract_edges:
+        w = self._RELATION_WEIGHTS.get(e.relation, self._DEFAULT_RELATION_WEIGHT)
+        if e.target.id in concrete_edge_map:
+            if e.relation in concrete_edge_map[e.target.id]:
+                score += w
+            else:
+                score += w * 0.5
+        else:
+            score -= w * 0.5
+    return score
+```
 
-### Test Results
-- Custom verification: ALL TESTS PASSED (Part A + B)
-- HFN structure tests: 35/35 passed
-- Pre-existing failure in test_experiment_nlp_smoke.py (max_hot vs hot_cap arg) — NOT our change
+## Next Steps (UNATTENDED - DO NOT PAUSE)
+1. Replace evaluator.py density_ratio() method
+2. Test: python3 -m pytest hfn/tests/ -v (expect 35/35 pass)
+3. Replace decoder.py _score_topological_fit() method
+4. Test again: 35/35 pass
+5. Commit: "Fix HFN scaling & correctness: expansion memoization, local density, relation-aware topology"
+6. Push to origin master
+7. Report: all tests pass, commit hash, push successful
+
+## Files
+- /home/mattthomson/workspace/HPM---Learning-Agent/hfn/observer.py (✅ DONE)
+- /home/mattthomson/workspace/HPM---Learning-Agent/hfn/evaluator.py (⏳ NEXT)
+- /home/mattthomson/workspace/HPM---Learning-Agent/hfn/decoder.py (⏳ AFTER)

@@ -25,6 +25,16 @@ class Decoder:
     Collapses abstract HFN nodes (high variance) into concrete leaf nodes (low variance)
     from a target manifold.
     """
+    # Relation importance weights — higher = more critical to match
+    _RELATION_WEIGHTS: dict[str, float] = {
+        "MUST_SATISFY": 3.0,   # hard structural constraint
+        "PART_OF": 2.0,         # parent-child composition
+        "spatial": 1.5,
+        "temporal": 1.5,
+        "recombined": 0.5,      # soft/emergent, lower penalty for missing
+    }
+    _DEFAULT_RELATION_WEIGHT = 1.0
+
     def __init__(
         self,
         target_forest: Forest,
@@ -108,24 +118,29 @@ class Decoder:
         return [best_candidate] if best_candidate else []
 
     def _score_topological_fit(self, abstract_node: HFN, concrete_node: HFN) -> float:
-        """
-        Scores how well a concrete node satisfies the constraints of an abstract node.
-        Logic: For every edge in abstract_node, does concrete_node share a path to the same target?
-        """
-        score = 0.0
-        abstract_edges = abstract_node.edges()
-        if not abstract_edges:
-            return 0.0
+    """
+    Scores how well a concrete node satisfies the constraints of an abstract node.
+    Relation types are weighted: structural constraints penalise harder for mismatches.
+    """
+    abstract_edges = abstract_node.edges()
+    if not abstract_edges:
+        return 0.0
 
-        # We check the targets of the concrete node's edges
-        concrete_edge_targets = {e.target.id for e in concrete_node.edges()}
-        
-        for e in abstract_edges:
-            # If the abstract node requires a specific relationship to another node
-            # we check if the candidate also has that relationship.
-            if e.target.id in concrete_edge_targets:
-                score += 1.0
+    # Map concrete node's edges: target_id → set of relation types
+    concrete_edge_map: dict[str, set[str]] = {}
+    for e in concrete_node.edges():
+        concrete_edge_map.setdefault(e.target.id, set()).add(e.relation)
+
+    score = 0.0
+    for e in abstract_edges:
+        w = self._RELATION_WEIGHTS.get(e.relation, self._DEFAULT_RELATION_WEIGHT)
+        if e.target.id in concrete_edge_map:
+            # Bonus if relation type also matches
+            if e.relation in concrete_edge_map[e.target.id]:
+                score += w
             else:
-                score -= 0.5 # Penalty for missing required constraint
-        
-        return score
+                score += w * 0.5   # target matches but relation differs
+        else:
+            score -= w * 0.5       # missing edge, weighted penalty
+
+    return score
