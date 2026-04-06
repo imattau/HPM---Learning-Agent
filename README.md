@@ -494,6 +494,9 @@ python hpm_fractal_node/experiments/experiment_self_curiosity.py
 
 # SP37 — Competing Hypotheses (Belief Revision)
 python hpm_fractal_node/experiments/experiment_belief_revision.py
+
+# SP38 — World Model Simulation (Imagination Test)
+python hpm_fractal_node/experiments/experiment_world_model_simulation.py
 ```
 
 ### Run HFN experiments
