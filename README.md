@@ -497,6 +497,9 @@ python hpm_fractal_node/experiments/experiment_belief_revision.py
 
 # SP38 — World Model Simulation (Imagination Test)
 python hpm_fractal_node/experiments/experiment_world_model_simulation.py
+
+# SP39 — Hierarchical Abstraction Discovery (Core HPM Claim)
+python hpm_fractal_node/experiments/experiment_hierarchical_abstraction.py
 ```
 
 ### Run HFN experiments

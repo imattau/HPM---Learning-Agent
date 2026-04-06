@@ -82,6 +82,7 @@ substrate. The core components are:
 | `experiment_self_curiosity.py` | Self-Curiosity | Autonomous learning loop (`generate → observe → evaluate → expand`) without external data stream | Working |
 | `experiment_belief_revision.py` | Competing Hypotheses | Tests belief revision and falsification dynamics in ambiguous environments; tracks weight trajectories | Working |
 | `experiment_world_model_simulation.py` | World Model Simulation | "Imagination Test": iteratively simulates future trajectories via relational [State, Delta] encoding | Working |
+| `experiment_hierarchical_abstraction.py` | Hierarchical Abstraction | Validates core HPM claim: builds multi-layered DAGs and reuses components (e.g. letters -> words -> sentences) | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -252,6 +253,8 @@ in the world model when observations fall outside the current node coverage.
 | Relational World Modeling | `experiment_world_model_simulation` |
 | Stable Imagination (Dreaming) | `experiment_world_model_simulation` |
 | Zero-Drift Extrapolation | `experiment_world_model_simulation` |
+| Multi-layered DAG Emergence | `experiment_hierarchical_abstraction` |
+| Compositional Generalization | `experiment_hierarchical_abstraction` |
 
 ---
 
@@ -297,4 +300,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_self_curiosity.md`](README_self_curiosity.md) — autonomous generative exploration loop
 - [`README_belief_revision.md`](README_belief_revision.md) — falsification and belief correction dynamics
 - [`README_world_model_simulation.md`](README_world_model_simulation.md) — iterative future trajectory simulation via relational encoding
+- [`README_hierarchical_abstraction.md`](README_hierarchical_abstraction.md) — multi-layered compositional DAG generation
 
