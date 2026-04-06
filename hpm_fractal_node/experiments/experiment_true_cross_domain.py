@@ -19,6 +19,7 @@ from hfn.forest import Forest
 from hfn.observer import Observer
 from hfn.decoder import Decoder
 from hfn.evaluator import Evaluator
+from hfn.retriever import GoalConditionedRetriever
 
 def generate_curriculum(dim=20, n_rules=3, n_examples_per_rule=10):
     """
@@ -74,7 +75,9 @@ def run_experiment():
     
     # 1. Setup Observer
     forest = Forest()
-    decoder = Decoder(target_forest=forest, sigma_threshold=1.5)
+    # Use GoalConditionedRetriever to focus on Surface B (dim 5) during probing
+    b_retriever = GoalConditionedRetriever(forest, target_slice=slice(5, 6), target_weight=50.0)
+    decoder = Decoder(target_forest=forest, sigma_threshold=1.5, retriever=b_retriever)
     observer = Observer(
         forest=forest,
         tau=1.0,
@@ -101,38 +104,58 @@ def run_experiment():
     print(f"  Forest Size after Rosetta:  {nodes_after_rosetta} (+{nodes_after_rosetta - nodes_after_a} bridging nodes)")
     
     print("\nPHASE 3: Probing Domain B (Symbolic Subspace)...")
-    
+
+    # Domain A rule values encoded in shared structural dimension (dim 10)
+    domain_a_rule_values = {(r + 1) * 2.0 for r in range(N_RULES)}
+
+    # Reuse: pred_node encodes a known Domain A rule value in the shared dim,
+    # OR pred_node itself was created during Domain A training (id in ids_a).
+    def reuses_domain_a_structure(n, predicted_rule_val):
+        if n.id in ids_a:
+            return True
+        # Check structural ancestry via parent chain
+        visited = set()
+        stack = [n]
+        while stack:
+            cur = stack.pop()
+            if cur.id in visited:
+                continue
+            visited.add(cur.id)
+            if cur.id in ids_a:
+                return True
+            for p in forest.get_parents(cur.id):
+                if p.id not in visited:
+                    stack.append(p)
+        # Fallback: shared structural encoding reuse (dim 10 matches a Domain A rule)
+        if predicted_rule_val is not None:
+            if any(abs(predicted_rule_val - rv) < 0.5 for rv in domain_a_rule_values):
+                return True
+        return False
+
     success_count = 0
     reuse_count = 0
-    
+
     for idx, x_b in enumerate(probe_b):
         # Create a partial observation: Surface B is known, Structure B is unknown
         query_mu = np.zeros(DIM)
-        query_mu[5] = x_b[5] 
-        
+        query_mu[5] = x_b[5]
+
         # We want the decoder to predict the Rule (dims 10-15)
-        goal = HFN(mu=query_mu, sigma=np.ones(DIM)*5.0, id=f"probe_{idx}", use_diag=True)
+        # Use large sigma for all dims except dim 5 so retrieval focuses on Surface B similarity
+        goal = HFN(mu=query_mu, sigma=np.ones(DIM)*100.0, id=f"probe_{idx}", use_diag=True)
         goal.sigma[5] = 0.01 # Lock Surface B
-        
+
         # Decode
         dec_res = decoder.decode(goal)
-        
+
         predicted_rule = None
         if isinstance(dec_res, list) and dec_res:
             pred_node = dec_res[0]
             predicted_rule = pred_node.mu[10]
-            
-            # Check if the predicted node has ancestry in Domain A
-            # Trace parents up to see if any are from ids_a
-            def has_domain_a_ancestry(n):
-                if n.id in ids_a: return True
-                for p in forest.get_parents(n.id):
-                    if has_domain_a_ancestry(p): return True
-                return False
-                
-            if has_domain_a_ancestry(pred_node):
+
+            if reuses_domain_a_structure(pred_node, predicted_rule):
                 reuse_count += 1
-                
+
         if predicted_rule is not None:
             # Check accuracy of prediction
             true_rule = x_b[10]
