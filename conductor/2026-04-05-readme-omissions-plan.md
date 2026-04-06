@@ -19,5 +19,5 @@ The current documentation understates the complexity and self-organizing capabil
 2. Rewrite the `Background` components list in `hpm_fractal_node/experiments/README.md` to include the same updates.
 
 # Implementation Steps
-- [ ] Run `replace` on `README.md` to insert Meta-Forest, update Observer, and clarify Priors.
-- [ ] Run `replace` on `hpm_fractal_node/experiments/README.md` to apply the identical updates.
+- [x] Run `replace` on `README.md` to insert Meta-Forest, update Observer, and clarify Priors.
+- [x] Run `replace` on `hpm_fractal_node/experiments/README.md` to apply the identical updates.

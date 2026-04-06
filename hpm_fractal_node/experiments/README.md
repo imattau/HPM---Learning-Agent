@@ -85,6 +85,7 @@ substrate. The core components are:
 | `experiment_hierarchical_abstraction.py` | Hierarchical Abstraction | Validates core HPM claim: builds multi-layered DAGs and reuses components (e.g. letters -> words -> sentences) | Working |
 | `experiment_multi_agent_social.py` | Social Learning | Knowledge transfer between sovereign agents via dream broadcasting and social refinement | Working |
 | `experiment_unified_cognitive_loop.py` | The Core Agent | "Capstone": autonomous Plan -> Act -> Fail -> Explore -> Re-Plan loop with belief revision | Working |
+| `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | Depth Test: stability and scalability of reasoning chains up to 20 steps with distractors | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -308,3 +309,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_multi_agent_social.md`](README_multi_agent_social.md) — social knowledge transfer between sovereign agents
 - [`README_unified_cognitive_loop.md`](README_unified_cognitive_loop.md) — capstone agentic loop with adaptation and belief revision
 
+- [`README_long_horizon_reasoning.md`](README_long_horizon_reasoning.md) — depth test for stability of long reasoning chains
