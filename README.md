@@ -485,6 +485,9 @@ python hpm_fractal_node/experiments/experiment_goal_reasoning.py
 
 # SP34 — Multi-Step Internal Reasoning (Chain-of-Thought)
 python hpm_fractal_node/experiments/experiment_multi_step_reasoning.py
+
+# SP35 — True Cross-Domain Transfer (Structural Equivalence)
+python hpm_fractal_node/experiments/experiment_true_cross_domain.py
 ```
 
 ### Run HFN experiments
