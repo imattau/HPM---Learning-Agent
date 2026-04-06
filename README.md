@@ -488,6 +488,9 @@ python hpm_fractal_node/experiments/experiment_multi_step_reasoning.py
 
 # SP35 — True Cross-Domain Transfer (Structural Equivalence)
 python hpm_fractal_node/experiments/experiment_true_cross_domain.py
+
+# SP36 — Self-Curiosity (Autonomous Learning)
+python hpm_fractal_node/experiments/experiment_self_curiosity.py
 ```
 
 ### Run HFN experiments

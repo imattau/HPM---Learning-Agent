@@ -79,6 +79,7 @@ substrate. The core components are:
 | `experiment_goal_reasoning.py` | Goal-Conditioned Reasoning | First step to agency: `goal + input → plan → execute → evaluate` loop using GoalConditionedRetriever | Working |
 | `experiment_multi_step_reasoning.py` | Multi-Step Reasoning | Continuous "Chain-of-Thought": sequences multiple atomic HFN rules to reach a distal goal state | Working |
 | `experiment_true_cross_domain.py` | True Cross-Domain Transfer | Achieves 100% structural reuse across orthogonal domains (Math -> Symbolic) without manual alignment | Working |
+| `experiment_self_curiosity.py` | Self-Curiosity | Autonomous learning loop (`generate → observe → evaluate → expand`) without external data stream | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -242,6 +243,8 @@ in the world model when observations fall outside the current node coverage.
 | Continuous Chain-of-Thought | `experiment_multi_step_reasoning` |
 | True Abstraction (Rule vs Surface) | `experiment_true_cross_domain` |
 | Surface-Structure Separation | `experiment_true_cross_domain` |
+| Autonomous Learning Trajectory | `experiment_self_curiosity` |
+| Generative-Perceptual Loops (Play) | `experiment_self_curiosity` |
 
 ---
 
@@ -284,4 +287,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_goal_reasoning.md`](README_goal_reasoning.md) — intent-driven retrieval and planning loop
 - [`README_multi_step_reasoning.md`](README_multi_step_reasoning.md) — multi-step intent-driven retrieval and planning loop
 - [`README_true_cross_domain.md`](README_true_cross_domain.md) — autonomous structural transfer across orthogonal domains
+- [`README_self_curiosity.md`](README_self_curiosity.md) — autonomous generative exploration loop
 
