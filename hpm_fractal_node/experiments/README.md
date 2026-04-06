@@ -83,6 +83,7 @@ substrate. The core components are:
 | `experiment_belief_revision.py` | Competing Hypotheses | Tests belief revision and falsification dynamics in ambiguous environments; tracks weight trajectories | Working |
 | `experiment_world_model_simulation.py` | World Model Simulation | "Imagination Test": iteratively simulates future trajectories via relational [State, Delta] encoding | Working |
 | `experiment_hierarchical_abstraction.py` | Hierarchical Abstraction | Validates core HPM claim: builds multi-layered DAGs and reuses components (e.g. letters -> words -> sentences) | Working |
+| `experiment_multi_agent_social.py` | Social Learning | Knowledge transfer between sovereign agents via dream broadcasting and social refinement | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -255,6 +256,8 @@ in the world model when observations fall outside the current node coverage.
 | Zero-Drift Extrapolation | `experiment_world_model_simulation` |
 | Multi-layered DAG Emergence | `experiment_hierarchical_abstraction` |
 | Compositional Generalization | `experiment_hierarchical_abstraction` |
+| Transmissible Knowledge (Social Learning) | `experiment_multi_agent_social` |
+| Distributed World-Model Discovery | `experiment_multi_agent_social` |
 
 ---
 
@@ -301,4 +304,5 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_belief_revision.md`](README_belief_revision.md) — falsification and belief correction dynamics
 - [`README_world_model_simulation.md`](README_world_model_simulation.md) — iterative future trajectory simulation via relational encoding
 - [`README_hierarchical_abstraction.md`](README_hierarchical_abstraction.md) — multi-layered compositional DAG generation
+- [`README_multi_agent_social.md`](README_multi_agent_social.md) — social knowledge transfer between sovereign agents
 

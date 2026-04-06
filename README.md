@@ -500,6 +500,9 @@ python hpm_fractal_node/experiments/experiment_world_model_simulation.py
 
 # SP39 — Hierarchical Abstraction Discovery (Core HPM Claim)
 python hpm_fractal_node/experiments/experiment_hierarchical_abstraction.py
+
+# SP40 — Multi-Agent HFN Interaction (Social Learning)
+python hpm_fractal_node/experiments/experiment_multi_agent_social.py
 ```
 
 ### Run HFN experiments
