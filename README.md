@@ -491,6 +491,9 @@ python hpm_fractal_node/experiments/experiment_true_cross_domain.py
 
 # SP36 — Self-Curiosity (Autonomous Learning)
 python hpm_fractal_node/experiments/experiment_self_curiosity.py
+
+# SP37 — Competing Hypotheses (Belief Revision)
+python hpm_fractal_node/experiments/experiment_belief_revision.py
 ```
 
 ### Run HFN experiments
