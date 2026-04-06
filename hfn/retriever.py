@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from hfn.forest import Forest
@@ -96,10 +96,14 @@ class GoalConditionedRetriever(Retriever):
         forest: Forest,
         target_slice: slice | None = None,
         target_weight: float = 10.0,
+        weight_provider: Callable[[str], float] | None = None,
+        weight_penalty: float = 100.0,
     ):
         super().__init__(forest)
         self.target_slice = target_slice or slice(None)
         self.target_weight = target_weight
+        self.weight_provider = weight_provider
+        self.weight_penalty = weight_penalty
 
     def retrieve(self, query: HFN, k: int = 10) -> list[HFN]:
         # Fetch a larger pool via standard forest lookup (fast index)
@@ -116,7 +120,17 @@ class GoalConditionedRetriever(Retriever):
             weighted_diff = diff.copy()
             weighted_diff[self.target_slice] *= self.target_weight
             
-            return float(np.sum(weighted_diff**2))
+            dist = float(np.sum(weighted_diff**2))
+            
+            # Apply penalty for low-weight nodes if a provider is present
+            if self.weight_provider:
+                weight = self.weight_provider(node.id)
+                # Multiplicative penalty: dist / (weight + epsilon)
+                # This ensures low-weight nodes are heavily suppressed
+                epsilon = 1e-6
+                return dist / (weight + epsilon)
+                
+            return dist
 
         candidates.sort(key=goal_score)
         return candidates[:k]

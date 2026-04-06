@@ -278,6 +278,20 @@ Two agents with fundamentally different substrates (Cartesian vs Coordinate) ach
 
 ---
 
+### SP17–SP41: Sovereign Agency & Unified Loops
+
+Validates the transition from passive pattern matching to active, autonomous agency using the HFN substrate.
+
+| Breakthrough | Evidence |
+|---|---|
+| **Belief Revision** | SP37: Successfully penalizes falsified rules in ambiguous environments |
+| **Goal-Conditioned Reasoning** | SP33/34: Uses weight-aware retrieval to sequence rules toward distal goals |
+| **Autonomous Curiosity** | SP36: Learns new structural rules without external data via generative play |
+| **Stable Imagination** | SP38: Iteratively simulates future trajectories with zero-drift extrapolation |
+| **Unified Cognitive Loop** | **SP41: Capstone SUCCESS**. Plan -> Act -> Fail -> Explore -> Re-Plan loop closed |
+
+---
+
 ## What the results suggest
 
 Taken together, the benchmarks show something more interesting than raw performance numbers. Each test targets a different property that HPM claims good learning systems should have — and the results offer early evidence for each claim.
@@ -324,6 +338,7 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 | `experiment_nlp.py` | Child language / LLM | 195 priors; 257 LLM queries; semantic category purity 0.780 mean with QueryLLM via ollama TinyLlama |
 | `experiment_dsprites.py` | dSprites generative factors | Learned nodes align with shape/scale/position without supervision |
 | `experiment_arc_world_model.py` | ARC-AGI-2 | Full layered world model; prior forest improves explanation coverage vs bare Observer |
+| `experiment_unified_cognitive_loop.py` | The Core Agent | **Capstone**: autonomous Plan -> Act -> Fail -> Explore -> Re-Plan loop with belief revision |
 | Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
 
 For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
@@ -503,6 +518,9 @@ python hpm_fractal_node/experiments/experiment_hierarchical_abstraction.py
 
 # SP40 — Multi-Agent HFN Interaction (Social Learning)
 python hpm_fractal_node/experiments/experiment_multi_agent_social.py
+
+# SP41 — Unified Cognitive Loop Test (The Core Agent)
+python hpm_fractal_node/experiments/experiment_unified_cognitive_loop.py
 ```
 
 ### Run HFN experiments
