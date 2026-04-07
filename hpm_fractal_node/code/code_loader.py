@@ -26,14 +26,16 @@ VOCAB: list[str] = [
     # Builtins (15)
     "print", "len", "range", "type", "input", "open", "map", "filter",
     "zip", "enumerate", "int", "str", "float", "bool", "list",
+    # Literals (10) - necessary for basic math and return tasks
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
 ]
 
-assert len(VOCAB) == 70, f"Vocab size {len(VOCAB)} != 70"
-assert len(set(VOCAB)) == 70, "Vocabulary has duplicate entries"
+assert len(VOCAB) == 80, f"Vocab size {len(VOCAB)} != 80"
+assert len(set(VOCAB)) == 80, "Vocabulary has duplicate entries"
 
 VOCAB_INDEX: dict[str, int] = {w: i for i, w in enumerate(VOCAB)}
 VOCAB_SIZE: int = len(VOCAB)
-D: int = VOCAB_SIZE  # 70
+D: int = VOCAB_SIZE  # 80
 
 
 # ---------------------------------------------------------------------------

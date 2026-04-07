@@ -87,6 +87,7 @@ substrate. The core components are:
 | `experiment_unified_cognitive_loop.py` | The Core Agent | "Capstone": autonomous Plan -> Act -> Fail -> Explore -> Re-Plan loop with belief revision | Working |
 | `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | Depth Test: stability and scalability of reasoning chains up to 20 steps with distractors | Working |
 | `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | Truth Under Conflict: unlearning entrenched, high-confidence incorrect beliefs | Working |
+| `experiment_developmental_cognitive_system.py` | Developmental System | **Nested Composition**: hierarchical knowledge accumulation rendered into Python | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).

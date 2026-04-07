@@ -1,0 +1,32 @@
+[
+  {
+    "id": "return_constant_1",
+    "type": "curriculum",
+    "goal": "return constant 1",
+    "input": [null],
+    "expected_output": [1],
+    "tags": ["function", "constant"],
+    "difficulty": 1,
+    "dependencies": []
+  },
+  {
+    "id": "return_constant_5",
+    "type": "curriculum",
+    "goal": "return constant 5",
+    "input": [null],
+    "expected_output": [5],
+    "tags": ["function", "constant"],
+    "difficulty": 1,
+    "dependencies": ["return_constant_1"]
+  },
+  {
+    "id": "return_input",
+    "type": "curriculum",
+    "goal": "return the input value",
+    "input": [10],
+    "expected_output": [10],
+    "tags": ["function", "variable"],
+    "difficulty": 2,
+    "dependencies": ["return_constant_5"]
+  }
+]
