@@ -290,6 +290,7 @@ Validates the transition from passive pattern matching to active, autonomous age
 | **Stable Imagination** | SP38: Iteratively simulates future trajectories with zero-drift extrapolation |
 | **Unified Cognitive Loop** | **SP41: Capstone SUCCESS**. Plan -> Act -> Fail -> Explore -> Re-Plan loop closed |
 | **Long-Horizon Reasoning** | **SP42: Depth Test SUCCESS**. 100% success on 20-step chains with stable pruning |
+| **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 
 ---
 
@@ -341,8 +342,14 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 | `experiment_arc_world_model.py` | ARC-AGI-2 | Full layered world model; prior forest improves explanation coverage vs bare Observer |
 | `experiment_unified_cognitive_loop.py` | The Core Agent | **Capstone**: autonomous Plan -> Act -> Fail -> Explore -> Re-Plan loop with belief revision |
 | `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | **Depth Test**: stability and scalability of reasoning chains up to 20 steps with distractors |
+| `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | **Truth Under Conflict**: unlearning high-confidence incorrect beliefs |
+# SP43 — Adversarial Belief Revision (Truth Under Conflict) 
+python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
+| **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 # SP42 — Long-Horizon Goal Reasoning (Depth Test) 
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
+# SP43 — Adversarial Belief Revision (Truth Under Conflict) 
+python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 | Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
 
 For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
@@ -527,6 +534,8 @@ python hpm_fractal_node/experiments/experiment_multi_agent_social.py
 python hpm_fractal_node/experiments/experiment_unified_cognitive_loop.py
 # SP42 — Long-Horizon Goal Reasoning (Depth Test) 
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
+# SP43 — Adversarial Belief Revision (Truth Under Conflict) 
+python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 ```
 
 ### Run HFN experiments

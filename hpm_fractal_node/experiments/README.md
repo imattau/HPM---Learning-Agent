@@ -86,6 +86,7 @@ substrate. The core components are:
 | `experiment_multi_agent_social.py` | Social Learning | Knowledge transfer between sovereign agents via dream broadcasting and social refinement | Working |
 | `experiment_unified_cognitive_loop.py` | The Core Agent | "Capstone": autonomous Plan -> Act -> Fail -> Explore -> Re-Plan loop with belief revision | Working |
 | `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | Depth Test: stability and scalability of reasoning chains up to 20 steps with distractors | Working |
+| `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | Truth Under Conflict: unlearning entrenched, high-confidence incorrect beliefs | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -310,3 +311,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_unified_cognitive_loop.md`](README_unified_cognitive_loop.md) — capstone agentic loop with adaptation and belief revision
 
 - [`README_long_horizon_reasoning.md`](README_long_horizon_reasoning.md) — depth test for stability of long reasoning chains
+- [`README_adversarial_belief_revision.md`](README_adversarial_belief_revision.md) — truth under conflict: unlearning entrenched beliefs
