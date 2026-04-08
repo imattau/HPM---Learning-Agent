@@ -1,0 +1,29 @@
+[
+  {
+    "id": "map_increment",
+    "type": "train",
+    "goal": "map increment across list",
+    "input": [[1, 2, 3]],
+    "expected_output": [[2, 3, 4]],
+    "tags": ["list", "loop"],
+    "difficulty": 2
+  },
+  {
+    "id": "map_double",
+    "type": "train",
+    "goal": "map double across list",
+    "input": [[1, 2, 3]],
+    "expected_output": [[2, 4, 6]],
+    "tags": ["list", "loop"],
+    "difficulty": 2
+  },
+  {
+    "id": "map_decrement",
+    "type": "test",
+    "goal": "map decrement across list using extracted template",
+    "input": [[2, 3, 4]],
+    "expected_output": [[1, 2, 3]],
+    "tags": ["list", "loop", "template"],
+    "difficulty": 4
+  }
+]

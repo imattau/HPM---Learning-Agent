@@ -127,20 +127,38 @@ class PythonExecutor:
             return test_func(inp)
         except Exception: return None
 
+from hfn.tiered_forest import TieredForest
+from hfn.persistence import PersistenceManager
+
 # --- 4. THE NON-LINEAR AGENT ---
 
 class NonLinearAgent:
-    def __init__(self, dim=DIM):
+    def __init__(self, dim=DIM, cold_dir="data/knowledge_base/nonlinear_synthesis"):
         self.dim = dim
         self.m_dim = S_DIM + DIM + S_DIM
-        self.forest = Forest(D=self.m_dim)
+        # TIERED FOREST: Tier 1 (Hot) + Tier 2 (Cold disk)
+        self.forest = TieredForest(D=self.m_dim, cold_dir=Path(cold_dir))
+        self.persistence = PersistenceManager(root_dir="data/knowledge_base")
+        self.experiment_id = "nonlinear_synthesis"
+
         self.retriever = GoalConditionedRetriever(
             self.forest, target_slice=slice(S_DIM + DIM, self.m_dim), 
             target_weight=50.0, weight_provider=lambda nid: self.observer.get_weight(nid)
         )
+
         self.observer = Observer(forest=self.forest, retriever=self.retriever, tau=0.5, residual_surprise_threshold=0.6, alpha_gain=0.5, beta_loss=0.05, node_use_diag=True)
         self.renderer = CodeRenderer()
-        self._inject_priors()
+
+        # Load Existing Knowledge Base
+        self.persistence.load(self.forest, self.observer, self.experiment_id)
+
+        # Check for essential priors
+        if "prior_rule_RETURN" not in self.forest:
+            self._inject_priors()
+
+    def save(self):
+        self.persistence.save(self.forest, self.observer, self.experiment_id)
+
 
     def _inject_priors(self):
         # [Value, Returned, Len, TargetVal, Iterator, Init, Condition]
@@ -161,7 +179,7 @@ class NonLinearAgent:
         mu[S_DIM + CONCEPT_IDX[concept]] = 5.0
         mu[S_DIM + DIM + delta_idx] = delta_val
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*5.0, id=f"prior_rule_{concept}", use_diag=True)
-        self.forest._registry[node.id] = node
+        self.forest.register(node)
         self.observer.protected_ids.add(node.id)
         state_node = HFN(mu=np.array([0.8, 0, 0, 0]), sigma=np.ones(4), id=f"state:{node.id}", use_diag=True)
         self.observer.meta_forest.register(state_node)
@@ -209,9 +227,12 @@ class NonLinearAgent:
         return solve(current_state, [], max_steps)
 
     def _fold_nodes(self, nodes: List[HFN]) -> HFN:
+        if not nodes: return None
         current = nodes[0]
         for n in nodes[1:]:
-            p_mu = (current.mu + n.mu) / 2.0; p_mu[S_DIM + DIM:] = current.mu[S_DIM + DIM:] + n.mu[S_DIM + DIM:]
+            if current is None or n is None: continue
+            p_mu = (current.mu + n.mu) / 2.0
+            p_mu[S_DIM + DIM:] = current.mu[S_DIM + DIM:] + n.mu[S_DIM + DIM:]
             p_id = f"compose({current.id.replace('prior_rule_', '')}+{n.id.replace('prior_rule_', '')})"
             p = HFN(mu=p_mu, sigma=np.ones(self.m_dim), id=p_id, use_diag=True)
             p.add_child(current); p.add_child(n); current = p
@@ -264,6 +285,9 @@ def run_experiment():
         print("\n[SUCCESS] Complex Logic Fork (if/else) rendered and executed correctly!")
     else:
         print(f"\n[FAIL] Complex Logic fork failed. Result {result2} != Goal {goal2}")
+
+    # SAVE KNOWLEDGE BASE
+    agent.save()
 
 if __name__ == "__main__":
     run_experiment()

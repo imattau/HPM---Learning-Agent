@@ -297,6 +297,7 @@ Validates the transition from passive pattern matching to active, autonomous age
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 
 ---
 
@@ -355,40 +356,58 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 | `experiment_structural_refinement.py` | Structural Refinement | **Debug SUCCESS**: local graph patching instead of re-planning |
 | `experiment_non_linear_synthesis.py` | Non-Linear Synthesis | **Logic forks SUCCESS**: Turing-complete if/else branching |
 | `experiment_modular_abstraction.py` | Modular Abstraction | **Functions SUCCESS**: encapsulated procedures and O(1) planning calls |
+| `experiment_template_extraction.py` | Template Extraction | **Generalization SUCCESS**: O(1) planning for new mapping tasks |
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP46 — Autonomous Graph Pruning (Simulation Dreams) 
 python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
 # SP46 — Autonomous Graph Pruning (Simulation Dreams) 
@@ -396,16 +415,20 @@ python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 | **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
@@ -415,17 +438,21 @@ python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 | **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
@@ -433,6 +460,7 @@ python hpm_fractal_node/experiments/experiment_modular_abstraction.py
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
@@ -443,11 +471,14 @@ python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
@@ -455,6 +486,7 @@ python hpm_fractal_node/experiments/experiment_modular_abstraction.py
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 # SP42 — Long-Horizon Goal Reasoning (Depth Test) 
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
@@ -464,6 +496,7 @@ python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
@@ -474,11 +507,14 @@ python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 | Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
 
 For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
@@ -670,6 +706,7 @@ python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 | **Structural Refinement** | **SP47: Debug SUCCESS**. Patched 7-step nested loops to fix logic in 1 cycle |
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
@@ -680,11 +717,14 @@ python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 # SP47 — Structural Refinement (Self-Debugging) 
 | **Non-Linear Synthesis** | **SP48: Logic forks SUCCESS**. Rendered if/else blocks for conditional mapping |
 | **Modular Abstraction** | **SP49: Functions SUCCESS**. Promoted chunks to library and synthesized modular calls |
+| **Template Extraction** | **SP50: Generalization SUCCESS**. Extracted generic MAP template from concrete examples |
 python hpm_fractal_node/experiments/experiment_structural_refinement.py
 # SP48 — Non-Linear Program Synthesis (Logic Forks) 
 python hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
 # SP49 — Modular Procedural Abstraction (Functions) 
 python hpm_fractal_node/experiments/experiment_modular_abstraction.py
+# SP50 — Higher-Order Template Extraction (Refactoring) 
+python hpm_fractal_node/experiments/experiment_template_extraction.py
 ```
 
 ### Run HFN experiments

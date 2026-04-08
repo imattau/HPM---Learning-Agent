@@ -93,6 +93,7 @@ substrate. The core components are:
 | `experiment_structural_refinement.py` | Structural Refinement | Iterative Engineering: local graph edits and patching for self-debugging | Working |
 | `experiment_non_linear_synthesis.py` | Non-Linear Synthesis | Turing-complete program synthesis with conditional logic forks | Working |
 | `experiment_modular_abstraction.py` | Modular Abstraction | Parameterized function calls and procedural library management | Working |
+| `experiment_template_extraction.py` | Template Extraction | Autonomous discovery of higher-order invariants (MAP, FILTER) | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -323,3 +324,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_structural_refinement.md`](README_structural_refinement.md) — iterative engineering: patching and debugging program graphs
 - [`README_non_linear_synthesis.md`](README_non_linear_synthesis.md) — non-linear program synthesis with conditional branching (if/else)
 - [`README_modular_abstraction.md`](README_modular_abstraction.md) — modular procedural abstraction and library function calls
+- [`README_template_extraction.md`](README_template_extraction.md) — higher-order template extraction and autonomous refactoring

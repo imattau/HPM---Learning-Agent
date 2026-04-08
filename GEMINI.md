@@ -82,10 +82,12 @@ pytest tests/benchmarks/
 
 ---
 
-## Development Conventions
+### Development Conventions
 
-### Coding Style
+*   **Tiered Knowledge Base**: All future experiment designs MUST use `TieredForests` for hot/cold storage.
+*   **Cold Storage Persistence**: Experiments must use `PersistenceManager` to save structural nodes and observer weights to `data/knowledge_base/` at the end of each run. This ensures a cumulative knowledge base across the developmental lifecycle.
 *   **Type Hinting**: Required for all new function and class definitions.
+
 *   **Documentation**: Use descriptive docstrings for classes and complex methods.
 *   **Configuration**: All agent hyperparameters should be managed via `AgentConfig` in `hpm/config.py`. Use `BENCH_CONFIG` in `benchmarks/common.py` for benchmark-specific defaults.
 *   **Immutability**: Patterns should generally be treated as immutable; `update()` and `recombine()` return new instances.
