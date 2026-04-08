@@ -1,0 +1,22 @@
+[
+  {
+    "id": "filter_even",
+    "type": "curriculum",
+    "goal": "filter only even numbers from list",
+    "input": [[1, 2, 3, 4]],
+    "expected_output": [[2, 4]],
+    "tags": ["list", "loop", "conditional", "filter"],
+    "difficulty": 4,
+    "dependencies": []
+  },
+  {
+    "id": "map_even_double_else_keep",
+    "type": "curriculum",
+    "goal": "double even numbers else keep same",
+    "input": [[1, 2, 3, 4]],
+    "expected_output": [[1, 4, 3, 8]],
+    "tags": ["list", "loop", "conditional", "map"],
+    "difficulty": 5,
+    "dependencies": ["filter_even"]
+  }
+]
