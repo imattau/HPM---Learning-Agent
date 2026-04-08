@@ -1,0 +1,32 @@
+[
+  {
+    "id": "return_empty_list",
+    "type": "curriculum",
+    "goal": "return an empty list",
+    "input": [null],
+    "expected_output": [[]],
+    "tags": ["list", "init"],
+    "difficulty": 1,
+    "dependencies": []
+  },
+  {
+    "id": "add_one_to_item",
+    "type": "curriculum",
+    "goal": "add one to input",
+    "input": [1],
+    "expected_output": [2],
+    "tags": ["math", "base"],
+    "difficulty": 1,
+    "dependencies": []
+  },
+  {
+    "id": "map_add_one",
+    "type": "curriculum",
+    "goal": "add one to every item in list",
+    "input": [[1, 2]],
+    "expected_output": [[2, 3]],
+    "tags": ["list", "loop", "composition"],
+    "difficulty": 3,
+    "dependencies": ["add_one_to_item", "return_empty_list"]
+  }
+]

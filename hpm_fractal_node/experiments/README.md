@@ -88,6 +88,7 @@ substrate. The core components are:
 | `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | Depth Test: stability and scalability of reasoning chains up to 20 steps with distractors | Working |
 | `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | Truth Under Conflict: unlearning entrenched, high-confidence incorrect beliefs | Working |
 | `experiment_developmental_cognitive_system.py` | Developmental System | **Nested Composition**: hierarchical knowledge accumulation rendered into Python | Working |
+| `experiment_recursive_scaling.py` | Recursive Complexity Scaling | Algorithmic curriculum building nested abstraction graphs (maps/loops) | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -313,3 +314,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 
 - [`README_long_horizon_reasoning.md`](README_long_horizon_reasoning.md) — depth test for stability of long reasoning chains
 - [`README_adversarial_belief_revision.md`](README_adversarial_belief_revision.md) — truth under conflict: unlearning entrenched beliefs
+- [`README_recursive_scaling.md`](README_recursive_scaling.md) — nested composition for algorithmic tasks (maps and loops)

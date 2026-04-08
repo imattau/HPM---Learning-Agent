@@ -292,6 +292,7 @@ Validates the transition from passive pattern matching to active, autonomous age
 | **Long-Horizon Reasoning** | **SP42: Depth Test SUCCESS**. 100% success on 20-step chains with stable pruning |
 | **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 
 ---
 
@@ -345,23 +346,37 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 | `experiment_long_horizon_reasoning.py` | Long-Horizon Reasoning | **Depth Test**: stability and scalability of reasoning chains up to 20 steps with distractors |
 | `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | **Truth Under Conflict**: unlearning high-confidence incorrect beliefs |
 | `experiment_developmental_cognitive_system.py` | Developmental System | **Mastery SUCCESS**: hierarchical knowledge accumulation over curriculum |
+| `experiment_recursive_scaling.py` | Recursive Scaling | **Algorithmic Chunking**: deep nested graph construction |
+# SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
+python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
+# SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
+python hpm_fractal_node/experiments/experiment_recursive_scaling.py
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
+# SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
+python hpm_fractal_node/experiments/experiment_recursive_scaling.py
 | **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 # SP42 — Long-Horizon Goal Reasoning (Depth Test) 
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
+# SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
+python hpm_fractal_node/experiments/experiment_recursive_scaling.py
 | Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
 
 For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
@@ -548,9 +563,12 @@ python hpm_fractal_node/experiments/experiment_unified_cognitive_loop.py
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
+| **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
+# SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
+python hpm_fractal_node/experiments/experiment_recursive_scaling.py
 ```
 
 ### Run HFN experiments
