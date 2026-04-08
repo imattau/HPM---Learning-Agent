@@ -1,0 +1,32 @@
+[
+  {
+    "id": "increment_val",
+    "type": "kernel",
+    "goal": "increment single value by one",
+    "input": [1],
+    "expected_output": 2,
+    "tags": ["primitive", "function"],
+    "difficulty": 1,
+    "dependencies": []
+  },
+  {
+    "id": "map_increment",
+    "type": "procedural",
+    "goal": "map increment across list using library function",
+    "input": [[1, 2, 3]],
+    "expected_output": [[2, 3, 4]],
+    "tags": ["list", "loop", "call"],
+    "difficulty": 3,
+    "dependencies": ["increment_val"]
+  },
+  {
+    "id": "filter_and_map_increment",
+    "type": "procedural",
+    "goal": "filter even then map increment using library function",
+    "input": [[1, 2, 3, 4]],
+    "expected_output": [[3, 5]],
+    "tags": ["list", "loop", "conditional", "call"],
+    "difficulty": 5,
+    "dependencies": ["map_increment"]
+  }
+]
