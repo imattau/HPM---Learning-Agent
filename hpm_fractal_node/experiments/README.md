@@ -96,6 +96,7 @@ substrate. The core components are:
 | `experiment_template_extraction.py` | Template Extraction | Autonomous discovery of higher-order invariants (MAP, FILTER) | Working |
 | `experiment_autonomous_curriculum.py` | Curiosity / Self-Play | Unsupervised discovery of novel algorithms and auto-cataloging | Working |
 | `experiment_goal_inference.py` | Goal Inference | Intent-driven reasoning bridging natural language to latent semantic planning | Working |
+| `experiment_robust_intent.py` | Robust Intent | Redesigned intent inference using ASTs and partial semantic constraints | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -329,3 +330,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_template_extraction.md`](README_template_extraction.md) — higher-order template extraction and autonomous refactoring
 - [`README_autonomous_curriculum.md`](README_autonomous_curriculum.md) — unsupervised algorithmic discovery via self-play and state oracles
 - [`README_goal_inference.md`](README_goal_inference.md) — intent-driven reasoning and LLM semantic oracle integration
+- [`README_robust_intent.md`](README_robust_intent.md) — robust intent inference and AST-based synthesis from partial constraints

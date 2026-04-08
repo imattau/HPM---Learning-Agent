@@ -63,7 +63,7 @@ class TieredForest(Forest):
                 for child in node.children():
                     self._root_ids.discard(child.id)
         
-        print(f"      [DEBUG] Forest.rebuild_hierarchy_cache: nodes={len(all_ids)}, roots={len(self._root_ids)}")
+        pass # print(f"      [DEBUG] Forest.rebuild_hierarchy_cache: nodes={len(all_ids)}, roots={len(self._root_ids)}")
 
     def deregister(self, node_id: str) -> None:
         if node_id in self._mu_index:
@@ -133,7 +133,7 @@ class TieredForest(Forest):
         res = candidates[:k]
         
         if k > 0:
-            print(f"      [DEBUG] Forest.retrieve: roots={len(roots)}, candidates={len(candidates)}, returning={len(res)}")
+            pass # print(f"      [DEBUG] Forest.retrieve: roots={len(roots)}, candidates={len(candidates)}, returning={len(res)}")
             
         return res
 
