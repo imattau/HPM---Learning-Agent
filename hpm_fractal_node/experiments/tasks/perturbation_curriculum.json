@@ -1,0 +1,32 @@
+[
+  {
+    "id": "map_add_one",
+    "type": "curriculum",
+    "goal": "add one to every item in list",
+    "input": [[1, 2]],
+    "expected_output": [[2, 3]],
+    "tags": ["list", "loop", "base"],
+    "difficulty": 3,
+    "dependencies": []
+  },
+  {
+    "id": "map_add_two",
+    "type": "curriculum",
+    "goal": "add two to every item in list",
+    "input": [[1, 2]],
+    "expected_output": [[3, 4]],
+    "tags": ["list", "loop", "substitution"],
+    "difficulty": 4,
+    "dependencies": ["map_add_one"]
+  },
+  {
+    "id": "map_add_one_and_double",
+    "type": "curriculum",
+    "goal": "add one then double every item in list",
+    "input": [[1, 2]],
+    "expected_output": [[4, 6]],
+    "tags": ["list", "loop", "insertion"],
+    "difficulty": 5,
+    "dependencies": ["map_add_two"]
+  }
+]

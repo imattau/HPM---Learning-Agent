@@ -90,6 +90,7 @@ substrate. The core components are:
 | `experiment_developmental_cognitive_system.py` | Developmental System | **Nested Composition**: hierarchical knowledge accumulation rendered into Python | Working |
 | `experiment_recursive_scaling.py` | Recursive Complexity Scaling | Algorithmic curriculum building nested abstraction graphs (maps/loops) | Working |
 | `experiment_autonomous_pruning.py` | Autonomous Graph Pruning | Pruning combinatorial search space via internal simulation dreams | Working |
+| `experiment_structural_refinement.py` | Structural Refinement | Iterative Engineering: local graph edits and patching for self-debugging | Working |
 
 > The ARC experiments require the ARC-AGI-2 dataset at `data/ARC-AGI-2/data/training/`.
 > The dSprites experiment requires the dSprites `.npz` file (see `hpm_fractal_node/dsprites/`).
@@ -317,3 +318,4 @@ For detailed documentation of the Sovereign AI (multi-process) experiments, see:
 - [`README_adversarial_belief_revision.md`](README_adversarial_belief_revision.md) — truth under conflict: unlearning entrenched beliefs
 - [`README_recursive_scaling.md`](README_recursive_scaling.md) — nested composition for algorithmic tasks (maps and loops)
 - [`README_autonomous_pruning.md`](README_autonomous_pruning.md) — autonomous search space pruning via simulation dreams
+- [`README_structural_refinement.md`](README_structural_refinement.md) — iterative engineering: patching and debugging program graphs
