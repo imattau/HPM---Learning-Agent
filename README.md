@@ -293,6 +293,7 @@ Validates the transition from passive pattern matching to active, autonomous age
 | **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 
 ---
 
@@ -347,36 +348,53 @@ For boundary orchestration, the repo also provides `AsyncHFNController` in `hfn/
 | `experiment_adversarial_belief_revision.py` | Adversarial Belief Revision | **Truth Under Conflict**: unlearning high-confidence incorrect beliefs |
 | `experiment_developmental_cognitive_system.py` | Developmental System | **Mastery SUCCESS**: hierarchical knowledge accumulation over curriculum |
 | `experiment_recursive_scaling.py` | Recursive Scaling | **Algorithmic Chunking**: deep nested graph construction |
+| `experiment_autonomous_pruning.py` | Autonomous Pruning | **Pruning SUCCESS**: 56% reduction in planning search space |
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 | **Adversarial Belief Revision** | **SP43: Truth SUCCESS**. Shifted from 0.62 weight bias to 0.20 truth in 3 steps |
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 # SP42 — Long-Horizon Goal Reasoning (Depth Test) 
 python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 | Fractal trio | ARC-AGI-2 | Box-counting dimension, Hausdorff distance, self-similarity converge toward fractal attractor with world-model seeding |
 
 For the full experiment suite, see [`hpm_fractal_node/experiments/README.md`](hpm_fractal_node/experiments/README.md).
@@ -564,11 +582,14 @@ python hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
 # SP43 — Adversarial Belief Revision (Truth Under Conflict) 
 | **Developmental System** | **SP44: Mastery SUCCESS**. Discovered nested compositional abstractions for multi-step tasks |
 | **Recursive Scaling** | **SP45: Abstraction SUCCESS**. Discovered 7-step nested graph for map/loop execution |
+| **Autonomous Pruning** | **SP46: Pruning SUCCESS**. Dreaming reduced search space by 56% via causal feedback |
 python hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
 # SP44 — Developmental Cognitive System (HFN) 
 python hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
 # SP45 — Recursive Complexity Scaling (Algorithmic Curriculum) 
 python hpm_fractal_node/experiments/experiment_recursive_scaling.py
+# SP46 — Autonomous Graph Pruning (Simulation Dreams) 
+python hpm_fractal_node/experiments/experiment_autonomous_pruning.py
 ```
 
 ### Run HFN experiments
