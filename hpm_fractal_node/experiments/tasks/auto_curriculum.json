@@ -1,0 +1,68 @@
+[
+  {
+    "id": "auto_task_0",
+    "code": "x = 0\n    val = 0\n    res = None\n    x = 1\n    x += 1\n    x = 1\n    return res if res is not None else x",
+    "example_input": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "example_output": 1,
+    "state_delta": [
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "id": "auto_task_1",
+    "code": "x = 0\n    val = 0\n    res = None\n    x = 1\n    x *= 2\n    x *= 2\n    return res if res is not None else x",
+    "example_input": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "example_output": 4,
+    "state_delta": [
+      4.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "id": "auto_task_2",
+    "code": "x = 0\n    val = 0\n    res = None\n    x = 1\n    x *= 2\n    return res if res is not None else x",
+    "example_input": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "example_output": 2,
+    "state_delta": [
+      2.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+]
