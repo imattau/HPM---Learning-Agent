@@ -42,8 +42,8 @@ CONCEPTS = [
 ]
 CONCEPT_IDX = {c: i for i, c in enumerate(CONCEPTS)}
 
-# Empirical State Vector (10D)
-S_DIM = 10 
+# Empirical State Vector (14D)
+S_DIM = 14 
 DIM = len(CONCEPTS)
 
 # --- 2. AST RENDERER ---
@@ -168,7 +168,7 @@ class PythonExecutor:
         return results, errors
 
 class EmpiricalOracle:
-    def compute_state(self, outputs: List[Any], errors: List[Optional[str]]) -> np.ndarray:
+    def compute_state(self, outputs: List[Any], errors: List[Optional[str]], code: str = "") -> np.ndarray:
         s = np.zeros(S_DIM)
         valid_outputs = [o for o, e in zip(outputs, errors) if e is None]
         
@@ -218,6 +218,11 @@ class EmpiricalOracle:
         s[8] = np.mean(is_int) if is_int else 0.0
         s[9] = 0.0
         
+        s[10] = 1.0 if 'for ' in code else 0.0
+        s[11] = 1.0 if '.append(' in code else 0.0
+        s[12] = 1.0 if 'if ' in code else 0.0
+        s[13] = 1.0 if '+=' in code or '-=' in code or '*=' in code else 0.0
+        
         return s
 
 # --- 4. EXECUTION-GUIDED AGENT ---
@@ -258,14 +263,17 @@ class ExecutionGuidedAgent:
         return current
 
     def plan(self, inputs: List[Any], expected_outputs: List[Any], max_depth=6) -> Optional[HFN]:
-        goal_state = self.oracle.compute_state(expected_outputs, [None]*len(expected_outputs))
+        goal_state = self.oracle.compute_state(expected_outputs, [None]*len(expected_outputs), "")
         
         initial_outputs, initial_errors = self.executor.run_batch("", inputs)
-        initial_state = self.oracle.compute_state(initial_outputs, initial_errors)
+        initial_state = self.oracle.compute_state(initial_outputs, initial_errors, "")
         
         beam = [([], initial_state)]
         print(f"    [PLANNER] Goal State: {np.round(goal_state, 2)}")
         priors = [self.forest.get(f"prior_rule_{c}") for c in CONCEPTS]
+        
+        seen_states = set()
+        seen_states.add(tuple(np.round(initial_state, 4)))
         
         for depth in range(max_depth):
             new_beam = []
@@ -290,7 +298,7 @@ class ExecutionGuidedAgent:
                     new_path = path + [rule]
                     code = self.renderer.render(self._fold_nodes(new_path, 0))
                     outs, errs = self.executor.run_batch(code, inputs)
-                    new_state = self.oracle.compute_state(outs, errs)
+                    new_state = self.oracle.compute_state(outs, errs, code)
                     
                     if new_state[0] == 1.0:
                         delta = new_state - state
@@ -299,23 +307,22 @@ class ExecutionGuidedAgent:
                         rule_concept = self.renderer._get_concept(rule)
                         if rule_concept: vec[S_DIM + CONCEPT_IDX[rule_concept]] = 5.0
                         vec[S_DIM + DIM:] = delta * 10.0
-                        # self.observer.observe(vec) # DISABLED FOR SPEED TEST
+                        # self.observer.observe(vec) 
                     
                     if errs[0] is None:
-                        weights = np.array([10.0, 10.0, 5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0])
+                        weights = np.array([10.0, 10.0, 5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0])
                         dist = np.linalg.norm((goal_state - new_state) * weights)
                         score = dist + (0.05 * len(new_path))
                         new_beam.append((score, new_path, new_state))
                         
             new_beam.sort(key=lambda x: x[0])
             unique_beam = []
-            seen_states = set()
             for score, p, s in new_beam:
                 state_key = tuple(np.round(s, 4))
                 if state_key not in seen_states:
                     seen_states.add(state_key)
                     unique_beam.append((p, s))
-                    if len(unique_beam) >= 15:
+                    if len(unique_beam) >= 50:
                         break
             beam = unique_beam
             if beam:
