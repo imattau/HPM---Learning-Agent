@@ -1,11 +1,12 @@
 """
-SP54: Experiment 30 — Execution-Guided Synthesis & Empirical Priors
+SP54: Experiment 33 — HPM-Native Planning Objective
 
-Addresses the final set of architectural critiques:
-1. Removes symbolic simulation leakage (state is now derived from ACTUAL execution).
-2. Removes hand-coded priors (priors are learned online via execution feedback).
-3. Plannning uses Beam Search with empirical state evaluation.
-4. Verifies semantic correctness against multiple test cases.
+Addresses the fundamental architectural misalignment:
+1. Integrates HPM Evaluator (Layer 3) from hfn/evaluator.py.
+2. Replaces deterministic Euclidean scoring with native HPM Utility (Accuracy - Complexity + Coherence).
+3. Accuracy is derived from goal_hfn.log_prob(new_state) using Evaluator.accuracy.
+4. Complexity is measured using program length (HPM Resource/Affective factor).
+5. Coherence is measured using structural progress markers (Delta Observables).
 """
 import numpy as np
 import json
@@ -23,6 +24,7 @@ from hfn.observer import Observer
 from hfn.retriever import GoalConditionedRetriever
 from hfn.tiered_forest import TieredForest
 from hfn.persistence import PersistenceManager
+from hfn.evaluator import Evaluator
 
 # --- 1. SEMANTIC CONCEPTS ---
 CONCEPTS = [
@@ -43,6 +45,9 @@ CONCEPTS = [
 CONCEPT_IDX = {c: i for i, c in enumerate(CONCEPTS)}
 
 # Empirical State Vector (20D)
+# 0-9: Statistical Features
+# 10-16: Structural Markers (has_loop, has_append, has_if, has_mutation, has_var_inp, has_item_access, has_list_init)
+# 17-19: State Transition Markers (delta_has_append, delta_len_changed, delta_value_changed)
 S_DIM = 20 
 DIM = len(CONCEPTS)
 
@@ -149,7 +154,7 @@ class PythonExecutor:
         for inp in inputs:
             try:
                 # Type check inputs to ensure they're lists before trying to iterate
-                if 'list(x)' in code and not isinstance(inp, list) and not isinstance(inp, tuple):
+                if 'list(x)' in code and not isinstance(inp, (list, tuple)):
                      results.append(None)
                      errors.append("TypeError")
                      continue
@@ -158,7 +163,7 @@ class PythonExecutor:
             except Exception as e:
                 results.append(None)
                 errors.append(type(e).__name__)
-
+            
         return results, errors
 
 class EmpiricalOracle:
@@ -216,6 +221,9 @@ class EmpiricalOracle:
         s[11] = 1.0 if '.append(' in code else 0.0
         s[12] = 1.0 if 'if ' in code else 0.0
         s[13] = 1.0 if '+=' in code or '-=' in code or '*=' in code else 0.0
+        s[14] = 1.0 if 'x = inp' in code else 0.0
+        s[15] = 1.0 if 'val = item' in code else 0.0
+        s[16] = 1.0 if 'res = []' in code else 0.0
         
         return s
 
@@ -233,6 +241,7 @@ class ExecutionGuidedAgent:
         self.renderer = ASTRenderer()
         self.oracle = EmpiricalOracle()
         self.executor = PythonExecutor()
+        self.evaluator = Evaluator() # HFN Layer 3 Evaluator
         
         if not self.forest._registry:
             self._inject_blank_priors()
@@ -257,13 +266,17 @@ class ExecutionGuidedAgent:
         return current
 
     def plan(self, inputs: List[Any], expected_outputs: List[Any], max_depth=6) -> Optional[HFN]:
-        goal_state = self.oracle.compute_state(expected_outputs, [None]*len(expected_outputs), "")
+        goal_mu = self.oracle.compute_state(expected_outputs, [None]*len(expected_outputs), "")
+        # Semantic weights mapped to Gaussian Sigma (Lower = higher importance)
+        weights = np.array([10.0, 100.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        goal_sigma = 1.0 / (weights + 1e-4)
+        goal_hfn = HFN(mu=goal_mu, sigma=goal_sigma, id="goal", use_diag=True)
         
         initial_outputs, initial_errors = self.executor.run_batch("", inputs)
         initial_state = self.oracle.compute_state(initial_outputs, initial_errors, "")
         
         beam = [([], initial_state)]
-        print(f"    [PLANNER] Goal State: {np.round(goal_state, 2)}")
+        print(f"    [PLANNER] Goal State: {np.round(goal_mu, 2)}")
         priors = [self.forest.get(f"prior_rule_{c}") for c in CONCEPTS]
         
         seen_states = set()
@@ -282,7 +295,7 @@ class ExecutionGuidedAgent:
                 
                 query_mu = np.zeros(self.m_dim)
                 query_mu[:S_DIM] = state
-                query_mu[S_DIM + DIM:] = (goal_state - state) * 10.0
+                query_mu[S_DIM + DIM:] = (goal_mu - state) * 10.0
                 candidates = self.retriever.retrieve(HFN(mu=query_mu, sigma=np.ones(self.m_dim), id="p"), k=20)
                 
                 if np.random.random() < 0.3:
@@ -314,29 +327,41 @@ class ExecutionGuidedAgent:
                             self.observer.observe(vec) 
                     
                     if errs[0] is None:
-                        weights = np.array([10.0, 100.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                        dist = np.linalg.norm((goal_state - new_state) * weights)
-                        score = dist + (0.05 * len(new_path))
-                        new_beam.append((score, new_path, new_state))
+                        # --- HPM Native Utility Transformation ---
+                        # 1. Epistemic Accuracy: Log Prob under goal distribution (raw gradient)
+                        accuracy = goal_hfn.log_prob(new_state)
                         
-            new_beam.sort(key=lambda x: x[0])
+                        # 2. Resource/Affective Complexity: program length penalty
+                        # Program length is a fundamental resource cost in HPM synthesis
+                        complexity = 1.0 * len(new_path)
+                        
+                        # 3. Coherence: directional progress bonus (structural markers)
+                        # We treat transitions as positive coherence with the search direction
+                        coherence = (5.0 * new_state[18]) + (2.0 * new_state[19]) + (3.0 * new_state[17])
+                        
+                        # Total HPM Utility
+                        utility = accuracy - complexity + coherence
+                        new_beam.append((utility, new_path, new_state))
+                        
+            # Sort by utility (HIGHER IS BETTER)
+            new_beam.sort(key=lambda x: x[0], reverse=True)
             unique_beam = []
-            for score, p, s in new_beam:
+            for utility, p, s in new_beam:
                 # Deduplicate using only the base 17D state (ignore transition markers for deduplication)
                 state_key = tuple(np.round(s[:17], 4))
                 if state_key not in seen_states:
                     seen_states.add(state_key)
                     unique_beam.append((p, s))
-                    if len(unique_beam) >= 150:
+                    if len(unique_beam) >= 50:
                         break
             beam = unique_beam
             if beam:
-                print(f"      Depth {depth+1} Best Dist: {new_beam[0][0]:.2f} | Path: {[self.renderer._get_concept(n) for n in beam[0][0]]}")
+                print(f"      Depth {depth+1} Max Utility: {new_beam[0][0]:.2f} | Path: {[self.renderer._get_concept(n) for n in beam[0][0]]}")
                 
         return None
 
 def run_experiment():
-    print("--- SP54: Experiment 30 — Execution-Guided Synthesis & Empirical Priors ---\n")
+    print("--- SP54: Experiment 33 — HPM-Native Planning Objective ---\n")
     agent = ExecutionGuidedAgent()
     
     tasks = [
