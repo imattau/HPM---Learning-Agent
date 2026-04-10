@@ -230,7 +230,7 @@ class ExecutionGuidedAgent:
         initial_state = self.oracle.compute_state(initial_outputs, initial_errors, "")
         
         planning_forest = Forest(D=self.m_dim)
-        planning_retriever = GoalConditionedRetriever(planning_forest, target_slice=slice(0, S_DIM), target_weight=1.0, weight_provider=lambda nid: planning_observer.get_weight(nid))
+        planning_retriever = GoalConditionedRetriever(planning_forest, target_slice=slice(S_DIM + DIM, self.m_dim), target_weight=1.0, weight_provider=lambda nid: planning_observer.get_weight(nid))
         planning_observer = Observer(forest=planning_forest, retriever=planning_retriever, tau=0.1, node_use_diag=True)
         
         initial_node = HFN(mu=np.zeros(self.m_dim), sigma=np.ones(self.m_dim), id="path_root", use_diag=True)
@@ -270,25 +270,51 @@ class ExecutionGuidedAgent:
                 code = self.renderer.render(self._fold_nodes(new_path, 0))
                 outs, errs = self.executor.run_batch(code, inputs)
                 if outs == expected_outputs:
-                    print(f"    [SUCCESS] Found exact match at iteration {i}!"); return self._fold_nodes(new_path, 0)
+                    print(f"    [SUCCESS] Found exact match at iteration {i}!")
+                    if len(new_path) >= 3:
+                        # Abstraction Reuse: compress successful sequences into new macro concepts
+                        unique_nodes = list({n.id: n for n in new_path}.values())
+                        if len(unique_nodes) >= 2:
+                            self.observer._track_cooccurrence(unique_nodes)
+                            self.observer._check_compression_candidates()
+                            print(f"      [MACRO] Sent {len(unique_nodes)} unique concepts to Observer for potential macro-compression.")
+                    return self._fold_nodes(new_path, 0)
                 
                 new_state_vec = self.oracle.compute_state(outs, errs, code)
                 if errs[0] is None:
                     accuracy = goal_hfn.log_prob(new_state_vec)
                     complexity = 0.2 * len(new_path)
-                    coherence = (30.0 * new_state_vec[18]) + (15.0 * new_state_vec[19]) + (20.0 * new_state_vec[17])
+                    # Removed hand-tuned coherence weights! Relying entirely on backpropagated utility.
+                    coherence = 0.0
                     utility = accuracy - complexity + coherence
                     
                     state_key = tuple(np.round(new_state_vec[:17], 4))
                     if state_key in seen_states and utility <= seen_states[state_key]: continue
                     seen_states[state_key] = utility
                     
-                    new_node_mu = np.zeros(self.m_dim); new_node_mu[:S_DIM] = new_state_vec
+                    new_node_mu = np.zeros(self.m_dim)
+                    new_node_mu[:S_DIM] = new_state_vec
+                    new_node_mu[S_DIM + DIM:] = goal_mu - new_state_vec # Store remaining delta for retriever alignment
+                    
                     new_node = HFN(mu=new_node_mu, sigma=np.ones(self.m_dim), id=f"prog_{i}_{self.renderer._get_concept(rule)}", use_diag=True)
                     parent.add_child(new_node); planning_observer.register(new_node)
                     node_to_path[new_node.id] = new_path
-                    weight = 1.0 / (1.0 + np.exp(-utility/20.0)); planning_observer._set_state_field(new_node.id, 0, weight)
-                    planning_observer._set_state_field(new_node.id, 1, utility)
+                    
+                    # Backpropagate utility up the planning tree (Temporal Credit Assignment)
+                    gamma = 0.95
+                    curr_n = new_node
+                    curr_util = utility
+                    while curr_n is not None and curr_n.id != "path_root":
+                        old_score = planning_observer.get_score(curr_n.id)
+                        if curr_util > old_score:
+                            weight = 1.0 / (1.0 + np.exp(-curr_util/20.0)) 
+                            planning_observer._set_state_field(curr_n.id, 0, weight)
+                            planning_observer._set_state_field(curr_n.id, 1, curr_util)
+                        else:
+                            break # Optimization: stop backprop if we don't improve the ancestor
+                        curr_util *= gamma
+                        parents = planning_forest.get_parents(curr_n.id)
+                        curr_n = parents[0] if parents else None
                     
                     if new_state_vec[0] == 1.0:
                         delta = new_state_vec - state; vec = np.zeros(self.m_dim); vec[:S_DIM] = state
