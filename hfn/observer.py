@@ -868,6 +868,8 @@ class Observer:
         for cooc_id, ids in candidates:
             node_a = self.forest.get(ids[0])
             node_b = self.forest.get(ids[1])
+            if node_a is None or node_b is None:
+                continue
             compressed_id = f"compressed({ids[0][:8]},{ids[1][:8]})"
             if compressed_id in self.forest:
                 continue
