@@ -140,7 +140,8 @@ class ASTRenderer:
 class PythonExecutor:
     def run_batch(self, code_str: str, inputs: List[Any], timeout: float = 0.5) -> Tuple[List[Any], List[Optional[str]]]:
         if not code_str: return [None]*len(inputs), ["EmptyCode"]*len(inputs)
-        code = f"def test_func(inp):\n    x = 0\n    val = 0\n    res = None\n    {code_str.replace('\n', '\n    ')}\n"
+        indented = code_str.replace('\n', '\n    ')
+        code = f"def test_func(inp):\n    x = 0\n    val = 0\n    res = None\n    {indented}\n"
         results, errors = [], []
         try:
             local_ns = {}
@@ -209,8 +210,14 @@ class SchemaTransferAgent:
         if not self.forest._registry: self._inject_blank_priors()
 
     def _inject_blank_priors(self):
+        # Concepts that contribute to list-type output — encode delta[1]=1.0 so
+        # GoalConditionedRetriever can find them when the goal requires list output
+        list_concepts = {"LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND"}
+        delta_offset = S_DIM + DIM
         for c in CONCEPTS:
             mu = np.zeros(self.m_dim); mu[S_DIM + CONCEPT_IDX[c]] = 5.0
+            if c in list_concepts:
+                mu[delta_offset + 1] = 1.0  # is_list signal in delta space
             node = HFN(mu=mu, sigma=np.ones(self.m_dim)*5.0, id=f"prior_rule_{c}", use_diag=True)
             self.forest.register(node); self.observer.protected_ids.add(node.id)
             self.observer.meta_forest.register(HFN(mu=np.array([0.5, 0, 0, 0]), sigma=np.ones(4), id=f"state:{node.id}", use_diag=True))
@@ -248,9 +255,12 @@ class SchemaTransferAgent:
         print(f"    [PLANNER] Goal State: {np.round(goal_mu, 2)}")
         priors = [self.forest.get(f"prior_rule_{c}") for c in CONCEPTS]
         
+        ema_baseline = 0.0
+        
         for i in range(max_iterations):
             active_nodes = planning_forest.active_nodes()
-            baseline_utility = np.mean([planning_observer.get_score(n.id) for n in active_nodes]) if active_nodes else 0.0
+            current_mean = np.mean([planning_observer.get_score(n.id) for n in active_nodes]) if active_nodes else 0.0
+            ema_baseline = current_mean if i == 0 else 0.9 * ema_baseline + 0.1 * current_mean
             
             if not active_nodes: parent = initial_node
             else:
@@ -258,7 +268,7 @@ class SchemaTransferAgent:
                 n_children = np.array([len(n.children()) for n in sorted_nodes])
                 curiosity_bonus = 1.0 / (1.0 + n_children)
                 ranks = np.arange(len(sorted_nodes))
-                p_vec = np.exp(-ranks / 30.0) * curiosity_bonus; p_vec /= p_vec.sum()
+                p_vec = np.exp(-ranks / 5.0) * curiosity_bonus; p_vec /= p_vec.sum()
                 parent = np.random.choice(sorted_nodes, p=p_vec)
             
             path = node_to_path[parent.id]; state = parent.mu[:S_DIM]
@@ -305,22 +315,44 @@ class SchemaTransferAgent:
                     parent.add_child(new_node); planning_observer.register(new_node)
                     node_to_path[new_node.id] = new_path
                     
+                    # Direct assignment for the new node
+                    weight = 1.0 / (1.0 + np.exp(-(utility - ema_baseline)/3.0)) 
+                    planning_observer._set_state_field(new_node.id, 0, weight)
+                    planning_observer._set_state_field(new_node.id, 1, utility)
+                    
                     # Backpropagate utility up the planning tree (Temporal Credit Assignment)
+                    advantage = utility - ema_baseline
                     gamma = 0.95
-                    curr_n = new_node
-                    curr_util = utility
+                    curr_n = parent
+                    curr_util = utility * gamma
+                    curr_adv = advantage * gamma
+                    depth = 1
+                    
+                    # Partial Attractor Formation: compress highly successful partial structures
+                    if advantage > 5.0 and len(new_path) >= 2:
+                        unique_nodes = list({n.id: n for n in new_path}.values())
+                        if len(unique_nodes) >= 2:
+                            self.observer._track_cooccurrence(unique_nodes)
+                            self.observer._check_compression_candidates()
+                    
                     while curr_n is not None and curr_n.id != "path_root":
                         old_score = planning_observer.get_score(curr_n.id)
-                        if curr_util > old_score:
-                            advantage = curr_util - baseline_utility
-                            weight = 1.0 / (1.0 + np.exp(-advantage/10.0)) 
-                            planning_observer._set_state_field(curr_n.id, 0, weight)
+                        if old_score == 0.0 or curr_util > old_score:
                             planning_observer._set_state_field(curr_n.id, 1, curr_util)
+                            
+                        # Anti-Diffusion: Only propagate positive advantage weight boosts
+                        if curr_adv > 0:
+                            weight = 1.0 / (1.0 + np.exp(-curr_adv/3.0)) # Sharpened contrast
+                            old_weight = planning_observer.get_weight(curr_n.id)
+                            planning_observer._set_state_field(curr_n.id, 0, max(old_weight, weight))
                         else:
-                            break # Optimization: stop backprop if we don't improve the ancestor
+                            break # Optimization: stop backprop if advantage diffuses to <= 0
+                        
+                        curr_adv *= gamma
                         curr_util *= gamma
                         parents = planning_forest.get_parents(curr_n.id)
                         curr_n = parents[0] if parents else None
+                        depth += 1
                     
                     if new_state_vec[0] == 1.0:
                         delta = new_state_vec - state; vec = np.zeros(self.m_dim); vec[:S_DIM] = state
