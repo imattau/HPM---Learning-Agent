@@ -1,12 +1,12 @@
 """
-SP54: Experiment 33 — HPM-Native Planning Objective
+SP54: Experiment 34 — Pure Observer-Driven Dynamics
 
-Addresses the fundamental architectural misalignment:
-1. Integrates HPM Evaluator (Layer 3) from hfn/evaluator.py.
-2. Replaces deterministic Euclidean scoring with native HPM Utility (Accuracy - Complexity + Coherence).
-3. Accuracy is derived from goal_hfn.log_prob(new_state) using Evaluator.accuracy.
-4. Complexity is measured using program length (HPM Resource/Affective factor).
-5. Coherence is measured using structural progress markers (Delta Observables).
+Addresses the fundamental search dynamics misalignment:
+1. Replaces heuristic Beam Search with pure Observer-driven dynamics in a Planning Forest.
+2. Search is driven by stochastic selection weighted by HPM Utility (Accuracy - Complexity + Coherence).
+3. Evaluator provides the reinforcement signal to the Planning Observer.
+4. Curiosity-driven exploration rewards nodes with fewer expansions.
+5. All search nodes are genuine HFNs in an ephemeral forest.
 """
 import numpy as np
 import json
@@ -45,9 +45,6 @@ CONCEPTS = [
 CONCEPT_IDX = {c: i for i, c in enumerate(CONCEPTS)}
 
 # Empirical State Vector (20D)
-# 0-9: Statistical Features
-# 10-16: Structural Markers (has_loop, has_append, has_if, has_mutation, has_var_inp, has_item_access, has_list_init)
-# 17-19: State Transition Markers (delta_has_append, delta_len_changed, delta_value_changed)
 S_DIM = 20 
 DIM = len(CONCEPTS)
 
@@ -108,7 +105,6 @@ class ASTRenderer:
                 curr_block.append(ast.Assign(targets=[ast.Name(id='res', ctx=ast.Store())], value=ast.List(elts=[], ctx=ast.Load())))
             elif concept == "FOR_LOOP":
                 if isinstance(curr_block[-1], ast.Pass): curr_block.pop()
-                # Iterate over a list copy to prevent infinite loops if x is mutated
                 list_call = ast.Call(func=ast.Name(id='list', ctx=ast.Load()), args=[ast.Name(id='x', ctx=ast.Load())], keywords=[])
                 for_node = ast.For(target=ast.Name(id='item', ctx=ast.Store()), iter=list_call, body=[ast.Pass()], orelse=[])
                 curr_block.append(for_node); stack.append(for_node.body)
@@ -123,6 +119,8 @@ class ASTRenderer:
                 if isinstance(curr_block[-1], ast.Pass): curr_block.pop()
                 if_node = ast.If(test=ast.Compare(left=ast.BinOp(left=ast.Name(id='val', ctx=ast.Load()), op=ast.Mod(), right=ast.Constant(value=2)), ops=[ast.Eq()], comparators=[ast.Constant(value=0)]), body=[ast.Pass()], orelse=[])
                 curr_block.append(if_node); stack.append(if_node.body)
+            elif concept == "BLOCK_ELSE":
+                pass
             elif concept == "RETURN":
                 ret_val = ast.IfExp(test=ast.Compare(left=ast.Name(id='res', ctx=ast.Load()), ops=[ast.IsNot()], comparators=[ast.Constant(value=None)]), body=ast.Name(id='res', ctx=ast.Load()), orelse=ast.Name(id='x', ctx=ast.Load()))
                 curr_block.append(ast.Return(value=ret_val)); break
@@ -139,74 +137,41 @@ class ASTRenderer:
 class PythonExecutor:
     def run_batch(self, code_str: str, inputs: List[Any], timeout: float = 0.5) -> Tuple[List[Any], List[Optional[str]]]:
         if not code_str: return [None]*len(inputs), ["EmptyCode"]*len(inputs)
-        
         code = f"def test_func(inp):\n    x = 0\n    val = 0\n    res = None\n    {code_str.replace('\n', '\n    ')}\n"
-        results = []
-        errors = []
-        
+        results, errors = [], []
         try:
             local_ns = {}
             exec(code, {}, local_ns)
             test_func = local_ns["test_func"]
         except Exception as e:
             return [None]*len(inputs), [type(e).__name__]*len(inputs)
-            
         for inp in inputs:
             try:
-                # Type check inputs to ensure they're lists before trying to iterate
                 if 'list(x)' in code and not isinstance(inp, (list, tuple)):
-                     results.append(None)
-                     errors.append("TypeError")
-                     continue
-                results.append(test_func(copy.deepcopy(inp)))
-                errors.append(None)
+                     results.append(None); errors.append("TypeError"); continue
+                results.append(test_func(copy.deepcopy(inp))); errors.append(None)
             except Exception as e:
-                results.append(None)
-                errors.append(type(e).__name__)
-            
+                results.append(None); errors.append(type(e).__name__)
         return results, errors
 
 class EmpiricalOracle:
     def compute_state(self, outputs: List[Any], errors: List[Optional[str]], code: str = "") -> np.ndarray:
         s = np.zeros(S_DIM)
         valid_outputs = [o for o, e in zip(outputs, errors) if e is None]
-        
-        if len(valid_outputs) == 0:
-            s[0] = 0.0 # IsValid
-            s[9] = 1.0 # IsNone
-            return s
-            
-        s[0] = 1.0 # IsValid
-        
-        is_list = []
-        lens = []
-        means = []
-        mins = []
-        maxs = []
-        firsts = []
-        lasts = []
-        is_int = []
-        
+        if not valid_outputs:
+            s[0] = 0.0; s[9] = 1.0; return s
+        s[0] = 1.0
+        is_list, lens, means, mins, maxs, firsts, lasts, is_int = [], [], [], [], [], [], [], []
         for out in valid_outputs:
             if isinstance(out, list):
-                is_list.append(1.0)
-                lens.append(len(out))
+                is_list.append(1.0); lens.append(len(out))
                 num_out = [x for x in out if isinstance(x, (int, float))]
                 if num_out:
-                    means.append(np.mean(num_out))
-                    mins.append(np.min(num_out))
-                    maxs.append(np.max(num_out))
-                    firsts.append(num_out[0])
-                    lasts.append(num_out[-1])
+                    means.append(np.mean(num_out)); mins.append(np.min(num_out)); maxs.append(np.max(num_out))
+                    firsts.append(num_out[0]); lasts.append(num_out[-1])
             elif isinstance(out, (int, float)):
-                is_list.append(0.0)
-                is_int.append(1.0)
-                means.append(out)
-                mins.append(out)
-                maxs.append(out)
-                firsts.append(out)
-                lasts.append(out)
-                
+                is_list.append(0.0); is_int.append(1.0)
+                means.append(out); mins.append(out); maxs.append(out); firsts.append(out); lasts.append(out)
         s[1] = np.mean(is_list) if is_list else 0.0
         s[2] = np.mean(lens) if lens else 0.0
         s[3] = np.mean(means) if means else 0.0
@@ -215,8 +180,6 @@ class EmpiricalOracle:
         s[6] = np.mean(firsts) if firsts else 0.0
         s[7] = np.mean(lasts) if lasts else 0.0
         s[8] = np.mean(is_int) if is_int else 0.0
-        s[9] = 0.0
-        
         s[10] = 1.0 if 'for ' in code else 0.0
         s[11] = 1.0 if '.append(' in code else 0.0
         s[12] = 1.0 if 'if ' in code else 0.0
@@ -224,7 +187,6 @@ class EmpiricalOracle:
         s[14] = 1.0 if 'x = inp' in code else 0.0
         s[15] = 1.0 if 'val = item' in code else 0.0
         s[16] = 1.0 if 'res = []' in code else 0.0
-        
         return s
 
 # --- 4. EXECUTION-GUIDED AGENT ---
@@ -235,25 +197,19 @@ class ExecutionGuidedAgent:
         self.forest = TieredForest(D=self.m_dim, cold_dir=Path(cold_dir))
         self.persistence = PersistenceManager(root_dir="data/knowledge_base")
         self.experiment_id = "execution_guided"
-        
         self.retriever = GoalConditionedRetriever(self.forest, target_slice=slice(S_DIM + DIM, self.m_dim), target_weight=50.0, weight_provider=lambda nid: self.observer.get_weight(nid))
         self.observer = Observer(forest=self.forest, retriever=self.retriever, tau=0.5, node_use_diag=True)
         self.renderer = ASTRenderer()
         self.oracle = EmpiricalOracle()
         self.executor = PythonExecutor()
-        self.evaluator = Evaluator() # HFN Layer 3 Evaluator
-        
-        if not self.forest._registry:
-            self._inject_blank_priors()
+        self.evaluator = Evaluator()
+        if not self.forest._registry: self._inject_blank_priors()
 
     def _inject_blank_priors(self):
         for c in CONCEPTS:
-            mu = np.zeros(self.m_dim)
-            mu[S_DIM + CONCEPT_IDX[c]] = 5.0
-            # Notice: No hardcoded delta values here!
+            mu = np.zeros(self.m_dim); mu[S_DIM + CONCEPT_IDX[c]] = 5.0
             node = HFN(mu=mu, sigma=np.ones(self.m_dim)*5.0, id=f"prior_rule_{c}", use_diag=True)
-            self.forest.register(node)
-            self.observer.protected_ids.add(node.id)
+            self.forest.register(node); self.observer.protected_ids.add(node.id)
             self.observer.meta_forest.register(HFN(mu=np.array([0.5, 0, 0, 0]), sigma=np.ones(4), id=f"state:{node.id}", use_diag=True))
 
     def _fold_nodes(self, nodes: List[HFN], i: int) -> HFN:
@@ -265,133 +221,109 @@ class ExecutionGuidedAgent:
             p.add_child(current); p.add_child(n); current = p
         return current
 
-    def plan(self, inputs: List[Any], expected_outputs: List[Any], max_depth=6) -> Optional[HFN]:
+    def plan(self, inputs: List[Any], expected_outputs: List[Any], max_depth=15, max_iterations=20000) -> Optional[HFN]:
         goal_mu = self.oracle.compute_state(expected_outputs, [None]*len(expected_outputs), "")
-        # Semantic weights mapped to Gaussian Sigma (Lower = higher importance)
-        weights = np.array([10.0, 100.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        weights = np.array([20.0, 500.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 20.0, 20.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
         goal_sigma = 1.0 / (weights + 1e-4)
         goal_hfn = HFN(mu=goal_mu, sigma=goal_sigma, id="goal", use_diag=True)
-        
         initial_outputs, initial_errors = self.executor.run_batch("", inputs)
         initial_state = self.oracle.compute_state(initial_outputs, initial_errors, "")
         
-        beam = [([], initial_state)]
+        planning_forest = Forest(D=self.m_dim)
+        planning_retriever = GoalConditionedRetriever(planning_forest, target_slice=slice(0, S_DIM), target_weight=1.0, weight_provider=lambda nid: planning_observer.get_weight(nid))
+        planning_observer = Observer(forest=planning_forest, retriever=planning_retriever, tau=0.1, node_use_diag=True)
+        
+        initial_node = HFN(mu=np.zeros(self.m_dim), sigma=np.ones(self.m_dim), id="path_root", use_diag=True)
+        initial_node.mu[:S_DIM] = initial_state
+        planning_observer.register(initial_node)
+        
+        initial_accuracy = goal_hfn.log_prob(initial_state)
+        planning_observer._set_state_field(initial_node.id, 1, initial_accuracy)
+        planning_observer._set_state_field(initial_node.id, 0, 1.0 / (1.0 + np.exp(-initial_accuracy/20.0)))
+        
+        node_to_path = {initial_node.id: []}; seen_states = {}; observed_deltas = set()
         print(f"    [PLANNER] Goal State: {np.round(goal_mu, 2)}")
         priors = [self.forest.get(f"prior_rule_{c}") for c in CONCEPTS]
         
-        seen_states = set()
-        seen_states.add(tuple(np.round(initial_state, 4)))
-        observed_deltas = set()
-        
-        for depth in range(max_depth):
-            new_beam = []
-            for path, state in beam:
-                if path:
-                    code = self.renderer.render(self._fold_nodes(path, 0))
-                    outs, errs = self.executor.run_batch(code, inputs)
-                    if outs == expected_outputs:
-                        print(f"    [SUCCESS] Found exact match at depth {depth}!")
-                        return self._fold_nodes(path, 0)
+        for i in range(max_iterations):
+            active_nodes = planning_forest.active_nodes()
+            if not active_nodes: parent = initial_node
+            else:
+                sorted_nodes = sorted(active_nodes, key=lambda n: planning_observer.get_weight(n.id), reverse=True)
+                n_children = np.array([len(n.children()) for n in sorted_nodes])
+                curiosity_bonus = 1.0 / (1.0 + n_children)
+                ranks = np.arange(len(sorted_nodes))
+                p_vec = np.exp(-ranks / 30.0) * curiosity_bonus; p_vec /= p_vec.sum()
+                parent = np.random.choice(sorted_nodes, p=p_vec)
+            
+            path = node_to_path[parent.id]; state = parent.mu[:S_DIM]
+            if len(path) >= max_depth: continue
+            
+            target_delta = (goal_mu - state) * 10.0
+            concept_query = np.zeros(self.m_dim); concept_query[:S_DIM] = state; concept_query[S_DIM + DIM:] = target_delta
+            candidates = self.retriever.retrieve(HFN(mu=concept_query, sigma=np.ones(self.m_dim), id="cq"), k=20)
+            if np.random.random() < 0.3: candidates.append(np.random.choice(priors))
+            
+            for rule in set(candidates):
+                if rule is None: continue
+                new_path = path + [rule]
+                code = self.renderer.render(self._fold_nodes(new_path, 0))
+                outs, errs = self.executor.run_batch(code, inputs)
+                if outs == expected_outputs:
+                    print(f"    [SUCCESS] Found exact match at iteration {i}!"); return self._fold_nodes(new_path, 0)
                 
-                query_mu = np.zeros(self.m_dim)
-                query_mu[:S_DIM] = state
-                query_mu[S_DIM + DIM:] = (goal_mu - state) * 10.0
-                candidates = self.retriever.retrieve(HFN(mu=query_mu, sigma=np.ones(self.m_dim), id="p"), k=20)
-                
-                if np.random.random() < 0.3:
-                    candidates.append(self.forest.get(f"prior_rule_{np.random.choice(CONCEPTS)}"))
-                
-                for rule in set(candidates):
-                    if rule is None: continue
-                    new_path = path + [rule]
-                    code = self.renderer.render(self._fold_nodes(new_path, 0))
-                    outs, errs = self.executor.run_batch(code, inputs)
-                    new_state = self.oracle.compute_state(outs, errs, code)
+                new_state_vec = self.oracle.compute_state(outs, errs, code)
+                if errs[0] is None:
+                    accuracy = goal_hfn.log_prob(new_state_vec)
+                    complexity = 0.2 * len(new_path)
+                    coherence = (30.0 * new_state_vec[18]) + (15.0 * new_state_vec[19]) + (20.0 * new_state_vec[17])
+                    utility = accuracy - complexity + coherence
                     
-                    # Compute state transition markers (Delta Observables)
-                    new_state[17] = 1.0 if new_state[11] > state[11] else 0.0 # delta_has_append
-                    new_state[18] = 1.0 if new_state[2] != state[2] else 0.0  # delta_len_changed
-                    new_state[19] = 1.0 if not np.allclose(new_state[3:8], state[3:8]) else 0.0 # delta_value_changed
+                    state_key = tuple(np.round(new_state_vec[:17], 4))
+                    if state_key in seen_states and utility <= seen_states[state_key]: continue
+                    seen_states[state_key] = utility
                     
-                    if new_state[0] == 1.0:
-                        delta = new_state - state
-                        vec = np.zeros(self.m_dim)
-                        vec[:S_DIM] = state
+                    new_node_mu = np.zeros(self.m_dim); new_node_mu[:S_DIM] = new_state_vec
+                    new_node = HFN(mu=new_node_mu, sigma=np.ones(self.m_dim), id=f"prog_{i}_{self.renderer._get_concept(rule)}", use_diag=True)
+                    parent.add_child(new_node); planning_observer.register(new_node)
+                    node_to_path[new_node.id] = new_path
+                    weight = 1.0 / (1.0 + np.exp(-utility/20.0)); planning_observer._set_state_field(new_node.id, 0, weight)
+                    planning_observer._set_state_field(new_node.id, 1, utility)
+                    
+                    if new_state_vec[0] == 1.0:
+                        delta = new_state_vec - state; vec = np.zeros(self.m_dim); vec[:S_DIM] = state
                         rule_concept = self.renderer._get_concept(rule)
-                        
                         delta_key = (rule_concept, tuple(np.round(delta, 4)))
                         if delta_key not in observed_deltas:
                             observed_deltas.add(delta_key)
                             if rule_concept: vec[S_DIM + CONCEPT_IDX[rule_concept]] = 5.0
-                            vec[S_DIM + DIM:] = delta * 10.0
-                            self.observer.observe(vec) 
-                    
-                    if errs[0] is None:
-                        # --- HPM Native Utility Transformation ---
-                        # 1. Epistemic Accuracy: Log Prob under goal distribution (raw gradient)
-                        accuracy = goal_hfn.log_prob(new_state)
-                        
-                        # 2. Resource/Affective Complexity: program length penalty
-                        # Program length is a fundamental resource cost in HPM synthesis
-                        complexity = 1.0 * len(new_path)
-                        
-                        # 3. Coherence: directional progress bonus (structural markers)
-                        # We treat transitions as positive coherence with the search direction
-                        coherence = (5.0 * new_state[18]) + (2.0 * new_state[19]) + (3.0 * new_state[17])
-                        
-                        # Total HPM Utility
-                        utility = accuracy - complexity + coherence
-                        new_beam.append((utility, new_path, new_state))
-                        
-            # Sort by utility (HIGHER IS BETTER)
-            new_beam.sort(key=lambda x: x[0], reverse=True)
-            unique_beam = []
-            for utility, p, s in new_beam:
-                # Deduplicate using only the base 17D state (ignore transition markers for deduplication)
-                state_key = tuple(np.round(s[:17], 4))
-                if state_key not in seen_states:
-                    seen_states.add(state_key)
-                    unique_beam.append((p, s))
-                    if len(unique_beam) >= 50:
-                        break
-            beam = unique_beam
-            if beam:
-                print(f"      Depth {depth+1} Max Utility: {new_beam[0][0]:.2f} | Path: {[self.renderer._get_concept(n) for n in beam[0][0]]}")
-                
+                            vec[S_DIM + DIM:] = delta * 10.0; self.observer.observe(vec) 
+            
+            if len(planning_forest._registry) > 1000:
+                active_nodes = planning_forest.active_nodes()
+                weights_dict = {n.id: planning_observer.get_weight(n.id) for n in active_nodes}
+                sorted_nodes = sorted(active_nodes, key=lambda n: weights_dict[n.id], reverse=True)
+                for n in sorted_nodes[500:]:
+                    if n.id != "path_root": planning_forest.deregister(n.id)
+            if i % 1000 == 0 and planning_forest._registry:
+                best_node = max(planning_forest.active_nodes(), key=lambda n: planning_observer.get_weight(n.id))
+                best_utility = planning_observer.get_score(best_node.id)
+                print(f"      Iteration {i} Max Utility: {best_utility:.2f} | Nodes: {len(planning_forest._registry)} | Best Path: {[self.renderer._get_concept(n) for n in node_to_path[best_node.id]]}")
         return None
 
 def run_experiment():
-    print("--- SP54: Experiment 33 — HPM-Native Planning Objective ---\n")
+    print("--- SP54: Experiment 34 — Pure Observer-Driven Dynamics ---\n")
     agent = ExecutionGuidedAgent()
-    
     tasks = [
-        {
-            "name": "Add one",
-            "inputs": [1, 5, 10],
-            "outputs": [2, 6, 11]
-        },
-        {
-            "name": "Add two",
-            "inputs": [1, 5, 10],
-            "outputs": [3, 7, 12]
-        },
-        {
-            "name": "Map double",
-            "inputs": [[1, 2], [10, 20], [3, 5, 7], [-1, 0]],
-            "outputs": [[2, 4], [20, 40], [6, 10, 14], [-2, 0]]
-        }
+        {"name": "Add one", "inputs": [1, 5, 10], "outputs": [2, 6, 11]},
+        {"name": "Add two", "inputs": [1, 5, 10], "outputs": [3, 7, 12]},
+        {"name": "Map double", "inputs": [[1, 2], [10, 20], [3, 5, 7], [-1, 0]], "outputs": [[2, 4], [20, 40], [6, 10, 14], [-2, 0]]}
     ]
-    
     for t in tasks:
-        print(f"\nTask: {t['name']}")
-        print(f"  Inputs:  {t['inputs']}")
-        print(f"  Outputs: {t['outputs']}")
+        print(f"\nTask: {t['name']}"); print(f"  Inputs:  {t['inputs']}"); print(f"  Outputs: {t['outputs']}")
         root = agent.plan(t['inputs'], t['outputs'], max_depth=9)
-        if root:
-            code = agent.renderer.render(root)
-            print(f"  [FINAL AST]\n{code}")
-        else:
-            print("  [FAIL] Could not synthesize program.")
+        if root: print(f"  [FINAL AST]\n{agent.renderer.render(root)}")
+        else: print("  [FAIL] Could not synthesize program.")
 
 if __name__ == "__main__":
     run_experiment()
