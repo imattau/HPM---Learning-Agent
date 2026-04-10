@@ -38,7 +38,7 @@ class Decoder:
     def __init__(
         self,
         target_forest: Forest,
-        sigma_threshold: float = 1e-3,
+        sigma_threshold: float = 1.5,
         k_candidates: int = 10,
         retriever: Retriever = None,
     ):
