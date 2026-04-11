@@ -77,6 +77,10 @@ class Forest(HFN):
     def __len__(self) -> int:
         return len(self._registry)
 
+    def rebuild_index(self) -> None:
+        """Force a full re-sync of the Forest's Gaussian summary from its population."""
+        self._sync_gaussian()
+
     # --- HFN interface overrides ---
 
     def children(self) -> list[HFN]:

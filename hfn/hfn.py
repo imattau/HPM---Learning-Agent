@@ -194,6 +194,37 @@ class HFN:
         """Explicitly add a typed edge between two children."""
         self._edges.append(Edge(source=source, target=target, relation=relation))
 
+    @staticmethod
+    def query_node(
+        known: np.ndarray,
+        unknown_mask: np.ndarray,
+        known_sigma: float = 0.5,
+        unknown_sigma: float = 100.0,
+        id: str = "query",
+    ) -> HFN:
+        """Create a goal node with tight sigma on known dims, loose on unknown.
+
+        This is the standard HPM idiom for querying the Decoder: dimensions
+        with high sigma are treated as "I don't know — fill this in."
+
+        Parameters
+        ----------
+        known : (D,) array
+            The mu vector (known values placed at their positions; unknown
+            positions can be any value — they will be ignored by the Decoder
+            because of the high sigma).
+        unknown_mask : (D,) bool array
+            True for dimensions that are unknown (will get high sigma).
+        known_sigma : float
+            Sigma value for known (pinned) dimensions.
+        unknown_sigma : float
+            Sigma value for unknown (free) dimensions.
+        id : str
+            Node id for the query node.
+        """
+        sigma = np.where(unknown_mask, unknown_sigma, known_sigma)
+        return HFN(mu=known, sigma=sigma, id=id, use_diag=True)
+
     def __repr__(self) -> str:
         return f"HFN(id={self.id[:8]}, children={len(self._children)}, leaf={self.is_leaf()})"
 

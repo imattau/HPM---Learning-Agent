@@ -109,7 +109,7 @@ def compute_purity(
     word_mus = np.stack([n.mu for n in word_nodes], axis=0)  # (V, D)
 
     for vec, true_token, obs_category in obs_list:
-        result = observer._expand(vec)
+        result = observer.expand(vec)
         if not result.explanation_tree:
             continue
 

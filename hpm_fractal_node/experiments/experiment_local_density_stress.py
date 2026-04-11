@@ -98,7 +98,7 @@ def _run_phase(
     for _ in range(inputs):
         x = base + rng.normal(0.0, noise, size=base.shape[0])
         if creations >= max_new_nodes:
-            result = obs._expand(x)  # type: ignore[attr-defined]
+            result = obs.expand(x)
         else:
             result = obs.observe(x)
         # Density ratio is expensive; use a bounded random sample to keep runtime tight.

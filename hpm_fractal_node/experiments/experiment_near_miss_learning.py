@@ -123,7 +123,7 @@ def run_experiment(config: ExperimentConfig | None = None) -> ExperimentSummary:
     for step in range(cfg.probe_steps):
         x = x_partial + rng.normal(0.0, cfg.probe_noise, size=cfg.dim)
 
-        expand_res = obs._expand(x)  # type: ignore[attr-defined]
+        expand_res = obs.expand(x)
         pred_mu = obs.predict(expand_res)
         predicted_c = False
         if pred_mu is not None:

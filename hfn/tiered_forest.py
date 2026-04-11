@@ -13,18 +13,41 @@ from typing import TYPE_CHECKING, Optional
 from hfn.hfn import HFN
 from hfn.forest import Forest
 
+try:
+    import psutil as _psutil
+except ImportError:
+    _psutil = None  # type: ignore
+
+
 class TieredForest(Forest):
     """
     A Forest that uses tiering and hierarchical pruning for retrieval.
     """
-    def __init__(self, D: int, cold_dir: Path, hot_cap: int = 100, forest_id: str = "forest"):
+    def __init__(
+        self,
+        D: int,
+        cold_dir: Path | str,
+        hot_cap: int = 100,
+        forest_id: str = "forest",
+        protected_ids: set[str] | None = None,
+        max_hot: int | None = None,
+        sweep_every: int = 0,
+        min_free_ram_mb: int = 0,
+    ):
         super().__init__(D, forest_id=forest_id)
-        self._cold_dir = cold_dir
+        self._cold_dir = Path(cold_dir)
+        if protected_ids:
+            self._protected_ids = set(protected_ids)
+        if max_hot is not None:
+            hot_cap = max_hot
         self._hot_cap = hot_cap
         self._hot: OrderedDict[str, HFN] = OrderedDict()
         self._mu_index: dict[str, np.ndarray] = {}
         self._cold_dir.mkdir(parents=True, exist_ok=True)
-        
+        self._sweep_every = sweep_every
+        self._min_free_ram_mb = min_free_ram_mb
+        self._obs_count: int = 0
+
         # PERSISTENT CACHES
         self._summary_ids: set[str] = set()
         self._root_ids: set[str] = set()
@@ -65,17 +88,25 @@ class TieredForest(Forest):
         
         pass # print(f"      [DEBUG] Forest.rebuild_hierarchy_cache: nodes={len(all_ids)}, roots={len(self._root_ids)}")
 
+    def hot_count(self) -> int:
+        """Number of nodes currently in the hot (in-memory) cache."""
+        return len(self._hot)
+
+    def cold_count(self) -> int:
+        """Number of nodes only in cold storage (not in hot cache)."""
+        return len(self._mu_index) - len(self._hot)
+
     def deregister(self, node_id: str) -> None:
+        if node_id in self._protected_ids:
+            return  # protected nodes cannot be deregistered
         if node_id in self._mu_index:
             self._mu_index.pop(node_id)
             self._hot.pop(node_id, None)
             self._summary_ids.discard(node_id)
             self._root_ids.discard(node_id)
-            
-            if node_id not in self._protected_ids:
-                cold_path = self._cold_path(node_id)
-                if cold_path.exists():
-                    cold_path.unlink()
+            cold_path = self._cold_path(node_id)
+            if cold_path.exists():
+                cold_path.unlink()
 
     def retrieve(self, x: np.ndarray, k: int = 5) -> list[HFN]:
         """
@@ -130,10 +161,16 @@ class TieredForest(Forest):
         # Final sort
         candidates.sort(key=lambda n: float(np.sum((n.mu - x)**2)))
         res = candidates[:k]
-        
-        if k > 0:
-            pass # print(f"      [DEBUG] Forest.retrieve: roots={len(roots)}, candidates={len(candidates)}, returning={len(res)}")
-            
+
+        # Promote top-k results to hot cache (MRU position)
+        for node in res:
+            if node.id not in self._hot:
+                self._hot[node.id] = node
+                if len(self._hot) > self._hot_cap:
+                    self._evict_lru()
+            else:
+                self._hot.move_to_end(node.id)
+
         return res
 
     def get(self, node_id: str) -> HFN | None:
@@ -199,10 +236,16 @@ class TieredForest(Forest):
             return None
 
     def _evict_lru(self) -> None:
-        nid, node = self._hot.popitem(last=False)
-        if nid in self._protected_ids:
-            self._hot[nid] = node # Put it back
-            return
+        # Find the LRU node that isn't protected
+        evict_id = None
+        for candidate in list(self._hot.keys()):
+            if candidate not in self._protected_ids:
+                evict_id = candidate
+                break
+        if evict_id is None:
+            return  # All hot nodes are protected — nothing to evict
+        node = self._hot.pop(evict_id)
+        nid = evict_id
         # Save to cold
         path = self._cold_path(nid)
         # Store child IDs as a comma-joined string to avoid pickle
@@ -216,7 +259,38 @@ class TieredForest(Forest):
         )
 
     def _on_observe(self) -> None:
-        pass
+        self._obs_count += 1
+        if self._sweep_every > 0 and self._obs_count % self._sweep_every == 0:
+            self._sweep()
+
+    def _sweep(self) -> None:
+        """Two-step sweep: RAM-pressure eviction, then persistence-floor deletion."""
+        # Snapshot cold IDs before step 1 so step 2 doesn't delete freshly evicted nodes
+        cold_ids_before = [nid for nid in self._mu_index if nid not in self._hot]
+
+        # Step 1: RAM pressure — evict LRU half of hot nodes to cold
+        if self._min_free_ram_mb > 0:
+            free_mb = 0
+            if _psutil is not None:
+                free_mb = _psutil.virtual_memory().available / (1024 * 1024)
+            if free_mb < self._min_free_ram_mb:
+                n_hot = len(self._hot)
+                evict_count = n_hot // 2
+                for _ in range(evict_count):
+                    if not self._hot:
+                        break
+                    self._evict_lru()
+
+        # Step 2: Persistence floor — delete cold unprotected nodes that were cold before sweep
+        for nid in cold_ids_before:
+            if nid in self._protected_ids:
+                continue
+            self._mu_index.pop(nid, None)
+            self._summary_ids.discard(nid)
+            self._root_ids.discard(nid)
+            cold_path = self._cold_path(nid)
+            if cold_path.exists():
+                cold_path.unlink()
 
     def _sync_gaussian(self) -> None:
         hot = list(self._hot.values())

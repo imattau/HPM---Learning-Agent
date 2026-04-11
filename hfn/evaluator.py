@@ -30,9 +30,68 @@ modifying Observer or Evaluator internals.
 from __future__ import annotations
 
 import numpy as np
+from collections import Counter, defaultdict
 from typing import Sequence
 
 from hfn.hfn import HFN
+
+
+class ActivationTracker:
+    """Track which labels activate which nodes during training.
+
+    Domain-agnostic utility: records (node_id, label) pairs and computes
+    purity metrics. Used by experiments to measure how cleanly nodes
+    specialise to individual categories.
+
+    Usage::
+
+        tracker = ActivationTracker()
+        for label, vec in data:
+            result = observer.expand(vec)
+            if result.accuracy_scores:
+                best = max(result.accuracy_scores, key=result.accuracy_scores.get)
+                tracker.record(best, label)
+        print(tracker.purity())
+    """
+
+    def __init__(self) -> None:
+        self.counts: dict[str, Counter] = defaultdict(Counter)
+
+    def record(self, node_id: str, label: str) -> None:
+        """Record that *node_id* was the best match for *label*."""
+        self.counts[node_id][label] += 1
+
+    def dominant_label(self, node_id: str) -> str | None:
+        """Return the most frequent label for *node_id*, or None."""
+        c = self.counts.get(node_id)
+        if not c:
+            return None
+        return c.most_common(1)[0][0]
+
+    def purity(self) -> dict:
+        """Compute per-node and mean purity.
+
+        Returns a dict with keys:
+            mean_purity : float  — average purity across all nodes
+            per_node    : dict[str, float]  — purity per node_id
+            labels_covered : set[str]  — all labels that appeared
+        """
+        per_node: dict[str, float] = {}
+        all_labels: set[str] = set()
+        for nid, c in self.counts.items():
+            total = sum(c.values())
+            if total == 0:
+                per_node[nid] = 0.0
+            else:
+                dominant = c.most_common(1)[0][1]
+                per_node[nid] = dominant / total
+            all_labels.update(c.keys())
+        mean_p = float(np.mean(list(per_node.values()))) if per_node else 0.0
+        return {
+            "mean_purity": mean_p,
+            "per_node": per_node,
+            "labels_covered": all_labels,
+        }
 
 
 class Evaluator:

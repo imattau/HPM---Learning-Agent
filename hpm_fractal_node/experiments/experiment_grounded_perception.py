@@ -87,7 +87,7 @@ def run_experiment():
     for ptype, vec in train_data:
         observer.observe(vec)
         # Record which node best explains this observation
-        result = observer._expand(vec)
+        result = observer.expand(vec)
         if result.accuracy_scores:
             best_id = max(result.accuracy_scores, key=result.accuracy_scores.get)
             node_activations[best_id][ptype] += 1
@@ -105,7 +105,7 @@ def run_experiment():
     if not active_tracked:
         print("  [WARN] No node activation data — using all active nodes")
         for ptype, vec in train_data:
-            result = observer._expand(vec)
+            result = observer.expand(vec)
             if result.accuracy_scores:
                 best_id = max(result.accuracy_scores, key=result.accuracy_scores.get)
                 node_activations[best_id][ptype] += 1

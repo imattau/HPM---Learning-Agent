@@ -128,7 +128,7 @@ def run_experiment():
 
     for op_label, vec in train_data:
         observer.observe(vec)
-        result = observer._expand(vec)
+        result = observer.expand(vec)
         if result.accuracy_scores:
             best_id = max(result.accuracy_scores, key=result.accuracy_scores.get)
             node_op_counts[best_id][op_label] += 1

@@ -116,7 +116,7 @@ def _probe_reuse_rate(
     for center in centers:
         for _ in range(samples):
             x = center + rng.normal(0.0, noise, size=center.shape[0])
-            res = obs._expand(x)  # type: ignore[attr-defined]
+            res = obs.expand(x)
             if any(_is_ab_variant(n) for n in res.explanation_tree):
                 hits += 1
             total += 1

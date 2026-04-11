@@ -123,7 +123,7 @@ class Observer:
         prior_plasticity: bool = False,        # enable density-based prior revision
         prior_drift_rate: float = 0.01,        # mu drift step when revision triggered
         prior_revision_threshold: int = 200,   # misses before eligible for drift
-        node_use_diag: bool = False,           # use O(D) diagonal sigma for all dynamically created nodes
+        node_use_diag: bool = True,            # use O(D) diagonal sigma for all dynamically created nodes
         node_prefix: str = "leaf_",            # prefix for dynamically created leaf nodes
         weight_decay_rate: float = 0.0,        # global weight decay rate (0.0 = disabled)
         retriever: Retriever = None,           # injectable retriever (default: GeometricRetriever)
@@ -231,16 +231,31 @@ class Observer:
 
     # --- Node lifecycle ---
 
-    def register(self, node: HFN) -> None:
-        """Register a node in the Forest and initialise its Observer state."""
-        self.forest.register(node)
-        self._init_node(node)
+    def register(self, node: HFN, *, protected: bool = False, initial_weight: float | None = None) -> None:
+        """Register a node in the Forest and initialise its Observer state.
 
-    def _init_node(self, node: HFN) -> None:
+        Parameters
+        ----------
+        node : HFN
+            The node to register.
+        protected : bool
+            If True, add the node to the protected set (exempt from
+            absorption, weight decay, and other dynamics).
+        initial_weight : float or None
+            Override the default w_init for this node's starting weight.
+            If None, uses the Observer's w_init.
+        """
+        self.forest.register(node)
+        self._init_node(node, initial_weight=initial_weight)
+        if protected:
+            self.protected_ids.add(node.id)
+
+    def _init_node(self, node: HFN, initial_weight: float | None = None) -> None:
         state_id = f"state:{node.id}"
+        w = initial_weight if initial_weight is not None else self.w_init
         if state_id not in self.meta_forest:
             state_node = HFN(
-                mu=np.array([self.w_init, 0.0, 0.0, 0.0]),
+                mu=np.array([w, 0.0, 0.0, 0.0]),
                 sigma=np.ones(4),
                 id=state_id,
                 use_diag=True,
@@ -353,6 +368,29 @@ class Observer:
         self._check_absorption()
         self._check_node_creation(x, result)
         return result
+
+    # --- Public expansion API ---
+
+    def expand(self, x: np.ndarray, exhaustive: bool = False) -> ExplanationResult:
+        """
+        Run the expansion loop and return the explanation tree.
+
+        This is the primary way to get an ExplanationResult with accuracy
+        scores without triggering the full observe() dynamics (weight
+        updates, absorption, node creation).
+        """
+        return self._expand(x, exhaustive=exhaustive)
+
+    def observe_and_explain(self, x: np.ndarray) -> ExplanationResult:
+        """
+        Convenience: observe(x) then expand(x), returning the explanation.
+
+        Equivalent to calling observe(x) for learning dynamics and then
+        expand(x) for the explanation result. This eliminates the common
+        double-call pattern in training loops.
+        """
+        self.observe(x)
+        return self._expand(x)
 
     def _expand(self, x: np.ndarray, exhaustive: bool = False) -> ExplanationResult:
         """

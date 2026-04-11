@@ -118,7 +118,7 @@ def run_experiment():
         obs.tau = 2.0 # Broader gating for probe
         try:
             for x in curriculum:
-                res = obs._expand(x)
+                res = obs.expand(x)
                 if res.accuracy_scores:
                     best_id = max(res.accuracy_scores, key=res.accuracy_scores.get)
                     best_node = obs.forest.get(best_id)
