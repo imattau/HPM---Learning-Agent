@@ -43,6 +43,12 @@ class HFN:
     use_diag: bool = False
     _children: list[HFN] = field(default_factory=list, repr=False)
     _edges: list[Edge] = field(default_factory=list, repr=False)
+    
+    # NEW fields for multi-arity composition
+    inputs: list[HFN] = field(default_factory=list, repr=False)
+    outputs: list[HFN] = field(default_factory=list, repr=False)
+    relation_type: str | None = None
+    relation_params: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         # Cache diagonal for O(D) log_prob fast path.
@@ -164,6 +170,12 @@ class HFN:
         return parent
 
     # --- Construction helpers ---
+
+    def add_relation(self, inputs: list[HFN], outputs: list[HFN] | None = None) -> None:
+        """Link this node to multi-arity inputs and optional outputs."""
+        self.inputs = inputs
+        if outputs is not None:
+            self.outputs = outputs
 
     def add_child(self, child: HFN, relation: str | None = None) -> None:
         """

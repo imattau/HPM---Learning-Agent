@@ -116,7 +116,6 @@ class TieredForest(Forest):
             
             node = self.get(nid)
             if not node:
-                print(f"      [DEBUG] Forest.retrieve: node {nid[:8]} MISSING from cache.")
                 continue
             
             candidates.append(node)

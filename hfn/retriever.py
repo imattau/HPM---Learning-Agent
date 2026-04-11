@@ -130,7 +130,12 @@ class GoalConditionedRetriever(Retriever):
                 epsilon = 1e-6
                 return dist / (weight + epsilon)
                 
-            return dist
+            # Structural Similarity Bonus (multi-arity macros)
+            struct_bonus = 0.0
+            if node.inputs and query.inputs:
+                struct_bonus = len(node.inputs) / (1.0 + len(query.inputs))
 
-        candidates.sort(key=goal_score)
+            return geo_dist - struct_bonus
+
+            candidates.sort(key=goal_score)
         return candidates[:k]
