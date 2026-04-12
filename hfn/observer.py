@@ -161,6 +161,7 @@ class Observer:
         self.max_expand_depth = max_expand_depth
         self.vocab: list | None = vocab
         self._in_gap_query: bool = False
+        self.density_tracker = None # Optional PatternDensityTracker
 
         # Collaborators (HPM layer 3 + structural executor)
         self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
