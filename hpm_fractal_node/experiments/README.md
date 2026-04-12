@@ -56,6 +56,31 @@ PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_induced_schema_libr
 
 ---
 
+## Experiment 46: Generative Forward Model (SP62)
+Demonstrates **HPM Level 4: Generative Rules / Mental Simulation**. A `StateTransitionModel`
+learns per-node state deltas from solved paths; imaginative BFS navigates over predicted
+state vectors with ZERO oracle calls during search. Oracle called only at the end to verify.
+
+### Tasks Solved
+| Phase | Task | Method | Oracle calls |
+|-------|------|--------|--------------|
+| 1-4 | add_1, MAP+1, MAP*2, FILTER_pos (+ transition recording) | Same as SP61 | Normal |
+| 5 | MAP*2 (held-out unseen inputs) | Imaginative BFS | 0 during search, 2 at verification |
+| 6 | Forward model accuracy | Structural dim MAE on STRUCT_DIMS | MAE = 0.000 |
+
+### Success Conditions
+- Phase 5: oracle_calls_during_search == 0 AND solution correct → L4 Mental Simulation demonstrated
+- Phase 6: mean_prediction_error < 0.15 on STRUCT_DIMS → Forward model accurate
+
+See [README_generative_forward_model.md](README_generative_forward_model.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_generative_forward_model.py
+```
+
+---
+
 # HPM Hierarchical Abstraction Experiments (SP54-SP56)
 
 This directory contains experiments for **HPM-Native Synthesis, Library Discovery, and Compositional Abstraction**.
