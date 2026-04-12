@@ -27,6 +27,35 @@ PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_unified_perception_
 
 ---
 
+## Experiment 45: Induced Schema Library (SP61)
+Demonstrates the full HPM loop: Perceive → Execute → Verify → Compress → Transfer → Meta-Abstract.
+Schemas are NOT hardcoded — they emerge from solved tasks, stored as Polygraph macro nodes, and
+reused on harder tasks via macro decomposition search.
+
+### Tasks Solved
+| Phase | Task | Method | Depth |
+|-------|------|--------|-------|
+| 1 | add_1, mul_2, sub_1 (scalar) | Direct enumeration over percept ops | 1 |
+| 2 | MAP+1 (list) | Scaffold-restricted BFS | 6 |
+| 3 | MAP*2 (list) | Macro decomposition (percept+1 → OP_MUL2) | **2** |
+| 4 | FILTER_pos (list) | Macro decomposition (percept+1 → COND_IS_POSITIVE) | 2 |
+| 5 | MAP+2 (list) | Macro decomposition (percept+1 → percept+2) | 2 |
+| 6 | Meta-schema | Common prefix across MAP/FILTER macros | L3 node |
+
+### Success Conditions
+- Phase 3 depth ≤ 2: MAP macro reuse demonstrated
+- Phase 5 depth ≤ 3: Compound macro composition demonstrated
+- Phase 6 L3 node exists: Meta-schema induction demonstrated
+
+See [README_induced_schema_library.md](README_induced_schema_library.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_induced_schema_library.py
+```
+
+---
+
 # HPM Hierarchical Abstraction Experiments (SP54-SP56)
 
 This directory contains experiments for **HPM-Native Synthesis, Library Discovery, and Compositional Abstraction**.
