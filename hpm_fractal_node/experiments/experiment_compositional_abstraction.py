@@ -118,27 +118,51 @@ class CompositionalExperimentRefactored:
             print(f"    Forest Size: {len(self.forest)}")
 
     def run_phase_3_zero_shot_prediction(self):
-        """Test on truly unseen domain using active prediction loop."""
-        print("\n--- PHASE 3: ZERO-SHOT DOMAIN TRANSFER & PREDICTION ---")
+        """Test on structurally aligned unseen domain using active prediction loop and noisy inference."""
+        print("\n--- PHASE 3: ZERO-SHOT DOMAIN TRANSFER & PREDICTION (WITH NOISE) ---")
         
         # Truly unseen domain: Spatial 2D Accumulator
         test_seq = self.gen_spatial_2d_accumulator(n=10)
         print(f"  Unseen Test Sequence (Spatial 2D): {test_seq[:4]} ...")
         
-        vecs = self.oracle.compute_sequence(test_seq)
+        # Clean ground truth vectors from oracle
+        clean_vecs = self.oracle.compute_sequence(test_seq)
         
-        # 1. Priming: Observe first 4 steps to allow dynamic HFN formation
-        print("  Priming (t=0 to t=3)...")
+        # 1. Priming with Perceptual Noise
+        # We add noise to L1 to simulate perceptual uncertainty. This forces the agent
+        # to infer a noisy L3 from history, preventing perfect 0.0000 error by construction.
+        np.random.seed(42)
+        noisy_vecs = []
+        for t, v in enumerate(clean_vecs):
+            noisy_v = v.copy()
+            # Add noise only to L1 (Content)
+            noisy_v[0:30] += np.random.normal(0, 0.01, S_DIM)
+            
+            # Recompute L2 and L3 based purely on noisy L1 history (Bottom-Up Perception)
+            if t > 0:
+                noisy_v[30:60] = noisy_v[0:30] - noisy_vecs[t-1][0:30]
+            if t > 1:
+                noisy_v[60:90] = noisy_v[30:60] - noisy_vecs[t-1][30:60]
+                
+            noisy_vecs.append(noisy_v)
+
+        print("  Priming (t=0 to t=3) with noisy perception...")
         for i in range(4):
-            self.observer.observe(vecs[i])
+            self.observer.observe(noisy_vecs[i])
             
         print(f"  Forest Size after priming: {len(self.forest)}")
         
-        # 2. Retrieval: Use current L3 trajectory to retrieve the L3 pattern
-        # Since the manifold is additive, the newly formed leaf for vecs[3] 
-        # is the best source for the L3 constraint.
-        query_vec = vecs[3]
-        query_node = HFN(mu=query_vec, sigma=np.ones(D)*0.01, id="query", use_diag=True)
+        # 2. Retrieval: Infer L3 from noisy history (NO ORACLE LEAKAGE)
+        # We DO NOT use the ground-truth L3 from the oracle.
+        # We query the forest using our noisy, bottom-up estimation of the current L3.
+        inferred_l3 = noisy_vecs[3][60:90]
+        
+        query_mu = np.zeros(D)
+        query_mu[60:90] = inferred_l3
+        
+        # We set a wider sigma to find the clean, stable meta-pattern from Phase 2
+        # despite our noisy bottom-up inference.
+        query_node = HFN(mu=query_mu, sigma=np.ones(D)*0.1, id="query", use_diag=True)
         candidates = self.retriever.retrieve(query_node, k=5)
         
         best_l3_node = None
@@ -151,20 +175,22 @@ class CompositionalExperimentRefactored:
             print("  [FAIL] Failed to retrieve L3 meta-node.")
             return
             
-        print(f"  Retrieved L3 Meta-Node: {best_l3_node.id}")
+        print(f"  Retrieved Stable L3 Meta-Node: {best_l3_node.id}")
         
         # 3. Prediction Loop with Ablations
         def evaluate_prediction(l3_constraint_vec: np.ndarray, name: str):
             print(f"\n  --- TEST: {name} ---")
-            current_vec = vecs[3] # Start from end of priming
+            current_vec = noisy_vecs[3] # Start from end of noisy priming
             errors = []
             
             # Predict t=4 to 9 autoregressively
-            for t in range(4, len(vecs)):
-                actual_vec = vecs[t]
+            for t in range(4, len(clean_vecs)):
+                # We compare against the CLEAN ground truth to measure true accuracy
+                actual_vec = clean_vecs[t]
+                
                 pred_vec = self.predict_next(current_vec, l3_constraint_vec)
                 
-                # Compare predicted L1 state to ground truth
+                # Compare predicted L1 state to clean ground truth
                 error = np.linalg.norm(pred_vec[0:30] - actual_vec[0:30])
                 errors.append(error)
                 
@@ -173,21 +199,21 @@ class CompositionalExperimentRefactored:
                 
             mean_error = np.mean(errors)
             print(f"    Mean Autoregressive L1 Prediction Error (t=4..9): {mean_error:.4f}")
-            if mean_error < 0.05:
-                print("    [SUCCESS] High-fidelity prediction.")
-            else:
-                print("    [FAIL] Prediction diverged from ground truth.")
+            return mean_error
 
-        # Baseline A: L2-only (Assume no meta-relational change)
-        evaluate_prediction(np.zeros(S_DIM), "L2-Only Baseline (Constant Rule Assumption)")
+        # Baseline A: L2-Only (Assume no meta-relational change)
+        err_l2 = evaluate_prediction(np.zeros(S_DIM), "L2-Only Baseline (Constant Rule Assumption)")
         
-        # Baseline B: Random L3
-        np.random.seed(42)
-        rand_l3 = np.random.randn(S_DIM) * np.linalg.norm(best_l3_node.mu[60:90])
-        evaluate_prediction(rand_l3, "Random L3 Baseline")
+        # Baseline B: Pure Bottom-Up (Use the noisy inferred L3 without retrieval)
+        err_noisy = evaluate_prediction(inferred_l3, "Noisy Bottom-Up Baseline (No Retrieval)")
         
-        # Full HPM: Active L3 constraint
-        evaluate_prediction(best_l3_node.mu[60:90], "Full HPM (L3 Top-Down Constraint)")
+        # Full HPM: Active L3 constraint (Stabilized by retrieved prior)
+        err_hpm = evaluate_prediction(best_l3_node.mu[60:90], "Full HPM (Stabilized L3 Top-Down Constraint)")
+        
+        if err_hpm < err_l2 and err_hpm < err_noisy:
+            print("\n  [SUCCESS] Retrieved L3 constraint stabilized noisy perception and outperformed baselines.")
+        else:
+            print("\n  [FAIL] Retrieved L3 constraint failed to stabilize prediction.")
 
 def run_experiment():
     exp = CompositionalExperimentRefactored()
