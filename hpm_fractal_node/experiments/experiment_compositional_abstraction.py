@@ -51,33 +51,20 @@ class CompositionalExperimentRefactored:
         return seq
 
     def gen_spatial_constant(self, n=10, start=0, step=1):
-        # 1D movement: [0,0,1,0] -> [0,0,0,1]
+        # 1D movement
         def to_vec(pos):
             v = np.zeros(5)
             v[pos % 5] = 1.0
             return tuple(v)
         return [to_vec(start + i * step) for i in range(n)]
 
-    def gen_numeric_accumulator(self, n=10, start=0):
-        # 0, 1, 3, 6, 10... (L2 grows linearly, L3 is constant)
+    def gen_numeric_accumulator(self, n=10, start=0, start_delta=0, acceleration=1):
+        # Accelerating sequence: L3 is constant 'acceleration'
         seq = [start]
+        curr_delta = start_delta
         for i in range(1, n):
-            seq.append(seq[-1] + i)
-        return seq
-
-    def gen_spatial_1d_accumulator(self, n=10, start=0):
-        # 1D Accumulator on axis 2
-        seq = [[start]]
-        for i in range(1, n):
-            seq.append([seq[-1][0] + i])
-        return seq
-
-    def gen_spatial_2d_accumulator(self, n=10):
-        # 2D Accumulator on axes 2 and 3
-        # Truly unseen domain: uses multiple axes
-        seq = [[0, 0]]
-        for i in range(1, n):
-            seq.append([seq[-1][0] + i, seq[-1][1] + i])
+            curr_delta += acceleration
+            seq.append(seq[-1] + curr_delta)
         return seq
 
     # --- Prediction Core ---
@@ -105,11 +92,10 @@ class CompositionalExperimentRefactored:
     def run_phase_1_l2_formation(self):
         """Pre-train relational primitives in seen domains."""
         print("\n--- PHASE 1: L2 RELATION FORMATION ---")
-        # Ensure Boolean is NOT here to maintain Zero-Shot integrity
+        # Only ONE primitive: Add 1. Agent MUST compose Add_1 + Add_1 to get +2.
         pairs = [
-            ([1, 2], "num_add_1"),
-            ([5, 6], "num_add_1_v2"),
-            ([[0], [1]], "sp1_add_1"),
+            ([0, 1], "num_add_1"),
+            ([10, 11], "num_add_1_v2"),
         ]
         for seq, _ in pairs:
             vecs = self.oracle.compute_sequence(seq)
@@ -119,12 +105,10 @@ class CompositionalExperimentRefactored:
     def run_phase_2_l3_formation(self):
         """Pre-train meta-relational meta-patterns in seen domains."""
         print("\n--- PHASE 2: L3 META-PATTERN DISCOVERY ---")
-        # STRIKE: Removed Accumulators from pre-training. 
-        # The agent will only know Constant and Oscillator patterns.
+        # Constant with very small step to avoid L1 overlap with target +2.
         sequences = [
-            self.gen_numeric_constant(15), 
-            self.gen_numeric_alternating(15, step_a=5, step_b=-5),
-            self.gen_spatial_constant(15),
+            self.gen_numeric_constant(15, step=0.1), 
+            self.gen_numeric_alternating(15, step_a=0.5, step_b=-0.5),
         ]
         
         for i, seq in enumerate(sequences):
@@ -135,18 +119,16 @@ class CompositionalExperimentRefactored:
             print(f"    Forest Size: {len(self.forest)}")
 
     def run_phase_3_zero_shot_prediction(self):
-        """Test on structurally aligned unseen domain using active prediction loop and noisy inference."""
-        print("\n--- PHASE 3: ZERO-SHOT DOMAIN TRANSFER & PREDICTION (WITH NOISE) ---")
+        """Test on truly unseen structure using active prediction and Generative Composition."""
+        print("\n--- PHASE 3: ZERO-SHOT DOMAIN TRANSFER & GENERATIVE COMPOSITION ---")
         
-        # Record long-term memory node IDs
         ltm_ids = [n.id for n in self.forest.active_nodes()]
         
-        # Truly unseen structure: Numeric Accumulator
-        # Training had NO accumulators. This forces compositional abstraction.
-        test_seq = self.gen_numeric_accumulator(n=10)
-        print(f"  Unseen Test Sequence (Numeric Accumulator): {test_seq[:4]} ...")
+        # Truly unseen structure: Accumulator with Acceleration +2
+        # Agent only knows +1 primitive. It MUST compose them.
+        test_seq = self.gen_numeric_accumulator(n=10, acceleration=2)
+        print(f"  Unseen Test Sequence (Numeric Accumulator +2): {test_seq[:4]} ...")
         
-        # Clean ground truth vectors from oracle
         clean_vecs = self.oracle.compute_sequence(test_seq)
         
         # 1. Priming with Perceptual Noise
@@ -167,63 +149,73 @@ class CompositionalExperimentRefactored:
             
         print(f"  Forest Size after priming: {len(self.forest)}")
         
-        # 2. Cross-Slice Retrieval: Infer L3 and find the closest 30D concept in LONG-TERM memory
-        # This is the "Compositional" step: the agent reuses a known L2 rule as an L3 dynamic.
+        # 2. Generative Composition: Combine multiple LTM concepts to approximate L3
+        # No single stored vector matches +3.
         inferred_l3 = noisy_vecs[3][60:90]
-        
-        best_node = None
-        best_slice_idx = -1
-        best_dist = float('inf')
-        
         slices = [slice(0,30), slice(30,60), slice(60,90)]
-        # Filter: only look at nodes that were in the forest BEFORE Phase 3 (Wisdom)
+        
+        candidate_priors = []
         for nid in ltm_ids:
             n = self.forest.get(nid)
             for i, slc in enumerate(slices):
                 sub_vec = n.mu[slc]
-                energy = np.linalg.norm(sub_vec)
-                if energy > 0.01:
-                    dist = np.linalg.norm(sub_vec - inferred_l3)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_node = n
-                        best_slice_idx = i
-                        
-        if not best_node:
-            print("  [FAIL] Failed to retrieve any stabilizing prior from Long-Term Memory.")
-            return
-            
-        stabilized_l3 = best_node.mu[slices[best_slice_idx]]
-        slice_names = ["L1 (Content)", "L2 (Relation)", "L3 (Meta)"]
-        print(f"  Retrieved Wisdom: {best_node.id} via slice {slice_names[best_slice_idx]}")
-        print(f"  Composition: Applied {best_node.id} logic as a second-order trajectory.")
+                if np.linalg.norm(sub_vec) > 0.01:
+                    candidate_priors.append((nid, i, sub_vec))
+        
+        # Find best SINGLE prior
+        best_single_dist = float('inf')
+        best_single_vec = np.zeros(S_DIM)
+        best_single_desc = "None"
+        
+        for nid, s_idx, vec in candidate_priors:
+            dist = np.linalg.norm(vec - inferred_l3)
+            if dist < best_single_dist:
+                best_single_dist = dist
+                best_single_vec = vec
+                best_single_desc = f"{nid} (slice {s_idx})"
+                
+        # Find best COMPOSED prior (Pair sum)
+        best_composed_dist = float('inf')
+        best_composed_vec = np.zeros(S_DIM)
+        best_composed_desc = "None"
+        
+        for i, (nid1, s1, v1) in enumerate(candidate_priors):
+            for j, (nid2, s2, v2) in enumerate(candidate_priors):
+                # Compositional Synthesis: L3 ≈ Prior1 + Prior2
+                composed = v1 + v2
+                dist = np.linalg.norm(composed - inferred_l3)
+                if dist < best_composed_dist:
+                    best_composed_dist = dist
+                    best_composed_vec = composed
+                    best_composed_desc = f"{nid1}[{s1}] + {nid2}[{s2}]"
+                    
+        print(f"  Best Single Prior:   {best_single_desc} (Dist: {best_single_dist:.4f})")
+        print(f"  Best Composed Prior: {best_composed_desc} (Dist: {best_composed_dist:.4f})")
         
         # 3. Prediction Loop with Ablations
         def evaluate_prediction(l3_constraint_vec: np.ndarray, name: str):
             print(f"\n  --- TEST: {name} ---")
             current_vec = noisy_vecs[3]
             errors = []
-            
             for t in range(4, len(clean_vecs)):
                 actual_vec = clean_vecs[t]
                 pred_vec = self.predict_next(current_vec, l3_constraint_vec)
                 error = np.linalg.norm(pred_vec[0:30] - actual_vec[0:30])
                 errors.append(error)
                 current_vec = pred_vec
-                
             mean_error = np.mean(errors)
             print(f"    Mean Autoregressive L1 Prediction Error (t=4..9): {mean_error:.4f}")
             return mean_error
 
         err_l2 = evaluate_prediction(np.zeros(S_DIM), "L2-Only Baseline (Constant Rule Assumption)")
-        err_noisy = evaluate_prediction(inferred_l3, "Noisy Bottom-Up Baseline (No Stabilization)")
-        err_hpm = evaluate_prediction(stabilized_l3, "Full HPM (Cross-Slice Compositional Stabilization)")
+        err_single = evaluate_prediction(best_single_vec, "Single Best Prior (Fractal Reuse Only)")
+        err_composed = evaluate_prediction(best_composed_vec, "Compositional HPM (Generative Synthesis)")
         
-        if err_hpm < err_l2 and err_hpm < err_noisy:
-            print("\n  [SUCCESS] Fractal Composition Verified!")
-            print("  The agent invented the 'Accumulator' meta-pattern by reusing an existing relational rule.")
+        if err_composed < err_single and err_composed < err_l2:
+            print("\n  [SUCCESS] Generative Composition Verified!")
+            print(f"  The agent dynamically synthesized the novel meta-pattern from '{best_composed_desc}'.")
         else:
-            print("\n  [FAIL] Compositional stabilization failed.")
+            print("\n  [FAIL] Generative composition failed to outperform retrieval.")
 
 def run_experiment():
     exp = CompositionalExperimentRefactored()
