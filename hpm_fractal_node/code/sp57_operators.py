@@ -27,6 +27,10 @@ class Operator:
         """Returns a new operator representing the composition f(g(x))."""
         return ComposedOperator(self, other)
 
+    def get_params(self) -> Tuple[float, ...]:
+        """Returns a tuple of functional parameters for deduplication."""
+        raise NotImplementedError()
+
     def __repr__(self):
         return f"Op({self.name})"
 
@@ -39,6 +43,9 @@ class AffineOperator(Operator):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         return x * self.weight + self.bias
+
+    def get_params(self) -> Tuple[float, ...]:
+        return (float(round(self.weight, 4)), float(round(self.bias, 4)), 0.0)
 
     def __repr__(self):
         return f"Affine({self.name}: w={self.weight:.2f}, b={self.bias:.2f})"
@@ -57,6 +64,9 @@ class ModOperator(Operator):
         res_vec[0] = result
         return res_vec
 
+    def get_params(self) -> Tuple[float, ...]:
+        return (0.0, 0.0, float(round(self.modulus, 4)))
+
     def __repr__(self):
         return f"Mod({self.name}: m={self.modulus:.1f})"
 
@@ -69,6 +79,13 @@ class ComposedOperator(Operator):
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         return self.f.apply(self.g.apply(x))
+
+    def get_params(self) -> Tuple[float, ...]:
+        # For simplicity, we can't easily flatten all compositions to a single 
+        # (w, b, m) tuple if they are truly non-linear, but for affine ∘ affine 
+        # it would work. However, since we have Mod, we'll just return the 
+        # recursive params.
+        return (self.f.get_params(), self.g.get_params())
 
     def __repr__(self):
         return f"Composed({self.name})"

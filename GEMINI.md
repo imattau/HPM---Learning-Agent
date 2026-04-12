@@ -55,6 +55,9 @@ PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_operator_c
 # Run Heuristic Operator Induction (SP58)
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_heuristic_induction.py
 
+# Run Manifold-Guided Induction (SP59)
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_manifold_induction.py
+
 # Run Schema Transfer Discovery
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_schema_transfer.py
 ```
@@ -74,6 +77,7 @@ Most benchmarks support a `--smoke` flag for rapid end-to-end verification.
 | **SP56** | Compositional | Transfer | `hpm_fractal_node/experiments/experiment_compositional_abstraction.py` |
 | **SP57** | Operator Logic | Synthesis | `hpm_fractal_node/experiments/experiment_operator_composition.py` |
 | **SP58** | Heuristic Search| Induction | `hpm_fractal_node/experiments/experiment_heuristic_induction.py` |
+| **SP59** | Manifold Guidance| Synthesis | `hpm_fractal_node/experiments/experiment_manifold_induction.py` |
 
 ---
 
