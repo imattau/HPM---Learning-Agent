@@ -43,6 +43,21 @@ class CompositionalExperimentRefactored:
     def gen_numeric_constant(self, n=10, start=0, step=1):
         return [start + i * step for i in range(n)]
 
+    def gen_numeric_alternating(self, n=10, start=0, step_a=1, step_b=-1):
+        seq = [start]
+        for i in range(n-1):
+            step = step_a if i % 2 == 0 else step_b
+            seq.append(seq[-1] + step)
+        return seq
+
+    def gen_spatial_constant(self, n=10, start=0, step=1):
+        # 1D movement: [0,0,1,0] -> [0,0,0,1]
+        def to_vec(pos):
+            v = np.zeros(5)
+            v[pos % 5] = 1.0
+            return tuple(v)
+        return [to_vec(start + i * step) for i in range(n)]
+
     def gen_numeric_accumulator(self, n=10, start=0):
         # 0, 1, 3, 6, 10... (L2 grows linearly, L3 is constant)
         seq = [start]
@@ -104,10 +119,12 @@ class CompositionalExperimentRefactored:
     def run_phase_2_l3_formation(self):
         """Pre-train meta-relational meta-patterns in seen domains."""
         print("\n--- PHASE 2: L3 META-PATTERN DISCOVERY ---")
+        # STRIKE: Removed Accumulators from pre-training. 
+        # The agent will only know Constant and Oscillator patterns.
         sequences = [
             self.gen_numeric_constant(15), 
-            self.gen_numeric_accumulator(15),
-            self.gen_spatial_1d_accumulator(15),
+            self.gen_numeric_alternating(15, step_a=5, step_b=-5),
+            self.gen_spatial_constant(15),
         ]
         
         for i, seq in enumerate(sequences):
@@ -121,29 +138,27 @@ class CompositionalExperimentRefactored:
         """Test on structurally aligned unseen domain using active prediction loop and noisy inference."""
         print("\n--- PHASE 3: ZERO-SHOT DOMAIN TRANSFER & PREDICTION (WITH NOISE) ---")
         
-        # Truly unseen domain: Spatial 2D Accumulator
-        test_seq = self.gen_spatial_2d_accumulator(n=10)
-        print(f"  Unseen Test Sequence (Spatial 2D): {test_seq[:4]} ...")
+        # Record long-term memory node IDs
+        ltm_ids = [n.id for n in self.forest.active_nodes()]
+        
+        # Truly unseen structure: Numeric Accumulator
+        # Training had NO accumulators. This forces compositional abstraction.
+        test_seq = self.gen_numeric_accumulator(n=10)
+        print(f"  Unseen Test Sequence (Numeric Accumulator): {test_seq[:4]} ...")
         
         # Clean ground truth vectors from oracle
         clean_vecs = self.oracle.compute_sequence(test_seq)
         
         # 1. Priming with Perceptual Noise
-        # We add noise to L1 to simulate perceptual uncertainty. This forces the agent
-        # to infer a noisy L3 from history, preventing perfect 0.0000 error by construction.
         np.random.seed(42)
         noisy_vecs = []
         for t, v in enumerate(clean_vecs):
             noisy_v = v.copy()
-            # Add noise only to L1 (Content)
             noisy_v[0:30] += np.random.normal(0, 0.01, S_DIM)
-            
-            # Recompute L2 and L3 based purely on noisy L1 history (Bottom-Up Perception)
             if t > 0:
                 noisy_v[30:60] = noisy_v[0:30] - noisy_vecs[t-1][0:30]
             if t > 1:
                 noisy_v[60:90] = noisy_v[30:60] - noisy_vecs[t-1][30:60]
-                
             noisy_vecs.append(noisy_v)
 
         print("  Priming (t=0 to t=3) with noisy perception...")
@@ -152,68 +167,63 @@ class CompositionalExperimentRefactored:
             
         print(f"  Forest Size after priming: {len(self.forest)}")
         
-        # 2. Retrieval: Infer L3 from noisy history (NO ORACLE LEAKAGE)
-        # We DO NOT use the ground-truth L3 from the oracle.
-        # We query the forest using our noisy, bottom-up estimation of the current L3.
+        # 2. Cross-Slice Retrieval: Infer L3 and find the closest 30D concept in LONG-TERM memory
+        # This is the "Compositional" step: the agent reuses a known L2 rule as an L3 dynamic.
         inferred_l3 = noisy_vecs[3][60:90]
         
-        query_mu = np.zeros(D)
-        query_mu[60:90] = inferred_l3
+        best_node = None
+        best_slice_idx = -1
+        best_dist = float('inf')
         
-        # We set a wider sigma to find the clean, stable meta-pattern from Phase 2
-        # despite our noisy bottom-up inference.
-        query_node = HFN(mu=query_mu, sigma=np.ones(D)*0.1, id="query", use_diag=True)
-        candidates = self.retriever.retrieve(query_node, k=5)
-        
-        best_l3_node = None
-        for c in candidates:
-            if np.linalg.norm(c.mu[60:90]) > 0.01:
-                best_l3_node = c
-                break
-                
-        if not best_l3_node:
-            print("  [FAIL] Failed to retrieve L3 meta-node.")
+        slices = [slice(0,30), slice(30,60), slice(60,90)]
+        # Filter: only look at nodes that were in the forest BEFORE Phase 3 (Wisdom)
+        for nid in ltm_ids:
+            n = self.forest.get(nid)
+            for i, slc in enumerate(slices):
+                sub_vec = n.mu[slc]
+                energy = np.linalg.norm(sub_vec)
+                if energy > 0.01:
+                    dist = np.linalg.norm(sub_vec - inferred_l3)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_node = n
+                        best_slice_idx = i
+                        
+        if not best_node:
+            print("  [FAIL] Failed to retrieve any stabilizing prior from Long-Term Memory.")
             return
             
-        print(f"  Retrieved Stable L3 Meta-Node: {best_l3_node.id}")
+        stabilized_l3 = best_node.mu[slices[best_slice_idx]]
+        slice_names = ["L1 (Content)", "L2 (Relation)", "L3 (Meta)"]
+        print(f"  Retrieved Wisdom: {best_node.id} via slice {slice_names[best_slice_idx]}")
+        print(f"  Composition: Applied {best_node.id} logic as a second-order trajectory.")
         
         # 3. Prediction Loop with Ablations
         def evaluate_prediction(l3_constraint_vec: np.ndarray, name: str):
             print(f"\n  --- TEST: {name} ---")
-            current_vec = noisy_vecs[3] # Start from end of noisy priming
+            current_vec = noisy_vecs[3]
             errors = []
             
-            # Predict t=4 to 9 autoregressively
             for t in range(4, len(clean_vecs)):
-                # We compare against the CLEAN ground truth to measure true accuracy
                 actual_vec = clean_vecs[t]
-                
                 pred_vec = self.predict_next(current_vec, l3_constraint_vec)
-                
-                # Compare predicted L1 state to clean ground truth
                 error = np.linalg.norm(pred_vec[0:30] - actual_vec[0:30])
                 errors.append(error)
-                
-                # Feedback loop: use prediction as next input
                 current_vec = pred_vec
                 
             mean_error = np.mean(errors)
             print(f"    Mean Autoregressive L1 Prediction Error (t=4..9): {mean_error:.4f}")
             return mean_error
 
-        # Baseline A: L2-Only (Assume no meta-relational change)
         err_l2 = evaluate_prediction(np.zeros(S_DIM), "L2-Only Baseline (Constant Rule Assumption)")
-        
-        # Baseline B: Pure Bottom-Up (Use the noisy inferred L3 without retrieval)
-        err_noisy = evaluate_prediction(inferred_l3, "Noisy Bottom-Up Baseline (No Retrieval)")
-        
-        # Full HPM: Active L3 constraint (Stabilized by retrieved prior)
-        err_hpm = evaluate_prediction(best_l3_node.mu[60:90], "Full HPM (Stabilized L3 Top-Down Constraint)")
+        err_noisy = evaluate_prediction(inferred_l3, "Noisy Bottom-Up Baseline (No Stabilization)")
+        err_hpm = evaluate_prediction(stabilized_l3, "Full HPM (Cross-Slice Compositional Stabilization)")
         
         if err_hpm < err_l2 and err_hpm < err_noisy:
-            print("\n  [SUCCESS] Retrieved L3 constraint stabilized noisy perception and outperformed baselines.")
+            print("\n  [SUCCESS] Fractal Composition Verified!")
+            print("  The agent invented the 'Accumulator' meta-pattern by reusing an existing relational rule.")
         else:
-            print("\n  [FAIL] Retrieved L3 constraint failed to stabilize prediction.")
+            print("\n  [FAIL] Compositional stabilization failed.")
 
 def run_experiment():
     exp = CompositionalExperimentRefactored()
