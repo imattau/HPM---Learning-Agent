@@ -61,6 +61,9 @@ PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_manifold_i
 # Run Cumulative Abstraction (SP60)
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_cumulative_abstraction.py
 
+# Run Enhanced Cross-Domain Analogy (SP66)
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_cross_domain_analogy_enhanced.py
+
 # Run Schema Transfer Discovery
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_schema_transfer.py
 ```
@@ -82,6 +85,7 @@ Most benchmarks support a `--smoke` flag for rapid end-to-end verification.
 | **SP58** | Heuristic Search| Induction | `hpm_fractal_node/experiments/experiment_heuristic_induction.py` |
 | **SP59** | Manifold Guidance| Synthesis | `hpm_fractal_node/experiments/experiment_manifold_induction.py` |
 | **SP60** | Self-Improvement | Learning | `hpm_fractal_node/experiments/experiment_cumulative_abstraction.py` |
+| **SP66** | Analogy + Affect | Transfer | `hpm_fractal_node/experiments/experiment_cross_domain_analogy_enhanced.py` |
 
 ---
 
