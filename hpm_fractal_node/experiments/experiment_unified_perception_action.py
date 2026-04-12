@@ -125,8 +125,10 @@ class ASTRenderer:
             concept = self._get_concept(leaf)
             if not concept: continue
             
-            # FIX 4: Enforce execution purity by ignoring symbolic operations
-            if concept in {"OP_ADD", "OP_SUB", "OP_MUL2"}:
+            # FIX 4: Enforce execution purity by ignoring symbolic OP_ADD/OP_SUB
+            # (they act on x; grounded percept ops handle addition instead).
+            # OP_MUL2 is context-aware: val *= 2 inside a loop, x *= 2 outside.
+            if concept in {"OP_ADD", "OP_SUB"}:
                 continue
                 
             if concept == "BLOCK_END":
@@ -146,6 +148,10 @@ class ASTRenderer:
                 target = ast.Name(id='val', ctx=ast.Store()) if len(stack) > 1 else ast.Name(id='x', ctx=ast.Store())
                 delta_val = int(delta) if float(delta) == int(delta) else float(delta)
                 curr_block.append(ast.AugAssign(target=target, op=ast.Add(), value=ast.Constant(value=delta_val)))
+            elif concept == "OP_MUL2":
+                if isinstance(curr_block[-1], ast.Pass): curr_block.pop()
+                target = ast.Name(id='val', ctx=ast.Store()) if len(stack) > 1 else ast.Name(id='x', ctx=ast.Store())
+                curr_block.append(ast.AugAssign(target=target, op=ast.Mult(), value=ast.Constant(value=2)))
             elif concept == "LIST_INIT":
                 if isinstance(curr_block[-1], ast.Pass): curr_block.pop()
                 curr_block.append(ast.Assign(targets=[ast.Name(id='res', ctx=ast.Store())], value=ast.List(elts=[], ctx=ast.Load())))
@@ -459,11 +465,25 @@ class SchemaTransferAgent:
         is_list_goal = goal_mu[1] > 0.5
 
         if is_list_goal:
-            # Scaffold ops sufficient to build list-map programs
-            scaffold_names = ["VAR_INP", "LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND"]
-            ops = [self.forest.get(f"prior_rule_{c}") for c in scaffold_names]
-            ops = [o for o in ops if o is not None]
-            ops.extend(self.perceptual_ops)
+            # Detect MAP (same output length) vs FILTER (shorter output) to restrict ops.
+            # This keeps each BFS to ≤9 candidates, making depth-7 solutions fast.
+            is_filter = any(
+                isinstance(o, (list, tuple)) and isinstance(i, (list, tuple)) and len(o) < len(i)
+                for i, o in zip(inputs, expected_outputs)
+            )
+            if is_filter:
+                # Filter pattern: if val > 0: res.append(val) — no perceptual ops needed
+                scaffold_names = ["VAR_INP", "LIST_INIT", "FOR_LOOP", "ITEM_ACCESS",
+                                  "COND_IS_POSITIVE", "COND_IS_EVEN", "LIST_APPEND", "BLOCK_END"]
+                ops = [self.forest.get(f"prior_rule_{c}") for c in scaffold_names]
+                ops = [o for o in ops if o is not None]
+            else:
+                # Map pattern: transform each element — OP_MUL2 + perceptual ops
+                scaffold_names = ["VAR_INP", "LIST_INIT", "FOR_LOOP", "ITEM_ACCESS",
+                                  "OP_MUL2", "LIST_APPEND"]
+                ops = [self.forest.get(f"prior_rule_{c}") for c in scaffold_names]
+                ops = [o for o in ops if o is not None]
+                ops.extend(self.perceptual_ops)
         else:
             ops = []
             for c in CONCEPTS:
@@ -556,7 +576,7 @@ class SchemaTransferAgent:
         priors = [
             self.forest.get(f"prior_rule_{c}") 
             for c in CONCEPTS 
-            if c not in {"OP_ADD", "OP_MUL2", "OP_SUB"}
+            if c not in {"OP_ADD", "OP_SUB"}
         ]
         priors.extend(self.perceptual_ops)
         
