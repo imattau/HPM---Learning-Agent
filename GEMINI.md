@@ -36,12 +36,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Running Latest Experiments (SP54)
-The latest breakthrough enables 100% HPM-native planning and schema discovery.
+### Running Latest Experiments (SP54-SP55)
+The latest breakthrough enables 100% HPM-native planning, schema discovery, and tool integration.
 
 ```bash
 # Run Execution-Guided Synthesis (SP54)
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_execution_guided_synthesis.py
+
+# Run Library Discovery & Recognition (SP55)
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_library_discovery.py
 
 # Run Schema Transfer Discovery
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_schema_transfer.py
@@ -58,6 +61,7 @@ Most benchmarks support a `--smoke` flag for rapid end-to-end verification.
 | **SP10** | Transfer | Alignment | `benchmarks/phyre_delta_alignment.py` |
 | **SP16** | Rosetta | Discovery | `benchmarks/rosetta_geometric_benchmark.py` |
 | **SP54** | Planning | Utility | `hpm_fractal_node/experiments/experiment_execution_guided_synthesis.py` |
+| **SP55** | Tool Integration | Discovery | `hpm_fractal_node/experiments/experiment_library_discovery.py` |
 
 ---
 

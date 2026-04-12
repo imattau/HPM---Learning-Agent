@@ -449,7 +449,15 @@ class Observer:
         residual_nodes = surprising_leaves + [
             n for n in frontier if n.id not in seen_ids and surprise(n) >= self.tau
         ]
-        residual = float(np.mean([surprise(n) for n in residual_nodes])) if residual_nodes else 0.0
+        if residual_nodes:
+            residual = float(np.mean([surprise(n) for n in residual_nodes]))
+        elif not explanation_tree:
+            # No nodes explained it, and no nodes were even "near".
+            # If the forest has nodes, this is a major surprise.
+            # If the forest is empty, it's also a gap.
+            residual = self.tau * 2.0
+        else:
+            residual = 0.0
 
         if hasattr(self.retriever, 'notify_active'):
             self.retriever.notify_active([n.id for n in explanation_tree])
