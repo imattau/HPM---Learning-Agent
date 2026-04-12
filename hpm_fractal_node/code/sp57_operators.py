@@ -13,33 +13,65 @@ S_DIM = 30
 class Operator:
     """
     A functional transformation representing a relation or meta-relation.
-    In this experiment, we use an Affine Transformation: f(x) = weight * x + bias.
     """
-    def __init__(self, weight: float = 1.0, bias: float = 0.0, name: str = "identity"):
-        self.weight = weight
-        self.bias = bias
+    def __init__(self, name: str = "identity"):
         self.name = name
 
     def apply(self, x: np.ndarray) -> np.ndarray:
-        """Apply the operator to a state vector."""
-        return x * self.weight + self.bias
+        raise NotImplementedError()
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
         return self.apply(x)
 
     def compose(self, other: 'Operator') -> 'Operator':
-        """
-        Returns a new operator representing the composition f(g(x)).
-        f(x) = w1*x + b1, g(x) = w2*x + b2
-        f(g(x)) = w1*(w2*x + b2) + b1 = (w1*w2)*x + (w1*b2 + b1)
-        """
-        new_w = self.weight * other.weight
-        new_b = self.weight * other.bias + self.bias
-        new_name = f"{self.name}({other.name})"
-        return Operator(weight=new_w, bias=new_b, name=new_name)
+        """Returns a new operator representing the composition f(g(x))."""
+        return ComposedOperator(self, other)
 
     def __repr__(self):
-        return f"Op({self.name}: w={self.weight:.2f}, b={self.bias:.2f})"
+        return f"Op({self.name})"
+
+class AffineOperator(Operator):
+    """f(x) = weight * x + bias"""
+    def __init__(self, weight: float = 1.0, bias: float = 0.0, name: str = "affine"):
+        super().__init__(name)
+        self.weight = weight
+        self.bias = bias
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        return x * self.weight + self.bias
+
+    def __repr__(self):
+        return f"Affine({self.name}: w={self.weight:.2f}, b={self.bias:.2f})"
+
+class ModOperator(Operator):
+    """f(x) = x % modulus"""
+    def __init__(self, modulus: float = 1.0, name: str = "mod"):
+        super().__init__(name)
+        self.modulus = modulus
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        # Scale back to numeric for mod, then re-scale
+        val = x[0] * 10.0
+        result = (val % self.modulus) * 0.1
+        res_vec = x.copy()
+        res_vec[0] = result
+        return res_vec
+
+    def __repr__(self):
+        return f"Mod({self.name}: m={self.modulus:.1f})"
+
+class ComposedOperator(Operator):
+    """f(g(x))"""
+    def __init__(self, f: Operator, g: Operator):
+        super().__init__(f"{f.name} ∘ {g.name}")
+        self.f = f
+        self.g = g
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        return self.f.apply(self.g.apply(x))
+
+    def __repr__(self):
+        return f"Composed({self.name})"
 
 class OperatorOracle:
     """
