@@ -49,6 +49,9 @@ PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_library_di
 # Run Compositional Abstraction (SP56)
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_compositional_abstraction.py
 
+# Run Operator-Level Composition (SP57)
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_operator_composition.py
+
 # Run Schema Transfer Discovery
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_schema_transfer.py
 ```
@@ -66,6 +69,7 @@ Most benchmarks support a `--smoke` flag for rapid end-to-end verification.
 | **SP54** | Planning | Utility | `hpm_fractal_node/experiments/experiment_execution_guided_synthesis.py` |
 | **SP55** | Tool Integration | Discovery | `hpm_fractal_node/experiments/experiment_library_discovery.py` |
 | **SP56** | Compositional | Transfer | `hpm_fractal_node/experiments/experiment_compositional_abstraction.py` |
+| **SP57** | Operator Logic | Synthesis | `hpm_fractal_node/experiments/experiment_operator_composition.py` |
 
 ---
 
