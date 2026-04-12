@@ -118,4 +118,20 @@ PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_library_di
 
 # Run SP56: Compositional Abstraction
 PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_compositional_abstraction.py
+
+# Run SP66: Enhanced Cross-Domain Analogy
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_cross_domain_analogy_enhanced.py
 ```
+
+---
+
+## Experiment 66: Enhanced Cross-Domain Analogy (SP66)
+Extends cross-domain analogy transfer with **Pattern Density**, **Affective Evaluators**, and **AST-level substitution**.
+
+### HPM Principles Demonstrated
+1. **Pattern Density (App A.8)**: Tracks connectivity, reinforcement, and usage frequency as HFN nodes. Implements density-guided pruning.
+2. **Affective Evaluator (§9.3, §9.4)**: Manages emotional state (arousal, valence) as HFN state. Anxiety-driven persistence and curiosity-driven exploration.
+3. **AST Substitution**: Robust structural transformation of code scaffolds using Python's `ast` module.
+4. **Fractal Uniformity**: All persistent internal state (density, affect) is stored as standard HFN nodes.
+
+See [README_SP66.md](README_SP66.md) for full analysis.

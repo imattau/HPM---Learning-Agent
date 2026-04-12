@@ -38,6 +38,8 @@ Quick start
 from hfn.hfn import HFN, Edge
 from hfn.forest import Forest
 from hfn.observer import Observer
+from hfn.density import PatternDensityTracker, attach_density_tracker
+from hfn.affective import AffectiveEvaluator, AffectiveState
 from hfn.evaluator import Evaluator, ActivationTracker
 from hfn.recombination import Recombination
 from hfn.reasoning import CognitiveSolver
@@ -79,6 +81,7 @@ def calibrate_tau(D: int, sigma_scale: float = 1.0, margin: float = 1.0) -> floa
 
 __all__ = [
     "HFN", "Edge", "Forest", "Observer", "AsyncHFNController", "Evaluator", "ActivationTracker",
+    "PatternDensityTracker", "attach_density_tracker", "AffectiveEvaluator", "AffectiveState",
     "Recombination", "CognitiveSolver", "calibrate_tau",
     "Query", "Converter",
     "box_counting_dimension", "population_dimension", "dimension_profile",

@@ -70,6 +70,7 @@ The **HFN** substrate implements HPM principles directly as a forest of probabil
 | `experiment_non_linear_synthesis.py` | Logic Forks | Turing-complete if/else branching. |
 | `experiment_modular_abstraction.py` | Functions | Encapsulated procedures and O(1) planning calls. |
 | `experiment_execution_guided_synthesis.py` | SP54 Planning | Replaced beam search with native HPM population dynamics and backpropagated utility. |
+| `experiment_cross_domain_analogy_enhanced.py` | SP66 Analogy | **Improvements**: Pattern Density, Affective Evaluators, and AST-level substitution. |
 | `experiment_schema_transfer.py` | Transfer | **Discovery**: Autonomous emergence of MAP and FILTER schemas via Replicator Contrast Dynamics. |
 
 ---

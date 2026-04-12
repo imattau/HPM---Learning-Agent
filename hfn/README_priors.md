@@ -35,7 +35,7 @@ By default (`prior_plasticity=False`), protection is fully binary. A prior is ei
 
 ### The Plasticity Model (`prior_plasticity=True`)
 
-When `prior_plasticity=True`, priors can undergo **density-guided mu drift**. The core idea comes from HPM Section 2.6: high-density patterns (those that frequently explain observations) resist revision, while low-density patterns (those that keep missing) are eligible for gradual update. Section 2.5.2 further motivates this: forgetting and decay apply to all patterns, priors included — only the rate and mechanism differ.
+When `prior_plasticity=True`, low-density priors can slowly drift their `mu` toward observations they keep missing, while remaining permanently protected from absorption. This plasticity is increasingly guided by the formal [`PatternDensityTracker`](./density.py) (see [Graduated Prior Protection](#graduated-prior-protection-prior-plasticity) below).
 
 The mechanism works as follows:
 
