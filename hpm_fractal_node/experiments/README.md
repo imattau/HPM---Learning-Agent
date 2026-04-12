@@ -1,3 +1,32 @@
+# HPM Hierarchical Abstraction Experiments (SP54-SP56+)
+
+## Experiment 44: Unified Perception-Action Schema Learning (SP54)
+Demonstrates that a single agent can synthesise executable Python programs from
+input-output examples using goal-directed BFS planning over structured concept scaffolds.
+
+### Tasks Solved
+| Task | Description | Method | Depth |
+|------|-------------|--------|-------|
+| A | Add one (scalar) | Stochastic search | ~11–40 iters |
+| B | Map add one | BFS (MAP scaffold) | 6 |
+| C | Map double | BFS (MAP scaffold + OP_MUL2) | 6 |
+| D | Filter positive | BFS (FILTER scaffold) | 6 |
+
+### Key Design
+- **EmpiricalOracle**: 20D state vector computed by actually executing synthesised code
+- **ASTRenderer**: Context-aware code generation (`val` vs `x` depending on loop depth)
+- **Goal-type detection**: MAP vs FILTER goals use separate operator sets, keeping BFS tractable
+- **Schema transfer**: MAP structure from Task B reused for Task C (double) and beyond
+
+See [README_unified_perception_action.md](README_unified_perception_action.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_unified_perception_action.py
+```
+
+---
+
 # HPM Hierarchical Abstraction Experiments (SP54-SP56)
 
 This directory contains experiments for **HPM-Native Synthesis, Library Discovery, and Compositional Abstraction**.
