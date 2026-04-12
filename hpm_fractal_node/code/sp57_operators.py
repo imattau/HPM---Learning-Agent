@@ -90,6 +90,30 @@ class ComposedOperator(Operator):
     def __repr__(self):
         return f"Composed({self.name})"
 
+class PolygraphOperator(Operator):
+    """
+    An operator derived from a Multi-Polygraph HFN node with inputs.
+    Executes the sequence of its child nodes.
+    """
+    def __init__(self, name: str, operators: List[Operator], effective_params: Tuple[float, ...]):
+        super().__init__(name)
+        self.operators = operators
+        self.effective_params = effective_params
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        # Multi-polygraph typically represents a sequence or combination.
+        # Here we assume it's a sequence of transformations (composition).
+        res = x
+        for op in self.operators:
+            res = op.apply(res)
+        return res
+
+    def get_params(self) -> Tuple[float, ...]:
+        return self.effective_params
+
+    def __repr__(self):
+        return f"Polygraph({self.name})"
+
 class OperatorOracle:
     """
     Consistent embedding oracle for SP57.
