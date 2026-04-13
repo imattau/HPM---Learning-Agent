@@ -1,0 +1,351 @@
+"""
+BaseHFNAgent — foundation for all hpm_ai_v2 agents.
+
+Provides:
+- TieredForest + Observer initialisation
+- PythonExecutor + EmpiricalOracle/CountingOracle
+- Generic pattern storage (self.patterns dict)
+- BFS search (_try_bfs, _try_exact)
+- Strategy dispatch (add_strategy, solve)
+- MetaStrategyController integration
+- Persistence (save_state, load_state)
+"""
+from __future__ import annotations
+
+import pickle
+import time
+from collections import deque
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+
+import numpy as np
+
+from hfn.hfn import HFN
+from hfn.tiered_forest import TieredForest
+from hfn.observer import Observer
+from hfn.retriever import GoalConditionedRetriever
+
+from hpm_ai_v2.utils.state import S_DIM, DIM, CONCEPTS, CONCEPT_IDX
+from hpm_ai_v2.utils.executor import PythonExecutor
+from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
+from hpm_ai_v2.utils.renderer import ASTRenderer
+from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
+
+
+class BaseHFNAgent:
+    """
+    Base class for all HPM agents.
+
+    Subclasses (and mixins) extend this with additional capabilities at each
+    HPM abstraction level (L2 macro composition, L3 relational schemas,
+    L4 forward models, L5 meta-strategy, social sharing).
+    """
+
+    def __init__(
+        self,
+        cold_dir: str = "data/knowledge_base/hpm_ai_v2",
+        forest_class: Type = TieredForest,
+        hot_cap: int = 10_000,
+        tau: float = 0.5,
+        compression_cooccurrence_threshold: int = 2,
+        use_density_tracker: bool = False,
+        use_affective_evaluator: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        self.m_dim = S_DIM + DIM + S_DIM  # state + action + delta
+        self.cold_dir = Path(cold_dir)
+
+        # Pattern substrate: TieredForest
+        self.forest: TieredForest = forest_class(
+            D=self.m_dim,
+            cold_dir=self.cold_dir,
+            hot_cap=hot_cap,
+        )
+
+        # Retriever (goal-conditioned: emphasises delta / outcome slice)
+        target_slice = slice(S_DIM + DIM, self.m_dim)
+        self.retriever = GoalConditionedRetriever(
+            self.forest,
+            target_slice=target_slice,
+            target_weight=50.0,
+            weight_provider=lambda nid: self.observer.get_weight(nid),
+        )
+
+        # Pattern dynamics: Observer
+        self.observer = Observer(
+            forest=self.forest,
+            retriever=self.retriever,
+            tau=tau,
+            node_use_diag=True,
+            compression_cooccurrence_threshold=compression_cooccurrence_threshold,
+            use_density_tracker=use_density_tracker,
+            use_affective_evaluator=use_affective_evaluator,
+        )
+
+        # Utils
+        self.renderer = ASTRenderer()
+        self.oracle = EmpiricalOracle()
+        self.counting_oracle = CountingOracle()
+        self.executor = PythonExecutor()
+
+        # Pattern evaluator: MetaStrategyController (L5)
+        self.meta = MetaStrategyController()
+
+        # Generic pattern storage: pattern_id -> HFN node
+        self.patterns: Dict[str, HFN] = {}
+
+        # Strategy registry: name -> callable(inputs, outputs) -> Optional[List[HFN]]
+        self._strategies: Dict[str, Callable] = {}
+        self._strategy_order: List[str] = []
+
+        # Inject priors if forest is empty
+        if len(self.forest) == 0:
+            self._inject_blank_priors()
+
+    # ------------------------------------------------------------------
+    # Prior injection
+    # ------------------------------------------------------------------
+
+    def _inject_blank_priors(self) -> None:
+        """Inject one prior node per concept into the forest."""
+        list_concepts = {"LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND"}
+        delta_offset = S_DIM + DIM
+        for c in CONCEPTS:
+            mu = np.zeros(self.m_dim)
+            mu[S_DIM + CONCEPT_IDX[c]] = 5.0
+            if c in list_concepts:
+                mu[delta_offset + 1] = 1.0
+            node = HFN(
+                mu=mu,
+                sigma=np.ones(self.m_dim) * 5.0,
+                id=f"prior_rule_{c}",
+                use_diag=True,
+            )
+            self.observer.register(node, protected=True, initial_weight=0.5)
+
+    # ------------------------------------------------------------------
+    # Strategy registry
+    # ------------------------------------------------------------------
+
+    def add_strategy(
+        self,
+        name: str,
+        fn: Callable[[List[Any], List[Any]], Optional[List[HFN]]],
+        position: Optional[int] = None,
+    ) -> None:
+        """Register a solve strategy callable."""
+        self._strategies[name] = fn
+        if name not in self._strategy_order:
+            if position is not None:
+                self._strategy_order.insert(position, name)
+            else:
+                self._strategy_order.append(name)
+
+    def _ordered_strategies(
+        self,
+        goal_type: str = "scalar",
+    ) -> List[Tuple[str, Callable]]:
+        """Return strategies in meta-controller ranked order."""
+        n_macros = sum(
+            1 for n in self.patterns.values()
+            if n.relation_type == "macro"
+        )
+        ranked = self.meta.rank_strategies(goal_type, n_macros)
+        order = [s for s in ranked if s in self._strategies]
+        for s in self._strategy_order:
+            if s not in order:
+                order.append(s)
+        return [(name, self._strategies[name]) for name in order if name in self._strategies]
+
+    # ------------------------------------------------------------------
+    # Core solve loop
+    # ------------------------------------------------------------------
+
+    def solve(
+        self,
+        inputs: List[Any],
+        outputs: List[Any],
+        goal_type: str = "scalar",
+        task_id: str = "task",
+    ) -> Tuple[bool, Optional[str], str]:
+        """
+        Attempt to solve task using registered strategies in ranked order.
+
+        Returns (success, code_str, strategy_used).
+        """
+        t0 = time.time()
+        n_macros = sum(1 for n in self.patterns.values() if n.relation_type == "macro")
+        for strat_name, strat_fn in self._ordered_strategies(goal_type):
+            oracle_calls_before = self.counting_oracle.call_count
+            path = strat_fn(inputs, outputs)
+            if path is not None:
+                code = (
+                    self.renderer.render(path[0])
+                    if len(path) == 1
+                    else self._render_path(path)
+                )
+                results, errors = self.executor.run_batch(code, inputs)
+                state = self.oracle.compute_state(results, errors, code)
+                success = bool(state[0] > 0.5 and self._check_outputs(results, outputs))
+                oracle_calls = self.counting_oracle.call_count - oracle_calls_before + 1
+                wall_ms = (time.time() - t0) * 1000
+                rec = SolveRecord(
+                    task_id=task_id,
+                    goal_type=goal_type,
+                    n_macros=n_macros,
+                    strategy=strat_name,
+                    depth=len(path),
+                    oracle_calls=oracle_calls,
+                    success=success,
+                    wall_ms=wall_ms,
+                )
+                self.meta.record(rec)
+                if success:
+                    return True, code, strat_name
+        return False, None, "none"
+
+    def _render_path(self, path: List[HFN]) -> str:
+        """Render a multi-node path by composing into a sequence node."""
+        composed = self._compose_sequence(path)
+        if composed is None:
+            return ""
+        return self.renderer.render(composed)
+
+    def _compose_sequence(self, nodes: List[HFN]) -> Optional[HFN]:
+        """Compose a list of nodes into a single sequence macro node."""
+        if not nodes:
+            return None
+        if len(nodes) == 1:
+            return nodes[0]
+        mu = np.zeros(self.m_dim)
+        first_state = nodes[0].mu[:S_DIM]
+        last_state = nodes[-1].mu[:S_DIM]
+        mu[:S_DIM] = last_state
+        mu[S_DIM + DIM:] = last_state - first_state
+        action_sum = sum(n.mu[S_DIM: S_DIM + DIM] for n in nodes)
+        mu[S_DIM: S_DIM + DIM] = action_sum / len(nodes)
+        return HFN(
+            mu=mu,
+            sigma=np.ones(self.m_dim),
+            inputs=nodes,
+            relation_type="macro",
+            use_diag=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Built-in strategies
+    # ------------------------------------------------------------------
+
+    def _try_exact(
+        self,
+        inputs: List[Any],
+        outputs: List[Any],
+    ) -> Optional[List[HFN]]:
+        """Strategy: retrieve nearest node and test directly."""
+        goal_state = self._outputs_to_goal_state(outputs)
+        query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
+        candidates = self.retriever.retrieve(query, k=5)
+        for node in candidates:
+            code = self.renderer.render(node)
+            results, errors = self.executor.run_batch(code, inputs)
+            if self._check_outputs(results, outputs):
+                return [node]
+        return None
+
+    def _try_bfs(
+        self,
+        inputs: List[Any],
+        outputs: List[Any],
+        max_depth: int = 4,
+        beam_width: int = 10,
+    ) -> Optional[List[HFN]]:
+        """Strategy: beam BFS over pattern space."""
+        goal_state = self._outputs_to_goal_state(outputs)
+        query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
+        primitives = self.retriever.retrieve(query, k=beam_width)
+        if not primitives:
+            return None
+
+        queue: deque = deque()
+        for p in primitives:
+            queue.append([p])
+
+        visited_ids: set = set()
+
+        while queue:
+            path = queue.popleft()
+            path_key = tuple(n.id for n in path)
+            if path_key in visited_ids:
+                continue
+            visited_ids.add(path_key)
+
+            composed = self._compose_sequence(path)
+            if composed is None:
+                continue
+            code = self.renderer.render(composed)
+            results, errors = self.executor.run_batch(code, inputs)
+            if self._check_outputs(results, outputs):
+                return path
+
+            if len(path) < max_depth:
+                next_nodes = self.retriever.retrieve(query, k=beam_width)
+                for nxt in next_nodes:
+                    new_path = path + [nxt]
+                    new_key = tuple(n.id for n in new_path)
+                    if new_key not in visited_ids:
+                        queue.append(new_path)
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _outputs_to_goal_state(self, outputs: List[Any]) -> np.ndarray:
+        """Build a goal state vector from expected outputs."""
+        results_dummy = outputs
+        errors_dummy = [None] * len(outputs)
+        delta_state = self.oracle.compute_state(results_dummy, errors_dummy)
+        goal = np.zeros(self.m_dim)
+        goal[S_DIM + DIM:] = delta_state
+        return goal
+
+    def _check_outputs(
+        self,
+        results: List[Any],
+        expected: List[Any],
+    ) -> bool:
+        """Check whether execution results match expected outputs."""
+        if len(results) != len(expected):
+            return False
+        for r, e in zip(results, expected):
+            if r != e:
+                return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save_state(self, path: Optional[str] = None) -> Path:
+        """Serialise agent state (patterns + meta stats) to disk."""
+        save_path = Path(path) if path else self.cold_dir / "agent_state.pkl"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "patterns": self.patterns,
+            "meta_stats": dict(self.meta._stats),
+        }
+        with open(save_path, "wb") as f:
+            pickle.dump(state, f)
+        return save_path
+
+    def load_state(self, path: Optional[str] = None) -> None:
+        """Load agent state from disk."""
+        load_path = Path(path) if path else self.cold_dir / "agent_state.pkl"
+        if not load_path.exists():
+            return
+        with open(load_path, "rb") as f:
+            state = pickle.load(f)
+        self.patterns = state.get("patterns", {})
+        if "meta_stats" in state:
+            self.meta._stats.update(state["meta_stats"])
