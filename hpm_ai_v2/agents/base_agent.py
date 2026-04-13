@@ -30,6 +30,7 @@ from hfn.retriever import GoalConditionedRetriever
 from hpm_ai_v2.utils.executor import PythonExecutor, _eval_path_worker
 from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
 from hpm_ai_v2.utils.renderer import ASTRenderer
+from hpm_ai_v2.utils.base_renderer import Renderer
 from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
 
 if TYPE_CHECKING:
@@ -56,6 +57,7 @@ class BaseHFNAgent:
         use_density_tracker: bool = False,
         use_affective_evaluator: bool = False,
         n_workers: Optional[int] = None,
+        renderer: Optional[Renderer] = None,
         **kwargs: Any,
     ) -> None:
         self.config = config
@@ -95,7 +97,7 @@ class BaseHFNAgent:
         self.n_workers: int = n_workers if n_workers is not None else os.cpu_count() or 1
 
         # Utils
-        self.renderer = ASTRenderer(config)
+        self.renderer = renderer if renderer is not None else ASTRenderer(config)
         self.oracle = EmpiricalOracle(config)
         self.counting_oracle = CountingOracle(config)
         self.executor = PythonExecutor()

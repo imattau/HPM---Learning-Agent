@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 import numpy as np
 
 
-class ASTRenderer:
+from hpm_ai_v2.utils.base_renderer import Renderer
+
+
+class ASTRenderer(Renderer):
     """Converts an HFN node (or tree) into a Python code string via AST."""
 
     def __init__(self, config: "DomainConfig"):
