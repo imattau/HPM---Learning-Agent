@@ -76,9 +76,12 @@ class InducedSchemaAgent(SchemaTransferAgent):
         outs, errs = self.executor.run_batch(code, inputs)
         solution_state = self.oracle.compute_state(outs, errs, code)
 
+        full_mu = np.zeros(self.m_dim)
+        full_mu[:S_DIM] = solution_state
+        
         macro = HFN(
-            mu=solution_state,
-            sigma=np.ones(S_DIM) * 0.5,
+            mu=full_mu,
+            sigma=np.ones(self.m_dim) * 0.5,
             id=f"macro_{name}",
             inputs=list(path),          # Polygraph: preserves constituent structure
             relation_type="macro",
@@ -301,9 +304,12 @@ class InducedSchemaAgent(SchemaTransferAgent):
         outs, errs = self.executor.run_batch(code, sample_inputs)
         meta_mu = self.oracle.compute_state(outs, errs, code)
 
+        full_meta_mu = np.zeros(self.m_dim)
+        full_meta_mu[:S_DIM] = meta_mu
+
         meta_node = HFN(
-            mu=meta_mu,
-            sigma=np.ones(S_DIM) * 1.0,
+            mu=full_meta_mu,
+            sigma=np.ones(self.m_dim) * 1.0,
             id="meta_list_iteration",
             inputs=prefix,
             relation_type="meta_schema",

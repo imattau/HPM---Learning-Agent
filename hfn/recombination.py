@@ -105,3 +105,42 @@ class Recombination:
         new_node.id = compressed_id  # type: ignore[misc]
         forest.register(new_node)
         return new_node
+
+    def recombine_structural(self, macro_a: HFN, macro_b: HFN, forest: Forest,
+                             new_id: str = None) -> HFN:
+        """
+        Structural recombination: concatenates the `inputs` lists of both macros,
+        averages their mu and sigma, and preserves all children and edges.
+        This creates a new macro that sequentially applies first macro_a's
+        constituents, then macro_b's constituents.
+        """
+        import numpy as np
+        # Build new mu and sigma (average of both)
+        new_mu = 0.5 * (macro_a.mu + macro_b.mu)
+        if macro_a.use_diag and macro_b.use_diag:
+            new_sigma = 0.5 * (macro_a.sigma + macro_b.sigma)
+            new_node = HFN(mu=new_mu, sigma=new_sigma, use_diag=True)
+        else:
+            s_sigma = np.diag(macro_a.sigma) if macro_a.use_diag else macro_a.sigma
+            o_sigma = np.diag(macro_b.sigma) if macro_b.use_diag else macro_b.sigma
+            new_sigma = 0.5 * (s_sigma + o_sigma)
+            new_node = HFN(mu=new_mu, sigma=new_sigma)
+
+        # Concatenate inputs
+        a_inputs = macro_a.inputs if macro_a.inputs else []
+        b_inputs = macro_b.inputs if macro_b.inputs else []
+        new_node.inputs = list(a_inputs) + list(b_inputs)
+        new_node.relation_type = "recombined"
+
+        # Children: all children from both macros
+        new_node._children = list(macro_a.children()) + list(macro_b.children())
+        # Edges: preserve all edges from both
+        new_node._edges = list(macro_a.edges()) + list(macro_b.edges())
+
+        # Add an edge from the last of macro_a's inputs to the first of macro_b's inputs
+        if a_inputs and b_inputs:
+            new_node.add_edge(a_inputs[-1], b_inputs[0], "then")
+
+        new_node.id = new_id or f"recomb_{macro_a.id[:4]}_{macro_b.id[:4]}"
+        forest.register(new_node)
+        return new_node

@@ -135,7 +135,111 @@ class GoalConditionedRetriever(Retriever):
             if node.inputs and query.inputs:
                 struct_bonus = len(node.inputs) / (1.0 + len(query.inputs))
 
-            return geo_dist - struct_bonus
+            return dist - struct_bonus
 
-            candidates.sort(key=goal_score)
+        candidates.sort(key=goal_score)
         return candidates[:k]
+
+
+class StructuralRetriever(Retriever):
+    """
+    Retrieves nodes by structural fingerprint similarity of their DAG.
+    Fingerprint includes:
+      - number of children, inputs, edges
+      - histogram of relation types
+      - depth of the sub-tree (approximated)
+    """
+    def __init__(self, forest: Forest, fingerprint_dim: int = 16):
+        super().__init__(forest)
+        self.fingerprint_dim = fingerprint_dim
+        self._fingerprint_cache = {}  # node_id -> np.ndarray
+
+    def _structural_fingerprint(self, node: HFN) -> np.ndarray:
+        """Return a fixed-length vector encoding the node's DAG structure."""
+        if node.id in self._fingerprint_cache:
+            return self._fingerprint_cache[node.id]
+
+        vec = np.zeros(self.fingerprint_dim)
+        vec[0] = len(node.children())
+        vec[1] = len(node.inputs) if node.inputs else 0
+        vec[2] = len(node.edges())
+        # Relation type histogram (if relation_type is set)
+        rel_types = ["macro", "sequence", "grounded_op", "string_op", "meta_schema"]
+        for i, rt in enumerate(rel_types):
+            if node.relation_type == rt:
+                vec[3 + i] = 1.0
+        # Depth proxy: if leaf, 0; else 1 + max child depth (capped)
+        if node.is_leaf():
+            vec[10] = 0.0
+        else:
+            max_child_depth = 0
+            for child in node.children():
+                child_fp = self._structural_fingerprint(child)
+                max_child_depth = max(max_child_depth, child_fp[10])
+            vec[10] = min(1.0, max_child_depth / 10.0)
+        # Additional features: has_children, has_inputs, has_edges
+        vec[11] = 1.0 if node.children() else 0.0
+        vec[12] = 1.0 if node.inputs else 0.0
+        vec[13] = 1.0 if node.edges() else 0.0
+        # Flag for macro vs primitive
+        vec[14] = 1.0 if node.relation_type == "macro" else 0.0
+        vec[15] = 1.0 if node.inputs and not node.children() else 0.0  # multi-arity leaf
+
+        self._fingerprint_cache[node.id] = vec
+        return vec
+
+    def retrieve(self, query: HFN, k: int = 10) -> list[HFN]:
+        q_fp = self._structural_fingerprint(query)
+        scored = []
+        for node in self.forest.active_nodes():
+            fp = self._structural_fingerprint(node)
+            dist = np.linalg.norm(q_fp - fp)
+            # Lower distance = more structurally similar
+            scored.append((dist, node))
+        scored.sort(key=lambda x: x[0])
+        return [node for _, node in scored[:k]]
+
+
+class HybridRetriever(Retriever):
+    """
+    Combines geometric (mu) and structural similarity.
+    Weights can be adjusted.
+    """
+    def __init__(self, forest: Forest,
+                 geometric_weight: float = 0.5,
+                 structural_weight: float = 0.5,
+                 geometric_retriever: Retriever = None,
+                 structural_retriever: Retriever = None):
+        super().__init__(forest)
+        self.geometric_weight = geometric_weight
+        self.structural_weight = structural_weight
+        self.geometric_retriever = geometric_retriever or GeometricRetriever(forest)
+        self.structural_retriever = structural_retriever or StructuralRetriever(forest)
+
+    def retrieve(self, query: HFN, k: int = 10) -> list[HFN]:
+        # Get two candidate lists (over-fetch)
+        geo_candidates = self.geometric_retriever.retrieve(query, k=k*3)
+        struct_candidates = self.structural_retriever.retrieve(query, k=k*3)
+        # Combine and deduplicate
+        combined = {}
+        for node in geo_candidates:
+            combined[node.id] = node
+        for node in struct_candidates:
+            combined[node.id] = node
+
+        # Score each node
+        scored = []
+        for node in combined.values():
+            # Geometric score: 1/(1+Euclidean distance)
+            geo_dist = np.linalg.norm(node.mu - query.mu)
+            geo_score = 1.0 / (1.0 + geo_dist)
+            # Structural score: 1/(1+structural distance)
+            struct_dist = np.linalg.norm(
+                self.structural_retriever._structural_fingerprint(node) -
+                self.structural_retriever._structural_fingerprint(query)
+            )
+            struct_score = 1.0 / (1.0 + struct_dist)
+            total = self.geometric_weight * geo_score + self.structural_weight * struct_score
+            scored.append((total, node))
+        scored.sort(reverse=True, key=lambda x: x[0])
+        return [node for _, node in scored[:k]]

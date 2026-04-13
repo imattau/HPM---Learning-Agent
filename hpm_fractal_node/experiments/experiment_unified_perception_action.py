@@ -300,6 +300,9 @@ class SchemaTransferAgent:
         # Preserve partial factorisation signal
         for i, n in enumerate(nodes[:3]): 
             action_vec = n.mu[S_DIM:S_DIM+DIM]
+            if action_vec.size == 0:
+                print(f"      [DEBUG] Node {n.id} has mu shape {n.mu.shape} (expected >= {S_DIM+DIM})")
+                continue
             if np.max(action_vec) > 0.5:
                 mu[S_DIM + i] = np.argmax(action_vec)
             

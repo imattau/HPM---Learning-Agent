@@ -268,6 +268,10 @@ class Observer:
         if protected:
             self.protected_ids.add(node.id)
 
+        # Update density structural connectivity
+        if self.density_tracker:
+            self.density_tracker.update_structural_connectivity(node)
+
     def _init_node(self, node: HFN, initial_weight: float | None = None) -> None:
         state_id = f"state:{node.id}"
         w = initial_weight if initial_weight is not None else self.w_init

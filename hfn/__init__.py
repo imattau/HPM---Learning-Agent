@@ -52,6 +52,10 @@ from hfn.fractal import (
     persistence_scores, RecurrenceTracker, lacunarity, multifractal_spectrum,
 )
 from hfn.hfn_controller import AsyncHFNController
+from hfn.retriever import (
+    Retriever, GeometricRetriever, ContextualRetriever,
+    GoalConditionedRetriever, StructuralRetriever, HybridRetriever
+)
 
 import numpy as np
 
@@ -81,6 +85,8 @@ def calibrate_tau(D: int, sigma_scale: float = 1.0, margin: float = 1.0) -> floa
 
 __all__ = [
     "HFN", "Edge", "Forest", "Observer", "AsyncHFNController", "Evaluator", "ActivationTracker",
+    "Retriever", "GeometricRetriever", "ContextualRetriever", "GoalConditionedRetriever",
+    "StructuralRetriever", "HybridRetriever",
     "PatternDensityTracker", "attach_density_tracker", "AffectiveEvaluator", "AffectiveState",
     "Recombination", "CognitiveSolver", "calibrate_tau",
     "Query", "Converter",
