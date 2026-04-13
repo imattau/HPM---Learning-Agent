@@ -75,6 +75,25 @@ bonus = aff_eval.get_affective_bonus("pattern_id")
 
 ## Advanced Features
 
+### Pluggable Probabilistic Models
+
+HFN nodes support pluggable probabilistic models. By default, nodes use a single-diagonal-Gaussian model (`FlatGaussianModel`), but they can be initialized with any class implementing the `ProbabilisticModel` interface.
+
+```python
+from hfn.hfn import HFN
+from hfn.probabilistic_models import ProbabilisticModel
+
+class CustomModel(ProbabilisticModel):
+    def log_prob(self, x): ...
+    def overlap(self, other): ...
+    def description_length(self): ...
+
+# Initialize HFN with custom model
+node = HFN(mu=mu, sigma=sigma, prob_model=CustomModel(...))
+```
+
+This allows the HFN substrate to support non-Gaussian identities (e.g., GMMs, hierarchical latents) while maintaining structural uniformity.
+
 - **Geometric Retrieval**: Efficiently find candidate patterns using the `GeometricRetriever`.
 - **Fractal Metrics**: Measure the complexity and self-similarity of the forest using tools like `box_counting_dimension` and `multifractal_spectrum`.
 - **Query/Converter Pipeline**: Map raw data to vectors and handle information gaps via the `Query` and `Converter` interfaces.

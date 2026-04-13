@@ -9,6 +9,18 @@ import copy
 from typing import Any, List, Optional, Tuple
 
 
+def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any]) -> bool:
+    """
+    Module-level worker for ProcessPoolExecutor — must be picklable.
+    Re-executes code_str in a fresh namespace and checks against expected outputs.
+    """
+    executor = PythonExecutor()
+    results, _ = executor.run_batch(code_str, inputs)
+    if len(results) != len(expected):
+        return False
+    return all(r == e for r, e in zip(results, expected))
+
+
 class PythonExecutor:
     """Run a code string against a batch of inputs, returning outputs and errors."""
 

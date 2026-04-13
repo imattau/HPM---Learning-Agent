@@ -8,13 +8,17 @@ Ported from:
 from __future__ import annotations
 
 import numpy as np
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
-from hpm_ai_v2.utils.state import S_DIM
+if TYPE_CHECKING:
+    from hpm_ai_v2.domains.base import DomainConfig
 
 
 class EmpiricalOracle:
-    """Computes a 20D empirical state vector from execution outputs."""
+    """Computes a fixed-D empirical state vector from execution outputs."""
+
+    def __init__(self, config: "DomainConfig"):
+        self.config = config
 
     def compute_state(
         self,
@@ -22,7 +26,8 @@ class EmpiricalOracle:
         errors: List[Optional[str]],
         code: str = "",
     ) -> np.ndarray:
-        s = np.zeros(S_DIM)
+        s_dim = self.config.S_DIM
+        s = np.zeros(s_dim)
         valid_outputs = [o for o, e in zip(outputs, errors) if e is None]
         if not valid_outputs:
             s[0] = 0.0
@@ -78,8 +83,8 @@ class EmpiricalOracle:
 class CountingOracle(EmpiricalOracle):
     """Wraps EmpiricalOracle with a per-task call counter."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, config: "DomainConfig") -> None:
+        super().__init__(config)
         self.call_count = 0
 
     def compute_state(

@@ -216,11 +216,22 @@ class TieredForest(Forest):
         if not path.exists(): return None
         try:
             data = np.load(path)
+            
+            # Reconstruct probabilistic model
+            prob_model = None
+            if "model_state" in data:
+                import pickle
+                from hfn.probabilistic_models import get_model_class
+                m_state = pickle.loads(data["model_state"].item())
+                model_cls = get_model_class(m_state["model_type"])
+                prob_model = model_cls.from_state(m_state["params"])
+            
             node = HFN(
                 mu=data["mu"],
                 sigma=data["sigma"],
                 id=node_id,
-                use_diag=bool(data["use_diag"])
+                use_diag=bool(data["use_diag"]),
+                prob_model=prob_model
             )
             # Restore child links if saved
             child_ids_str = str(data["child_ids_str"]) if "child_ids_str" in data else ""
@@ -248,6 +259,15 @@ class TieredForest(Forest):
         nid = evict_id
         # Save to cold
         path = self._cold_path(nid)
+        
+        # Serialize probabilistic model
+        import pickle
+        from hfn.probabilistic_models import get_model_name
+        m_state = {
+            "model_type": get_model_name(type(node.prob_model)),
+            "params": node.prob_model.get_state()
+        }
+        
         # Store child IDs as a comma-joined string to avoid pickle
         child_ids_str = ",".join(c.id for c in node.children()) if node.children() else ""
         np.savez_compressed(
@@ -256,6 +276,7 @@ class TieredForest(Forest):
             sigma=node.sigma,
             use_diag=node.use_diag,
             child_ids_str=np.array(child_ids_str),
+            model_state=np.array(pickle.dumps(m_state))
         )
 
     def _on_observe(self) -> None:

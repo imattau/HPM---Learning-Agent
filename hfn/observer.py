@@ -560,6 +560,9 @@ class Observer:
                 # Update density tracker on success
                 if self.density_tracker:
                     self.density_tracker.update_evaluator_reinforcement(nid, success=True)
+
+                # NEW: Update node's internal probabilistic model parameters
+                node.update(x, weight=float(s.mu[0]), learning_rate=self.alpha_gain)
             else:
                 overlap_sum = 0.0
                 for explaining_node in result.explanation_tree:

@@ -16,6 +16,7 @@ from hpm_ai_v2.agents.mixins.l3_relational import L3RelationalMixin
 from hpm_ai_v2.agents.mixins.l4_forward import L4ForwardModelMixin
 from hpm_ai_v2.agents.mixins.social import SocialMixin
 from hpm_ai_v2.agents.mixins.recombination import RecombinationMixin
+from hpm_ai_v2.agents.mixins.sequential_composition import SequentialCompositionMixin
 
 
 class InducedSchemaAgent(L3RelationalMixin, L2MacroMixin, BaseHFNAgent):
@@ -76,6 +77,7 @@ class AnalogicalAgent(L2MacroMixin, BaseHFNAgent):
 
 
 class SocialAnalogicalAgent(
+    SequentialCompositionMixin,
     RecombinationMixin,
     SocialMixin,
     L4ForwardModelMixin,
@@ -86,13 +88,14 @@ class SocialAnalogicalAgent(
     Full HPM agent: L1–L5 + social sharing + recombination.
 
     MRO (left to right):
-      RecombinationMixin -> SocialMixin -> L4ForwardModelMixin ->
-      L2MacroMixin -> BaseHFNAgent
+      SequentialCompositionMixin -> RecombinationMixin -> SocialMixin ->
+      L4ForwardModelMixin -> L2MacroMixin -> BaseHFNAgent
 
     Capabilities:
     - All ImaginativeAgent capabilities
     - Social pattern sharing via SocialForest
     - Cross-domain recombination (analogical insight)
+    - Sequential composition of macros via AST
     - Meta-strategy controller (L5)
     """
 
@@ -102,5 +105,6 @@ class SocialAnalogicalAgent(
         self.add_strategy("decompose", self._try_decompose)
         self.add_strategy("social", self._try_social)
         self.add_strategy("recombine", self._try_recombine)
+        self.add_strategy("compose", self._try_sequential_compose)
         self.add_strategy("imagine", self._try_imagine)
         self.add_strategy("bfs", self._try_bfs)

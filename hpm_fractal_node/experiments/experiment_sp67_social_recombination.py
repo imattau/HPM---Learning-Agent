@@ -121,7 +121,7 @@ def run_experiment():
     print("\nPHASE 3: L4 – Forward Model Mental Simulation...")
     
     macro_to_share = alice.macro_nodes["scalar_add1"]
-    probe_input = [100, 200] 
+    probe_input = 10  # scalar input to match the scalar_add1 macro's domain
     can_share = alice.should_share(macro_to_share, probe_input)
     
     if can_share:

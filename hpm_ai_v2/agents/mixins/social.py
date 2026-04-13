@@ -16,7 +16,6 @@ from hfn.hfn import HFN
 from hfn.tiered_forest import TieredForest
 from hfn.observer import Observer
 from hfn.retriever import GoalConditionedRetriever
-from hpm_ai_v2.utils.state import S_DIM, DIM
 
 
 class SocialForest:
@@ -46,7 +45,10 @@ class SocialForest:
         for agent in self._agents:
             if agent is source_agent:
                 continue
-            if node.id not in agent.forest:
+            # If the agent has social capabilities, use receive_pattern
+            if hasattr(agent, "receive_pattern"):
+                agent.receive_pattern(node.id, node)
+            elif node.id not in agent.forest:
                 agent.observer.register(node, protected=False, initial_weight=initial_weight)
 
 
@@ -77,7 +79,7 @@ class SocialMixin:
             self._social_forest = social_forest
 
             # Rebuild retriever + observer on the shared forest
-            target_slice = slice(S_DIM + DIM, self.m_dim)
+            target_slice = slice(self.s_dim + self.dim, self.m_dim)
             self.retriever = GoalConditionedRetriever(
                 self.forest,
                 target_slice=target_slice,
@@ -87,11 +89,15 @@ class SocialMixin:
             self.observer = Observer(
                 forest=self.forest,
                 retriever=self.retriever,
-                tau=getattr(self, '_tau_init', 0.5),
+                tau=getattr(self, "_tau_init", 0.5),
                 node_use_diag=True,
                 compression_cooccurrence_threshold=2,
             )
             social_forest.register_agent(self)
+            # Priors were injected into the private forest before it was replaced.
+            # Re-inject into the shared forest if it is still empty.
+            if len(self.forest) == 0:
+                self._inject_blank_priors()
         else:
             self._social_forest = None
 
@@ -105,6 +111,11 @@ class SocialMixin:
         node = self.patterns.get(name)
         if node is not None:
             self._social_forest.broadcast(node, self)
+
+    def exchange_patterns(self) -> None:
+        """Broadcast all local patterns to peers in the shared forest."""
+        for name in list(self.patterns.keys()):
+            self.share_pattern(name)
 
     def _try_social(
         self,

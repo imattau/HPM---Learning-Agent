@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from hfn.hfn import HFN
-from hpm_ai_v2.utils.state import S_DIM, DIM
 
 
 class RecombinationMixin:

@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from hfn.hfn import HFN
-from hpm_ai_v2.utils.state import S_DIM, DIM
 
 
 class L2MacroMixin:
@@ -44,6 +43,43 @@ class L2MacroMixin:
         if macro.id not in self.forest:
             self.observer.register(macro, protected=protect, initial_weight=0.3)
         return macro
+
+    def register_code_macro(
+        self,
+        name: str,
+        code_str: str,
+        sample_inputs: Optional[List[Any]] = None,
+    ) -> "HFN":
+        """
+        Register a macro directly from a Python code string.
+
+        Useful when the code is known (e.g. domain-expert seeding) and the
+        renderer cannot derive it from structural nodes alone.  The code is
+        stored as ``node._code`` so the renderer returns it verbatim.
+        """
+        from hfn.hfn import HFN
+
+        # Run code to obtain an empirical state vector
+        if sample_inputs is None:
+            sample_inputs = [1]
+        results, errors = self.executor.run_batch(code_str, sample_inputs)
+        mu = self.oracle.compute_state(results, errors, code_str)
+        # Pad to full node dimensionality
+        full_mu = np.zeros(self.m_dim)
+        full_mu[:len(mu)] = mu
+
+        node = HFN(
+            mu=full_mu,
+            sigma=np.ones(self.m_dim) * 0.5,
+            id=f"macro_{name}",
+            relation_type="macro",
+            use_diag=True,
+        )
+        node._code = code_str  # stored verbatim for renderer
+        self.patterns[name] = node
+        if node.id not in self.forest:
+            self.observer.register(node, protected=True, initial_weight=0.5)
+        return node
 
     def _try_decompose(
         self,

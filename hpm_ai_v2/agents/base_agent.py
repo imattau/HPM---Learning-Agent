@@ -12,11 +12,13 @@ Provides:
 """
 from __future__ import annotations
 
+import os
 import pickle
 import time
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import numpy as np
 
@@ -25,11 +27,13 @@ from hfn.tiered_forest import TieredForest
 from hfn.observer import Observer
 from hfn.retriever import GoalConditionedRetriever
 
-from hpm_ai_v2.utils.state import S_DIM, DIM, CONCEPTS, CONCEPT_IDX
-from hpm_ai_v2.utils.executor import PythonExecutor
+from hpm_ai_v2.utils.executor import PythonExecutor, _eval_path_worker
 from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
 from hpm_ai_v2.utils.renderer import ASTRenderer
 from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
+
+if TYPE_CHECKING:
+    from hpm_ai_v2.domains.base import DomainConfig
 
 
 class BaseHFNAgent:
@@ -43,6 +47,7 @@ class BaseHFNAgent:
 
     def __init__(
         self,
+        config: "DomainConfig",
         cold_dir: str = "data/knowledge_base/hpm_ai_v2",
         forest_class: Type = TieredForest,
         hot_cap: int = 10_000,
@@ -50,9 +55,13 @@ class BaseHFNAgent:
         compression_cooccurrence_threshold: int = 2,
         use_density_tracker: bool = False,
         use_affective_evaluator: bool = False,
+        n_workers: Optional[int] = None,
         **kwargs: Any,
     ) -> None:
-        self.m_dim = S_DIM + DIM + S_DIM  # state + action + delta
+        self.config = config
+        self.s_dim = config.S_DIM
+        self.dim = config.DIM
+        self.m_dim = config.m_dim
         self.cold_dir = Path(cold_dir)
 
         # Pattern substrate: TieredForest
@@ -63,7 +72,7 @@ class BaseHFNAgent:
         )
 
         # Retriever (goal-conditioned: emphasises delta / outcome slice)
-        target_slice = slice(S_DIM + DIM, self.m_dim)
+        target_slice = slice(self.s_dim + self.dim, self.m_dim)
         self.retriever = GoalConditionedRetriever(
             self.forest,
             target_slice=target_slice,
@@ -82,10 +91,13 @@ class BaseHFNAgent:
             use_affective_evaluator=use_affective_evaluator,
         )
 
+        # Parallelism
+        self.n_workers: int = n_workers if n_workers is not None else os.cpu_count() or 1
+
         # Utils
-        self.renderer = ASTRenderer()
-        self.oracle = EmpiricalOracle()
-        self.counting_oracle = CountingOracle()
+        self.renderer = ASTRenderer(config)
+        self.oracle = EmpiricalOracle(config)
+        self.counting_oracle = CountingOracle(config)
         self.executor = PythonExecutor()
 
         # Pattern evaluator: MetaStrategyController (L5)
@@ -109,10 +121,10 @@ class BaseHFNAgent:
     def _inject_blank_priors(self) -> None:
         """Inject one prior node per concept into the forest."""
         list_concepts = {"LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND"}
-        delta_offset = S_DIM + DIM
-        for c in CONCEPTS:
+        delta_offset = self.s_dim + self.dim
+        for i, c in enumerate(self.config.concepts):
             mu = np.zeros(self.m_dim)
-            mu[S_DIM + CONCEPT_IDX[c]] = 5.0
+            mu[self.s_dim + i] = 5.0
             if c in list_concepts:
                 mu[delta_offset + 1] = 1.0
             node = HFN(
@@ -218,12 +230,12 @@ class BaseHFNAgent:
         if len(nodes) == 1:
             return nodes[0]
         mu = np.zeros(self.m_dim)
-        first_state = nodes[0].mu[:S_DIM]
-        last_state = nodes[-1].mu[:S_DIM]
-        mu[:S_DIM] = last_state
-        mu[S_DIM + DIM:] = last_state - first_state
-        action_sum = sum(n.mu[S_DIM: S_DIM + DIM] for n in nodes)
-        mu[S_DIM: S_DIM + DIM] = action_sum / len(nodes)
+        first_state = nodes[0].mu[:self.s_dim]
+        last_state = nodes[-1].mu[:self.s_dim]
+        mu[:self.s_dim] = last_state
+        mu[self.s_dim + self.dim:] = last_state - first_state
+        action_sum = sum(n.mu[self.s_dim: self.s_dim + self.dim] for n in nodes)
+        mu[self.s_dim: self.s_dim + self.dim] = action_sum / len(nodes)
         return HFN(
             mu=mu,
             sigma=np.ones(self.m_dim),
@@ -259,41 +271,65 @@ class BaseHFNAgent:
         max_depth: int = 4,
         beam_width: int = 10,
     ) -> Optional[List[HFN]]:
-        """Strategy: beam BFS over pattern space."""
+        """Strategy: beam BFS over pattern space, evaluating each depth level in parallel."""
         goal_state = self._outputs_to_goal_state(outputs)
         query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
         primitives = self.retriever.retrieve(query, k=beam_width)
         if not primitives:
             return None
 
-        queue: deque = deque()
-        for p in primitives:
-            queue.append([p])
-
         visited_ids: set = set()
+        current_level: List[List[HFN]] = [[p] for p in primitives]
 
-        while queue:
-            path = queue.popleft()
-            path_key = tuple(n.id for n in path)
-            if path_key in visited_ids:
-                continue
-            visited_ids.add(path_key)
+        for _depth in range(max_depth):
+            # Deduplicate and render all paths at this depth level
+            candidates: List[Tuple[str, List[HFN]]] = []
+            for path in current_level:
+                path_key = tuple(n.id for n in path)
+                if path_key in visited_ids:
+                    continue
+                visited_ids.add(path_key)
+                composed = self._compose_sequence(path)
+                if composed is None:
+                    continue
+                code = self.renderer.render(composed)
+                candidates.append((code, path))
 
-            composed = self._compose_sequence(path)
-            if composed is None:
-                continue
-            code = self.renderer.render(composed)
-            results, errors = self.executor.run_batch(code, inputs)
-            if self._check_outputs(results, outputs):
-                return path
+            if not candidates:
+                break
 
-            if len(path) < max_depth:
-                next_nodes = self.retriever.retrieve(query, k=beam_width)
+            # Evaluate all candidates at this level in parallel
+            if self.n_workers > 1 and len(candidates) > 1:
+                with ProcessPoolExecutor(max_workers=self.n_workers) as pool:
+                    futures = {
+                        pool.submit(_eval_path_worker, code, inputs, outputs): path
+                        for code, path in candidates
+                    }
+                    for fut in as_completed(futures):
+                        if fut.result():
+                            # Cancel remaining futures (best-effort)
+                            for f in futures:
+                                f.cancel()
+                            return futures[fut]
+            else:
+                for code, path in candidates:
+                    results, _ = self.executor.run_batch(code, inputs)
+                    if self._check_outputs(results, outputs):
+                        return path
+
+            if _depth + 1 >= max_depth:
+                break
+
+            # Expand next level
+            next_nodes = self.retriever.retrieve(query, k=beam_width)
+            next_level: List[List[HFN]] = []
+            for path in current_level:
                 for nxt in next_nodes:
                     new_path = path + [nxt]
                     new_key = tuple(n.id for n in new_path)
                     if new_key not in visited_ids:
-                        queue.append(new_path)
+                        next_level.append(new_path)
+            current_level = next_level
 
         return None
 
@@ -307,7 +343,7 @@ class BaseHFNAgent:
         errors_dummy = [None] * len(outputs)
         delta_state = self.oracle.compute_state(results_dummy, errors_dummy)
         goal = np.zeros(self.m_dim)
-        goal[S_DIM + DIM:] = delta_state
+        goal[self.s_dim + self.dim:] = delta_state
         return goal
 
     def _check_outputs(

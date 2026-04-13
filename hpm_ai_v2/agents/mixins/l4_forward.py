@@ -13,7 +13,6 @@ from typing import Any, List, Optional
 import numpy as np
 
 from hfn.hfn import HFN
-from hpm_ai_v2.utils.state import S_DIM, DIM, STRUCT_DIMS
 from hpm_ai_v2.utils.forward_model import StateTransitionModel
 
 
@@ -91,7 +90,7 @@ class L4ForwardModelMixin:
         start_state = self.oracle.compute_state(empty_results, empty_errors, "")
 
         # Goal: structural dims of the goal state
-        goal_struct = goal_state[STRUCT_DIMS]
+        goal_struct = goal_state[self.config.STRUCT_DIMS]
 
         queue: deque = deque()
         for p in primitives:
@@ -109,7 +108,7 @@ class L4ForwardModelMixin:
                 continue
             visited_ids.add(path_key)
 
-            pred_struct = pred_state[STRUCT_DIMS]
+            pred_struct = pred_state[self.config.STRUCT_DIMS]
             dist = float(np.sum((pred_struct - goal_struct) ** 2))
             if dist < best_dist:
                 best_dist = dist

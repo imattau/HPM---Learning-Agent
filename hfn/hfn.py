@@ -9,7 +9,8 @@ from __future__ import annotations
 import uuid
 import numpy as np
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import NamedTuple, Optional
+from hfn.probabilistic_models import ProbabilisticModel, FlatGaussianModel
 
 
 class Edge(NamedTuple):
@@ -50,21 +51,18 @@ class HFN:
     relation_type: str | None = None
     relation_params: dict = field(default_factory=dict, repr=False)
 
+    # Probabilistic model (default = flat Gaussian)
+    prob_model: Optional[ProbabilisticModel] = field(default=None, repr=False)
+
     def __post_init__(self) -> None:
-        # Cache diagonal for O(D) log_prob fast path.
-        # All prior nodes use diagonal sigma; this avoids O(D³) Cholesky per call.
-        if self.use_diag:
-            # sigma is already a D-vector diagonal — use directly
-            self._sigma_diag: np.ndarray | None = np.maximum(self.sigma, 1e-9)
-            self._log_det_cached: float = float(np.sum(np.log(self._sigma_diag)))
-        else:
-            diag = np.diag(self.sigma)
-            if np.allclose(self.sigma, np.diag(diag)):
-                self._sigma_diag = np.maximum(diag, 1e-9)
-                self._log_det_cached = float(np.sum(np.log(self._sigma_diag)))
-            else:
-                self._sigma_diag = None
-                self._log_det_cached = 0.0
+        # Probabilistic model initialization
+        if self.prob_model is None:
+            self.prob_model = FlatGaussianModel(self.mu, self.sigma, self.use_diag)
+
+        # Caches for backward compatibility (kept for code that might access them directly)
+        # Note: These are only guaranteed to be accurate for FlatGaussianModel
+        self._sigma_diag = getattr(self.prob_model, '_sigma_diag', None)
+        self._log_det_cached = getattr(self.prob_model, '_log_det_cached', 0.0)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, HFN):
@@ -77,51 +75,25 @@ class HFN:
     # --- Identity operations ---
 
     def log_prob(self, x: np.ndarray) -> float:
-        """Log-probability of x under N(mu, sigma). Lower = more surprising."""
-        diff = np.asarray(x, dtype=float) - self.mu
-        D = self.mu.shape[0]
-        if self._sigma_diag is not None:
-            # O(D) fast path for diagonal covariance (all prior nodes)
-            z2 = float(np.dot(diff * diff, 1.0 / self._sigma_diag))
-            return -0.5 * (z2 + self._log_det_cached + D * np.log(2.0 * np.pi))
-        try:
-            chol = np.linalg.cholesky(self.sigma)
-            z = np.linalg.solve(chol, diff)
-            log_det = 2.0 * float(np.sum(np.log(np.diag(chol))))
-        except np.linalg.LinAlgError:
-            diag = np.maximum(np.diag(self.sigma), 1e-9)
-            z = diff / np.sqrt(diag)
-            log_det = float(np.sum(np.log(diag)))
-        return float(-0.5 * (np.dot(z, z) + log_det + D * np.log(2.0 * np.pi)))
+        """Log-probability of x under the node's probabilistic model."""
+        return self.prob_model.log_prob(x)
 
     def overlap(self, other: HFN) -> float:
-        """Gaussian overlap integral approx: exp(-0.5 * Mahalanobis(mu_self, mu_other))."""
-        diff = self.mu - other.mu
-        # O(D) fast path when both nodes have diagonal sigma (all prior/learned nodes)
-        if self._sigma_diag is not None and other._sigma_diag is not None:
-            combined_diag = self._sigma_diag + other._sigma_diag
-            return float(np.exp(-0.5 * float(np.dot(diff * diff, 1.0 / combined_diag))))
-        # Mixed case: one diag, one full — expand diag to full matrix for the full path
-        s_sigma = np.diag(self._sigma_diag) if (self.use_diag and self._sigma_diag is not None) else self.sigma
-        o_sigma = np.diag(other._sigma_diag) if (other.use_diag and other._sigma_diag is not None) else other.sigma
-        combined_sigma = s_sigma + o_sigma
-        try:
-            val = float(np.exp(-0.5 * diff @ np.linalg.solve(combined_sigma, diff)))
-        except np.linalg.LinAlgError:
-            val = 0.0
-        return val
+        """Overlap integral between this node and another node's probabilistic model."""
+        return self.prob_model.overlap(other.prob_model)
 
     def description_length(self) -> float:
-        """Complexity proxy: non-zero mu components + off-diagonal sigma entries."""
-        D = self.mu.shape[0]
-        if self._sigma_diag is not None:
-            # Diagonal sigma — off-diagonal is exactly zero, skip the expensive check
-            return float(np.sum(np.abs(self.mu) > 1e-6)) + D
-        return float(
-            np.sum(np.abs(self.mu) > 1e-6)
-            + np.sum(np.abs(self.sigma - np.diag(np.diag(self.sigma))) > 1e-6)
-            + D
-        )
+        """Complexity measure of the node's probabilistic model."""
+        return self.prob_model.description_length()
+
+    def update(self, x: np.ndarray, weight: float = 1.0, learning_rate: float = 0.1) -> None:
+        """Update the node's internal probabilistic parameters based on observation."""
+        self.prob_model.update(x, weight, learning_rate)
+        # Sync mu/sigma fields for backward compatibility if the model provides them
+        if hasattr(self.prob_model, 'mu'):
+            self.mu = self.prob_model.mu
+        if hasattr(self.prob_model, 'sigma'):
+            self.sigma = self.prob_model.sigma
 
     # --- Structure operations (read-only) ---
 

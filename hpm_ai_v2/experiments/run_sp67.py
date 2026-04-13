@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from hpm_ai_v2.agents.agents import SocialAnalogicalAgent, InducedSchemaAgent
 from hpm_ai_v2.agents.mixins.social import SocialForest
-from hpm_ai_v2.utils.state import S_DIM, DIM
+from hpm_ai_v2.domains.list_domain import ListDomainConfig
 
 # ---------------------------------------------------------------------------
 # Curriculum tasks
@@ -71,14 +71,16 @@ def main() -> None:
     print("SP67 — hpm_ai_v2 SocialAnalogicalAgent")
     print("=" * 60)
 
-    m_dim = S_DIM + DIM + S_DIM  # 54
-    shared = SocialForest(D=m_dim, cold_dir=Path("data/knowledge_base/sp67_social"))
+    config = ListDomainConfig()
+    shared = SocialForest(D=config.m_dim, cold_dir=Path("data/knowledge_base/sp67_social"))
 
     agent_a = SocialAnalogicalAgent(
+        config=config,
         cold_dir="data/knowledge_base/sp67_a",
         social_forest=shared,
     )
     agent_b = SocialAnalogicalAgent(
+        config=config,
         cold_dir="data/knowledge_base/sp67_b",
         social_forest=shared,
     )
