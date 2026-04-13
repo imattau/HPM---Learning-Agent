@@ -35,7 +35,16 @@ class MetaStrategyController:
     tie-breaking by mean oracle_calls asc.
     """
 
-    DEFAULT_ORDER: List[str] = ["exact", "decompose", "imagine", "bfs"]
+    DEFAULT_ORDER: List[str] = [
+        "exact",
+        "decompose",
+        "imagine",
+        "bfs",
+        "analogy",
+        "social",
+        "recombine",
+        "compose",
+    ]
 
     def __init__(self) -> None:
         # (context_key, strategy) -> [successes, attempts, total_oracle_calls]

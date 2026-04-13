@@ -782,6 +782,14 @@ class Observer:
                 coherence=coh,
             )
             effective_miss_threshold = self.policy.effective_miss_threshold(ctx)
+
+            # NEW: Density-modulated absorption threshold
+            if self.density_tracker:
+                density = self.density_tracker.get_total_density(node.id)
+                # High density makes absorption harder (increases threshold)
+                density_factor = 1.0 + density  # density in [0,1] -> factor [1,2]
+                effective_miss_threshold = int(round(effective_miss_threshold * density_factor))
+
             best_overlap = 0.0
             best_node = None
             for other in snapshot:

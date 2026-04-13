@@ -27,6 +27,7 @@ class L2MacroMixin:
         name: str,
         nodes: List[HFN],
         protect: bool = True,
+        k_components: int = 1,
     ) -> HFN:
         """
         Compose nodes into a named macro and register it in the forest.
@@ -38,6 +39,17 @@ class L2MacroMixin:
             raise ValueError(f"Cannot compose empty node list for macro '{name}'")
         macro.id = f"macro_{name}"
         macro.relation_type = "macro"
+
+        # Apply pluggable probabilistic model if k_components > 1
+        if k_components > 1:
+            from hfn.probabilistic_models import GaussianMixtureModel
+            # Initialize components near the mean with small noise
+            mus = [macro.mu + np.random.randn(self.m_dim) * 0.1 for _ in range(k_components)]
+            sigmas = [np.ones(self.m_dim) * 0.5 for _ in range(k_components)]
+            macro.prob_model = GaussianMixtureModel.from_params(
+                mus, sigmas, weights=[1.0 / k_components] * k_components, use_diag=True
+            )
+
         self.patterns[name] = macro
         # Register in observer so it participates in retrieval
         if macro.id not in self.forest:
@@ -49,6 +61,7 @@ class L2MacroMixin:
         name: str,
         code_str: str,
         sample_inputs: Optional[List[Any]] = None,
+        k_components: int = 1,
     ) -> "HFN":
         """
         Register a macro directly from a Python code string.
@@ -75,6 +88,15 @@ class L2MacroMixin:
             relation_type="macro",
             use_diag=True,
         )
+
+        if k_components > 1:
+            from hfn.probabilistic_models import GaussianMixtureModel
+            mus = [full_mu + np.random.randn(self.m_dim) * 0.1 for _ in range(k_components)]
+            sigmas = [np.ones(self.m_dim) * 0.5 for _ in range(k_components)]
+            node.prob_model = GaussianMixtureModel.from_params(
+                mus, sigmas, weights=[1.0 / k_components] * k_components, use_diag=True
+            )
+
         node._code = code_str  # stored verbatim for renderer
         self.patterns[name] = node
         if node.id not in self.forest:

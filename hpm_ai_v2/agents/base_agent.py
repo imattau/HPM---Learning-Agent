@@ -25,7 +25,7 @@ import numpy as np
 from hfn.hfn import HFN
 from hfn.tiered_forest import TieredForest
 from hfn.observer import Observer
-from hfn.retriever import GoalConditionedRetriever
+from hfn.retriever import GoalConditionedRetriever, HybridRetriever, StructuralRetriever, GeometricRetriever
 
 from hpm_ai_v2.utils.executor import PythonExecutor, _eval_path_worker
 from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
@@ -58,6 +58,7 @@ class BaseHFNAgent:
         use_affective_evaluator: bool = False,
         n_workers: Optional[int] = None,
         renderer: Optional[Renderer] = None,
+        retriever_type: str = "goal_conditioned",
         **kwargs: Any,
     ) -> None:
         self.config = config
@@ -73,14 +74,21 @@ class BaseHFNAgent:
             hot_cap=hot_cap,
         )
 
-        # Retriever (goal-conditioned: emphasises delta / outcome slice)
+        # Retriever
         target_slice = slice(self.s_dim + self.dim, self.m_dim)
-        self.retriever = GoalConditionedRetriever(
-            self.forest,
-            target_slice=target_slice,
-            target_weight=50.0,
-            weight_provider=lambda nid: self.observer.get_weight(nid),
-        )
+        if retriever_type == "hybrid":
+            self.retriever = HybridRetriever(self.forest)
+        elif retriever_type == "structural":
+            self.retriever = StructuralRetriever(self.forest)
+        elif retriever_type == "geometric":
+            self.retriever = GeometricRetriever(self.forest)
+        else:
+            # Default to goal-conditioned for backward compatibility
+            self.retriever = GoalConditionedRetriever(
+                self.forest,
+                target_slice=target_slice,
+                target_weight=50.0,
+            )
 
         # Pattern dynamics: Observer
         self.observer = Observer(
@@ -92,6 +100,10 @@ class BaseHFNAgent:
             use_density_tracker=use_density_tracker,
             use_affective_evaluator=use_affective_evaluator,
         )
+        
+        # Link retriever to observer's weight provider if applicable
+        if hasattr(self.retriever, 'weight_provider'):
+            self.retriever.weight_provider = lambda nid: self.observer.get_weight(nid)
 
         # Parallelism
         self.n_workers: int = n_workers if n_workers is not None else os.cpu_count() or 1
@@ -170,6 +182,33 @@ class BaseHFNAgent:
             if s not in order:
                 order.append(s)
         return [(name, self._strategies[name]) for name in order if name in self._strategies]
+
+    def select_next_task(
+        self,
+        task_pool: List[Tuple[str, str, List[Any], List[Any]]],
+        learnability_dict: Dict[str, float],
+    ) -> Tuple[str, str, List[Any], List[Any]]:
+        """
+        Active Learning: Select next task from pool using affective curiosity.
+        Requires use_affective_evaluator=True.
+        """
+        if not self.observer.affective_evaluator:
+            # Fallback to random if no affective evaluator
+            idx = np.random.randint(len(task_pool))
+            return task_pool[idx]
+
+        probs = []
+        for task_id, _, _, _ in task_pool:
+            learnability = learnability_dict.get(task_id, 0.5)
+            # Higher curiosity for tasks with mid-range learnability
+            prob = self.observer.affective_evaluator.curiosity_exploration_probability(
+                learnability
+            )
+            probs.append(max(1e-6, float(prob)))
+
+        probs = np.array(probs) / sum(probs)
+        chosen_idx = np.random.choice(len(task_pool), p=probs)
+        return task_pool[chosen_idx]
 
     # ------------------------------------------------------------------
     # Core solve loop
