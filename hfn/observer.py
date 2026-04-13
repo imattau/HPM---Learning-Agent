@@ -30,6 +30,7 @@ for when to invoke which Evaluator method.
 from __future__ import annotations
 
 import numpy as np
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -128,6 +129,10 @@ class Observer:
         weight_decay_rate: float = 0.0,        # global weight decay rate (0.0 = disabled)
         retriever: Retriever = None,           # injectable retriever (default: GeometricRetriever)
         decoder = None,                        # injectable decoder for predictive coding
+        use_density_tracker: bool = False,     # optional pattern density tracking
+        use_affective_evaluator: bool = False, # optional affective state management
+        density_cold_dir: Path | None = None,
+        affective_cold_dir: Path | None = None,
     ):
         self.forest = forest
         self.retriever = retriever or GeometricRetriever(forest)
@@ -161,10 +166,22 @@ class Observer:
         self.max_expand_depth = max_expand_depth
         self.vocab: list | None = vocab
         self._in_gap_query: bool = False
-        self.density_tracker = None # Optional PatternDensityTracker
+
+        # --- Density Tracker & Affective Evaluator ---
+        self.density_tracker = None
+        if use_density_tracker:
+            from hfn.density import PatternDensityTracker
+            self.density_tracker = PatternDensityTracker(self, cold_dir=density_cold_dir)
+
+        self._affective_enabled = False
+        if use_affective_evaluator:
+            from hfn.affective import AffectiveEvaluator
+            self.evaluator: Evaluator = AffectiveEvaluator(cold_dir=affective_cold_dir)
+            self._affective_enabled = True
+        else:
+            self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
 
         # Collaborators (HPM layer 3 + structural executor)
-        self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator()
         self.recombination: Recombination = recombination if recombination is not None else Recombination()
         self.policy: DecisionPolicy = policy if policy is not None else DecisionPolicy(
             search=SearchPolicyConfig(tau=tau, budget=budget),
@@ -368,6 +385,13 @@ class Observer:
         self._track_cooccurrence(result.explanation_tree)
         self._check_absorption()
         self._check_node_creation(x, result)
+
+        # Update affective evaluator if enabled
+        if self._affective_enabled:
+            success = len(result.explanation_tree) > 0
+            pattern_id = result.explanation_tree[0].id if success else "global"
+            self.evaluator.update_from_outcome(pattern_id, success, result.residual_surprise)
+
         return result
 
     # --- Public expansion API ---
@@ -498,12 +522,16 @@ class Observer:
                 self._init_node(node)
                 s = self._get_state(nid)
 
+            # Get affective bonus if enabled
+            aff_bonus = 1.0
+            if self._affective_enabled and hasattr(self.evaluator, 'get_affective_bonus'):
+                aff_bonus = 1.0 + self.evaluator.get_affective_bonus(nid)
+
             # Apply global decay to all non-protected nodes
             if self.weight_decay_rate > 0 and nid not in self.protected_ids:
                 s.mu[0] *= (1.0 - self.weight_decay_rate)
 
             if nid in self.protected_ids:
-
                 if self.prior_plasticity:
                     if nid in effective_explaining_ids:
                         self._prior_hit_counts[nid] += 1
@@ -514,14 +542,20 @@ class Observer:
 
             if nid in effective_explaining_ids:
                 acc = result.accuracy_scores.get(nid, 0.0)
+                # Apply affective bonus to accuracy
+                effective_acc = min(1.0, acc * aff_bonus)
                 s.mu[0] = self.policy.weight_update(
                     current_weight=float(s.mu[0]),
                     explaining=True,
-                    accuracy=acc,
+                    accuracy=effective_acc,
                     overlap_sum=0.0,
                 )
                 s.mu[2] = 0  # reset miss_count
                 s.mu[3] += 1  # increment hit_count
+
+                # Update density tracker on success
+                if self.density_tracker:
+                    self.density_tracker.update_evaluator_reinforcement(nid, success=True)
             else:
                 overlap_sum = 0.0
                 for explaining_node in result.explanation_tree:
@@ -538,6 +572,14 @@ class Observer:
                     for n in result.explanation_tree
                 ):
                     s.mu[2] += 1  # increment miss_count
+
+                # Update density tracker on failure
+                if self.density_tracker:
+                    self.density_tracker.update_evaluator_reinforcement(nid, success=False)
+
+            # Update field amplification for explaining nodes
+            if self.density_tracker and nid in effective_explaining_ids:
+                self.density_tracker.update_field_amplification(nid, time.time())
 
     def _check_prior_plasticity(self, x: np.ndarray) -> None:
         """Drift low-density priors toward observations they keep missing (HPM Section 2.6).
@@ -872,6 +914,10 @@ class Observer:
                 id=node_id,
             )
         self.register(new_node)
+
+        # Update density structural connectivity
+        if self.density_tracker:
+            self.density_tracker.update_structural_connectivity(new_node)
 
     def _collect_compression_candidates(self, threshold: float) -> list[tuple[str, list[str]]]:
         # Collect all qualifying pairs from cooccurrence HFNs in meta_forest
