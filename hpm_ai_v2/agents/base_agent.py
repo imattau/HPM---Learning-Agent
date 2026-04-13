@@ -192,7 +192,7 @@ class BaseHFNAgent:
         Active Learning: Select next task from pool using affective curiosity.
         Requires use_affective_evaluator=True.
         """
-        if not self.observer.affective_evaluator:
+        if not hasattr(self.observer, 'evaluator') or not hasattr(self.observer.evaluator, 'curiosity_exploration_probability'):
             # Fallback to random if no affective evaluator
             idx = np.random.randint(len(task_pool))
             return task_pool[idx]
@@ -201,7 +201,7 @@ class BaseHFNAgent:
         for task_id, _, _, _ in task_pool:
             learnability = learnability_dict.get(task_id, 0.5)
             # Higher curiosity for tasks with mid-range learnability
-            prob = self.observer.affective_evaluator.curiosity_exploration_probability(
+            prob = self.observer.evaluator.curiosity_exploration_probability(
                 learnability
             )
             probs.append(max(1e-6, float(prob)))
