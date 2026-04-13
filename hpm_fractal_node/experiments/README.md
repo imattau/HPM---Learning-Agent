@@ -81,6 +81,95 @@ PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_generative_forward_
 
 ---
 
+## Experiment 47: Meta-Strategy Controller (SP63)
+Demonstrates **HPM Level 5: Meta-patterns / Metacognition**. The agent observes its own
+solve behaviour across tasks, learns which strategies succeed in which contexts
+(goal_type × n_macros_bucket), and adapts strategy selection accordingly. Oracle call
+overhead is reduced to ≤80% of the fixed-order baseline.
+
+### Tasks / Phases
+| Phase | Task | Method |
+|-------|------|--------|
+| 1 | add_1, mul_2, sub_1 (scalar) | Enumeration + strategy recording |
+| 2 | MAP+1 (list) | BFS + strategy recording |
+| 3 | MAP*2 (list) | Macro decomposition + recording |
+| 4 | FILTER_pos (list) | Macro decomposition + recording |
+| 5 | 6 novel tasks | Meta-directed strategy selection |
+| 6 | Same 6 tasks | Fixed-order baseline comparison |
+| 7 | — | Meta-pattern report |
+
+### Success Conditions
+- Phase 5: strategy_match ≥ 4/6 tasks → Meta-controller selects learned strategy
+- Phase 6: meta_oracle_calls ≤ 0.80 × baseline → Oracle efficiency demonstrated
+- Phase 7: ≥ 3 distinct meta-patterns encoded → L5 meta-patterns emerge
+
+See [README_meta_strategy_controller.md](README_meta_strategy_controller.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_meta_strategy_controller.py
+```
+
+---
+
+## Experiment 48: Cross-Domain Structural Analogy Transfer — AGI Stretch (SP64)
+Demonstrates **HPM L5 expertise: structural analogy across surface-different domains**.
+MAP and FILTER schemas learned on integer lists transfer to string lists with **zero
+domain-B training examples**. The scaffold nodes (VAR_INP, LIST_INIT, FOR_LOOP, etc.)
+are domain-invariant; only the op slot differs across domains.
+
+### Tasks / Phases
+| Phase | Task | Method | Domain-B examples |
+|-------|------|--------|-------------------|
+| 1–4 | add_1, MAP+1, MAP*2, FILTER_pos | Same as SP63 | — |
+| 5 | Learnability probe | LearnabilityProbe.assess() | 0 |
+| 6 | MAP_upper: ["hello"] → ["HELLO"] | DomainTransferBridge substitution | 0 |
+| 7 | FILTER_starts_a: keep words starting with 'a' | Bridge substitution | 0 |
+| 8 | Classification robustness | 3 probe tasks | 0 |
+
+### Success Conditions
+- Phase 5: classification == "analogous"
+- Phase 6: MAP_upper depth ≤ 2 AND 0 domain-B training examples
+- Phase 7: FILTER_starts_a depth ≤ 2 AND 0 domain-B training examples
+- Phase 8: 3/3 correct learnability classifications
+
+See [README_cross_domain_analogy.md](README_cross_domain_analogy.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_cross_domain_analogy.py
+```
+
+---
+
+## Experiment 49: Autonomous Op Discovery (SP65)
+Removes the last hand-seeded assumption — the L1 op vocabulary. The agent discovers
+its own primitive ops from raw I/O pairs: element type detection activates a candidate
+library; empirical consistency testing filters candidates; intersection mode resolves
+ambiguity. The schema BFS + oracle pipeline runs unchanged on discovered ops.
+
+### Tasks / Phases
+| Phase | Task | Key result |
+|-------|------|------------|
+| 1 | Integer bootstrap from 3 seed examples | ≥ 3 ops discovered |
+| 2 | Schema acquisition on discovered ops | MAP + FILTER macros |
+| 3 | String bootstrap | str_upper + str_cond_a discovered |
+| 4 | Cross-domain transfer with discovered string ops | depth ≤ 2, 0 domain-B examples |
+| 5 | Float bootstrap | Duck-typed from int library |
+| 6 | Ambiguity resolution | 2nd example narrows to val *= 2 |
+
+### Success Conditions
+- All 6 phases pass → General HPM AI L1 bootstrapping demonstrated
+
+See [README_autonomous_op_discovery.md](README_autonomous_op_discovery.md) for full analysis.
+
+### Running
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_autonomous_op_discovery.py
+```
+
+---
+
 # HPM Hierarchical Abstraction Experiments (SP54-SP56)
 
 This directory contains experiments for **HPM-Native Synthesis, Library Discovery, and Compositional Abstraction**.
