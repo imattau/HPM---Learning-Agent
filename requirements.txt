@@ -7,3 +7,4 @@ datasets>=2.0      # ARC benchmark: HuggingFace dataset loading
 pymunk>=6.0        # PhyRE physics benchmark (SP7): 2D rigid-body simulation
 psutil>=5.9        # TieredForest: memory monitoring and disk paging
 Pillow>=10.0       # ImageDomain core
+librosa>=0.10.0    # AudioDomain core

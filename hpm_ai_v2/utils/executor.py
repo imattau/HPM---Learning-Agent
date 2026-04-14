@@ -14,11 +14,18 @@ def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any]) -> 
     Module-level worker for ProcessPoolExecutor — must be picklable.
     Re-executes code_str in a fresh namespace and checks against expected outputs.
     """
+    import numpy as np
     executor = PythonExecutor()
     results, _ = executor.run_batch(code_str, inputs)
     if len(results) != len(expected):
         return False
-    return all(r == e for r, e in zip(results, expected))
+    for r, e in zip(results, expected):
+        if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
+            if not np.allclose(r, e, atol=1e-4):
+                return False
+        elif r != e:
+            return False
+    return True
 
 
 class PythonExecutor:

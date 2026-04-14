@@ -473,7 +473,11 @@ class BaseHFNAgent:
         if len(results) != len(expected):
             return False
         for r, e in zip(results, expected):
-            if r != e:
+            if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
+                # For arrays, use allclose to handle float precision
+                if not np.allclose(r, e, atol=1e-4):
+                    return False
+            elif r != e:
                 return False
         return True
 
