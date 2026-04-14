@@ -95,3 +95,44 @@ class CountingOracle(EmpiricalOracle):
     ) -> np.ndarray:
         self.call_count += 1
         return super().compute_state(outputs, errors, code)
+
+
+class ImageOracle(EmpiricalOracle):
+    """Computes empirical state vector for PIL image outputs."""
+
+    def __init__(self, config: "DomainConfig"):
+        super().__init__(config)
+        self.call_count = 0
+
+    def compute_state(
+        self,
+        outputs: List[Any],
+        errors: List[Optional[str]],
+        code: str = "",
+    ) -> np.ndarray:
+        self.call_count += 1
+        s_dim = self.config.S_DIM
+        s = np.zeros(s_dim)
+        valid_outputs = [o for o, e in zip(outputs, errors) if e is None]
+        if not valid_outputs:
+            s[0] = 0.0
+            return s
+        s[0] = 1.0
+        
+        # For each output image (PIL Image), compute statistics
+        pixels = []
+        for img in valid_outputs:
+            try:
+                # convert to grayscale and normalize
+                arr = np.array(img.convert('L')) / 255.0
+                pixels.extend(arr.flatten())
+            except Exception:
+                continue
+        
+        if pixels:
+            s[3] = float(np.mean(pixels))   # mean brightness
+            s[4] = float(np.std(pixels))    # contrast proxy
+            # simple edge presence: high variance
+            s[12] = 1.0 if s[4] > 0.2 else 0.0
+            
+        return s
