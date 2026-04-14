@@ -226,6 +226,21 @@ class BaseHFNAgent:
     # Lifecycle and persistence
     # ------------------------------------------------------------------
 
+    def register_pattern(self, task_id: str, path: List[HFN]) -> None:
+        """Register a successful solution path as a reusable pattern."""
+        if not path:
+            return
+        if len(path) == 1:
+            self.patterns[task_id] = path[0]
+            if path[0].id not in self.forest:
+                self.forest.register(path[0])
+        else:
+            composed = self._compose_sequence(path)
+            if composed:
+                self.patterns[task_id] = composed
+                if composed.id not in self.forest:
+                    self.forest.register(composed)
+
     def _maybe_auto_observe(self, x: Optional[np.ndarray] = None) -> None:
         """Periodically call observer.observe() to drive compression/absorption."""
         if self.auto_observe_frequency <= 0:
@@ -300,6 +315,8 @@ class BaseHFNAgent:
                 )
                 self.meta.record(rec)
                 if success:
+                    self.register_pattern(task_id, path)
+
                     # After successful solve, optionally observe the encoded input
                     if self.auto_observe_frequency > 0:
                         # Encode the first input as a vector (simplified flattening)
@@ -370,7 +387,12 @@ class BaseHFNAgent:
         """Strategy: beam BFS over pattern space, evaluating each depth level in parallel."""
         goal_state = self._outputs_to_goal_state(outputs)
         query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
-        primitives = self.retriever.retrieve(query, k=beam_width)
+
+        if hasattr(self, "_candidate_ops") and self._candidate_ops:
+            primitives = self._candidate_ops
+        else:
+            primitives = self.retriever.retrieve(query, k=beam_width)
+
         if not primitives:
             return None
 

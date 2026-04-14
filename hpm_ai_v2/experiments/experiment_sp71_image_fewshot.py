@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
-from hpm_ai_v2.domains.image_domain import ImageDomainConfig
+from hpm_ai_v2.domains.image_domain import ImageDomainConfig, get_primitive_nodes
 from hpm_ai_v2.domains.image_renderer import ImageRenderer
 from hpm_ai_v2.utils.oracle import ImageOracle
 
@@ -55,7 +55,6 @@ def run_experiment():
 
     config = ImageDomainConfig(image_size=32)
     renderer = ImageRenderer(config)
-    oracle = ImageOracle(config)
     
     agent = BaseHFNAgent(
         config=config,
@@ -63,11 +62,16 @@ def run_experiment():
         cold_dir="data/knowledge_base/sp71_images",
         retriever_type="goal_conditioned" # use simple for fast BFS
     )
-    # BFS is the core discovery mechanism for new domains
+    # exact (macro reuse) is prioritized for speed, falling back to bfs for discovery
+    agent.add_strategy("exact", agent._try_exact)
     agent.add_strategy("bfs", agent._try_bfs)
-    # Inject oracle override
-    agent.oracle = oracle
-    agent.counting_oracle = oracle # for now
+    
+    # Explicitly set candidate operations for BFS
+    agent._candidate_ops = get_primitive_nodes(config)
+    
+    # Inject oracle override with separate instances for counting
+    agent.oracle = ImageOracle(config)
+    agent.counting_oracle = ImageOracle(config)
 
     # 1. Prepare training data (one-shot)
     # Task: Rotate 90 degrees counter-clockwise
@@ -85,7 +89,7 @@ def run_experiment():
     state_inp[:len(flat_inp)] = flat_inp[:config.m_dim]
     agent.observe_example(state_inp)
     
-    success, code, strategy = agent.solve(train_inputs, train_outputs, task_id="rotate_3")
+    success, code, strategy = agent.solve(train_inputs, train_outputs, task_id="rotate_macro")
     
     if success:
         print(f"  [OK] Task solved via {strategy}.")
@@ -100,27 +104,8 @@ def run_experiment():
     test_inputs = [digit5]
     expected_output = digit5.rotate(-90)
     
-    # Run the learned code manually or via agent.solve
-    # If we use agent.solve, it should find the macro immediately via 'exact' (if registered)
-    # Wait, BaseHFNAgent doesn't register the macro automatically in self.patterns.
-    # It just returns it. 
-    # But wait, solve() calls strat_fn which might return a path.
-    # If success, solve returns (True, code, strat_name).
-    
-    # Let's manually register the macro to simulate learning retention
-    # In a real scenario, the agent would have registered it during 'solve' or 'register_macro'
-    # Actually, solve doesn't register. Let's register it.
-    
-    # We need to get the HFN node from the BFS result. 
-    # But solve only returns the code.
-    # Let's re-run BFS to get the node.
-    path = agent._try_bfs(train_inputs, train_outputs)
-    if path:
-        agent.patterns["rotate_macro"] = path[0] if len(path) == 1 else agent._compose_sequence(path)
-        agent.forest.register(agent.patterns["rotate_macro"])
-        print("  [OK] Learned macro registered in patterns.")
-
-    # Now solve for digit 5
+    # Solve for digit 5
+    # Since Phase 1 registered the macro under "rotate_macro", solve() should find it via "exact"
     success_test, code_test, strategy_test = agent.solve(test_inputs, [expected_output], task_id="rotate_5")
     
     if success_test:
