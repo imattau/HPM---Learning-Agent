@@ -30,7 +30,7 @@ from hfn.retriever import GoalConditionedRetriever, HybridRetriever, StructuralR
 
 from hpm_ai_v2.utils.executor import PythonExecutor, _eval_path_worker
 from hpm_ai_v2.utils.oracle import ListOracle, CountingOracle
-from hpm_ai_v2.utils.renderer import ASTRenderer
+from hpm_ai_v2.domains.list_renderer import ListRenderer
 from hpm_ai_v2.utils.base_renderer import Renderer
 from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
 
@@ -113,7 +113,7 @@ class BaseHFNAgent:
         self.n_workers: int = n_workers if n_workers is not None else os.cpu_count() or 1
 
         # Utils
-        self.renderer = renderer if renderer is not None else ASTRenderer(config)
+        self.renderer = renderer if renderer is not None else ListRenderer(config)
         self.oracle = ListOracle(config)
         self.counting_oracle = CountingOracle(self.oracle)
         self.executor = PythonExecutor()

@@ -1,5 +1,5 @@
 """
-ASTRenderer — renders an HFN node tree to executable Python source.
+ListRenderer — renders an HFN node tree to executable Python source.
 
 Ported from experiment_unified_perception_action.py.
 """
@@ -18,7 +18,7 @@ import numpy as np
 from hpm_ai_v2.utils.base_renderer import Renderer
 
 
-class ASTRenderer(Renderer):
+class ListRenderer(Renderer):
     """Converts an HFN node (or tree) into a Python code string via AST."""
 
     def __init__(self, config: "DomainConfig"):

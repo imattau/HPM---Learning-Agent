@@ -23,7 +23,7 @@ hpm_ai_v2/
 ├── utils/
 │   ├── executor.py         # PythonExecutor — sandboxed code execution
 │   ├── oracle.py           # EmpiricalOracle, CountingOracle
-│   ├── renderer.py         # ASTRenderer — HFN node tree → Python source
+│   ├── renderer.py         # ListRenderer — HFN node tree → Python source
 │   ├── forward_model.py    # StateTransitionModel — per-node delta learning
 │   └── meta_controller.py  # MetaStrategyController, SolveRecord
 └── experiments/
@@ -104,7 +104,7 @@ bob   = SocialAnalogicalAgent("Bob",   shared_forest)
 | `forest` | `TieredForest` | Pattern substrate — stores all HFN nodes |
 | `observer` | `Observer` | Pattern dynamics — learning, compression, weights |
 | `retriever` | `GoalConditionedRetriever` | Goal-conditioned nearest-node lookup |
-| `renderer` | `ASTRenderer` | Converts HFN node tree → executable Python |
+| `renderer` | `ListRenderer` | Converts HFN node tree → executable Python |
 | `executor` | `PythonExecutor` | Runs code strings against input batches |
 | `oracle` | `EmpiricalOracle` | Computes empirical state vector from execution results |
 | `meta` | `MetaStrategyController` | L5: learns which strategy works in which context |
