@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.domains.audio_domain import AudioDomainConfig, get_audio_primitive_nodes
 from hpm_ai_v2.domains.audio_renderer import AudioRenderer
-from hpm_ai_v2.utils.oracle import AudioOracle
+from hpm_ai_v2.utils.oracle import AudioOracle, CountingOracle
 
 def create_sine_melody(frequencies: list[float], duration: float = 1.0, sr: int = 22050) -> np.ndarray:
     """Create a waveform by concatenating sine waves."""
@@ -53,9 +53,9 @@ def run_experiment():
     # Set explicit candidate ops
     agent._candidate_ops = get_audio_primitive_nodes(config)
     
-    # Oracles
+    # Oracles using the new wrapper pattern
     agent.oracle = AudioOracle(config)
-    agent.counting_oracle = AudioOracle(config)
+    agent.counting_oracle = CountingOracle(agent.oracle)
 
     # 1. Training (One-Shot)
     # Melody C4-D4-E4-F4 (approx 261.6, 293.7, 329.6, 349.2 Hz)

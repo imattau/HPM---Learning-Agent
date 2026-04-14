@@ -250,13 +250,13 @@ The module also exports `_eval_path_worker` — the picklable worker used by the
 ### `utils/oracle.py`
 
 ```python
-from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
+from hpm_ai_v2.utils.oracle import ListOracle, CountingOracle
 
-oracle = EmpiricalOracle()
+oracle = ListOracle(config)
 state = oracle.compute_state(results, errors, code_str)  # returns np.ndarray shape (20,)
 
-# CountingOracle wraps EmpiricalOracle and tracks call count
-counting = CountingOracle()
+# CountingOracle wraps any oracle and tracks call count
+counting = CountingOracle(oracle)
 counting.call_count  # int
 ```
 

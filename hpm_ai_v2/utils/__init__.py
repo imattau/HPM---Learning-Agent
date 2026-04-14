@@ -1,6 +1,6 @@
 """hpm_ai_v2.utils — shared utilities ported from hpm_fractal_node/experiments/."""
 from hpm_ai_v2.utils.executor import PythonExecutor
-from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
+from hpm_ai_v2.utils.oracle import ListOracle, CountingOracle, EmpiricalOracle
 from hpm_ai_v2.utils.base_renderer import Renderer
 from hpm_ai_v2.utils.renderer import ASTRenderer
 from hpm_ai_v2.utils.forward_model import StateTransitionModel

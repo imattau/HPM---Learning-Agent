@@ -29,7 +29,7 @@ from hfn.observer import Observer
 from hfn.retriever import GoalConditionedRetriever, HybridRetriever, StructuralRetriever, GeometricRetriever
 
 from hpm_ai_v2.utils.executor import PythonExecutor, _eval_path_worker
-from hpm_ai_v2.utils.oracle import EmpiricalOracle, CountingOracle
+from hpm_ai_v2.utils.oracle import ListOracle, CountingOracle
 from hpm_ai_v2.utils.renderer import ASTRenderer
 from hpm_ai_v2.utils.base_renderer import Renderer
 from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
@@ -114,8 +114,8 @@ class BaseHFNAgent:
 
         # Utils
         self.renderer = renderer if renderer is not None else ASTRenderer(config)
-        self.oracle = EmpiricalOracle(config)
-        self.counting_oracle = CountingOracle(config)
+        self.oracle = ListOracle(config)
+        self.counting_oracle = CountingOracle(self.oracle)
         self.executor = PythonExecutor()
 
         # Pattern evaluator: MetaStrategyController (L5)

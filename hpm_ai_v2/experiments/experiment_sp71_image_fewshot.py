@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.domains.image_domain import ImageDomainConfig, get_primitive_nodes
 from hpm_ai_v2.domains.image_renderer import ImageRenderer
-from hpm_ai_v2.utils.oracle import ImageOracle
+from hpm_ai_v2.utils.oracle import ImageOracle, CountingOracle
 
 def create_mock_digit(digit: int, size: int = 32) -> Image.Image:
     """Create a simple grayscale PIL image representing a digit."""
@@ -69,9 +69,9 @@ def run_experiment():
     # Explicitly set candidate operations for BFS
     agent._candidate_ops = get_primitive_nodes(config)
     
-    # Inject oracle override with separate instances for counting
+    # Inject oracle override using the new wrapper pattern
     agent.oracle = ImageOracle(config)
-    agent.counting_oracle = ImageOracle(config)
+    agent.counting_oracle = CountingOracle(agent.oracle)
 
     # 1. Prepare training data (one-shot)
     # Task: Rotate 90 degrees counter-clockwise
