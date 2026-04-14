@@ -42,15 +42,9 @@ class GraphRenderer(Renderer):
                 lines.append("G.clear()")
             elif op == "COPY_GRAPH":
                 lines.append("G = G.copy()")
-            elif op == "ADD_STAR":
-                # Special concept for the star extension
-                lines.append("new_node = max(G.nodes)+1 if G.nodes else 0")
-                lines.append("nodes_to_connect = list(G.nodes)")
-                lines.append("G.add_node(new_node)")
-                lines.append("for n in nodes_to_connect:")
-                lines.append("    G.add_edge(new_node, n)")
-        
-        lines.append("res = G")
+
+            lines.append("res = G")
+
         return "\n".join(lines)
 
     def render_function(self, node: HFN, func_name: str = "macro_func") -> str:

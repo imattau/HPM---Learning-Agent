@@ -15,8 +15,7 @@ class GraphDomainConfig(DomainConfig):
         concepts = [
             "ADD_NODE", "REMOVE_NODE",
             "ADD_EDGE", "REMOVE_EDGE",
-            "CLEAR_GRAPH", "COPY_GRAPH",
-            "ADD_STAR"
+            "CLEAR_GRAPH", "COPY_GRAPH"
         ]
         # S_DIM=20, DIM=len(concepts), m_dim = S_DIM + DIM + S_DIM
         super().__init__(concepts, s_dim=20)
