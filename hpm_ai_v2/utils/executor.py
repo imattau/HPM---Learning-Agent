@@ -39,6 +39,7 @@ class PythonExecutor:
             "    val = 0\n"
             "    res = None\n"
             "    " + indented + "\n"
+            "    return res\n"
         )
         results: List[Any] = []
         errors: List[Optional[str]] = []
