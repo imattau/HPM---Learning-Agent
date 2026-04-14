@@ -27,8 +27,9 @@ hpm_ai_v2/
 │   ├── forward_model.py    # StateTransitionModel — per-node delta learning
 │   └── meta_controller.py  # MetaStrategyController, SolveRecord
 └── experiments/
+    ├── README.md           # Experiments Index — validation suite documentation
     ├── run_sp67.py         # SP67: Multi-agent social recombination example
-    └── experiment_ms_sl.py # MS-SL: Multi-specialist social learning experiment
+    └── experiment_sp80_comparative_benchmark.py # SOTA Comparative Benchmark
 ```
 
 ---
@@ -364,9 +365,9 @@ The `hfn/` package is the shared core used by both.
 
 ---
 
-## Running the example experiment
+## Running the SOTA Benchmark
 
 ```bash
 cd /path/to/HPM---Learning-Agent
-PYTHONPATH=. python3 hpm_ai_v2/experiments/run_sp67.py
+PYTHONPATH=. .venv/bin/python hpm_ai_v2/experiments/experiment_sp80_comparative_benchmark.py
 ```

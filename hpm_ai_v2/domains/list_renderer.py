@@ -74,9 +74,13 @@ class ListRenderer(Renderer):
         for leaf in leaves:
             concept = self._get_concept(leaf)
             if not concept:
-                continue
-            if concept in {"OP_ADD", "OP_SUB"}:
-                continue
+                # Map common study phase macro IDs to their corresponding concepts
+                if "scalar_add1" in leaf.id:
+                    concept = "OP_ADD"
+                elif "scalar_mul2" in leaf.id:
+                    concept = "OP_MUL2"
+                else:
+                    continue
             if concept == "BLOCK_END":
                 if len(stack) > 1:
                     stack.pop()
@@ -94,6 +98,24 @@ class ListRenderer(Renderer):
                 curr_block.append(ast.Assign(
                     targets=[ast.Name(id='x', ctx=ast.Store())],
                     value=ast.Name(id='inp', ctx=ast.Load())))
+            elif concept == "OP_ADD":
+                if curr_block and isinstance(curr_block[-1], ast.Pass):
+                    curr_block.pop()
+                target = (ast.Name(id='val', ctx=ast.Store())
+                          if len(stack) > 1
+                          else ast.Name(id='x', ctx=ast.Store()))
+                curr_block.append(ast.AugAssign(
+                    target=target, op=ast.Add(),
+                    value=ast.Constant(value=1)))
+            elif concept == "OP_SUB":
+                if curr_block and isinstance(curr_block[-1], ast.Pass):
+                    curr_block.pop()
+                target = (ast.Name(id='val', ctx=ast.Store())
+                          if len(stack) > 1
+                          else ast.Name(id='x', ctx=ast.Store()))
+                curr_block.append(ast.AugAssign(
+                    target=target, op=ast.Sub(),
+                    value=ast.Constant(value=1)))
             elif concept == "GROUNDED_OP":
                 delta = leaf.mu[self.config.S_DIM + self.config.DIM + 3]
                 if curr_block and isinstance(curr_block[-1], ast.Pass):
@@ -181,6 +203,43 @@ class ListRenderer(Renderer):
                         attr='append', ctx=ast.Load()),
                     args=[ast.Name(id='val', ctx=ast.Load())], keywords=[]))
                 curr_block.append(append_call)
+            elif concept == "MAP_START":
+                # Composite: VAR_INP + LIST_INIT + FOR_LOOP + ITEM_ACCESS
+                if curr_block and isinstance(curr_block[-1], ast.Pass):
+                    curr_block.pop()
+                # 1. x = inp
+                curr_block.append(ast.Assign(
+                    targets=[ast.Name(id='x', ctx=ast.Store())],
+                    value=ast.Name(id='inp', ctx=ast.Load())))
+                # 2. res = []
+                curr_block.append(ast.Assign(
+                    targets=[ast.Name(id='res', ctx=ast.Store())],
+                    value=ast.List(elts=[], ctx=ast.Load())))
+                # 3. for item in list(x): val = item
+                for_node = ast.For(
+                    target=ast.Name(id='item', ctx=ast.Store()),
+                    iter=ast.Call(
+                        func=ast.Name(id='list', ctx=ast.Load()),
+                        args=[ast.Name(id='x', ctx=ast.Load())], keywords=[]),
+                    body=[ast.Assign(
+                        targets=[ast.Name(id='val', ctx=ast.Store())],
+                        value=ast.Name(id='item', ctx=ast.Load()))],
+                    orelse=[])
+                curr_block.append(for_node)
+                stack.append(for_node.body)
+            elif concept == "MAP_END":
+                # Composite: LIST_APPEND + BLOCK_END
+                if curr_block and isinstance(curr_block[-1], ast.Pass):
+                    curr_block.pop()
+                # 1. res.append(val)
+                curr_block.append(ast.Expr(value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id='res', ctx=ast.Load()),
+                        attr='append', ctx=ast.Load()),
+                    args=[ast.Name(id='val', ctx=ast.Load())], keywords=[])))
+                # 2. BLOCK_END
+                if len(stack) > 1:
+                    stack.pop()
             elif concept == "COND_IS_EVEN":
                 if curr_block and isinstance(curr_block[-1], ast.Pass):
                     curr_block.pop()

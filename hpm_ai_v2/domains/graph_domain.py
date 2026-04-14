@@ -13,12 +13,17 @@ class GraphDomainConfig(DomainConfig):
     """
     def __init__(self):
         concepts = [
+            "VAR_INP",
             "ADD_NODE", "REMOVE_NODE",
             "ADD_EDGE", "REMOVE_EDGE",
-            "CLEAR_GRAPH", "COPY_GRAPH"
+            "CLEAR_GRAPH", "COPY_GRAPH",
+            "FOR_EACH_NODE", "RELABEL_NODE",
+            "BLOCK_END"
         ]
         # S_DIM=20, DIM=len(concepts), m_dim = S_DIM + DIM + S_DIM
         super().__init__(concepts, s_dim=20)
+        # Include node/edge stats in structural dims for imagination
+        self.STRUCT_DIMS = [0, 3, 4, 5] + list(range(10, 17))
 
 def get_graph_primitive_nodes(config: GraphDomainConfig) -> List[HFN]:
     """

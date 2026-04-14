@@ -233,7 +233,21 @@ class TieredForest(Forest):
                 use_diag=bool(data["use_diag"]),
                 prob_model=prob_model
             )
-            # Restore child links if saved
+            
+            # Restore HFN metadata
+            if "metadata" in data:
+                metadata = pickle.loads(data["metadata"].item())
+                node.relation_type = metadata.get("relation_type")
+                node.relation_params = metadata.get("relation_params", {})
+                # Resolve input/output nodes by ID
+                for iid in metadata.get("inputs_ids", []):
+                    inode = self.get(iid)
+                    if inode: node.inputs.append(inode)
+                for oid in metadata.get("outputs_ids", []):
+                    onode = self.get(oid)
+                    if onode: node.outputs.append(onode)
+
+            # Restore child links if saved (legacy PART_OF edges)
             child_ids_str = str(data["child_ids_str"]) if "child_ids_str" in data else ""
             for cid in (child_ids_str.split(",") if child_ids_str else []):
                 child = self.get(cid)
@@ -246,18 +260,17 @@ class TieredForest(Forest):
         except Exception:
             return None
 
-    def _evict_lru(self) -> None:
-        # Find the LRU node that isn't protected
-        evict_id = None
-        for candidate in list(self._hot.keys()):
-            if candidate not in self._protected_ids:
-                evict_id = candidate
-                break
-        if evict_id is None:
-            return  # All hot nodes are protected — nothing to evict
-        node = self._hot.pop(evict_id)
-        nid = evict_id
-        # Save to cold
+    def save_to_cold(self) -> None:
+        """Persist all hot nodes to cold storage."""
+        # We need to save ALL hot nodes, including protected ones, 
+        # because this is a shutdown/checkpoint, not an eviction sweep.
+        for nid in list(self._hot.keys()):
+            node = self._hot.get(nid)
+            if node:
+                self._save_node(nid, node)
+
+    def _save_node(self, nid: str, node: HFN) -> None:
+        """Internal helper to serialize a single node to its .npz file."""
         path = self._cold_path(nid)
         
         # Serialize probabilistic model
@@ -268,7 +281,15 @@ class TieredForest(Forest):
             "params": node.prob_model.get_state()
         }
         
-        # Store child IDs as a comma-joined string to avoid pickle
+        # NEW: Serialize HFN metadata (multi-arity composition)
+        metadata = {
+            "relation_type": node.relation_type,
+            "relation_params": node.relation_params,
+            "inputs_ids": [n.id for n in node.inputs],
+            "outputs_ids": [n.id for n in node.outputs]
+        }
+        
+        # Store child IDs as a comma-joined string to avoid pickle for basic structure
         child_ids_str = ",".join(c.id for c in node.children()) if node.children() else ""
         np.savez_compressed(
             path,
@@ -276,8 +297,21 @@ class TieredForest(Forest):
             sigma=node.sigma,
             use_diag=node.use_diag,
             child_ids_str=np.array(child_ids_str),
-            model_state=np.array(pickle.dumps(m_state))
+            model_state=np.array(pickle.dumps(m_state)),
+            metadata=np.array(pickle.dumps(metadata))
         )
+
+    def _evict_lru(self) -> None:
+        # Find the LRU node that isn't protected
+        evict_id = None
+        for candidate in list(self._hot.keys()):
+            if candidate not in self._protected_ids:
+                evict_id = candidate
+                break
+        if evict_id is None:
+            return  # All hot nodes are protected — nothing to evict
+        node = self._hot.pop(evict_id)
+        self._save_node(evict_id, node)
 
     def _on_observe(self) -> None:
         self._obs_count += 1

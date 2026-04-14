@@ -34,6 +34,7 @@ class GraphOracle(BaseOracle):
         n_nodes = []
         n_edges = []
         avg_degs = []
+        node_labels = []
         for G in valid_outputs:
             if isinstance(G, nx.Graph):
                 try:
@@ -42,6 +43,11 @@ class GraphOracle(BaseOracle):
                     n_nodes.append(n)
                     n_edges.append(e)
                     avg_degs.append(2.0 * e / n if n > 0 else 0.0)
+                    
+                    # Extract numeric labels if possible
+                    labels = [n for n in G.nodes() if isinstance(n, (int, float))]
+                    if labels:
+                        node_labels.extend(labels)
                 except Exception:
                     continue
         
@@ -50,6 +56,12 @@ class GraphOracle(BaseOracle):
             s[3] = float(np.mean(n_nodes)) / 100.0
             s[4] = float(np.mean(n_edges)) / 100.0
             s[5] = float(np.mean(avg_degs)) / 10.0
+            
+            if node_labels:
+                s[6] = float(np.mean(node_labels)) / 100.0
+                s[7] = float(np.min(node_labels)) / 100.0
+                s[8] = float(np.max(node_labels)) / 100.0
+            
             # binary flags for simple structural features
             s[10] = 1.0 if any(n > 0 for n in n_nodes) else 0.0
             s[11] = 1.0 if any(e > 0 for e in n_edges) else 0.0

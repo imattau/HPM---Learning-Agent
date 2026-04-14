@@ -15,6 +15,8 @@ LIST_CONCEPTS = [
     "COND_IS_POSITIVE",
     "BLOCK_ELSE",
     "BLOCK_END",
+    "MAP_START",
+    "MAP_END",
 ]
 
 class ListDomainConfig(DomainConfig):

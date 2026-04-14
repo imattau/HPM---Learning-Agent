@@ -14,6 +14,7 @@ import numpy as np
 
 from hfn.hfn import HFN
 from hpm_ai_v2.utils.forward_model import StateTransitionModel
+from hpm_ai_v2.utils.hfn_forward_model import HFNStateTransitionModel
 
 
 class L4ForwardModelMixin:
@@ -27,7 +28,15 @@ class L4ForwardModelMixin:
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.forward_model = StateTransitionModel()
+        
+        use_hfn = kwargs.get("use_hfn_forward_model", False)
+        cold_dir = kwargs.get("forward_model_cold_dir")
+        
+        if use_hfn:
+            self.forward_model = HFNStateTransitionModel(self.config, cold_dir)
+        else:
+            self.forward_model = StateTransitionModel()
+            
         self._oracle_calls_imagination = 0
 
     # ------------------------------------------------------------------
@@ -81,7 +90,12 @@ class L4ForwardModelMixin:
         """
         goal_state = self._outputs_to_goal_state(outputs)
         query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
-        primitives = self.retriever.retrieve(query, k=beam_width)
+        
+        if hasattr(self, "_candidate_ops") and self._candidate_ops:
+            primitives = self._candidate_ops
+        else:
+            primitives = self.retriever.retrieve(query, k=beam_width)
+            
         if not primitives:
             return None
 
@@ -89,8 +103,9 @@ class L4ForwardModelMixin:
         empty_results, empty_errors = self.executor.run_batch("", inputs)
         start_state = self.oracle.compute_state(empty_results, empty_errors, "")
 
-        # Goal: structural dims of the goal state
-        goal_struct = goal_state[self.config.STRUCT_DIMS]
+        # Goal: structural dims of the goal state (which is in the delta slice)
+        idx_offset = self.s_dim + self.dim
+        goal_struct = goal_state[idx_offset + np.array(self.config.STRUCT_DIMS)]
 
         queue: deque = deque()
         for p in primitives:

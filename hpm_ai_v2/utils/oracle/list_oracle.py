@@ -58,6 +58,7 @@ class ListOracle(BaseOracle):
                 maxs.append(sf)
                 firsts.append(sf)
                 lasts.append(sf)
+        
         s[1] = float(np.mean(is_list)) if is_list else 0.0
         s[2] = float(np.mean(lens)) if lens else 0.0
         s[3] = float(np.mean(means)) if means else 0.0

@@ -33,6 +33,7 @@ from hpm_ai_v2.utils.oracle import ListOracle, CountingOracle
 from hpm_ai_v2.domains.list_renderer import ListRenderer
 from hpm_ai_v2.utils.base_renderer import Renderer
 from hpm_ai_v2.utils.meta_controller import MetaStrategyController, SolveRecord
+from hpm_ai_v2.utils.hfn_meta_controller import HFNMetaStrategyController
 
 if TYPE_CHECKING:
     from hpm_ai_v2.domains.base import DomainConfig
@@ -80,19 +81,23 @@ class BaseHFNAgent:
 
         # Retriever
         target_slice = slice(self.s_dim + self.dim, self.m_dim)
+        base_retriever = None
         if retriever_type == "hybrid":
-            self.retriever = HybridRetriever(self.forest)
+            base_retriever = HybridRetriever(self.forest)
         elif retriever_type == "structural":
-            self.retriever = StructuralRetriever(self.forest)
+            base_retriever = StructuralRetriever(self.forest)
         elif retriever_type == "geometric":
-            self.retriever = GeometricRetriever(self.forest)
+            base_retriever = GeometricRetriever(self.forest)
         else:
             # Default to goal-conditioned for backward compatibility
-            self.retriever = GoalConditionedRetriever(
+            base_retriever = GoalConditionedRetriever(
                 self.forest,
                 target_slice=target_slice,
                 target_weight=50.0,
             )
+        
+        from hfn.retriever import MacroPrioritizingRetriever
+        self.retriever = MacroPrioritizingRetriever(base_retriever)
 
         # Pattern dynamics: Observer
         self.observer = Observer(
@@ -119,7 +124,13 @@ class BaseHFNAgent:
         self.executor = PythonExecutor()
 
         # Pattern evaluator: MetaStrategyController (L5)
-        self.meta = MetaStrategyController()
+        use_hfn_meta = kwargs.get("use_hfn_meta_controller", False)
+        meta_cold_dir = kwargs.get("meta_cold_dir")
+        
+        if use_hfn_meta:
+            self.meta = HFNMetaStrategyController(meta_cold_dir)
+        else:
+            self.meta = MetaStrategyController()
 
         # Generic pattern storage: pattern_id -> HFN node
         self.patterns: Dict[str, HFN] = {}
@@ -146,7 +157,10 @@ class BaseHFNAgent:
 
     def _inject_blank_priors(self) -> None:
         """Inject one prior node per concept into the forest."""
-        list_concepts = {"LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND"}
+        list_concepts = {
+            "LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND", 
+            "MAP_START", "MAP_END", "COND_IS_EVEN", "COND_IS_POSITIVE"
+        }
         delta_offset = self.s_dim + self.dim
         for i, c in enumerate(self.config.concepts):
             mu = np.zeros(self.m_dim)
@@ -316,6 +330,10 @@ class BaseHFNAgent:
                 self.meta.record(rec)
                 if success:
                     self.register_pattern(task_id, path)
+                    
+                    # Record transitions for forward model (L4)
+                    if hasattr(self, "_record_transitions"):
+                        self._record_transitions(path, inputs)
 
                     # After successful solve, optionally observe the encoded input
                     if self.auto_observe_frequency > 0:
@@ -472,10 +490,17 @@ class BaseHFNAgent:
         """Check whether execution results match expected outputs."""
         if len(results) != len(expected):
             return False
+        import networkx as nx
         for r, e in zip(results, expected):
             if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
                 # For arrays, use allclose to handle float precision
                 if not np.allclose(r, e, atol=1e-4):
+                    return False
+            elif isinstance(r, nx.Graph) and isinstance(e, nx.Graph):
+                # Compare graphs by node and edge sets
+                if set(r.nodes()) != set(e.nodes()):
+                    return False
+                if set(r.edges()) != set(e.edges()):
                     return False
             elif r != e:
                 return False
@@ -489,10 +514,26 @@ class BaseHFNAgent:
         """Serialise agent state (patterns + meta stats) to disk."""
         save_path = Path(path) if path else self.cold_dir / "agent_state.pkl"
         save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 1. Patterns
         state = {
             "patterns": self.patterns,
-            "meta_stats": dict(self.meta._stats),
         }
+        
+        # 2. Meta Stats (L5)
+        if hasattr(self.meta, "_stats"):
+            state["meta_stats"] = dict(self.meta._stats)
+        elif hasattr(self.meta, "save_state"):
+            self.meta.save_state()
+            
+        # 3. Forward Model (L4) - if it has its own persistence
+        if hasattr(self, "forward_model") and hasattr(self.forward_model, "save_state"):
+            self.forward_model.save_state()
+            
+        # 4. Global Forest
+        if hasattr(self.forest, "save_to_cold"):
+            self.forest.save_to_cold()
+
         with open(save_path, "wb") as f:
             pickle.dump(state, f)
         return save_path
@@ -505,5 +546,7 @@ class BaseHFNAgent:
         with open(load_path, "rb") as f:
             state = pickle.load(f)
         self.patterns = state.get("patterns", {})
-        if "meta_stats" in state:
+        
+        # Meta stats recovery for dict-based controller
+        if "meta_stats" in state and hasattr(self.meta, "_stats"):
             self.meta._stats.update(state["meta_stats"])

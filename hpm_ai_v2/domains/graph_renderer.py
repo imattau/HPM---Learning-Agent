@@ -25,25 +25,40 @@ class GraphRenderer(Renderer):
         lines = [
             "import networkx as nx",
             "G = inp.copy() if hasattr(inp, 'copy') else nx.Graph(inp)",
-            "# apply operations in order"
+            "res = G"
         ]
+        
+        indent = 0
         for op in ops:
-            if op == "ADD_NODE":
-                lines.append("G.add_node(max(G.nodes)+1 if G.nodes else 0)")
+            if op == "BLOCK_END":
+                if indent > 0: indent -= 1
+                continue
+                
+            prefix = "    " * indent
+            if op == "VAR_INP":
+                lines.append(f"{prefix}G = inp.copy() if hasattr(inp, 'copy') else nx.Graph(inp)")
+            elif op == "ADD_NODE":
+                lines.append(f"{prefix}G.add_node(max(G.nodes)+1 if G.nodes else 0)")
             elif op == "REMOVE_NODE":
-                lines.append("if G.nodes: G.remove_node(max(G.nodes))")
+                lines.append(f"{prefix}if G.nodes: G.remove_node(max(G.nodes))")
             elif op == "ADD_EDGE":
-                lines.append("if len(G.nodes) >= 2:")
-                lines.append("    nodes = list(G.nodes)")
-                lines.append("    G.add_edge(nodes[0], nodes[1])")
+                lines.append(f"{prefix}if len(G.nodes) >= 2:")
+                lines.append(f"{prefix}    nodes = list(G.nodes)")
+                lines.append(f"{prefix}    G.add_edge(nodes[0], nodes[1])")
             elif op == "REMOVE_EDGE":
-                lines.append("if G.edges: G.remove_edge(*list(G.edges)[0])")
+                lines.append(f"{prefix}if G.edges: G.remove_edge(*list(G.edges)[0])")
             elif op == "CLEAR_GRAPH":
-                lines.append("G.clear()")
+                lines.append(f"{prefix}G.clear()")
             elif op == "COPY_GRAPH":
-                lines.append("G = G.copy()")
+                lines.append(f"{prefix}G = G.copy()")
+            elif op == "FOR_EACH_NODE":
+                lines.append(f"{prefix}for node in list(G.nodes()):")
+                indent += 1
+                prefix = "    " * indent # Update prefix for the 'res = G' and body
+            elif op == "RELABEL_NODE":
+                lines.append(f"{prefix}G = nx.relabel_nodes(G, {{node: node + 1}})")
 
-            lines.append("res = G")
+            lines.append(f"{prefix}res = G")
 
         return "\n".join(lines)
 

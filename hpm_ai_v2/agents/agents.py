@@ -4,7 +4,7 @@ Concrete HPM agents built from BaseHFNAgent + mixins.
 InducedSchemaAgent   — Base + L2 + L3
 ImaginativeAgent     — Base + L2 + L4
 AnalogicalAgent      — Base + L2
-SocialAnalogicalAgent — Base + L2 + L4 + Social + Recombination
+SocialAnalogicalAgent — Base + L2 + L4 + Social + Recombination + Analogy
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any, List, Optional
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.agents.mixins.l2_macro import L2MacroMixin
 from hpm_ai_v2.agents.mixins.l3_relational import L3RelationalMixin
+from hpm_ai_v2.agents.mixins.l3_analogy import L3AnalogyMixin
 from hpm_ai_v2.agents.mixins.l4_forward import L4ForwardModelMixin
 from hpm_ai_v2.agents.mixins.social import SocialMixin
 from hpm_ai_v2.agents.mixins.recombination import RecombinationMixin
@@ -79,22 +80,26 @@ class AnalogicalAgent(L2MacroMixin, BaseHFNAgent):
 class SocialAnalogicalAgent(
     SequentialCompositionMixin,
     RecombinationMixin,
+    L3AnalogyMixin,
+    L3RelationalMixin,
     SocialMixin,
     L4ForwardModelMixin,
     L2MacroMixin,
     BaseHFNAgent,
 ):
     """
-    Full HPM agent: L1–L5 + social sharing + recombination.
+    Full HPM agent: L1–L5 + social sharing + recombination + analogy.
 
     MRO (left to right):
-      SequentialCompositionMixin -> RecombinationMixin -> SocialMixin ->
-      L4ForwardModelMixin -> L2MacroMixin -> BaseHFNAgent
+      SequentialCompositionMixin -> RecombinationMixin -> L3AnalogyMixin ->
+      L3RelationalMixin -> SocialMixin -> L4ForwardModelMixin ->
+      L2MacroMixin -> BaseHFNAgent
 
     Capabilities:
     - All ImaginativeAgent capabilities
     - Social pattern sharing via SocialForest
-    - Cross-domain recombination (analogical insight)
+    - Cross-domain analogy (L3)
+    - Recombination (analogical insight)
     - Sequential composition of macros via AST
     - Meta-strategy controller (L5)
     """
@@ -104,6 +109,7 @@ class SocialAnalogicalAgent(
         self.add_strategy("exact", self._try_exact)
         self.add_strategy("decompose", self._try_decompose)
         self.add_strategy("social", self._try_social)
+        self.add_strategy("analogy", self._try_l3_analogy)
         self.add_strategy("recombine", self._try_recombine)
         self.add_strategy("compose", self._try_sequential_compose)
         self.add_strategy("imagine", self._try_imagine)
