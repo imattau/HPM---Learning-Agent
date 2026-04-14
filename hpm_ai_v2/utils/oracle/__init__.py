@@ -5,6 +5,7 @@ from .base import BaseOracle, CountingOracle
 from .list_oracle import ListOracle
 from .image_oracle import ImageOracle
 from .audio_oracle import AudioOracle
+from .graph_oracle import GraphOracle
 
 # For backward compatibility
 EmpiricalOracle = ListOracle
