@@ -4,7 +4,7 @@ SP74: Graph Domain Few-Shot Learning – Macro Composition and Reuse
 Demonstrates HPM learning a graph transformation macro from a single example.
 - Transformation: Add two new nodes to the graph.
 - Training: chain graph 0-1-2 → chain + 2 new nodes.
-- Test: triangle graph 0-1-2-0 → triangle + 2 new nodes.
+- Test: square graph 0-1-2-3 → square + 2 new nodes.
 - Shows: BFS discovery of composition [ADD_NODE, ADD_NODE] followed by macro reuse.
 """
 
@@ -29,25 +29,7 @@ from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.domains.graph_domain import GraphDomainConfig, get_graph_primitive_nodes
 from hpm_ai_v2.domains.graph_renderer import GraphRenderer
 from hpm_ai_v2.utils.oracle import GraphOracle, CountingOracle
-from hfn.retriever import Retriever
-
-class MacroBoostRetriever(Retriever):
-    """
-    Custom retriever that wraps an existing retriever but explicitly
-    boosts macros to the top of the candidate list. This overcomes the issue
-    where structural similarity prefers primitives (leaf nodes) when queried
-    with a leaf-node goal state.
-    """
-    def __init__(self, base_retriever: Retriever):
-        super().__init__(base_retriever.forest)
-        self.base_retriever = base_retriever
-
-    def retrieve(self, query, k=10):
-        # Fetch a wider pool to ensure macro is present
-        candidates = self.base_retriever.retrieve(query, k=max(k * 2, 20))
-        # Re-rank: macros first, then preserve original order
-        candidates.sort(key=lambda n: 0 if n.relation_type == "macro" else 1)
-        return candidates[:k]
+from hfn.retriever import MacroPrioritizingRetriever
 
 def run_experiment():
     print("=" * 70)
@@ -66,7 +48,7 @@ def run_experiment():
     )
     
     # Wrap the retriever to ensure macro reuse is prioritized
-    agent.retriever = MacroBoostRetriever(agent.retriever)
+    agent.retriever = MacroPrioritizingRetriever(agent.retriever)
     agent.observer.retriever = agent.retriever
 
     # Register strategies: exact (macro reuse) before bfs (discovery)
@@ -105,19 +87,19 @@ def run_experiment():
         return
 
     # 2. Generalization (Macro Reuse)
-    print("\n[Phase 2] Generalizing to triangle graph (0-1-2-0) → add 2 nodes")
-    # Triangle graph 0-1-2-0
+    print("\n[Phase 2] Generalizing to 4-node square graph → add 2 nodes")
+    # Square graph 0-1, 1-2, 2-3, 3-0
     test_input = nx.Graph()
-    test_input.add_edges_from([(0, 1), (1, 2), (2, 0)])
-    # Target: triangle + 2 new nodes (3, 4)
+    test_input.add_edges_from([(0, 1), (1, 2), (2, 3), (3, 0)])
+    # Target: square + 2 new nodes (4, 5)
     test_output = test_input.copy()
-    test_output.add_node(3)
     test_output.add_node(4)
+    test_output.add_node(5)
 
     success_test, code_test, strategy_test = agent.solve([test_input], [test_output], task_id="add_two_nodes_test")
     
     if success_test:
-        print(f"  [OK] Triangle solved via {strategy_test}.")
+        print(f"  [OK] Test graph solved via {strategy_test}.")
         # Verify output structure
         results, _ = agent.executor.run_batch(code_test, [test_input])
         result_graph = results[0]

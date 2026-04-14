@@ -244,3 +244,20 @@ class HybridRetriever(Retriever):
             scored.append((total, node))
         scored.sort(reverse=True, key=lambda x: x[0])
         return [node for _, node in scored[:k]]
+
+
+class MacroPrioritizingRetriever(Retriever):
+    """
+    Wraps an existing retriever and boosts macros to the top of results.
+    Useful for ensuring composition reuse when the goal state query is a leaf.
+    """
+    def __init__(self, base_retriever: Retriever):
+        super().__init__(base_retriever.forest)
+        self.base_retriever = base_retriever
+
+    def retrieve(self, query: 'HFN', k: int = 10) -> list['HFN']:
+        # Fetch a wider pool to ensure macro is present
+        candidates = self.base_retriever.retrieve(query, k=max(k * 2, 20))
+        # Re-rank: macros (relation_type == "macro") first
+        candidates.sort(key=lambda n: 0 if n.relation_type == "macro" else 1)
+        return candidates[:k]
