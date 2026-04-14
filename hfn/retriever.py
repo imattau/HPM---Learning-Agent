@@ -117,7 +117,8 @@ class GoalConditionedRetriever(Retriever):
             diff = node.mu - query.mu
             
             # Apply target weight to the specific slice
-            weighted_diff = diff.copy()
+            # Ensure float64 to avoid UFuncOutputCastingError if mu is int64
+            weighted_diff = diff.astype(np.float64)
             weighted_diff[self.target_slice] *= self.target_weight
             
             dist = float(np.sum(weighted_diff**2))

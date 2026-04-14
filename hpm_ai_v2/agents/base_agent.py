@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import random
 import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -59,6 +60,9 @@ class BaseHFNAgent:
         n_workers: Optional[int] = None,
         renderer: Optional[Renderer] = None,
         retriever_type: str = "goal_conditioned",
+        auto_observe_frequency: int = 0,
+        replay_buffer_size: int = 100,
+        auto_save_frequency: int = 0,
         **kwargs: Any,
     ) -> None:
         self.config = config
@@ -123,6 +127,14 @@ class BaseHFNAgent:
         # Strategy registry: name -> callable(inputs, outputs) -> Optional[List[HFN]]
         self._strategies: Dict[str, Callable] = {}
         self._strategy_order: List[str] = []
+
+        # Lifecycle and persistence
+        self.auto_observe_frequency = auto_observe_frequency
+        self._observe_counter = 0
+        self._replay_buffer: List[np.ndarray] = []
+        self._replay_buffer_size = replay_buffer_size
+        self.auto_save_frequency = auto_save_frequency
+        self._solve_counter = 0
 
         # Inject priors if forest is empty
         if len(self.forest) == 0:
@@ -211,6 +223,40 @@ class BaseHFNAgent:
         return task_pool[chosen_idx]
 
     # ------------------------------------------------------------------
+    # Lifecycle and persistence
+    # ------------------------------------------------------------------
+
+    def _maybe_auto_observe(self, x: Optional[np.ndarray] = None) -> None:
+        """Periodically call observer.observe() to drive compression/absorption."""
+        if self.auto_observe_frequency <= 0:
+            return
+        self._observe_counter += 1
+        if self._observe_counter >= self.auto_observe_frequency:
+            self._observe_counter = 0
+            if x is not None:
+                self.observer.observe(x)
+            elif self._replay_buffer:
+                sample = random.choice(self._replay_buffer)
+                self.observer.observe(sample)
+
+    def observe_example(self, x: np.ndarray) -> None:
+        """Explicitly observe an input vector (e.g., during training)."""
+        self.observer.observe(x)
+        self._replay_buffer.append(x)
+        if len(self._replay_buffer) > self._replay_buffer_size:
+            self._replay_buffer.pop(0)
+        self._maybe_auto_observe()
+
+    def _maybe_save_state(self) -> None:
+        """Automatically save agent state periodically."""
+        if self.auto_save_frequency <= 0:
+            return
+        self._solve_counter += 1
+        if self._solve_counter >= self.auto_save_frequency:
+            self._solve_counter = 0
+            self.save_state()
+
+    # ------------------------------------------------------------------
     # Core solve loop
     # ------------------------------------------------------------------
 
@@ -254,6 +300,15 @@ class BaseHFNAgent:
                 )
                 self.meta.record(rec)
                 if success:
+                    # After successful solve, optionally observe the encoded input
+                    if self.auto_observe_frequency > 0:
+                        # Encode the first input as a vector (simplified flattening)
+                        flat = np.array(inputs[0]).flatten()
+                        if len(flat) < self.m_dim:
+                            flat = np.pad(flat, (0, self.m_dim - len(flat)))
+                        self._maybe_auto_observe(flat[:self.m_dim])
+
+                    self._maybe_save_state()
                     return True, code, strat_name
         return False, None, "none"
 

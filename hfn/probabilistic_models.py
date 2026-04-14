@@ -67,7 +67,8 @@ class FlatGaussianModel(ProbabilisticModel):
         diff = np.asarray(x, dtype=float) - self.mu
         D = self.mu.shape[0]
         if self._sigma_diag is not None:
-            z2 = float(np.dot(diff * diff, 1.0 / self._sigma_diag))
+            # Diagonal case: -0.5 * (sum((x-mu)^2 / sigma) + sum(log(sigma)) + D*log(2pi))
+            z2 = float(np.sum((diff * diff) / self._sigma_diag))
             return -0.5 * (z2 + self._log_det_cached + D * np.log(2.0 * np.pi))
         try:
             chol = np.linalg.cholesky(self.sigma)
@@ -89,7 +90,9 @@ class FlatGaussianModel(ProbabilisticModel):
         diff = self.mu - other.mu
         if self._sigma_diag is not None and other._sigma_diag is not None:
             combined_diag = self._sigma_diag + other._sigma_diag
-            return float(np.exp(-0.5 * float(np.dot(diff * diff, 1.0 / combined_diag))))
+            # Use np.sum to ensure scalar result for diagonal Gaussian overlap
+            val = np.sum((diff * diff) / combined_diag)
+            return float(np.exp(-0.5 * float(val)))
         # Mixed case: expand diag to full matrix
         s_sigma = np.diag(self._sigma_diag) if (self.use_diag and self._sigma_diag is not None) else self.sigma
         o_sigma = np.diag(other._sigma_diag) if (other.use_diag and other._sigma_diag is not None) else other.sigma

@@ -33,8 +33,11 @@ class PythonExecutor:
         if not code_str:
             return [None] * len(inputs), ["EmptyCode"] * len(inputs)
         indented = code_str.replace('\n', '\n    ')
+        # Use 'inputs' so the code can access the full batch if needed (e.g. for compositions)
+        # But traditionally code strings use 'inp' for the current element.
+        # Let's support both.
         code = (
-            "def test_func(inp):\n"
+            "def test_func(inp, inputs):\n"
             "    x = 0\n"
             "    val = 0\n"
             "    res = None\n"
@@ -56,7 +59,8 @@ class PythonExecutor:
                     results.append(None)
                     errors.append("TypeError")
                     continue
-                results.append(test_func(copy.deepcopy(inp)))
+                # Pass both the current element 'inp' and the full batch 'inputs'
+                results.append(test_func(copy.deepcopy(inp), copy.deepcopy(inputs)))
                 errors.append(None)
             except Exception as e:
                 results.append(None)

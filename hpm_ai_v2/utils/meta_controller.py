@@ -51,6 +51,7 @@ class MetaStrategyController:
         self._stats: Dict[Tuple, Dict[str, List[int]]] = defaultdict(
             lambda: {s: [0, 0, 0] for s in self.DEFAULT_ORDER}
         )
+        self.history: List[SolveRecord] = []
 
     def _bucket(self, n_macros: int) -> int:
         if n_macros == 0:
@@ -64,6 +65,7 @@ class MetaStrategyController:
 
     def record(self, rec: SolveRecord) -> None:
         """Update strategy success rates for this context."""
+        self.history.append(rec)
         key = self._context_key(rec.goal_type, rec.n_macros)
         if rec.strategy not in self._stats[key]:
             self._stats[key][rec.strategy] = [0, 0, 0]
