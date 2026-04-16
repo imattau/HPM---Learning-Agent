@@ -11,6 +11,7 @@ FLUID_CONCEPTS = [
     "VAR_THETA",       # Load theta
     "OP_MUL_Q",        # res = res * Q
     "OP_MUL_RHO",      # res = res * rho
+    "OP_MUL",          # b = pop(); a = pop(); push(a * b)
     "OP_SQUARE",       # res = res**2
     "OP_SIN",          # res = sin(res)
     "OP_SIGN",         # res = sign(res)
