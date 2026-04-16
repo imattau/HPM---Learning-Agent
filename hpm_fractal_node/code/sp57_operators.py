@@ -159,4 +159,4 @@ class OperatorOracle:
         # For priming, we usually assume bias-only (Add) or weight-only (Mul)
         # depending on the context. In true HPM, the search resolves this.
         # Here we'll return a 'Delta' operator (Add) as the default primitive.
-        return Operator(weight=1.0, bias=v_curr - v_prev, name=name)
+        return AffineOperator(weight=1.0, bias=v_curr - v_prev, name=name)

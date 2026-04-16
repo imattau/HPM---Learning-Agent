@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Any, Optional, TYPE_CHECKING
 from hfn.tiered_forest import TieredForest
 from hfn.hfn import HFN
+from hfn.recombination import Recombination
 
 if TYPE_CHECKING:
     from hpm_ai_v2.domains.base import DomainConfig
@@ -24,22 +25,8 @@ class HFNStateTransitionModel:
             cold_dir=cold_dir or Path("data/knowledge_base/forward_model_deltas"),
             forest_id="forward_model"
         )
-        self.alpha = 1.0  # EMA learning rate
-
-    def _get_delta_node(self, node_id: str) -> HFN:
-        """Fetch or create an HFN node to store the delta for a given primitive/macro."""
-        delta_id = f"delta:{node_id}"
-        node = self.delta_forest.get(delta_id)
-        if node is None:
-            # Initialize with zero delta and flat sigma
-            node = HFN(
-                mu=np.zeros(self.config.S_DIM),
-                sigma=np.ones(self.config.S_DIM),
-                id=delta_id,
-                use_diag=True
-            )
-            self.delta_forest.register(node)
-        return node
+        self.recombination = Recombination()
+        self.alpha = 0.1  # EMA learning rate
 
     def record_path(self, path: List[HFN], state_sequence: List[np.ndarray]) -> None:
         """
@@ -51,9 +38,17 @@ class HFNStateTransitionModel:
 
         for i, node in enumerate(path):
             delta = state_sequence[i+1] - state_sequence[i]
-            delta_node = self._get_delta_node(node.id)
-            # Update delta node mu via Exponential Moving Average
-            delta_node.mu = (1.0 - self.alpha) * delta_node.mu + self.alpha * delta
+            delta_id = f"delta:{node.id}"
+            existing = self.delta_forest.get(delta_id)
+            if existing is None:
+                # Create a delta node that references the pattern node via inputs
+                new_node = self.recombination.aggregate(
+                    [node], lambda mus: delta, delta_id, "transition"
+                )
+                self.delta_forest.register(new_node)
+            else:
+                # EMA update of existing mu
+                existing.mu = (1.0 - self.alpha) * existing.mu + self.alpha * delta
 
     def predict(self, current_state: np.ndarray, node: HFN) -> np.ndarray:
         """

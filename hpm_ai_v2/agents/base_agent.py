@@ -124,10 +124,10 @@ class BaseHFNAgent:
         self.executor = PythonExecutor()
 
         # Pattern evaluator: MetaStrategyController (L5)
-        use_hfn_meta = kwargs.get("use_hfn_meta_controller", False)
+        use_fractal_meta = kwargs.get("use_fractal_meta", kwargs.get("use_hfn_meta_controller", False))
         meta_cold_dir = kwargs.get("meta_cold_dir")
         
-        if use_hfn_meta:
+        if use_fractal_meta:
             self.meta = HFNMetaStrategyController(meta_cold_dir)
         else:
             self.meta = MetaStrategyController()
@@ -159,7 +159,8 @@ class BaseHFNAgent:
         """Inject one prior node per concept into the forest."""
         list_concepts = {
             "LIST_INIT", "FOR_LOOP", "ITEM_ACCESS", "LIST_APPEND", 
-            "MAP_START", "MAP_END", "COND_IS_EVEN", "COND_IS_POSITIVE"
+            "MAP_START", "MAP_END", "COND_IS_EVEN", "COND_IS_POSITIVE",
+            "FOR_EACH_FRAME", "FRAME_APPEND"
         }
         delta_offset = self.s_dim + self.dim
         for i, c in enumerate(self.config.concepts):
@@ -251,6 +252,7 @@ class BaseHFNAgent:
         else:
             composed = self._compose_sequence(path)
             if composed:
+                composed.id = f"macro_{task_id}"
                 self.patterns[task_id] = composed
                 if composed.id not in self.forest:
                     self.forest.register(composed)
@@ -327,7 +329,9 @@ class BaseHFNAgent:
                     success=success,
                     wall_ms=wall_ms,
                 )
-                self.meta.record(rec)
+                
+                pattern_used = path[0] if len(path) == 1 else self._compose_sequence(path)
+                self.meta.record(rec, pattern_used)
                 if success:
                     self.register_pattern(task_id, path)
                     
@@ -345,6 +349,20 @@ class BaseHFNAgent:
 
                     self._maybe_save_state()
                     return True, code, strat_name
+            else:
+                # Strategy failed to even find a path
+                wall_ms = (time.time() - t0) * 1000
+                rec = SolveRecord(
+                    task_id=task_id,
+                    goal_type=goal_type,
+                    n_macros=n_macros,
+                    strategy=strat_name,
+                    depth=0,
+                    oracle_calls=self.counting_oracle.call_count - oracle_calls_before,
+                    success=False,
+                    wall_ms=wall_ms,
+                )
+                self.meta.record(rec, None)
         return False, None, "none"
 
     def _render_path(self, path: List[HFN]) -> str:
@@ -400,7 +418,7 @@ class BaseHFNAgent:
         inputs: List[Any],
         outputs: List[Any],
         max_depth: int = 4,
-        beam_width: int = 10,
+        beam_width: int = 20,
     ) -> Optional[List[HFN]]:
         """Strategy: beam BFS over pattern space, evaluating each depth level in parallel."""
         goal_state = self._outputs_to_goal_state(outputs)
@@ -431,9 +449,6 @@ class BaseHFNAgent:
                 code = self.renderer.render(composed)
                 candidates.append((code, path))
 
-            if not candidates:
-                break
-
             # Evaluate all candidates at this level in parallel
             if self.n_workers > 1 and len(candidates) > 1:
                 with ProcessPoolExecutor(max_workers=self.n_workers) as pool:
@@ -457,7 +472,11 @@ class BaseHFNAgent:
                 break
 
             # Expand next level
-            next_nodes = self.retriever.retrieve(query, k=beam_width)
+            if hasattr(self, "_candidate_ops") and self._candidate_ops:
+                next_nodes = self._candidate_ops
+            else:
+                next_nodes = self.retriever.retrieve(query, k=beam_width)
+
             next_level: List[List[HFN]] = []
             for path in current_level:
                 for nxt in next_nodes:
@@ -490,19 +509,27 @@ class BaseHFNAgent:
         """Check whether execution results match expected outputs."""
         if len(results) != len(expected):
             return False
-        import networkx as nx
-        for r, e in zip(results, expected):
+            
+        def is_equal(r: Any, e: Any) -> bool:
             if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
-                # For arrays, use allclose to handle float precision
-                if not np.allclose(r, e, atol=1e-4):
-                    return False
-            elif isinstance(r, nx.Graph) and isinstance(e, nx.Graph):
-                # Compare graphs by node and edge sets
-                if set(r.nodes()) != set(e.nodes()):
-                    return False
-                if set(r.edges()) != set(e.edges()):
-                    return False
-            elif r != e:
+                res = np.allclose(r, e, atol=1e-4)
+                return res
+            if isinstance(r, list) and isinstance(e, list):
+                if len(r) != len(e): return False
+                return all(is_equal(ri, ei) for ri, ei in zip(r, e))
+            import networkx as nx
+            if isinstance(r, nx.Graph) and isinstance(e, nx.Graph):
+                return set(r.nodes()) == set(e.nodes()) and set(r.edges()) == set(e.edges())
+            try:
+                return bool(r == e)
+            except ValueError:
+                # Handle cases like nested arrays that we missed
+                if isinstance(r, (list, tuple, np.ndarray)) and isinstance(e, (list, tuple, np.ndarray)):
+                    return np.array_equal(r, e)
+                return False
+
+        for r, e in zip(results, expected):
+            if not is_equal(r, e):
                 return False
         return True
 

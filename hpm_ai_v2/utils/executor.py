@@ -19,11 +19,22 @@ def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any]) -> 
     results, _ = executor.run_batch(code_str, inputs)
     if len(results) != len(expected):
         return False
-    for r, e in zip(results, expected):
+        
+    def is_equal(r: Any, e: Any) -> bool:
         if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
-            if not np.allclose(r, e, atol=1e-4):
-                return False
-        elif r != e:
+            return np.allclose(r, e, atol=1e-4)
+        if isinstance(r, list) and isinstance(e, list):
+            if len(r) != len(e): return False
+            return all(is_equal(ri, ei) for ri, ei in zip(r, e))
+        try:
+            return bool(r == e)
+        except ValueError:
+            if isinstance(r, (list, tuple, np.ndarray)) and isinstance(e, (list, tuple, np.ndarray)):
+                return np.array_equal(r, e)
+            return False
+
+    for r, e in zip(results, expected):
+        if not is_equal(r, e):
             return False
     return True
 

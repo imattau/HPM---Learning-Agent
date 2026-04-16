@@ -18,7 +18,7 @@ from hfn.hfn import HFN
 from hfn.forest import Forest
 from hfn.observer import Observer
 from hfn.retriever import GeometricRetriever
-from hpm_fractal_node.code.sp57_operators import OperatorOracle, Operator, S_DIM
+from hpm_fractal_node.code.sp57_operators import OperatorOracle, Operator, AffineOperator, S_DIM
 
 D = 60 # [30D Content | 30D Operator Parameters]
 PARAM_OFFSET = 30
@@ -48,20 +48,20 @@ class OperatorCompositionExperiment:
         return vec
 
     def decode_op_from_vec(self, vec: np.ndarray, name: str = "decoded") -> Operator:
-        return Operator(weight=vec[PARAM_OFFSET], bias=vec[PARAM_OFFSET+1], name=name)
+        return AffineOperator(weight=vec[PARAM_OFFSET], bias=vec[PARAM_OFFSET+1], name=name)
 
     # --- Training Phases ---
 
     def run_phase_1_primitives(self):
         print("\n--- PHASE 1: OPERATOR PRIMITIVE FORMATION ---")
         # 1. Add_1 Primitive
-        op_add = Operator(weight=1.0, bias=0.1, name="Add_1") # 0.1 in manifold = 1.0 numeric
+        op_add = AffineOperator(weight=1.0, bias=0.1, name="Add_1") # 0.1 in manifold = 1.0 numeric
         s1 = self.oracle.encode(10)
         v1 = self.encode_op_node(op_add, s1)
         self.observer.observe(v1)
         
         # 2. Mul_2 Primitive
-        op_mul = Operator(weight=2.0, bias=0.0, name="Mul_2")
+        op_mul = AffineOperator(weight=2.0, bias=0.0, name="Mul_2")
         s2 = self.oracle.encode(5)
         v2 = self.encode_op_node(op_mul, s2)
         self.observer.observe(v2)
@@ -72,14 +72,14 @@ class OperatorCompositionExperiment:
         print("\n--- PHASE 2: OPERATOR STABILIZATION ---")
         # Constant Add sequence
         seq_add = [1, 2, 3, 4, 5]
-        op = Operator(weight=1.0, bias=0.1, name="Add_1")
+        op = AffineOperator(weight=1.0, bias=0.1, name="Add_1")
         for x in seq_add:
             v = self.encode_op_node(op, self.oracle.encode(x))
             self.observer.observe(v)
             
         # Constant Mul sequence
         seq_mul = [1, 2, 4, 8, 16]
-        op = Operator(weight=2.0, bias=0.0, name="Mul_2")
+        op = AffineOperator(weight=2.0, bias=0.0, name="Mul_2")
         for x in seq_mul:
             v = self.encode_op_node(op, self.oracle.encode(x))
             self.observer.observe(v)
@@ -180,9 +180,9 @@ class OperatorCompositionExperiment:
             return mean_err
 
         # Baseline: Add_1 only
-        evaluate(Operator(1.0, 0.1, "Add_1"), "Baseline: Constant Addition")
+        evaluate(AffineOperator(1.0, 0.1, "Add_1"), "Baseline: Constant Addition")
         # Baseline: Mul_2 only
-        evaluate(Operator(2.0, 0.0, "Mul_2"), "Baseline: Constant Multiplication")
+        evaluate(AffineOperator(2.0, 0.0, "Mul_2"), "Baseline: Constant Multiplication")
         # Full HPM
         err_hpm = evaluate(best_chain, "SP57: Composed Operator x -> 2x+1")
         

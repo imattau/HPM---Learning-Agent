@@ -17,7 +17,9 @@ Two operations:
 """
 
 from __future__ import annotations
+from typing import Callable, List
 
+import numpy as np
 from hfn.hfn import HFN
 from hfn.forest import Forest
 
@@ -144,3 +146,19 @@ class Recombination:
         new_node.id = new_id or f"recomb_{macro_a.id[:4]}_{macro_b.id[:4]}"
         forest.register(new_node)
         return new_node
+
+    def aggregate(
+        self,
+        nodes: List[HFN],
+        agg_func: Callable[[List[np.ndarray]], np.ndarray],
+        new_id: str,
+        relation_type: str = "aggregate",
+    ) -> HFN:
+        """Create a node whose inputs are `nodes` and mu = agg_func([n.mu for n in nodes])."""
+        mus = [n.mu for n in nodes]
+        new_mu = agg_func(mus)
+        new_sigma = np.ones_like(new_mu)
+        node = HFN(mu=new_mu, sigma=new_sigma, id=new_id, use_diag=True)
+        node.inputs = nodes
+        node.relation_type = relation_type
+        return node

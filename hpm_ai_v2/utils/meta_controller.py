@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hfn.hfn import HFN
 
 
 @dataclass
@@ -63,7 +66,7 @@ class MetaStrategyController:
     def _context_key(self, goal_type: str, n_macros: int) -> Tuple:
         return (goal_type, self._bucket(n_macros))
 
-    def record(self, rec: SolveRecord) -> None:
+    def record(self, rec: SolveRecord, pattern_used: Optional[HFN] = None) -> None:
         """Update strategy success rates for this context."""
         self.history.append(rec)
         key = self._context_key(rec.goal_type, rec.n_macros)
