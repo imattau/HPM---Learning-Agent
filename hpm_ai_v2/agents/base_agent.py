@@ -551,26 +551,49 @@ class BaseHFNAgent:
                     break
 
                 # Evaluate all candidates at this level
-                level_success_path = None
+                level_successes: List[Tuple[float, float, List[HFN]]] = []
                 if pool and len(candidates) > 1:
                     futures = {
-                        pool.submit(_eval_path_worker, code, inputs, outputs, self.tolerance): path
+                        pool.submit(_eval_path_worker, code, inputs, outputs, self.tolerance): (code, path)
                         for code, path in candidates
                     }
                     for fut in as_completed(futures):
-                        if fut.result():
-                            level_success_path = futures[fut]
-                            for f in futures: f.cancel()
-                            break
+                        is_ok = fut.result()
+                        code_eval, path_eval = futures[fut]
+                        if is_ok:
+                            results, errors = self.executor.run_batch(code_eval, inputs)
+                            state = self.oracle.compute_state(results, errors, code_eval, inputs=inputs)
+                            # Mask out structural flags (10+) to avoid bias against correct ops
+                            mask = np.ones(self.s_dim)
+                            mask[10:] = 0.0
+                            dist = float(np.sum(((state - goal_state[:self.s_dim]) * mask)**2))
+                            # Coherence: Average weight of nodes in path
+                            weight = sum(self.observer.get_weight(n.id) for n in path_eval) / len(path_eval)
+                            level_successes.append((dist, -weight, path_eval))
                 else:
                     for code, path in candidates:
-                        results, _ = self.executor.run_batch(code, inputs)
+                        results, errors = self.executor.run_batch(code, inputs)
                         if self._check_outputs(results, outputs):
-                            level_success_path = path
-                            break
+                            state = self.oracle.compute_state(results, errors, code, inputs=inputs)
+                            mask = np.ones(self.s_dim)
+                            mask[10:] = 0.0
+                            dist = float(np.sum(((state - goal_state[:self.s_dim]) * mask)**2))
+                            weight = sum(self.observer.get_weight(n.id) for n in path) / len(path)
+                            level_successes.append((dist, -weight, path))
                 
-                if level_success_path:
-                    return level_success_path
+                if level_successes:
+                    # [UPGRADE] Unified Utility Selection (HPM §3.4)
+                    # Utility = Accuracy (1000/(d+1)) + Coherence (weight)
+                    # Complexity is constant at this depth level.
+                    scored = []
+                    for d, nw, p in level_successes:
+                        weight = -nw
+                        utility = (1000.0 / (d + 1.0)) + weight
+                        scored.append((utility, d, weight, p))
+                    
+                    # Sort by utility (DESC)
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    return scored[0][3]
 
                 if _depth + 1 >= max_depth:
                     break
