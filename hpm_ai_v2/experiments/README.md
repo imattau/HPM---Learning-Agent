@@ -34,6 +34,25 @@ Evaluates **zero-shot sequential composition** of two high-level macros: `filter
 
 ---
 
+## Physical and Chemical Intelligence (SP94–SP97)
+
+These experiments demonstrate HPM's ability to discover and transfer robust physical and chemical laws from noisy, continuous, or confounded data.
+
+| Superpower | Domain | Script | Docs |
+|---|---|---|---|
+| **SP94** | Chemistry | `experiment_sp94_reaction_prediction.py` | [README_SP94.md](./README_SP94.md) |
+| **SP95** | Fluid Dynamics | `experiment_sp95_inverse_sprinkler.py` | [README_SP95.md](./README_SP95.md) |
+| **SP96** | Physics | `experiment_sp96_projectile_motion.py` | [README_SP96.md](./README_SP96.md) |
+| **SP97** | Causal | `experiment_sp97_spurious_resistance.py` | [README_SP97.md](./README_SP97.md) |
+
+**Key Breakthroughs**:
+- **One-Shot Reaction Prediction (SP94)**: Learns complex bit-level molecular transformations from a single example.
+- **Inverse Sprinkler Problem (SP95)**: Discovers non-intuitive physical invariants that defy simple statistical correlations.
+- **Noise-Robust Discovery (SP96)**: Extracts quadratic laws ($0.5 g t^2$) from noisy continuous trajectories.
+- **Spurious Resistance (SP97)**: Detects the failure of statistical shortcuts under distribution shift and recovers true structural invariants.
+
+---
+
 ## Social and Lifelong Learning
 
 ### [MS-SL] Multi-Specialist Social Learning

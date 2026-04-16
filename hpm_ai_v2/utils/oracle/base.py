@@ -9,7 +9,13 @@ class BaseOracle(ABC):
     """Abstract base class for all oracles."""
     
     @abstractmethod
-    def compute_state(self, outputs: List[Any], errors: List[Optional[str]], code: str = "") -> np.ndarray:
+    def compute_state(
+        self,
+        outputs: List[Any],
+        errors: List[Optional[str]],
+        code: str = "",
+        inputs: Optional[List[Any]] = None,
+    ) -> np.ndarray:
         pass
 
 class CountingOracle(BaseOracle):
@@ -23,6 +29,12 @@ class CountingOracle(BaseOracle):
     def config(self) -> Any:
         return getattr(self.wrapped, 'config', None)
 
-    def compute_state(self, outputs: List[Any], errors: List[Optional[str]], code: str = "") -> np.ndarray:
+    def compute_state(
+        self,
+        outputs: List[Any],
+        errors: List[Optional[str]],
+        code: str = "",
+        inputs: Optional[List[Any]] = None,
+    ) -> np.ndarray:
         self.call_count += 1
-        return self.wrapped.compute_state(outputs, errors, code)
+        return self.wrapped.compute_state(outputs, errors, code, inputs)

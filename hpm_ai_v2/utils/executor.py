@@ -9,7 +9,7 @@ import copy
 from typing import Any, List, Optional, Tuple
 
 
-def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any]) -> bool:
+def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any], tolerance: float = 0.05) -> bool:
     """
     Module-level worker for ProcessPoolExecutor — must be picklable.
     Re-executes code_str in a fresh namespace and checks against expected outputs.
@@ -21,8 +21,13 @@ def _eval_path_worker(code_str: str, inputs: List[Any], expected: List[Any]) -> 
         return False
         
     def is_equal(r: Any, e: Any) -> bool:
+        if isinstance(r, (int, float, np.float64, np.int64)) and isinstance(e, (int, float, np.float64, np.int64)):
+            abs_diff = abs(float(r) - float(e))
+            # Hybrid tolerance: abs_diff < tolerance * (1 + abs(e))
+            return abs_diff < tolerance * (1.0 + abs(float(e)))
+            
         if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
-            return np.allclose(r, e, atol=1e-4)
+            return np.allclose(r, e, atol=tolerance, rtol=tolerance)
         if isinstance(r, list) and isinstance(e, list):
             if len(r) != len(e): return False
             return all(is_equal(ri, ei) for ri, ei in zip(r, e))

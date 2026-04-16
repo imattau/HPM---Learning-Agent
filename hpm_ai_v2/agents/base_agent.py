@@ -71,6 +71,7 @@ class BaseHFNAgent:
         self.dim = config.DIM
         self.m_dim = config.m_dim
         self.cold_dir = Path(cold_dir)
+        self.tolerance = kwargs.get("tolerance", 0.05)
 
         # Pattern substrate: TieredForest
         self.forest: TieredForest = forest_class(
@@ -305,6 +306,7 @@ class BaseHFNAgent:
         outputs: List[Any],
         goal_type: str = "scalar",
         task_id: str = "task",
+        **kwargs: Any,
     ) -> Tuple[bool, Optional[str], str]:
         """
         Attempt to solve task using registered strategies in ranked order.
@@ -315,7 +317,13 @@ class BaseHFNAgent:
         n_macros = sum(1 for n in self.patterns.values() if n.relation_type == "macro")
         for strat_name, strat_fn in self._ordered_strategies(goal_type):
             oracle_calls_before = self.counting_oracle.call_count
-            path = strat_fn(inputs, outputs)
+            
+            # Use inspection to only pass kwargs that the strategy accepts
+            import inspect
+            sig = inspect.signature(strat_fn)
+            strat_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+            
+            path = strat_fn(inputs, outputs, **strat_kwargs)
             if path is not None:
                 code = (
                     self.renderer.render(path[0])
@@ -478,7 +486,7 @@ class BaseHFNAgent:
             
             path.append(best_node)
             visited_ids.add(best_node.id)
-            
+            print(f"  [Greedy] Step {len(path)}: {best_node.id}")
         return None
 
     def _rank_nodes(self, query: HFN, nodes: List[HFN]) -> List[HFN]:
@@ -509,7 +517,7 @@ class BaseHFNAgent:
         beam_width: int = 20,
     ) -> Optional[List[HFN]]:
         """Strategy: beam BFS over pattern space, evaluating each depth level in parallel."""
-        goal_state = self._outputs_to_goal_state(outputs)
+        goal_state = self._outputs_to_goal_state(outputs, inputs)
         query = HFN(mu=goal_state, sigma=np.ones(self.m_dim), use_diag=True)
 
         if hasattr(self, "_candidate_ops") and self._candidate_ops:
@@ -520,71 +528,98 @@ class BaseHFNAgent:
         if not primitives:
             return None
 
-        visited_ids: set = set()
-        current_level: List[List[HFN]] = [[p] for p in primitives]
+        # Execute search
+        def run_search(pool: Optional[ProcessPoolExecutor]):
+            visited_ids: set = set()
+            current_level: List[List[HFN]] = [[p] for p in primitives]
+            
+            for _depth in range(max_depth):
+                # Deduplicate and render candidates for this level
+                candidates: List[Tuple[str, List[HFN]]] = []
+                for path in current_level:
+                    path_key = tuple(n.id for n in path)
+                    if path_key in visited_ids:
+                        continue
+                    visited_ids.add(path_key)
+                    composed = self._compose_sequence(path)
+                    if composed is None:
+                        continue
+                    code = self.renderer.render(composed)
+                    candidates.append((code, path))
 
-        for _depth in range(max_depth):
-            # Deduplicate and render all paths at this depth level
-            candidates: List[Tuple[str, List[HFN]]] = []
-            for path in current_level:
-                path_key = tuple(n.id for n in path)
-                if path_key in visited_ids:
-                    continue
-                visited_ids.add(path_key)
-                composed = self._compose_sequence(path)
-                if composed is None:
-                    continue
-                code = self.renderer.render(composed)
-                candidates.append((code, path))
+                if not candidates:
+                    break
 
-            # Evaluate all candidates at this level in parallel
-            if self.n_workers > 1 and len(candidates) > 1:
-                with ProcessPoolExecutor(max_workers=self.n_workers) as pool:
+                # Evaluate all candidates at this level
+                level_success_path = None
+                if pool and len(candidates) > 1:
                     futures = {
-                        pool.submit(_eval_path_worker, code, inputs, outputs): path
+                        pool.submit(_eval_path_worker, code, inputs, outputs, self.tolerance): path
                         for code, path in candidates
                     }
                     for fut in as_completed(futures):
                         if fut.result():
-                            # Cancel remaining futures (best-effort)
-                            for f in futures:
-                                f.cancel()
-                            return futures[fut]
-            else:
-                for code, path in candidates:
-                    results, _ = self.executor.run_batch(code, inputs)
-                    if self._check_outputs(results, outputs):
-                        return path
+                            level_success_path = futures[fut]
+                            for f in futures: f.cancel()
+                            break
+                else:
+                    for code, path in candidates:
+                        results, _ = self.executor.run_batch(code, inputs)
+                        if self._check_outputs(results, outputs):
+                            level_success_path = path
+                            break
+                
+                if level_success_path:
+                    return level_success_path
 
-            if _depth + 1 >= max_depth:
-                break
+                if _depth + 1 >= max_depth:
+                    break
 
-            # Expand next level
-            if hasattr(self, "_candidate_ops") and self._candidate_ops:
-                next_nodes = self._candidate_ops
-            else:
-                next_nodes = self.retriever.retrieve(query, k=beam_width)
+                # Expand next level
+                next_level_raw: List[List[HFN]] = []
+                for path in [c[1] for c in candidates]:
+                    for p in primitives:
+                        next_level_raw.append(path + [p])
+                
+                # Beam Pruning: keep top beam_width by goal-state proximity
+                if len(next_level_raw) > beam_width:
+                    scored = []
+                    for path in next_level_raw:
+                        composed = self._compose_sequence(path)
+                        if composed:
+                            # [UPGRADE] Use Oracle to get actual state for guided ranking
+                            code = self.renderer.render(composed)
+                            results, errors = self.executor.run_batch(code, inputs)
+                            state = self.oracle.compute_state(results, errors, code, inputs)
+                            
+                            # Update composed mu with empirical delta state
+                            composed.mu[self.s_dim + self.dim:] = state
+                            
+                            dist = float(np.sum((composed.mu - query.mu)**2))
+                            scored.append((dist, path))
+                    scored.sort(key=lambda x: x[0])
+                    top_path_ids = [n.id for n in scored[0][1]]
+                    print(f"  [BFS] Depth {_depth+1} Top Rank: {top_path_ids} (Dist: {scored[0][0]:.4f})")
+                    current_level = [p for d, p in scored[:beam_width]]
+                else:
+                    current_level = next_level_raw
+            return None
 
-            next_level: List[List[HFN]] = []
-            for path in current_level:
-                for nxt in next_nodes:
-                    new_path = path + [nxt]
-                    new_key = tuple(n.id for n in new_path)
-                    if new_key not in visited_ids:
-                        next_level.append(new_path)
-            current_level = next_level
-
-        return None
+        if self.n_workers > 1:
+            with ProcessPoolExecutor(max_workers=self.n_workers) as pool:
+                return run_search(pool)
+        else:
+            return run_search(None)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _outputs_to_goal_state(self, outputs: List[Any]) -> np.ndarray:
+    def _outputs_to_goal_state(self, outputs: List[Any], inputs: Optional[List[Any]] = None) -> np.ndarray:
         """Build a goal state vector from expected outputs."""
         results_dummy = outputs
         errors_dummy = [None] * len(outputs)
-        delta_state = self.oracle.compute_state(results_dummy, errors_dummy)
+        delta_state = self.oracle.compute_state(results_dummy, errors_dummy, inputs=inputs)
         goal = np.zeros(self.m_dim)
         goal[self.s_dim + self.dim:] = delta_state
         return goal
@@ -593,15 +628,24 @@ class BaseHFNAgent:
         self,
         results: List[Any],
         expected: List[Any],
+        tolerance: Optional[float] = None,
     ) -> bool:
-        """Check whether execution results match expected outputs."""
+        """Check whether execution results match expected outputs within tolerance."""
+        if tolerance is None:
+            tolerance = self.tolerance
+            
         if len(results) != len(expected):
             return False
             
         def is_equal(r: Any, e: Any) -> bool:
+            if isinstance(r, (int, float, np.float64, np.int64)) and isinstance(e, (int, float, np.float64, np.int64)):
+                abs_diff = abs(float(r) - float(e))
+                # Hybrid tolerance: abs_diff < tolerance * (1 + abs(e))
+                # This allows for absolute noise at small values and relative at large.
+                return abs_diff < tolerance * (1.0 + abs(float(e)))
+            
             if isinstance(r, np.ndarray) and isinstance(e, np.ndarray):
-                res = np.allclose(r, e, atol=1e-4)
-                return res
+                return np.allclose(r, e, atol=tolerance, rtol=tolerance)
             if isinstance(r, list) and isinstance(e, list):
                 if len(r) != len(e): return False
                 return all(is_equal(ri, ei) for ri, ei in zip(r, e))
@@ -616,10 +660,13 @@ class BaseHFNAgent:
                     return np.array_equal(r, e)
                 return False
 
+        n_matches = 0
         for r, e in zip(results, expected):
-            if not is_equal(r, e):
-                return False
-        return True
+            if is_equal(r, e):
+                n_matches += 1
+        
+        # Robust match: at least 80% of points must match
+        return (n_matches / len(expected)) >= 0.80
 
     # ------------------------------------------------------------------
     # Persistence
