@@ -88,6 +88,9 @@ class BaseHFNAgent:
             base_retriever = StructuralRetriever(self.forest)
         elif retriever_type == "geometric":
             base_retriever = GeometricRetriever(self.forest)
+        elif retriever_type == "contextual":
+            from hfn.retriever import ContextualRetriever
+            base_retriever = ContextualRetriever(self.forest)
         else:
             # Default to goal-conditioned for backward compatibility
             base_retriever = GoalConditionedRetriever(
@@ -262,17 +265,22 @@ class BaseHFNAgent:
         if self.auto_observe_frequency <= 0:
             return
         self._observe_counter += 1
-        if self._observe_counter >= self.auto_observe_frequency:
-            self._observe_counter = 0
-            if x is not None:
-                self.observer.observe(x)
-            elif self._replay_buffer:
-                sample = random.choice(self._replay_buffer)
-                self.observer.observe(sample)
+        if self._observe_counter % self.auto_observe_frequency == 0:
+            obs_input = x
+            if obs_input is None and self._replay_buffer:
+                obs_input = random.choice(self._replay_buffer)
+            
+            if obs_input is not None:
+                exp = self.observer.observe(obs_input)
+                if exp and hasattr(self.retriever.base_retriever, "notify_active"):
+                    self.retriever.base_retriever.notify_active([n.id for n in exp.explanation_tree])
 
     def observe_example(self, x: np.ndarray) -> None:
         """Explicitly observe an input vector (e.g., during training)."""
-        self.observer.observe(x)
+        exp = self.observer.observe(x)
+        if exp and hasattr(self.retriever.base_retriever, "notify_active"):
+            self.retriever.base_retriever.notify_active([n.id for n in exp.explanation_tree])
+        
         self._replay_buffer.append(x)
         if len(self._replay_buffer) > self._replay_buffer_size:
             self._replay_buffer.pop(0)
@@ -334,6 +342,10 @@ class BaseHFNAgent:
                 self.meta.record(rec, pattern_used)
                 if success:
                     self.register_pattern(task_id, path)
+                    
+                    # Notify retriever of active nodes
+                    if hasattr(self.retriever.base_retriever, "notify_active"):
+                        self.retriever.base_retriever.notify_active([n.id for n in path])
                     
                     # Record transitions for forward model (L4)
                     if hasattr(self, "_record_transitions"):
