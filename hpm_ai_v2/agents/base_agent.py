@@ -425,6 +425,82 @@ class BaseHFNAgent:
                 return [node]
         return None
 
+    def _try_greedy_chain(
+        self,
+        inputs: List[Any],
+        outputs: List[Any],
+        max_depth: int = 6,
+    ) -> Optional[List[HFN]]:
+        """Strategy: zero-branching greedy walk driven by top-ranked retrieval."""
+        path = []
+        visited_ids = set()
+        for _ in range(max_depth):
+            # 1. Evaluate current progress
+            if not path:
+                current_results = [0.0] * len(inputs) 
+                current_errors = [None] * len(inputs)
+                current_code = ""
+            else:
+                composed = self._compose_sequence(path)
+                current_code = self.renderer.render(composed)
+                current_results, current_errors = self.executor.run_batch(current_code, inputs)
+                if self._check_outputs(current_results, outputs):
+                    return path
+            
+            # 2. Compute residual goal
+            target_state = self.oracle.compute_state(outputs, [None]*len(outputs))
+            current_state = self.oracle.compute_state(current_results, current_errors, current_code)
+            delta_needed = target_state - current_state
+            
+            query_mu = np.zeros(self.m_dim)
+            query_mu[:self.s_dim] = current_state
+            query_mu[self.s_dim + self.dim:] = delta_needed
+            query = HFN(mu=query_mu, sigma=np.ones(self.m_dim), use_diag=True)
+            
+            # 3. Retrieve from candidate ops if provided, else forest
+            if hasattr(self, "_candidate_ops") and self._candidate_ops:
+                # We still want to rank them by retrieval score relative to query
+                candidates = self._rank_nodes(query, self._candidate_ops)
+            else:
+                candidates = self.retriever.retrieve(query, k=10)
+            
+            if not candidates:
+                break
+            
+            # Pick first non-visited
+            best_node = None
+            for cand in candidates:
+                if cand.id not in visited_ids:
+                    best_node = cand
+                    break
+            
+            if not best_node: break
+            
+            path.append(best_node)
+            visited_ids.add(best_node.id)
+            
+        return None
+
+    def _rank_nodes(self, query: HFN, nodes: List[HFN]) -> List[HFN]:
+        """Rank a list of nodes by their distance/score relative to query."""
+        # Simple geometric + recency if ContextualRetriever is used
+        scored = []
+        recent_set = set()
+        if hasattr(self.retriever.base_retriever, "_recent"):
+            recent_set = set(self.retriever.base_retriever._recent)
+            boost = self.retriever.base_retriever._recency_boost
+        else:
+            boost = 0.0
+
+        for node in nodes:
+            dist = float(np.sum((node.mu - query.mu) ** 2))
+            # Lower score is better
+            score = dist - (boost if node.id in recent_set else 0.0)
+            scored.append((score, node))
+        
+        scored.sort(key=lambda x: x[0])
+        return [n for s, n in scored]
+
     def _try_bfs(
         self,
         inputs: List[Any],
