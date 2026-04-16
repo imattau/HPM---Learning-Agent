@@ -5,12 +5,15 @@ from __future__ import annotations
 from hpm_ai_v2.domains.base import DomainConfig
 
 FLUID_CONCEPTS = [
-    "MOMENTUM_FLUX",   # ρ * Q**2 / A
-    "TORQUE",          # F * L
-    "SIGN",            # sign(x)
-    "MULTIPLY",        # a * b
-    "SINE",            # sin(θ)
-    "COSINE",          # cos(θ)
+    "VAR_Q",           # Load Q
+    "VAR_RHO",         # Load rho
+    "VAR_L",           # Load L
+    "VAR_THETA",       # Load theta
+    "OP_MUL_Q",        # res = res * Q
+    "OP_MUL_RHO",      # res = res * rho
+    "OP_SQUARE",       # res = res**2
+    "OP_SIN",          # res = sin(res)
+    "OP_SIGN",         # res = sign(res)
 ]
 
 class FluidDomainConfig(DomainConfig):

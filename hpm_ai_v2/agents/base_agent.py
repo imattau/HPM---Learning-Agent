@@ -417,7 +417,7 @@ class BaseHFNAgent:
         self,
         inputs: List[Any],
         outputs: List[Any],
-        max_depth: int = 4,
+        max_depth: int = 6,
         beam_width: int = 20,
     ) -> Optional[List[HFN]]:
         """Strategy: beam BFS over pattern space, evaluating each depth level in parallel."""

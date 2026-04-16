@@ -41,11 +41,9 @@ class FluidOracle(BaseOracle):
             s[3] = float(np.mean(vals))
             
         # Code structure flags (dimensions 10+)
-        s[10] = 1.0 if 'rho' in code else 0.0
-        s[11] = 1.0 if 'Q_mag**2' in code else 0.0
-        s[12] = 1.0 if 'np.sin' in code else 0.0
-        s[13] = 1.0 if 'np.sign' in code else 0.0
-        s[14] = 1.0 if 'L' in code else 0.0
-        s[15] = 1.0 if 'N' in code else 0.0
+        # We only keep generic complexity flags, no variable name leakage.
+        s[10] = 1.0 if 'res**2' in code else 0.0
+        s[11] = 1.0 if 'np.sin' in code else 0.0
+        s[12] = 1.0 if 'np.sign' in code else 0.0
         
         return s

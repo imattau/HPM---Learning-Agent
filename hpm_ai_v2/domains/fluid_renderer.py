@@ -20,40 +20,36 @@ class FluidRenderer(Renderer):
 
     def render(self, node: HFN) -> str:
         """Render a sequence of operations into Python code."""
-        # For simplicity, we assume a sequential execution model
-        # where 'res' is the running result.
         ops = self._extract_ops(node)
         lines = [
             "import numpy as np",
-            "# Inputs: N=inp[0], L=inp[1], theta=inp[2], Q_sign=inp[3], Q_mag=inp[4], rho=inp[5]",
-            "N, L, theta, Q_sign, Q_mag, rho = inp[0], inp[1], inp[2], inp[3], inp[4], inp[5]",
-            "A = 1.0  # Assumed unit area",
+            "# Inputs: N=inp[0], L=inp[1], theta=inp[2], Q=inp[3], rho=inp[4]",
+            "N, L, theta, Q, rho = inp[0], inp[1], inp[2], inp[3], inp[4]",
             "res = 0.0"
         ]
         
-        # Local state for intermediate variables
-        # We'll use a stack-like or register-like approach if needed, 
-        # but for SP95 a simple sequence is often enough.
+        # In this minimal renderer, 'res' tracks the primary quantity.
+        # Load ops set 'res' to the variable value.
+        # Math ops operate on 'res' and other variables.
         for op in ops:
-            if op == "MOMENTUM_FLUX":
-                # F = rho * Q^2 / A
-                lines.append("F = rho * (Q_mag**2) / A")
-                lines.append("res = F")
-            elif op == "TORQUE":
-                # T = F * L
-                lines.append("res = res * L")
-            elif op == "SINE":
-                # Multiply by sin(theta)
-                # theta is 0-1 (90 deg = 0.5)
-                lines.append("res = res * np.sin(theta * np.pi)")
-            elif op == "SIGN":
+            if op == "VAR_Q":
+                lines.append("res = Q")
+            elif op == "VAR_RHO":
+                lines.append("res = rho")
+            elif op == "VAR_L":
+                lines.append("res = L")
+            elif op == "VAR_THETA":
+                lines.append("res = theta")
+            elif op == "OP_SQUARE":
+                lines.append("res = res**2")
+            elif op == "OP_SIN":
+                lines.append("res = np.sin(res * np.pi)")
+            elif op == "OP_MUL_Q":
+                lines.append("res = res * Q")
+            elif op == "OP_MUL_RHO":
+                lines.append("res = res * rho")
+            elif op == "OP_SIGN":
                 lines.append("res = np.sign(res)")
-            elif op == "MULTIPLY":
-                # Generic multiplication by some other parameter? 
-                # Let's say by N (number of arms)
-                lines.append("res = res * N")
-            elif op == "COSINE":
-                lines.append("res = res * np.cos(theta * np.pi)")
 
         return "\n".join(lines)
 
