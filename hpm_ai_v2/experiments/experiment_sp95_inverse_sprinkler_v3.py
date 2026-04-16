@@ -126,6 +126,8 @@ def main():
     # ------------------------------------------------------------------
     print("\n[Step 2] Promoting 'macro_discover_square' to primitives.")
     # Primitives for Task 2: VAR_THETA, OP_SIN, OP_SIGN, OP_MUL + Learned Macro
+    # We KEEP OP_MUL because it is needed to combine the sin(theta) and Q^2 terms.
+    # But since macro_square already contains Q*Q, it's a shorter path.
     t2_primitives = create_primitives(agent, config, ["VAR_THETA", "OP_SIN", "OP_SIGN", "OP_MUL"])
     agent._candidate_ops = t2_primitives + [macro_square]
 
@@ -166,24 +168,20 @@ def main():
     # Phase 4: Structure Audit (Proof of Hierarchy)
     # ------------------------------------------------------------------
     print("\n[Step 5] Structure Audit (Proof of Hierarchy)")
-    # The Task 2 code should NOT contain literal multiplication loops for Q.
-    # It should call the macro_discover_square (or its rendered content if inlined).
-    # Since BaseHFNAgent/Renderer currently inlines, we check if Task 2's depth
-    # is SMALLER than it would be if it searched for Q*Q again.
+    # We check if the rendered code explicitly contains the macro ID.
+    macro_id_in_code = f"BEGIN MACRO: {macro_square.id}"
+    has_macro = macro_id_in_code in t2_code
     
-    # In Task 1, Q*Q is depth 2 (VAR_Q, OP_SQUARE).
-    # In Task 2, sin(theta)*Q^2*sign is depth 6 flat.
-    # Hierarchical: sin(theta) [2] + macro [1] + mul [1] + sign [1] = depth 5.
+    print(f"  Macro '{macro_square.id}' found in Task 2 code: {has_macro}")
     
-    # For now, let's look at the solve record depth.
     rec = agent.meta.history[-1]
-    print(f"  Task 2 Search Depth: {rec.depth} (expected 5 for hierarchical, 6+ for flat)")
+    print(f"  Task 2 Search Depth: {rec.depth}")
     
-    if rec.depth <= 5:
+    if has_macro:
         print("\n  [VERDICT] HPM successfully demonstrated HIERARCHICAL TRANSFER.")
         print("  The agent reused the square invariant as a high-level primitive.")
     else:
-        print("\n  [VERDICT] The agent successfully solved the task, but hierarchy is unclear.")
+        print("\n  [VERDICT] FAIL: The solution was found but did not use the macro.")
 
     print("\n" + "=" * 80)
     print("[FINISH] SP95 v3 Experiment Complete.")

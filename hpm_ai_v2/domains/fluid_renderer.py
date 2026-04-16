@@ -20,7 +20,6 @@ class FluidRenderer(Renderer):
 
     def render(self, node: HFN) -> str:
         """Render a sequence of operations into a stack-based execution."""
-        ops = self._extract_ops(node)
         lines = [
             "import numpy as np",
             "# Inputs: N=inp[0], L=inp[1], theta=inp[2], Q=inp[3], rho=inp[4]",
@@ -30,32 +29,40 @@ class FluidRenderer(Renderer):
             "def pop(): return stack.pop() if len(stack) > 1 else stack[0]",
             "def top(): return stack[-1]"
         ]
-        
-        for op in ops:
-            if op == "VAR_Q":
-                lines.append("push(Q)")
-            elif op == "VAR_RHO":
-                lines.append("push(rho)")
-            elif op == "VAR_L":
-                lines.append("push(L)")
-            elif op == "VAR_THETA":
-                lines.append("push(theta)")
-            elif op == "OP_SQUARE":
-                lines.append("v = pop(); push(v**2)")
-            elif op == "OP_SIN":
-                lines.append("v = pop(); push(np.sin(v * np.pi))")
-            elif op == "OP_MUL_Q":
-                lines.append("v = pop(); push(v * Q)")
-            elif op == "OP_MUL_RHO":
-                lines.append("v = pop(); push(v * rho)")
-            elif op == "OP_MUL":
-                # Multiply top two
-                lines.append("b = pop(); a = pop(); push(a * b)")
-            elif op == "OP_SIGN":
-                lines.append("v = pop(); push(np.sign(v))")
-
+        lines.extend(self._render_node_hierarchical(node))
         lines.append("res = top()")
         return "\n".join(lines)
+
+    def _render_node_hierarchical(self, node: HFN) -> List[str]:
+        lines = []
+        if node.relation_type == "macro":
+            lines.append(f"# BEGIN MACRO: {node.id}")
+            for child in node.inputs:
+                lines.extend(self._render_node_hierarchical(child))
+            lines.append(f"# END MACRO: {node.id}")
+        else:
+            concept = self._get_concept(node)
+            if concept == "VAR_Q":
+                lines.append("push(Q)")
+            elif concept == "VAR_RHO":
+                lines.append("push(rho)")
+            elif concept == "VAR_L":
+                lines.append("push(L)")
+            elif concept == "VAR_THETA":
+                lines.append("push(theta)")
+            elif concept == "OP_SQUARE":
+                lines.append("v = pop(); push(v**2)")
+            elif concept == "OP_SIN":
+                lines.append("v = pop(); push(np.sin(v * np.pi))")
+            elif concept == "OP_MUL_Q":
+                lines.append("v = pop(); push(v * Q)")
+            elif concept == "OP_MUL_RHO":
+                lines.append("v = pop(); push(v * rho)")
+            elif concept == "OP_MUL":
+                lines.append("b = pop(); a = pop(); push(a * b)")
+            elif concept == "OP_SIGN":
+                lines.append("v = pop(); push(np.sign(v))")
+        return lines
 
     def render_function(self, node: HFN, func_name: str = "macro_func") -> str:
         code = self.render(node)
