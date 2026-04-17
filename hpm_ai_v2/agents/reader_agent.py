@@ -8,17 +8,18 @@ from hfn.hfn import HFN
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.agents.mixins.syntax import SyntaxMixin
 from hpm_ai_v2.agents.mixins.srl import SemanticRoleMixin
+from hpm_ai_v2.agents.mixins.spelling import SpellingMixin
 from hpm_ai_v2.domains.text_domain import TextDomainConfig
 from hpm_ai_v2.domains.text_renderer import TextRenderer
 from hpm_ai_v2.utils.oracle.text_oracle import TextOracle
 from hpm_ai_v2.utils.text_fetcher import fetch_passages
 
 
-class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin):
+class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     """
     HFN-native agent that reads text/webpages and retrieves relevant passages.
     Extended with structural hierarchy (L2-L5), recursive summarization, 
-    predictive curiosity, structural analogy, syntax, and semantics (SP-Reader 7).
+    predictive curiosity, structural analogy, syntax, semantics, and spelling (SP-Reader 8).
     """
 
     def __init__(self, config: TextDomainConfig, **kwargs) -> None:
@@ -150,7 +151,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin):
             "passages": self.config._passages, 
             "docs": self._documents,
             "pos_rules": getattr(self, "pos_rules", {}),
-            "role_knowledge": getattr(self, "role_knowledge", [])
+            "role_knowledge": getattr(self, "role_knowledge", []),
+            "word_spellings": getattr(self, "word_spellings", {}),
+            "include_char_primitives": getattr(self.config, "include_char_primitives", False)
         }
         with open(path / "reader_meta.json", "w") as f: json.dump(meta, f)
 
@@ -158,13 +161,18 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin):
     def load_agent(cls, directory: str) -> "ReaderAgent":
         path = Path(directory)
         with open(path / "reader_meta.json") as f: meta = json.load(f)
-        config = TextDomainConfig(meta["concepts"], meta["idf"])
+        config = TextDomainConfig(
+            meta["concepts"], 
+            meta["idf"], 
+            include_char_primitives=meta.get("include_char_primitives", False)
+        )
         config._passages = meta["passages"]
         config._passage_vecs = [config.encode_passage(p) for p in meta["passages"]]
         agent = cls(config, cold_dir=str(path))
         agent._documents = meta.get("docs", [])
         agent.pos_rules = meta.get("pos_rules", {})
         agent.role_knowledge = meta.get("role_knowledge", [])
+        agent.word_spellings = meta.get("word_spellings", {})
         agent.load_state(str(path / "agent_state.pkl"))
         # FIX: Explicitly reindex all nodes (hot and cold) after load
         agent.reindex_knowledge_base()

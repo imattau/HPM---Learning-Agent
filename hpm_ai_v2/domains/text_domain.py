@@ -32,11 +32,23 @@ def tokenise_raw(text: str) -> List[str]:
 
 
 class TextDomainConfig(DomainConfig):
-    def __init__(self, concepts: List[str], idf: Dict[str, float], s_dim: int = 20):
+    def __init__(self, concepts: List[str], idf: Dict[str, float], s_dim: int = 20, include_char_primitives: bool = False):
+        if include_char_primitives:
+            # Add character primitives
+            for c in "abcdefghijklmnopqrstuvwxyz": concepts.append(f"CHAR_{c}")
+            for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ": concepts.append(f"CHAR_{c}")
+            for d in range(10): concepts.append(f"CHAR_DIGIT_{d}")
+            # Add string utility primitives
+            concepts.extend([
+                "TO_UPPER", "TO_LOWER", "CHAR_EQ", "STRING_LEN", 
+                "CHAR_AT", "EDIT_DISTANCE", "FIND_CLOSEST"
+            ])
+            
         super().__init__(concepts, s_dim=s_dim)
         self.idf = idf
         self._passages: List[str] = []
         self._passage_vecs: List[np.ndarray] = []
+        self.include_char_primitives = include_char_primitives
 
     def get_pos_primitives(self) -> List[str]:
         return [
