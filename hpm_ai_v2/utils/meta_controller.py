@@ -55,6 +55,10 @@ class MetaStrategyController:
             lambda: {s: [0, 0, 0] for s in self.DEFAULT_ORDER}
         )
         self.history: List[SolveRecord] = []
+        # (context_key, strategy) -> [recent_success_rate, trend, last_update_time]
+        self._strategy_trends: Dict[Tuple, Dict[str, List[float]]] = defaultdict(
+            lambda: {s: [0.5, 0.0, 0.0] for s in self.DEFAULT_ORDER}
+        )
 
     def _bucket(self, n_macros: int) -> int:
         if n_macros == 0:
@@ -68,6 +72,7 @@ class MetaStrategyController:
 
     def record(self, rec: SolveRecord, pattern_used: Optional[HFN] = None) -> None:
         """Update strategy success rates for this context."""
+        import time
         self.history.append(rec)
         key = self._context_key(rec.goal_type, rec.n_macros)
         if rec.strategy not in self._stats[key]:
@@ -77,6 +82,15 @@ class MetaStrategyController:
         entry[2] += rec.oracle_calls     # total oracle calls
         if rec.success:
             entry[0] += 1               # successes
+
+        # Update trend tracking
+        successes, attempts, _ = entry
+        new_rate = successes / attempts if attempts > 0 else 0.5
+        trend_entry = self._strategy_trends[key][rec.strategy]
+        old_rate = trend_entry[0]
+        trend_entry[0] = new_rate
+        trend_entry[1] = new_rate - old_rate  # trend = delta success_rate
+        trend_entry[2] = time.time()  # last update timestamp
 
     def rank_strategies(self, goal_type: str, n_macros: int) -> List[str]:
         """Return strategies sorted by historical success rate (desc), then
@@ -94,6 +108,25 @@ class MetaStrategyController:
             rate = successes / attempts if attempts > 0 else 0.0
             avg_calls = oracle_total / attempts if attempts > 0 else float('inf')
             return (-rate, avg_calls)
+
+        return sorted(self.DEFAULT_ORDER, key=sort_key)
+
+    def rank_strategies_with_trends(self, goal_type: str, n_macros: int) -> List[str]:
+        """Return strategies ranked by success rate + trend direction.
+        Prioritizes improving strategies and penalizes declining ones."""
+        key = self._context_key(goal_type, n_macros)
+        stats = self._stats.get(key)
+        trends = self._strategy_trends.get(key)
+
+        if stats is None or trends is None:
+            return list(self.DEFAULT_ORDER)
+
+        def sort_key(strategy: str) -> Tuple[float, float, float]:
+            successes, attempts, _ = stats.get(strategy, [0, 0, 0])
+            rate = successes / attempts if attempts > 0 else 0.0
+            trend = trends.get(strategy, [0.5, 0.0, 0.0])[1]  # trend value
+            # Primary: success rate (DESC), Secondary: trend (DESC)
+            return (-rate, -trend, float('inf'))
 
         return sorted(self.DEFAULT_ORDER, key=sort_key)
 

@@ -114,9 +114,17 @@ class BaseHFNAgent:
             use_affective_evaluator=use_affective_evaluator,
         )
         
+        # Pattern dynamics: Decay/forgetting tracking (L2-L4)
+        self._pattern_decay_times: Dict[str, float] = {}  # pattern_id -> last_decay_time
+        self._decay_half_life: float = kwargs.get("decay_half_life", 1000.0)  # ms
+        
         # Link retriever to observer's weight provider if applicable
         if hasattr(self.retriever, 'weight_provider'):
             self.retriever.weight_provider = lambda nid: self.observer.get_weight(nid)
+
+        # Pattern evaluator: Usage/boredom tracking (L5 meta-cognition)
+        self._pattern_usage_count: Dict[str, int] = {}  # pattern_id -> usage_count
+        self._boredom_alpha: float = kwargs.get("boredom_alpha", 0.5)
 
         # Parallelism
         self.n_workers: int = n_workers if n_workers is not None else os.cpu_count() or 1
@@ -150,6 +158,11 @@ class BaseHFNAgent:
         self._replay_buffer_size = replay_buffer_size
         self.auto_save_frequency = auto_save_frequency
         self._solve_counter = 0
+
+        # Temporal pattern field: recency tracking (L3-L5)
+        self._pattern_timestamps: Dict[str, float] = {}  # pattern_id -> last_used_time
+        self._recency_half_life: float = kwargs.get("recency_half_life", 5000.0)  # ms
+        self._recency_boost: float = kwargs.get("recency_boost", 1.5)  # multiplicative boost
 
         # Inject priors if forest is empty
         if len(self.forest) == 0:
@@ -232,10 +245,14 @@ class BaseHFNAgent:
         for task_id, _, _, _ in task_pool:
             learnability = learnability_dict.get(task_id, 0.5)
             # Higher curiosity for tasks with mid-range learnability
-            prob = self.observer.evaluator.curiosity_exploration_probability(
+            base_prob = self.observer.evaluator.curiosity_exploration_probability(
                 learnability
             )
-            probs.append(max(1e-6, float(prob)))
+            
+            # Apply boredom satiation: reduce probability for overused patterns
+            usage_count = self._pattern_usage_count.get(task_id, 0)
+            satiated_prob = float(base_prob) / (1.0 + self._boredom_alpha * usage_count)
+            probs.append(max(1e-6, satiated_prob))
 
         probs = np.array(probs) / sum(probs)
         chosen_idx = np.random.choice(len(task_pool), p=probs)
@@ -307,11 +324,11 @@ class BaseHFNAgent:
         goal_type: str = "scalar",
         task_id: str = "task",
         **kwargs: Any,
-    ) -> Tuple[bool, Optional[str], str]:
+    ) -> Tuple[bool, Optional[str], str, Optional[List[HFN]]]:
         """
         Attempt to solve task using registered strategies in ranked order.
 
-        Returns (success, code_str, strategy_used).
+        Returns (success, code_str, strategy_used, path).
         """
         t0 = time.time()
         n_macros = sum(1 for n in self.patterns.values() if n.relation_type == "macro")
@@ -349,8 +366,16 @@ class BaseHFNAgent:
                 pattern_used = path[0] if len(path) == 1 else self._compose_sequence(path)
                 self.meta.record(rec, pattern_used)
                 if success:
+                    # Track pattern usage for boredom mechanism (L5)
+                    self._pattern_usage_count[task_id] = self._pattern_usage_count.get(task_id, 0) + 1
+                    
                     self.register_pattern(task_id, path)
                     
+                    # Update temporal pattern field: record usage timestamps (L3-L5)
+                    current_time = time.time() * 1000
+                    for node in path:
+                        self._pattern_timestamps[node.id] = current_time
+
                     # Notify retriever of active nodes
                     if hasattr(self.retriever.base_retriever, "notify_active"):
                         self.retriever.base_retriever.notify_active([n.id for n in path])
@@ -368,7 +393,7 @@ class BaseHFNAgent:
                         self._maybe_auto_observe(flat[:self.m_dim])
 
                     self._maybe_save_state()
-                    return True, code, strat_name
+                    return True, code, strat_name, path
             else:
                 # Strategy failed to even find a path
                 wall_ms = (time.time() - t0) * 1000
@@ -383,7 +408,7 @@ class BaseHFNAgent:
                     wall_ms=wall_ms,
                 )
                 self.meta.record(rec, None)
-        return False, None, "none"
+        return False, None, "none", None
 
     def _render_path(self, path: List[HFN]) -> str:
         """Render a multi-node path by composing into a sequence node."""
@@ -509,6 +534,39 @@ class BaseHFNAgent:
         scored.sort(key=lambda x: x[0])
         return [n for s, n in scored]
 
+    def get_weight_with_decay(self, node_id: str) -> float:
+        """Get pattern weight with exponential decay applied."""
+        current_time = time.time() * 1000  # ms
+        base_weight = self.observer.get_weight(node_id)
+
+        if node_id not in self._pattern_decay_times:
+            self._pattern_decay_times[node_id] = current_time
+            return base_weight
+
+        last_decay = self._pattern_decay_times[node_id]
+        time_elapsed = current_time - last_decay
+        decay_factor = np.exp(-time_elapsed / self._decay_half_life)
+        # Update decay time to keep it moving (standard HPM decay)
+        self._pattern_decay_times[node_id] = current_time
+
+        return base_weight * decay_factor
+
+    def _apply_recency_weight(self, node_id: str, base_weight: float) -> float:
+        """Apply recency boost: recently-used patterns get higher weight."""
+        current_time = time.time() * 1000  # ms
+        if node_id not in self._pattern_timestamps:
+            self._pattern_timestamps[node_id] = current_time
+            return base_weight
+
+        last_used = self._pattern_timestamps[node_id]
+        time_since_use = current_time - last_used
+
+        # Recency decay: weight decays toward base over time
+        recency_factor = 1.0 + (self._recency_boost - 1.0) * np.exp(
+            -time_since_use / self._recency_half_life
+        )
+        return base_weight * recency_factor
+
     def _try_bfs(
         self,
         inputs: List[Any],
@@ -568,7 +626,10 @@ class BaseHFNAgent:
                             mask[10:] = 0.0
                             dist = float(np.sum(((state - goal_state[:self.s_dim]) * mask)**2))
                             # Coherence: Average weight of nodes in path
-                            weight = sum(self.observer.get_weight(n.id) for n in path_eval) / len(path_eval)
+                            weight = sum(
+                                self._apply_recency_weight(n.id, self.get_weight_with_decay(n.id)) 
+                                for n in path_eval
+                            ) / len(path_eval)
                             level_successes.append((dist, -weight, path_eval))
                 else:
                     for code, path in candidates:
@@ -578,7 +639,10 @@ class BaseHFNAgent:
                             mask = np.ones(self.s_dim)
                             mask[10:] = 0.0
                             dist = float(np.sum(((state - goal_state[:self.s_dim]) * mask)**2))
-                            weight = sum(self.observer.get_weight(n.id) for n in path) / len(path)
+                            weight = sum(
+                                self._apply_recency_weight(n.id, self.get_weight_with_decay(n.id)) 
+                                for n in path
+                            ) / len(path)
                             level_successes.append((dist, -weight, path))
                 
                 if level_successes:
@@ -687,8 +751,9 @@ class BaseHFNAgent:
         for r, e in zip(results, expected):
             if is_equal(r, e):
                 n_matches += 1
-        
+
         # Robust match: at least 80% of points must match
+
         return (n_matches / len(expected)) >= 0.80
 
     # ------------------------------------------------------------------

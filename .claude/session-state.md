@@ -1,56 +1,75 @@
-# Session State Checkpoint
-Generated: 2026-04-12
-Reason: Handing off SP65 implementation
+# Gap Fix Planning Session - CONTINUATION STATE
 
-## Execution Mode
-**Mode**: unattended
-**Auto-Continue**: true
+## EXECUTION MODE
+- **mode**: unattended
+- **auto_continue**: true
+- **task_status**: READY FOR CONTINUATION - GENERATE 4 GAP PLANS
 
-> **CRITICAL**: Do NOT pause for confirmation. Complete ALL work.
+## Task Objective
+Generate detailed implementation plans for fixing 4 critical HPM gaps with exact file:line changes.
 
-## Current Task
-Implement SP65: Autonomous Op Discovery (Experiment 49).
-Plan at `/home/mattthomson/.claude/plans/zazzy-tickling-conway.md`.
+1. **Gap 1: No Decay/Forgetting** - Add exponential decay to pattern weights
+2. **Gap 2: No Boredom Mechanism** - Add satiation tracking to curiosity evaluator  
+3. **Gap 3: L5 Meta-Pattern Layer** - Expand MetaStrategyController strategy monitoring
+4. **Gap 4: Temporal Pattern Field** - Add timestamp/recency to pattern weights
 
-## Remaining Work
+## Key Architecture Knowledge
+- HFN nodes already store metadata: `D=4 [successes, attempts, total_oracle_calls, last_timestamp]`
+- HFN is the pattern substrate - use it for all structured data
+- **Recommended Implementation**: Store decay/usage metadata in Observer class (manages pattern dynamics)
 
-### 1. Read parent files
-- `hpm_fractal_node/experiments/experiment_cross_domain_analogy.py` — AnalogicalAgent, DomainTransferBridge, op_registry pattern
-- `hpm_fractal_node/experiments/experiment_meta_strategy_controller.py` — MetaAwareAgent
-- `hpm_fractal_node/experiments/experiment_unified_perception_action.py` — _seed_perceptual_ops, ASTRenderer, HFN node creation pattern
+## REQUIRED READS FOR CONTINUATION AGENT
+Read these files COMPLETELY to generate gap plans:
 
-### 2. Create `experiment_autonomous_op_discovery.py`
+1. **base_agent.py** key sections:
+   - Lines 40-120 (class def, __init__, Observer setup)
+   - Lines 220-240 (curiosity/select_next_task)
+   - Lines 565-595 (get_weight mechanism)
+   - Lines 140-160 (pattern storage)
 
-New classes:
-- `CandidateOpLibrary`: INT_MAP_OPS, INT_COND_OPS, STR_MAP_OPS, STR_COND_OPS, FLOAT_MAP_OPS (duck-type int), get(element_type, op_kind)
-- `OpDiscoverer`: detect_element_type(), detect_task_kind(), extract_map_pairs(), extract_filter_pairs(), discover() → list of op dicts
-- `BootstrappingAgent(AnalogicalAgent)`: overrides _seed_perceptual_ops() as no-op; adds bootstrap_ops(seed_examples, domain) and op_registry dict
+2. **meta_controller.py**:
+   - Lines 1-150 (full class, SolveRecord, methods)
 
-Key: discover() returns ALL consistent ops (not just best). Schema BFS+oracle is the gatekeeper.
-Key: BootstrappingAgent must NOT call _seed_perceptual_ops(). Override in __init__.
-Key: op_registry dict (node_id → {render_hint, callable}) — pass to DomainTransferBridge.
+3. **Search patterns** (expect NONE - gaps to fill):
+   - "decay" or "forgetting"
+   - "boredom" or "satiation"
+   - "timestamp" in pattern storage
+   - "last_used" or "recency"
 
-6-phase curriculum:
-- Phase 1: bootstrap int ops from 3 seed examples (MAP+1, MAP*2, FILTER_pos) → ≥3 ops
-- Phase 2: schema acquisition using only discovered ops → MAP/FILTER macros acquired
-- Phase 3: bootstrap str ops from 2 string examples → str_upper + str_cond_a
-- Phase 4: cross-domain transfer using discovered string ops → depth 2, 0 domain-B examples
-- Phase 5: float domain bootstrap → val *= 2, val > 0 via duck-typing
-- Phase 6: ambiguity resolution — [[3]]→[[6]] gives 2 candidates; [[3],[5]]→[[6],[10]] picks val *= 2
+## Required Output Format
+For EACH gap, output:
+```
+## Gap N: [Name]
 
-Success: All 6 phases pass → "[SUCCESS] SP65 Autonomous Op Discovery — General HPM AI L1 Achieved!"
+**File:** [absolute path]
+**Location:** [class:method, line range]
 
-### 3. Run and debug
-```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent
-PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_autonomous_op_discovery.py
+**Current Code:**
+[brief description or snippet]
+
+**Changes:**
+1. Add/Modify [specific class/method]
+   - Lines: [exact line numbers]
+   - Change: [before → after code snippet]
+2. [next change if needed]
+
+**Verification:**
+- Test: [how to verify fix]
+- Expected: [behavior]
 ```
 
-### 4. Commit
-```bash
-git add hpm_fractal_node/experiments/experiment_autonomous_op_discovery.py
-git commit -m "Implement SP65 Autonomous Op Discovery (General HPM AI L1)"
-```
+## File Paths (Absolute)
+- base_agent.py: `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v2/agents/base_agent.py`
+- meta_controller.py: `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v2/utils/meta_controller.py`
+- hfn_meta_controller.py: `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v2/utils/hfn_meta_controller.py`
+- hfn_forward_model.py: `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v2/utils/hfn_forward_model.py`
+- Project root: `/home/mattthomson/workspace/HPM---Learning-Agent/`
 
-## Working Dir
-/home/mattthomson/workspace/HPM---Learning-Agent
+## Continuation Instructions (CRITICAL)
+- **DO NOT PAUSE** - unattended mode active
+- Spawn continuation agent to read this file FIRST
+- Execute all required reads in parallel
+- Generate ALL 4 gap plans COMPLETELY
+- Output directly to user with absolute file paths
+- Include exact line numbers and code diffs
+- Do not ask for confirmation
