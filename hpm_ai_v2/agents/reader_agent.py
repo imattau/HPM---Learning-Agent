@@ -6,17 +6,18 @@ from typing import Optional, List, Dict, Tuple
 import numpy as np
 from hfn.hfn import HFN
 from hpm_ai_v2.agents.base_agent import BaseHFNAgent
+from hpm_ai_v2.agents.mixins.syntax import SyntaxMixin
 from hpm_ai_v2.domains.text_domain import TextDomainConfig
 from hpm_ai_v2.domains.text_renderer import TextRenderer
 from hpm_ai_v2.utils.oracle.text_oracle import TextOracle
 from hpm_ai_v2.utils.text_fetcher import fetch_passages
 
 
-class ReaderAgent(BaseHFNAgent):
+class ReaderAgent(BaseHFNAgent, SyntaxMixin):
     """
     HFN-native agent that reads text/webpages and retrieves relevant passages.
     Extended with structural hierarchy (L2-L5), recursive summarization, 
-    predictive curiosity, and structural analogy detection (SP-Reader 5).
+    predictive curiosity, structural analogy, and syntax (SP-Reader 6).
     """
 
     def __init__(self, config: TextDomainConfig, **kwargs) -> None:
@@ -142,7 +143,13 @@ class ReaderAgent(BaseHFNAgent):
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
         super().save_state(str(path / "agent_state.pkl"))
-        meta = {"concepts": self.config.concepts, "idf": self.config.idf, "passages": self.config._passages, "docs": self._documents}
+        meta = {
+            "concepts": self.config.concepts, 
+            "idf": self.config.idf, 
+            "passages": self.config._passages, 
+            "docs": self._documents,
+            "pos_rules": getattr(self, "pos_rules", {})
+        }
         with open(path / "reader_meta.json", "w") as f: json.dump(meta, f)
 
     @classmethod
@@ -152,8 +159,12 @@ class ReaderAgent(BaseHFNAgent):
         config = TextDomainConfig(meta["concepts"], meta["idf"])
         config._passages = meta["passages"]
         config._passage_vecs = [config.encode_passage(p) for p in meta["passages"]]
-        agent = cls(config); agent._documents = meta.get("docs", [])
+        agent = cls(config, cold_dir=str(path))
+        agent._documents = meta.get("docs", [])
+        agent.pos_rules = meta.get("pos_rules", {})
         agent.load_state(str(path / "agent_state.pkl"))
+        # FIX: Explicitly reindex all nodes (hot and cold) after load
+        agent.reindex_knowledge_base()
         return agent
 
     def curiosity_score(self, text: str) -> float:

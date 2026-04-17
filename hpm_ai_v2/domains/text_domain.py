@@ -25,12 +25,24 @@ def tokenise(text: str) -> List[str]:
     ]
 
 
+def tokenise_raw(text: str) -> List[str]:
+    """Tokenise including stopwords and punctuation (for syntactic analysis)."""
+    # Simple whitespace splitting for now
+    return [w.strip() for w in re.findall(r"\w+|[^\w\s]", text.lower()) if w.strip()]
+
+
 class TextDomainConfig(DomainConfig):
     def __init__(self, concepts: List[str], idf: Dict[str, float], s_dim: int = 20):
         super().__init__(concepts, s_dim=s_dim)
         self.idf = idf
         self._passages: List[str] = []
         self._passage_vecs: List[np.ndarray] = []
+
+    def get_pos_primitives(self) -> List[str]:
+        return [
+            "POS_NOUN", "POS_VERB", "POS_ADVERB", "POS_ADJECTIVE",
+            "POS_DET", "POS_PREP", "POS_CONJ", "POS_PUNCT"
+        ]
 
     @classmethod
     def from_passages(cls, passages: List[str], max_vocab: int = 200, s_dim: int = 20) -> "TextDomainConfig":
