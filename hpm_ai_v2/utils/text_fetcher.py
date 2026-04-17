@@ -47,20 +47,24 @@ def fetch_url(url: str, timeout: int = 10) -> str:
     return strip_html(raw)
 
 
+def split_sentences(text: str) -> List[str]:
+    """Split text into sentences on .!? boundaries."""
+    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+
+
 def fetch_passages(
     url: Optional[str] = None,
     text: Optional[str] = None,
     min_length: int = 40,
+    mode: str = "paragraph",
 ) -> List[str]:
     """Fetch text from URL or accept raw text, split into passages."""
     if url is not None:
         text = fetch_url(url)
     if text is None:
         raise ValueError("Provide url or text")
-    raw_chunks = re.split(r"\n\n+", text)
-    passages = []
-    for chunk in raw_chunks:
-        chunk = chunk.strip()
-        if len(chunk) >= min_length:
-            passages.append(chunk)
-    return passages
+    if mode == "sentence":
+        chunks = split_sentences(text)
+    else:
+        chunks = [p.strip() for p in re.split(r"\n\n+", text)]
+    return [c for c in chunks if len(c) >= min_length]

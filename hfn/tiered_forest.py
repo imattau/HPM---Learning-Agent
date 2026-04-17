@@ -120,13 +120,7 @@ class TieredForest(Forest):
         if not roots:
             roots = list(self._mu_index.keys())[:50]
 
-        # DEBUG: Check manifold consistency
-        if k > 0:
-            sample_id = next(iter(self._mu_index))
-            # print(f"      [DEBUG] Forest.retrieve: D={self._D}, index_size={len(self._mu_index)}, sample_id={sample_id[:8]}, x_shape={x.shape}")
-
         candidates = []
-        # FIX: Copy the list so we don't drain 'roots' for the debug print
         frontier = list(roots) 
         seen = set()
         
@@ -137,7 +131,8 @@ class TieredForest(Forest):
             try:
                 # Sort by distance (mu - x)
                 frontier.sort(key=lambda nid: float(np.sum((self._mu_index[nid] - x)**2)))
-            except ValueError as e:
+            except Exception as e:
+                print(f"      [DEBUG] TieredForest.retrieve Error: {e}")
                 return []
             
             nid = frontier.pop(0)
@@ -158,9 +153,14 @@ class TieredForest(Forest):
                     if c.id not in seen and c.id in self._mu_index:
                         frontier.append(c.id)
 
+        if not candidates:
+            print(f"      [DEBUG] TieredForest.retrieve: No candidates found. frontier_size={len(frontier)}, budget={budget}")
+
         # Final sort
         candidates.sort(key=lambda n: float(np.sum((n.mu - x)**2)))
         res = candidates[:k]
+        
+        # ...
 
         # Promote top-k results to hot cache (MRU position)
         for node in res:

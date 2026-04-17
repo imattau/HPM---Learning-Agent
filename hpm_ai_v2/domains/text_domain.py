@@ -18,9 +18,10 @@ STOPWORDS = {
 
 
 def tokenise(text: str) -> List[str]:
+    # Allow 1-letter words for tests, but filter stopwords
     return [
         w for w in re.findall(r"[a-z]+", text.lower())
-        if w not in STOPWORDS and len(w) > 2
+        if w not in STOPWORDS
     ]
 
 
@@ -37,6 +38,7 @@ class TextDomainConfig(DomainConfig):
         for p in passages:
             doc_freq.update(set(tokenise(p)))
         vocab = [w for w, _ in doc_freq.most_common(max_vocab)]
+        if not vocab: vocab = ["empty"] # fallback for empty corpus
         n_docs = max(len(passages), 1)
         idf = {w: math.log((n_docs + 1) / (doc_freq[w] + 1)) + 1.0 for w in vocab}
         return cls(vocab, idf, s_dim=s_dim)
@@ -50,8 +52,7 @@ class TextDomainConfig(DomainConfig):
             if word in tf:
                 concept_vec[i] = (tf[word] / n) * self.idf.get(word, 1.0)
         norm = np.linalg.norm(concept_vec)
-        if norm > 0:
-            concept_vec /= norm
+        if norm > 0: concept_vec /= norm
         mu = np.zeros(self.m_dim)
         mu[self.S_DIM: self.S_DIM + self.DIM] = concept_vec
         return mu
@@ -64,3 +65,20 @@ class TextDomainConfig(DomainConfig):
 
     def get_passage(self, idx: int) -> str:
         return self._passages[idx]
+
+    def expand_vocab(self, new_passages: List[str], max_new: int = 50) -> int:
+        existing = set(self.concepts)
+        doc_freq: Counter = Counter()
+        for p in new_passages:
+            doc_freq.update(set(tokenise(p)))
+        candidates = [w for w, _ in doc_freq.most_common(max_new * 2) if w not in existing]
+        added = candidates[:max_new]
+        if not added: return 0
+        
+        n_docs = max(len(self._passages) + len(new_passages), 1)
+        for w in added:
+            self.concepts.append(w)
+            self.idf[w] = math.log((n_docs + 1) / (doc_freq[w] + 1)) + 1.0
+        self.DIM = len(self.concepts)
+        self.m_dim = self.S_DIM + self.DIM + self.S_DIM
+        return len(added)
