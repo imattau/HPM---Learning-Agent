@@ -44,6 +44,12 @@ class TextDomainConfig(DomainConfig):
             "POS_DET", "POS_PREP", "POS_CONJ", "POS_PUNCT"
         ]
 
+    def get_srl_primitives(self) -> List[str]:
+        return [
+            "SRL_AGENT", "SRL_PATIENT", "SRL_INSTRUMENT", 
+            "SRL_PREDICATE", "SRL_GET_ROLE"
+        ]
+
     @classmethod
     def from_passages(cls, passages: List[str], max_vocab: int = 200, s_dim: int = 20) -> "TextDomainConfig":
         doc_freq: Counter = Counter()
