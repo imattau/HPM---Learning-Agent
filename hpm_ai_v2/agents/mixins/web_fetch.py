@@ -19,25 +19,8 @@ class WebFetchMixin:
         Fetch a webpage and return its HFN node representation.
         Encapsulates fetching strategy and status tracking.
         """
-        print(f"      [WEB] Fetching: {url}")
-        try:
-            # We use the existing fetch_url which strips HTML
-            # but in a real implementation we might want to keep links for structural nodes
-            text = fetch_url(url)
-            status = 200
-        except Exception as e:
-            print(f"      [WEB] Error fetching {url}: {e}")
-            text = ""
-            status = 404 # Simplified
-            
-        # Build the HFN node for the webpage
+        # Create a stub node first
         mu = self.config.encode_url(url)
-        # Mix in status code concept
-        status_concept = f"WEB_STATUS_{status}"
-        if status_concept in self.config.concept_idx:
-            idx = self.config.concept_idx[status_concept]
-            mu[self.config.S_DIM + idx] = 1.0
-            
         import uuid
         webpage_id = f"webpage_{uuid.uuid4().hex[:8]}"
         node = HFN(
@@ -49,16 +32,45 @@ class WebFetchMixin:
         node.metadata = {
             "type": "webpage",
             "url": url,
-            "status": status,
-            "text": text
+            "status": "unfetched"
         }
         node.relation_type = "webpage"
-        
         self.observer.register(node, protected=False)
         self.patterns[webpage_id] = node
-        self.web_history.append(url)
         
+        # Now fetch it
+        self.fetch_page(node)
         return node
+
+    def fetch_page(self, webpage_node: HFN) -> str:
+        """
+        Fetch the content of a webpage node.
+        Updates node metadata with status and text. Returns text.
+        """
+        url = webpage_node.metadata.get("url")
+        if not url: return ""
+        
+        print(f"      [WEB] Fetching: {url}")
+        try:
+            text = fetch_url(url)
+            status = 200
+        except Exception as e:
+            print(f"      [WEB] Error fetching {url}: {e}")
+            text = ""
+            status = 404
+            
+        # Update node metadata
+        webpage_node.metadata["text"] = text
+        webpage_node.metadata["status"] = status
+        
+        # Update mu with status concept
+        status_concept = f"WEB_STATUS_{status}"
+        if status_concept in self.config.concept_idx:
+            idx = self.config.concept_idx[status_concept]
+            webpage_node.mu[self.config.S_DIM + idx] = 1.0
+            
+        self.web_history.append(url)
+        return text
 
     def extract_links_hierarchical(self, webpage_node: HFN) -> List[HFN]:
         """

@@ -12,6 +12,12 @@ class WebSearchMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    def search(self, topic: str, num_results: int = 1) -> List[HFN]:
+        """High-level search interface, returns list of webpage nodes."""
+        query_node = self.search_web(topic)
+        # Returns children (webpage nodes) up to num_results
+        return query_node.children()[:num_results]
+
     def search_web(self, query: str) -> HFN:
         """
         Perform a web search and return a search_query HFN node.

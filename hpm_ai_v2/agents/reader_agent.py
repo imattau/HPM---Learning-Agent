@@ -244,31 +244,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             self._last_topic_mu = best_t.mu.copy()
         return idx
 
-    def ingest_wikipedia_page(self, title: str, chunk_size: int = 5, overlap: int = 2):
-        """Fetch and ingest a Wikipedia page, returns (doc_node, links)."""
-        webpage_node = None
-        if self.web_agent:
-            # Use WebAgent for fetching
-            url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
-            webpage_node = self.web_agent.fetch_webpage(url)
-            text = webpage_node.metadata.get("text", "")
-            links = [] # Basic link extraction could be done here if needed
-        else:
-            try:
-                import wikipedia
-            except ImportError:
-                print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found.")
-                return None, []
-                
-            print(f"      [INFO] Ingesting Wikipedia page: {title}")
-            try:
-                page = wikipedia.page(title)
-                text = page.content
-                links = list(page.links)
-            except Exception as e:
-                print(f"      [ERROR] Failed to fetch Wikipedia page '{title}': {e}")
-                return None, []
-            
+    def ingest_text(self, text: str, title: str, webpage_node: Optional[HFN] = None, chunk_size: int = 5, overlap: int = 2) -> HFN:
+        """Generalized text ingestion pipeline, returns document node."""
         sentences = self.sentence_splitter.split(text)
         from hpm_ai_v2.utils.text_chunker import chunk_passages
         passages = chunk_passages(sentences, window_size=chunk_size, overlap=overlap)
@@ -300,60 +277,41 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             print(f"      [INFO] Building topic clusters for {title}...")
             self.build_topic_clusters()
             self.stabilize_universal_concepts()
-        
-        return doc_node, links if not self.web_agent else [] # links handled differently with web_agent
+            
+        return doc_node
 
-    def explore_wikipedia(self, seed_title: str, max_iterations: int = 5) -> List[str]:
-        """Autonomously explore Wikipedia based on predictive curiosity."""
-        import wikipedia
-        visited = []
-        current_title = seed_title
-        source_doc = None
+    def get_most_curious_topic(self) -> str:
+        """
+        Identify the most 'curious' topic based on current knowledge.
+        Uses topic coverage or entropy as a proxy for information gaps.
+        """
+        topic_nodes = [n for k, n in self.patterns.items() if k.startswith("topic_")]
         
-        print(f"      [EXPLORATION] Starting at: {seed_title}")
+        # Filter concepts to avoid characters, padding, and common words
+        valid_concepts = [
+            c for c in self.config.concepts 
+            if not c.startswith("CHAR_") and not c.startswith("PAD_") 
+            and not c.isupper() and len(c) > 3
+        ]
+
+        if not topic_nodes:
+            # Fallback: pick a valid concept
+            return valid_concepts[np.random.randint(len(valid_concepts))] if valid_concepts else "Artificial intelligence"
+
+        # Calculate curiosity: (1.0 - coverage) or entropy
+        # Here we just pick one with low weight/density
+        best_topic = max(topic_nodes, key=lambda t: self.predictive_curiosity_score(self.renderer.render(t)))
         
-        for i in range(max_iterations):
-            if current_title in visited: break
-            visited.append(current_title)
-            
-            # 1. Ingest page
-            doc_node, links = self.ingest_wikipedia_page(current_title)
-            if not doc_node: break
-            
-            # 2. Update Knowledge Graph
-            self._update_corpus(doc_node, source_doc)
-            source_doc = doc_node
-            
-            if i == max_iterations - 1: break
-            
-            # 3. Select next link by curiosity
-            if not links: break
-            
-            # Subsample links for efficiency
-            import random
-            candidates = random.sample(links, min(15, len(links)))
-            
-            best_link = None
-            max_curiosity = -1.0
-            
-            print(f"      [EXPLORATION] Evaluating {len(candidates)} candidates for iteration {i+2}...")
-            for link in candidates:
-                if link in visited: continue
-                try:
-                    # Get snippet for curiosity score
-                    summary = wikipedia.summary(link, sentences=1)
-                    score = self.predictive_curiosity_score(summary)
-                    if score > max_curiosity:
-                        max_curiosity = score
-                        best_link = link
-                except:
-                    continue
-            
-            if not best_link: break
-            print(f"      [EXPLORATION] Selected: '{best_link}' (Curiosity: {max_curiosity:.4f})")
-            current_title = best_link
-            
-        return visited
+        # Extract keywords from topic node
+        concept_slice = best_topic.mu[self.config.S_DIM: self.config.S_DIM + self.config.DIM]
+        top_indices = concept_slice.argsort()[::-1]
+        
+        for idx in top_indices:
+            concept = self.config.concepts[idx]
+            if concept in valid_concepts:
+                return concept
+                
+        return valid_concepts[0] if valid_concepts else "Artificial intelligence"
 
     def find_path_between_docs(self, start_title: str, end_title: str) -> List[str]:
         """BFS over the Corpus HFN graph to find a path between document nodes."""

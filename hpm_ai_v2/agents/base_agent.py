@@ -74,11 +74,14 @@ class BaseHFNAgent:
         self.tolerance = kwargs.get("tolerance", 0.05)
 
         # Pattern substrate: TieredForest
-        self.forest: TieredForest = forest_class(
-            D=self.m_dim,
-            cold_dir=self.cold_dir,
-            hot_cap=hot_cap,
-        )
+        if "forest" in kwargs:
+            self.forest = kwargs.pop("forest")
+        else:
+            self.forest: TieredForest = forest_class(
+                D=self.m_dim,
+                cold_dir=self.cold_dir,
+                hot_cap=hot_cap,
+            )
 
         # Retriever
         target_slice = slice(self.s_dim + self.dim, self.m_dim)
