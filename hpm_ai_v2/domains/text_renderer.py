@@ -14,10 +14,34 @@ class TextRenderer:
 
     def render(self, node: "HFN") -> str:
         metadata = getattr(node, "metadata", {})
+        relation_type = getattr(node, "relation_type", None)
+        
+        # 1. Base case: Passage with raw text (backward compatibility)
         idx = metadata.get("passage_idx")
         if idx is not None and 0 <= idx < len(self.config._passages):
             return self.config.get_passage(idx)
+            
+        # 2. Fractal Rendering: Recursive reconstruction from children
+        children = node.children()
+        if children:
+            if relation_type == "sentence":
+                # Render word nodes
+                words = [self.render(c) for c in children]
+                return " ".join(words).replace(" .", ".").replace(" ,", ",").replace(" ?", "?").replace(" !", "!")
+            elif relation_type in ["paragraph", "document", "topic"]:
+                # Render sentence or paragraph nodes
+                parts = [self.render(c) for c in children]
+                return " ".join(parts)
+            elif relation_type == "spelling":
+                # Render character nodes for a word
+                chars = [self.render(c) for c in children]
+                return "".join(chars)
+            elif relation_type == "character":
+                # Character primitive
+                return metadata.get("char", node.id.replace("CHAR_", ""))
+
+        # 3. Fallback: Top words from concept vector (mu)
         concept_slice = node.mu[self.config.S_DIM: self.config.S_DIM + self.config.DIM]
         top_indices = concept_slice.argsort()[::-1][:10]
-        words = [self.config.concepts[i] for i in top_indices if concept_slice[i] > 0]
+        words = [self.config.concepts[i] for i in top_indices if concept_slice[i] > 1e-4]
         return " ".join(words)

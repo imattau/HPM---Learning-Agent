@@ -71,6 +71,18 @@ def run_experiment():
         # If wikipedia fetch fails (no network), we might not see this, but ingest_wikipedia_page should handle it
         print("PARTIAL: No document node found (maybe wikipedia fetch failed).")
 
+    # 5. Verify Hierarchical Retrieval
+    print("\nVerifying Hierarchical Retrieval...")
+    query = "What jumps over the dog?"
+    print(f"  Query: '{query}'")
+    result = agent.query_hierarchical(query)
+    print(f"  Reconstructed Result: {result}")
+    
+    if "fox jumps" in result:
+        print("SUCCESS: Hierarchical retrieval correctly reconstructed text from HFN nodes!")
+    else:
+        print("PARTIAL: Retrieval returned but not as expected.")
+
     print("\n[SUCCESS] Fractal Uniformity experiment completed.")
 
 if __name__ == "__main__":

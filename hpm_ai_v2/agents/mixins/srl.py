@@ -100,6 +100,75 @@ class SemanticRoleMixin:
             if roles not in self.role_knowledge:
                 self.role_knowledge.append(roles)
 
+    def extract_roles_from_node(self, node: HFN) -> Dict[str, str]:
+        """Extract roles from a sentence HFN node."""
+        if getattr(node, "relation_type", None) != "sentence": return {}
+        # Render tokens from children
+        tokens = [c.metadata.get("word", c.id.replace("word_spelling_", "")) for c in node.children()]
+        # We need to tag them
+        tags = self._tag_sentence(node)
+        struct = list(zip(tokens, tags))
+        
+        roles = {}
+        verb_idx = -1
+        AUXILIARIES = ["do", "does", "did", "is", "are", "was", "were", "has", "have", "had", "can", "will"]
+        
+        # Predicate induction
+        for i, (token, tag) in enumerate(struct):
+            if tag == "VERB" and token.lower() not in AUXILIARIES:
+                verb_idx = i
+                roles["PREDICATE"] = token
+                break
+        
+        if verb_idx != -1:
+            # Agent (before verb)
+            for i in range(verb_idx - 1, -1, -1):
+                if struct[i][1] == "NOUN":
+                    roles["AGENT"] = struct[i][0]
+                    break
+            # Patient (after verb)
+            for i in range(verb_idx + 1, len(struct)):
+                if struct[i][1] == "NOUN":
+                    if i > 0 and struct[i-1][0].lower() == "with":
+                        roles["INSTRUMENT"] = struct[i][0]
+                    elif "PATIENT" not in roles:
+                        roles["PATIENT"] = struct[i][0]
+        return roles
+
+    def score_role_match(self, q_roles: Dict[str, str], candidate_roles: Dict[str, str]) -> float:
+        """Score how well candidate roles match query roles."""
+        score = 0.0
+        
+        q_pred = q_roles.get("PREDICATE", "").lower()
+        c_pred = candidate_roles.get("PREDICATE", "").lower()
+        
+        # 1. Predicate must match (at least stem)
+        if not q_pred or not c_pred: return 0.0
+        if q_pred[:4] != c_pred[:4]: return 0.0
+        score += 1.0
+        
+        # 2. Check other roles
+        for role in ["AGENT", "PATIENT", "INSTRUMENT"]:
+            q_val = q_roles.get(role, "").lower()
+            c_val = candidate_roles.get(role, "").lower()
+            
+            if q_val and c_val:
+                if q_val == c_val:
+                    score += 1.0
+                else:
+                    # Fuzzy match via concept similarity if config is available
+                    if hasattr(self, "config"):
+                        v1 = self.config.encode_passage(q_val)
+                        v2 = self.config.encode_passage(c_val)
+                        s_dim, dim = self.config.S_DIM, self.config.DIM
+                        sim = float(np.dot(v1[s_dim:s_dim+dim], v2[s_dim:s_dim+dim]) / (np.linalg.norm(v1[s_dim:s_dim+dim])*np.linalg.norm(v2[s_dim:s_dim+dim]) + 1e-9))
+                        if sim > 0.7: score += sim
+            elif q_val and not c_val:
+                # Penalty for missing role required by query
+                score -= 0.5
+                
+        return score
+
     def answer_role_query(self, question: str, target_role: str = "PATIENT") -> Optional[str]:
         """
         Answer a role-based query.

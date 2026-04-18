@@ -464,6 +464,62 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         prefix = getattr(node, "metadata", {}).get("type", "Pattern").capitalize()
         return f"{prefix} [{', '.join(words)}]"
 
+    def retrieve_by_predicate(self, predicate_word: str) -> List[HFN]:
+        """Find sentence nodes whose predicate matches predicate_word."""
+        candidates = []
+        p_lower = predicate_word.lower()[:4] # stem
+        for k, n in self.patterns.items():
+            if getattr(n, "relation_type", None) == "sentence":
+                roles = self.extract_roles_from_node(n)
+                c_pred = roles.get("PREDICATE", "").lower()
+                if c_pred and c_pred[:4] == p_lower:
+                    candidates.append(n)
+        return candidates
+
+    def answer_question_hierarchical(self, question: str) -> Optional[str]:
+        """Answer a question by searching the HFN hierarchy for structured evidence."""
+        q_roles = self.extract_roles(question)
+        print(f"      [DEBUG] Question Roles: {q_roles}")
+        if not q_roles: return None
+        
+        # 1. Determine target role
+        q_lower = question.lower()
+        target_role = "AGENT" if any(w in q_lower for w in ["who", "which animal"]) else "PATIENT"
+        
+        # 2. Retrieve candidates by predicate
+        predicate = q_roles.get("PREDICATE")
+        if not predicate: return None
+        
+        candidates = self.retrieve_by_predicate(predicate)
+        if not candidates:
+            # Fallback to general hierarchical retrieval
+            topic_res = self.query_hierarchical(question)
+            return topic_res
+            
+        # 3. Score candidates by role alignment
+        best_sent = None
+        best_score = -1.0
+        
+        for sent_node in candidates:
+            s_roles = self.extract_roles_from_node(sent_node)
+            score = self.score_role_match(q_roles, s_roles)
+            if score > best_score:
+                best_score = score
+                best_sent = sent_node
+                
+        # 4. Extract answer role
+        if best_sent and best_score > 0.5:
+            s_roles = self.extract_roles_from_node(best_sent)
+            ans = s_roles.get(target_role)
+            if ans:
+                # Reconstruct full NP if needed, for now return the word
+                return ans
+            else:
+                # Fallback to rendering the whole sentence as evidence
+                return self.renderer.render(best_sent)
+                
+        return None
+
     def query_hierarchical(self, question: str) -> Optional[str]:
         """Perform top-down hierarchical search with analogical fallback."""
         concepts = [n for k,n in self.patterns.items() if k.startswith("concept_")]
