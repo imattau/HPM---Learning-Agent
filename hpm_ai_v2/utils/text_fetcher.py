@@ -42,7 +42,11 @@ def strip_html(html: str) -> str:
 
 def fetch_url(url: str, timeout: int = 10) -> str:
     """Fetch URL and return stripped plain text."""
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    req = urllib.request.Request(
+        url, 
+        headers={'User-Agent': 'HPM-Learning-Agent/1.0 (https://github.com/imattau/HPM---Learning-Agent; imattau@gmail.com)'}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     return strip_html(raw)
 

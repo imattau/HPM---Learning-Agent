@@ -34,6 +34,7 @@ class SpellingMixin:
         
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.01, id=char_id, use_diag=True)
         node.metadata = {"type": "character", "char": c_str}
+        node.relation_type = "character"
         self.observer.register(node, protected=True)
         self.patterns[char_id] = node
         return node

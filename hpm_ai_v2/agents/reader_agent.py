@@ -10,7 +10,7 @@ from hpm_ai_v2.agents.base_agent import BaseHFNAgent
 from hpm_ai_v2.agents.mixins.syntax import SyntaxMixin
 from hpm_ai_v2.agents.mixins.srl import SemanticRoleMixin
 from hpm_ai_v2.agents.mixins.spelling import SpellingMixin
-from hpm_ai_v2.domains.text_domain import TextDomainConfig
+from hpm_ai_v2.domains.text_domain import TextDomainConfig, tokenise
 from hpm_ai_v2.domains.text_renderer import TextRenderer
 from hpm_ai_v2.utils.oracle.text_oracle import TextOracle
 from hpm_ai_v2.utils.text_fetcher import fetch_passages
@@ -244,12 +244,15 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             self._last_topic_mu = best_t.mu.copy()
         return idx
 
-    def ingest_text(self, text: str, title: str, webpage_node: Optional[HFN] = None, chunk_size: int = 5, overlap: int = 2) -> HFN:
+    def ingest_text(self, text: str, title: str, webpage_node: Optional[HFN] = None, chunk_size: int = 5, overlap: int = 2, max_passages: Optional[int] = None) -> HFN:
         """Generalized text ingestion pipeline, returns document node."""
         sentences = self.sentence_splitter.split(text)
         from hpm_ai_v2.utils.text_chunker import chunk_passages
         passages = chunk_passages(sentences, window_size=chunk_size, overlap=overlap)
         
+        if max_passages is not None:
+            passages = passages[:max_passages]
+            
         indices = []
         passage_nodes = []
         for p in passages:
@@ -347,20 +350,45 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self._documents.append(indices)
         return indices
 
-    def query(self, question: str, top_k: int = 1, node_type: Optional[str] = "passage") -> Optional[str]:
-        if not self.config._passages: return None
+    def query(self, question: str, top_k: int = 1, node_type: Optional[str] = None) -> Optional[str]:
+        """Query the HFN forest for the most relevant node content."""
+        if not self.config._passages and not self.patterns: return None
+        
+        # Ensure words in the question are in our vocabulary if dynamic_vocab is on
+        if self.dynamic_vocab:
+            tokens = tokenise(question)
+            for t in tokens:
+                self._ensure_word_macro(t)
+        
         query_mu = self.config.encode_passage(question)
+        s_dim, dim = self.config.S_DIM, self.config.DIM
+        q_v = query_mu[s_dim : s_dim + dim]
+        
+        # Debug: Top words in query
+        top_indices = q_v.argsort()[::-1][:5]
+        query_words = [self.config.get_concept_name(i) for i in top_indices if q_v[i] > 1e-4]
+        print(f"      [DEBUG] Query words: {query_words}")
+
         query_node = HFN(mu=query_mu, sigma=np.ones(self.m_dim), id="__query__", use_diag=True)
         
-        # We might want to over-fetch if we're filtering
-        pool_size = top_k * 10 if node_type else top_k
+        # Increase search pool if we're filtering
+        pool_size = top_k * 50 if node_type else top_k * 10
         candidates = self.retriever.retrieve(query_node, k=pool_size)
+        print(f"      [DEBUG] Forest returned {len(candidates)} candidates")
         
         if node_type:
             candidates = [n for n in candidates if getattr(n, "metadata", {}).get("type") == node_type]
+        else:
+            # Filter out non-content nodes like priors or character primitives
+            candidates = [n for n in candidates if getattr(n, "relation_type", None) in ["sentence", "paragraph", "passage", "document", "spelling"]]
+
+        if not candidates: 
+            print("      [DEBUG] No suitable candidates after filtering.")
+            return None
         
-        if not candidates: return None
-        return self.renderer.render(candidates[0])
+        res = self.renderer.render(candidates[0])
+        print(f"      [DEBUG] Best match: {res[:50]}...")
+        return res
 
     def query_scored(self, question: str, k: int = 10) -> List[tuple]:
         if not self.config._passage_vecs: return []
@@ -565,12 +593,15 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         
         predicate = q_roles.get("PREDICATE")
         
-        # Special case for "What is X?"
-        if not predicate and "is" in q_lower:
-            predicate = "is"
+        # Special case for "What is X?" or "What are X?"
+        if not predicate and any(w in q_lower for w in ["is", "are", "were"]):
+            for w in ["is", "are", "were"]:
+                if w in q_lower:
+                    predicate = w
+                    break
             words = question.replace("?", "").split()
-            if "is" in words:
-                idx = words.index("is")
+            if predicate in words:
+                idx = words.index(predicate)
                 subject = " ".join(words[idx+1:])
                 q_roles["PATIENT"] = subject
         

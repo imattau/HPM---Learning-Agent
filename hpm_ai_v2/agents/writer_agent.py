@@ -13,10 +13,12 @@ class WriterAgent(BaseHFNAgent, WriterMixin):
     Collaborates with ReaderAgent and WebAgent to synthesize knowledge.
     """
     def __init__(self, config: TextDomainConfig, reader_agent: "ReaderAgent", **kwargs) -> None:
-        super().__init__(config, **kwargs)
+        # Use reader_agent's renderer by default to ensure consistent text handling
+        renderer = kwargs.get("renderer", getattr(reader_agent, "renderer", None))
+        super().__init__(config, renderer=renderer, **kwargs)
         self.reader_agent = reader_agent
 
-    def request_knowledge(self, topic: str) -> bool:
+    def request_knowledge(self, topic: str, max_passages: Optional[int] = 10) -> bool:
         """
         Request missing knowledge from the Web-Reader pipeline.
         Triggers discovery if the current knowledge base lacks information.
@@ -38,8 +40,8 @@ class WriterAgent(BaseHFNAgent, WriterMixin):
         
         # 3. Use ReaderAgent to ingest
         if text:
-            print(f"      [WRITER] Found information, Reader ingesting...")
-            self.reader_agent.ingest_text(text, title=topic, webpage_node=webpage_node)
+            print(f"      [WRITER] Found information, Reader ingesting (limit: {max_passages} passages)...")
+            self.reader_agent.ingest_text(text, title=topic, webpage_node=webpage_node, max_passages=max_passages)
             return True
         return False
 
