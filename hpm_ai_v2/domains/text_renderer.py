@@ -23,6 +23,12 @@ class TextRenderer:
             
         # 2. Fractal Rendering: Recursive reconstruction from children
         children = node.children()
+        
+        if relation_type == "webpage":
+            return f"[Webpage: {metadata.get('url', 'Unknown URL')}]"
+        elif relation_type == "search":
+            return f"[Search Query: {metadata.get('query', 'Unknown')}]"
+            
         if children:
             if relation_type == "sentence":
                 # Render word nodes
@@ -39,6 +45,11 @@ class TextRenderer:
             elif relation_type == "character":
                 # Character primitive
                 return metadata.get("char", node.id.replace("CHAR_", ""))
+            elif relation_type == "hyperlink":
+                # Render hyperlink source -> target
+                if len(children) >= 2:
+                    return f"[Hyperlink: {self.render(children[0])} -> {self.render(children[1])}]"
+                return "[Hyperlink]"
 
         # 3. Fallback: Top words from concept vector (mu)
         concept_slice = node.mu[self.config.S_DIM: self.config.S_DIM + self.config.DIM]

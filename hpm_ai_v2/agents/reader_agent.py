@@ -25,7 +25,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     Upgraded for Wikipedia ingestion and dynamic vocabulary (SP-Reader 9).
     """
 
-    def __init__(self, config: TextDomainConfig, dynamic_vocab: bool = True, max_vocab: Optional[int] = None, **kwargs) -> None:
+    def __init__(self, config: TextDomainConfig, dynamic_vocab: bool = True, max_vocab: Optional[int] = None, web_agent: Optional[WebAgent] = None, **kwargs) -> None:
         renderer = TextRenderer(config)
         super().__init__(config, renderer=renderer, **kwargs)
         self.oracle = TextOracle(config)
@@ -37,6 +37,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self.max_vocab = max_vocab
         self.sentence_splitter = SentenceSplitter()
         self.corpus_node: Optional[HFN] = None
+        self.web_agent = web_agent
         
         # Ensure mixin attributes are initialized if super() chain was interrupted
         if not hasattr(self, "pos_rules"): self.pos_rules = {}
@@ -245,20 +246,28 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
 
     def ingest_wikipedia_page(self, title: str, chunk_size: int = 5, overlap: int = 2):
         """Fetch and ingest a Wikipedia page, returns (doc_node, links)."""
-        try:
-            import wikipedia
-        except ImportError:
-            print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found.")
-            return None, []
-            
-        print(f"      [INFO] Ingesting Wikipedia page: {title}")
-        try:
-            page = wikipedia.page(title)
-            text = page.content
-            links = list(page.links)
-        except Exception as e:
-            print(f"      [ERROR] Failed to fetch Wikipedia page '{title}': {e}")
-            return None, []
+        webpage_node = None
+        if self.web_agent:
+            # Use WebAgent for fetching
+            url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+            webpage_node = self.web_agent.fetch_webpage(url)
+            text = webpage_node.metadata.get("text", "")
+            links = [] # Basic link extraction could be done here if needed
+        else:
+            try:
+                import wikipedia
+            except ImportError:
+                print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found.")
+                return None, []
+                
+            print(f"      [INFO] Ingesting Wikipedia page: {title}")
+            try:
+                page = wikipedia.page(title)
+                text = page.content
+                links = list(page.links)
+            except Exception as e:
+                print(f"      [ERROR] Failed to fetch Wikipedia page '{title}': {e}")
+                return None, []
             
         sentences = self.sentence_splitter.split(text)
         from hpm_ai_v2.utils.text_chunker import chunk_passages
@@ -279,6 +288,12 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             if para: para_nodes.append(para)
             
         doc_node = self.build_document_node(para_nodes, title=title)
+        
+        # Link document to webpage node if available
+        if webpage_node:
+            doc_node.add_child(webpage_node)
+            doc_node.add_edge(doc_node, webpage_node, "derived_from")
+            
         self._documents.append(indices)
         
         if len(passages) > 10:
@@ -286,7 +301,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             self.build_topic_clusters()
             self.stabilize_universal_concepts()
         
-        return doc_node, links
+        return doc_node, links if not self.web_agent else [] # links handled differently with web_agent
 
     def explore_wikipedia(self, seed_title: str, max_iterations: int = 5) -> List[str]:
         """Autonomously explore Wikipedia based on predictive curiosity."""
