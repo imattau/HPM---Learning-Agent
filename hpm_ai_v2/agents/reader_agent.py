@@ -13,6 +13,7 @@ from hpm_ai_v2.domains.text_domain import TextDomainConfig
 from hpm_ai_v2.domains.text_renderer import TextRenderer
 from hpm_ai_v2.utils.oracle.text_oracle import TextOracle
 from hpm_ai_v2.utils.text_fetcher import fetch_passages
+from hpm_ai_v2.utils.sentence_splitter import SentenceSplitter
 
 
 class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
@@ -20,9 +21,10 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     HFN-native agent that reads text/webpages and retrieves relevant passages.
     Extended with structural hierarchy (L2-L5), recursive summarization, 
     predictive curiosity, structural analogy, syntax, semantics, and spelling (SP-Reader 8).
+    Upgraded for Wikipedia ingestion and dynamic vocabulary (SP-Reader 9).
     """
 
-    def __init__(self, config: TextDomainConfig, **kwargs) -> None:
+    def __init__(self, config: TextDomainConfig, dynamic_vocab: bool = True, max_vocab: Optional[int] = None, **kwargs) -> None:
         renderer = TextRenderer(config)
         super().__init__(config, renderer=renderer, **kwargs)
         self.oracle = TextOracle(config)
@@ -30,6 +32,14 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self._documents: List[List[int]] = []
         self._last_topic_mu: Optional[np.ndarray] = None
         self._analogy_map: Dict[str, str] = {} # target_node_id -> source_node_id
+        self.dynamic_vocab = dynamic_vocab
+        self.max_vocab = max_vocab
+        self.sentence_splitter = SentenceSplitter()
+        
+        # Ensure mixin attributes are initialized if super() chain was interrupted
+        if not hasattr(self, "pos_rules"): self.pos_rules = {}
+        if not hasattr(self, "role_knowledge"): self.role_knowledge = []
+        if not hasattr(self, "word_spellings"): self.word_spellings = {}
         
         # Override retriever slice to point to Concept/Text manifold
         from hfn.retriever import GoalConditionedRetriever
@@ -92,7 +102,29 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         if added > 0: self.reindex_knowledge_base()
         return added
 
+    def _ensure_word_macro(self, word: str) -> HFN:
+        """Ensure a character-level macro exists for the word, adding to vocab if needed."""
+        word_id = f"word_spelling_{word.lower()}"
+        if word_id in self.patterns:
+            return self.patterns[word_id]
+        
+        # Add to config vocabulary (dynamic expansion)
+        if self.dynamic_vocab:
+            self.config.add_word(word)
+            # Reindex if dimension changed
+            if self.config.m_dim != self.forest._D:
+                self.reindex_knowledge_base()
+        
+        # Create character-level macro
+        return self.learn_word_spelling(word, case_sensitive=False)
+
     def observe_passage(self, text: str) -> int:
+        if self.dynamic_vocab:
+            from hpm_ai_v2.domains.text_domain import tokenise
+            tokens = tokenise(text)
+            for t in tokens:
+                self._ensure_word_macro(t)
+        
         idx = self.config.register_passage(text)
         mu = self.config.encode_passage(text)
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.1, id=f"passage_{idx}", use_diag=True)
@@ -106,6 +138,40 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             best_t = min(topics, key=lambda t: np.linalg.norm(t.mu - mu))
             self._last_topic_mu = best_t.mu.copy()
         return idx
+
+    def ingest_wikipedia_page(self, title: str, chunk_size: int = 5, overlap: int = 2):
+        """Fetch and ingest a Wikipedia page."""
+        try:
+            import wikipedia
+        except ImportError:
+            print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found. Run 'pip install wikipedia'.")
+            return
+            
+        print(f"      [INFO] Ingesting Wikipedia page: {title}")
+        try:
+            page = wikipedia.page(title)
+            text = page.content
+        except Exception as e:
+            print(f"      [ERROR] Failed to fetch Wikipedia page '{title}': {e}")
+            return
+            
+        sentences = self.sentence_splitter.split(text)
+        from hpm_ai_v2.utils.text_chunker import chunk_passages
+        passages = chunk_passages(sentences, window_size=chunk_size, overlap=overlap)
+        
+        indices = []
+        for p in passages:
+            indices.append(self.observe_passage(p))
+        
+        self._documents.append(indices)
+        
+        # After large ingestion, it's good to rebuild hierarchy
+        if len(passages) > 10:
+            print(f"      [INFO] Building topic clusters for {title}...")
+            self.build_topic_clusters()
+            self.stabilize_universal_concepts()
+        
+        return indices
 
     def observe_document(self, text: str, min_length: int = 40) -> List[int]:
         passages = fetch_passages(text=text, min_length=min_length)

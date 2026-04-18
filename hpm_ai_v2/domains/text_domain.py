@@ -63,7 +63,7 @@ class TextDomainConfig(DomainConfig):
         ]
 
     @classmethod
-    def from_passages(cls, passages: List[str], max_vocab: int = 200, s_dim: int = 20) -> "TextDomainConfig":
+    def from_passages(cls, passages: List[str], max_vocab: int = 200, s_dim: int = 20, include_char_primitives: bool = False) -> "TextDomainConfig":
         doc_freq: Counter = Counter()
         for p in passages:
             doc_freq.update(set(tokenise(p)))
@@ -71,7 +71,7 @@ class TextDomainConfig(DomainConfig):
         if not vocab: vocab = ["empty"] # fallback for empty corpus
         n_docs = max(len(passages), 1)
         idf = {w: math.log((n_docs + 1) / (doc_freq[w] + 1)) + 1.0 for w in vocab}
-        return cls(vocab, idf, s_dim=s_dim)
+        return cls(vocab, idf, s_dim=s_dim, include_char_primitives=include_char_primitives)
 
     def encode_passage(self, text: str) -> np.ndarray:
         tokens = tokenise(text)
@@ -92,6 +92,19 @@ class TextDomainConfig(DomainConfig):
         self._passages.append(text)
         self._passage_vecs.append(self.encode_passage(text))
         return idx
+
+    def add_word(self, word: str) -> int:
+        """Add a new word to the vocabulary and update dimension."""
+        word = word.lower()
+        if word not in self.concepts:
+            self.concepts.append(word)
+            # Assign a default IDF for the new word (e.g., average or max)
+            avg_idf = sum(self.idf.values()) / len(self.idf) if self.idf else 1.0
+            self.idf[word] = avg_idf
+            self.DIM = len(self.concepts)
+            self.m_dim = self.S_DIM + self.DIM + self.S_DIM
+            return len(self.concepts) - 1
+        return self.concepts.index(word)
 
     def get_passage(self, idx: int) -> str:
         return self._passages[idx]

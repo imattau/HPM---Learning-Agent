@@ -157,7 +157,10 @@ class BaseHFNAgent:
         self._replay_buffer: List[np.ndarray] = []
         self._replay_buffer_size = replay_buffer_size
         self.auto_save_frequency = auto_save_frequency
-        self._solve_counter = 0
+        self._step_counter = 0
+
+        super().__init__(**kwargs)
+
 
         # Temporal pattern field: recency tracking (L3-L5)
         self._pattern_timestamps: Dict[str, float] = {}  # pattern_id -> last_used_time
