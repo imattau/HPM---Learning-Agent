@@ -36,6 +36,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self.dynamic_vocab = dynamic_vocab
         self.max_vocab = max_vocab
         self.sentence_splitter = SentenceSplitter()
+        self.corpus_node: Optional[HFN] = None
         
         # Ensure mixin attributes are initialized if super() chain was interrupted
         if not hasattr(self, "pos_rules"): self.pos_rules = {}
@@ -146,7 +147,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         if not para_nodes: return None
         doc_mu = np.mean([n.mu for n in para_nodes], axis=0)
         
-        doc_id = f"document_{uuid.uuid4().hex[:8]}"
+        # Deterministic ID for document lookup
+        doc_id = f"document_{title.replace(' ', '_')}"
         doc_node = HFN(
             mu=doc_mu,
             sigma=np.ones(self.m_dim)*0.1,
@@ -161,6 +163,26 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self.observer.register(doc_node, protected=False)
         self.patterns[doc_id] = doc_node
         return doc_node
+
+    def _update_corpus(self, doc_node: HFN, source_doc: Optional[HFN] = None) -> None:
+        """Integrate document into the root Corpus graph."""
+        if self.corpus_node is None:
+            mu = np.zeros(self.m_dim)
+            self.corpus_node = HFN(mu=mu, sigma=np.ones(self.m_dim), id="corpus_root", use_diag=True)
+            self.corpus_node.metadata = {"type": "corpus"}
+            self.corpus_node.relation_type = "corpus"
+            self.observer.register(self.corpus_node, protected=True)
+            self.patterns["corpus_root"] = self.corpus_node
+        
+        # Add doc as child if not already
+        if doc_node not in self.corpus_node.children():
+            self.corpus_node.add_child(doc_node)
+        
+        # Add 'links_to' edge if source is provided
+        if source_doc:
+            if source_doc not in self.corpus_node.children():
+                self.corpus_node.add_child(source_doc)
+            self.corpus_node.add_edge(source_doc, doc_node, "links_to")
 
     def expand_vocabulary(self, texts: List[str], max_new: int = 10) -> int:
         added = self.config.expand_vocab(texts, max_new=max_new)
@@ -222,20 +244,21 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         return idx
 
     def ingest_wikipedia_page(self, title: str, chunk_size: int = 5, overlap: int = 2):
-        """Fetch and ingest a Wikipedia page."""
+        """Fetch and ingest a Wikipedia page, returns (doc_node, links)."""
         try:
             import wikipedia
         except ImportError:
-            print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found. Run 'pip install wikipedia'.")
-            return
+            print("      [ERROR] ingest_wikipedia_page: 'wikipedia' library not found.")
+            return None, []
             
         print(f"      [INFO] Ingesting Wikipedia page: {title}")
         try:
             page = wikipedia.page(title)
             text = page.content
+            links = list(page.links)
         except Exception as e:
             print(f"      [ERROR] Failed to fetch Wikipedia page '{title}': {e}")
-            return
+            return None, []
             
         sentences = self.sentence_splitter.split(text)
         from hpm_ai_v2.utils.text_chunker import chunk_passages
@@ -249,25 +272,101 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             passage_nodes.append(self.patterns[f"passage_{idx}"])
         
         # Build Document hierarchy
-        # A document node whose children are paragraph nodes (here passage nodes are paragraphs)
         para_nodes = []
         for pn in passage_nodes:
-            # Each passage node contains one paragraph node
             children = pn.children()
             para = next((c for c in children if getattr(c, "relation_type", None) == "paragraph"), None)
             if para: para_nodes.append(para)
             
-        self.build_document_node(para_nodes, title=title)
-        
+        doc_node = self.build_document_node(para_nodes, title=title)
         self._documents.append(indices)
         
-        # After large ingestion, it's good to rebuild hierarchy
         if len(passages) > 10:
             print(f"      [INFO] Building topic clusters for {title}...")
             self.build_topic_clusters()
             self.stabilize_universal_concepts()
         
-        return indices
+        return doc_node, links
+
+    def explore_wikipedia(self, seed_title: str, max_iterations: int = 5) -> List[str]:
+        """Autonomously explore Wikipedia based on predictive curiosity."""
+        import wikipedia
+        visited = []
+        current_title = seed_title
+        source_doc = None
+        
+        print(f"      [EXPLORATION] Starting at: {seed_title}")
+        
+        for i in range(max_iterations):
+            if current_title in visited: break
+            visited.append(current_title)
+            
+            # 1. Ingest page
+            doc_node, links = self.ingest_wikipedia_page(current_title)
+            if not doc_node: break
+            
+            # 2. Update Knowledge Graph
+            self._update_corpus(doc_node, source_doc)
+            source_doc = doc_node
+            
+            if i == max_iterations - 1: break
+            
+            # 3. Select next link by curiosity
+            if not links: break
+            
+            # Subsample links for efficiency
+            import random
+            candidates = random.sample(links, min(15, len(links)))
+            
+            best_link = None
+            max_curiosity = -1.0
+            
+            print(f"      [EXPLORATION] Evaluating {len(candidates)} candidates for iteration {i+2}...")
+            for link in candidates:
+                if link in visited: continue
+                try:
+                    # Get snippet for curiosity score
+                    summary = wikipedia.summary(link, sentences=1)
+                    score = self.predictive_curiosity_score(summary)
+                    if score > max_curiosity:
+                        max_curiosity = score
+                        best_link = link
+                except:
+                    continue
+            
+            if not best_link: break
+            print(f"      [EXPLORATION] Selected: '{best_link}' (Curiosity: {max_curiosity:.4f})")
+            current_title = best_link
+            
+        return visited
+
+    def find_path_between_docs(self, start_title: str, end_title: str) -> List[str]:
+        """BFS over the Corpus HFN graph to find a path between document nodes."""
+        if not self.corpus_node: return []
+        
+        start_id = f"document_{start_title.replace(' ', '_')}"
+        end_id = f"document_{end_title.replace(' ', '_')}"
+        
+        if start_id not in self.patterns or end_id not in self.patterns:
+            return []
+            
+        # BFS over edges
+        queue = [(self.patterns[start_id], [start_title])]
+        visited = {start_id}
+        
+        while queue:
+            node, path = queue.pop(0)
+            if node.id == end_id:
+                return path
+            
+            # Find outgoing 'links_to' edges from this node in the corpus root
+            for edge in self.corpus_node.edges():
+                if edge.source.id == node.id and edge.relation == "links_to":
+                    if edge.target.id not in visited:
+                        visited.add(edge.target.id)
+                        title = edge.target.metadata.get("title", edge.target.id)
+                        queue.append((edge.target, path + [title]))
+        return []
 
     def observe_document(self, text: str, min_length: int = 40) -> List[int]:
         passages = fetch_passages(text=text, min_length=min_length)
