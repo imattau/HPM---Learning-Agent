@@ -1,6 +1,7 @@
 """ReaderAgent: observes text passages and retrieves relevant ones for queries."""
 from __future__ import annotations
 import json
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 import numpy as np
@@ -97,6 +98,70 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         if isinstance(curr, GoalConditionedRetriever):
             curr.target_slice = slice(s_dim, s_dim + self.config.DIM)
 
+    def build_sentence_node(self, tokens: List[str]) -> HFN:
+        """Create a sentence node with inputs = list of word nodes."""
+        word_nodes = [self._ensure_word_macro(t) for t in tokens]
+        # Use existing encoding for mu
+        sentence_mu = self.config.encode_passage(" ".join(tokens))
+        
+        sentence_id = f"sentence_{uuid.uuid4().hex[:8]}"
+        sentence_node = HFN(
+            mu=sentence_mu,
+            sigma=np.ones(self.m_dim)*0.05,
+            id=sentence_id,
+            use_diag=True,
+        )
+        for wn in word_nodes:
+            sentence_node.add_child(wn)
+            
+        sentence_node.metadata = {"tokens": tokens, "type": "sentence"}
+        sentence_node.relation_type = "sentence"
+        self.observer.register(sentence_node, protected=False)
+        self.patterns[sentence_id] = sentence_node
+        return sentence_node
+
+    def build_paragraph_node(self, sentence_nodes: List[HFN]) -> HFN:
+        """Create a paragraph node with inputs = sentence nodes."""
+        if not sentence_nodes: return None
+        para_mu = np.mean([n.mu for n in sentence_nodes], axis=0)
+        
+        para_id = f"paragraph_{uuid.uuid4().hex[:8]}"
+        para_node = HFN(
+            mu=para_mu,
+            sigma=np.ones(self.m_dim)*0.08,
+            id=para_id,
+            use_diag=True,
+        )
+        for sn in sentence_nodes:
+            para_node.add_child(sn)
+            
+        para_node.metadata = {"type": "paragraph"}
+        para_node.relation_type = "paragraph"
+        self.observer.register(para_node, protected=False)
+        self.patterns[para_id] = para_node
+        return para_node
+
+    def build_document_node(self, para_nodes: List[HFN], title: str = "document") -> HFN:
+        """Build document node from list of paragraph nodes."""
+        if not para_nodes: return None
+        doc_mu = np.mean([n.mu for n in para_nodes], axis=0)
+        
+        doc_id = f"document_{uuid.uuid4().hex[:8]}"
+        doc_node = HFN(
+            mu=doc_mu,
+            sigma=np.ones(self.m_dim)*0.1,
+            id=doc_id,
+            use_diag=True,
+        )
+        for pn in para_nodes:
+            doc_node.add_child(pn)
+            
+        doc_node.metadata = {"type": "document", "title": title}
+        doc_node.relation_type = "document"
+        self.observer.register(doc_node, protected=False)
+        self.patterns[doc_id] = doc_node
+        return doc_node
+
     def expand_vocabulary(self, texts: List[str], max_new: int = 10) -> int:
         added = self.config.expand_vocab(texts, max_new=max_new)
         if added > 0: self.reindex_knowledge_base()
@@ -125,10 +190,27 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             for t in tokens:
                 self._ensure_word_macro(t)
         
+        # Build structural hierarchy (Fractal Uniformity)
+        sentences = self.sentence_splitter.split(text)
+        sentence_nodes = []
+        from hpm_ai_v2.domains.text_domain import tokenise_raw
+        for s in sentences:
+            tokens = tokenise_raw(s)
+            if tokens:
+                s_node = self.build_sentence_node(tokens)
+                sentence_nodes.append(s_node)
+        
+        # Build paragraph node (treat passage as one paragraph for now)
+        para_node = self.build_paragraph_node(sentence_nodes)
+        
         idx = self.config.register_passage(text)
         mu = self.config.encode_passage(text)
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.1, id=f"passage_{idx}", use_diag=True)
         node.metadata = {"passage_idx": idx, "text": text, "type": "passage"}
+        
+        # Link paragraph node to passage node
+        if para_node: node.add_child(para_node)
+        
         self.observer.register(node, protected=False, initial_weight=1.0)
         self.patterns[f"passage_{idx}"] = node
         
@@ -160,8 +242,22 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         passages = chunk_passages(sentences, window_size=chunk_size, overlap=overlap)
         
         indices = []
+        passage_nodes = []
         for p in passages:
-            indices.append(self.observe_passage(p))
+            idx = self.observe_passage(p)
+            indices.append(idx)
+            passage_nodes.append(self.patterns[f"passage_{idx}"])
+        
+        # Build Document hierarchy
+        # A document node whose children are paragraph nodes (here passage nodes are paragraphs)
+        para_nodes = []
+        for pn in passage_nodes:
+            # Each passage node contains one paragraph node
+            children = pn.children()
+            para = next((c for c in children if getattr(c, "relation_type", None) == "paragraph"), None)
+            if para: para_nodes.append(para)
+            
+        self.build_document_node(para_nodes, title=title)
         
         self._documents.append(indices)
         
@@ -267,18 +363,27 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         return False
 
     def build_topic_clusters(self, n_clusters: int = 5) -> None:
-        """K-means clustering with deep structural wiring (L3 -> L2)."""
-        if not self.config._passage_vecs: return
-        s_dim, dim = self.config.S_DIM, self.config.DIM
-        vecs = np.array([v[s_dim : s_dim + dim] for v in self.config._passage_vecs])
+        """K-means clustering of structural nodes (sentences/paragraphs)."""
+        # Find all sentence nodes
+        struct_nodes = [n for k,n in self.patterns.items() if getattr(n, "relation_type", None) in ["sentence", "paragraph"]]
+        if not struct_nodes:
+            # Fallback to passage vectors if no structural nodes found
+            if not self.config._passage_vecs: return
+            vecs = np.array([v[self.config.S_DIM : self.config.S_DIM + self.config.DIM] for v in self.config._passage_vecs])
+            node_ids = [f"passage_{i}" for i in range(len(self.config._passages))]
+        else:
+            vecs = np.array([n.mu[self.config.S_DIM : self.config.S_DIM + self.config.DIM] for n in struct_nodes])
+            node_ids = [n.id for n in struct_nodes]
+            
         k = min(n_clusters, len(vecs))
+        if k == 0: return
+        
         # K-means++ style initialization
         centroids = [vecs[np.random.choice(len(vecs))]]
         for _ in range(1, k):
             dists = np.array([min([np.linalg.norm(v-c)**2 for c in centroids]) for v in vecs])
             d_sum = dists.sum()
             if d_sum == 0:
-                # Fallback to random if all remaining points are identical to centroids
                 remaining = [i for i in range(len(vecs)) if not any(np.allclose(vecs[i], c) for c in centroids)]
                 if not remaining: remaining = list(range(len(vecs)))
                 centroids.append(vecs[np.random.choice(remaining)])
@@ -286,21 +391,22 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
                 probs = dists / d_sum
                 centroids.append(vecs[np.random.choice(len(vecs), p=probs)])
         centroids = np.array(centroids)
+        
         for _ in range(10):
             dists = np.linalg.norm(vecs[:,None]-centroids[None], axis=2)
             labels = dists.argmin(axis=1)
             centroids = np.array([vecs[labels==i].mean(axis=0) if (labels==i).any() else centroids[i] for i in range(k)])
         
         for i, c in enumerate(centroids):
-            mu = np.zeros(self.m_dim); mu[s_dim : s_dim + dim] = c
-            node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.2, id=f"topic_{i}", use_diag=True)
+            mu = np.zeros(self.m_dim); mu[self.config.S_DIM : self.config.S_DIM + self.config.DIM] = c
+            node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.2, id=f"topic_{uuid.uuid4().hex[:8]}", use_diag=True)
             node.metadata = {"cluster_id": i, "type": "topic"}; node.relation_type = "topic"
             indices = np.where(labels == i)[0]
             for idx in indices:
-                p_id = f"passage_{idx}"
-                if p_id in self.patterns: node.add_child(self.patterns[p_id])
+                child_id = node_ids[idx]
+                if child_id in self.patterns: node.add_child(self.patterns[child_id])
             self.observer.register(node, protected=True, initial_weight=2.0)
-            self.patterns[f"topic_{i}"] = node
+            self.patterns[node.id] = node
 
     def stabilize_universal_concepts(self, n_concepts: int = 3) -> int:
         """Higher-order clustering with deep structural wiring (L5 -> L3)."""

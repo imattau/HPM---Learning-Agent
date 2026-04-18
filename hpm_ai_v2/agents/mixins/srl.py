@@ -39,9 +39,9 @@ class SemanticRoleMixin:
         
         return True
 
-    def extract_roles(self, sentence_raw: str) -> Dict[str, str]:
-        """Apply learned heuristic to extract semantic roles."""
-        struct = self.get_sentence_structure(sentence_raw) # (token, tag)
+    def extract_roles(self, sentence: str | HFN) -> Dict[str, str]:
+        """Apply learned heuristic to extract semantic roles (from string or HFN node)."""
+        struct = self.get_sentence_structure(sentence) # (token, tag)
         
         roles = {}
         verb_idx = -1

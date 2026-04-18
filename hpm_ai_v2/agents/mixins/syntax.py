@@ -65,8 +65,11 @@ class SyntaxMixin:
         
         return True
 
-    def _tag_sentence(self, sentence: List[str]) -> List[str]:
-        """Apply the induced rules to tag a new sentence."""
+    def _tag_sentence(self, sentence: List[str] | HFN) -> List[str]:
+        """Apply the induced rules to tag a new sentence (token list or HFN node)."""
+        if isinstance(sentence, HFN):
+            sentence = [c.metadata.get("char", c.id.replace("CHAR_", "")) if getattr(c, "relation_type", None) == "character" else c.metadata.get("word", c.id.replace("word_spelling_", "")) for c in sentence.children()]
+            
         tags = []
         for token in sentence:
             token = token.lower()
@@ -115,9 +118,13 @@ class SyntaxMixin:
                 
         return nps
 
-    def get_sentence_structure(self, sentence_raw: str) -> List[Tuple[str, str]]:
-        """Returns list of (token, tag) for a sentence."""
-        from hpm_ai_v2.domains.text_domain import tokenise_raw
-        tokens = tokenise_raw(sentence_raw)
-        tags = self._tag_sentence(tokens)
+    def get_sentence_structure(self, sentence: str | HFN) -> List[Tuple[str, str]]:
+        """Returns list of (token, tag) for a sentence (string or HFN node)."""
+        if isinstance(sentence, HFN):
+            tokens = [c.metadata.get("char", c.id.replace("CHAR_", "")) if getattr(c, "relation_type", None) == "character" else c.metadata.get("word", c.id.replace("word_spelling_", "")) for c in sentence.children()]
+            tags = self._tag_sentence(sentence)
+        else:
+            from hpm_ai_v2.domains.text_domain import tokenise_raw
+            tokens = tokenise_raw(sentence)
+            tags = self._tag_sentence(tokens)
         return list(zip(tokens, tags))
