@@ -539,58 +539,76 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     def retrieve_by_predicate(self, predicate_word: str) -> List[HFN]:
         """Find sentence nodes whose predicate matches predicate_word."""
         candidates = []
-        p_lower = predicate_word.lower()[:4] # stem
+        p_lower = predicate_word.lower()
+        if p_lower.endswith(('s', 'es', 'ed', 'ing')):
+            p_lower = p_lower[:4] # basic stemming
+        else:
+            p_lower = p_lower[:4]
+
         for k, n in self.patterns.items():
             if getattr(n, "relation_type", None) == "sentence":
                 roles = self.extract_roles_from_node(n)
                 c_pred = roles.get("PREDICATE", "").lower()
-                if c_pred and c_pred[:4] == p_lower:
-                    candidates.append(n)
+                if c_pred:
+                    if c_pred == predicate_word.lower() or c_pred[:4] == p_lower:
+                        candidates.append(n)
         return candidates
 
     def answer_question_hierarchical(self, question: str) -> Optional[str]:
         """Answer a question by searching the HFN hierarchy for structured evidence."""
         q_roles = self.extract_roles(question)
         print(f"      [DEBUG] Question Roles: {q_roles}")
-        if not q_roles: return None
         
-        # 1. Determine target role
+        # Determine target role
         q_lower = question.lower()
         target_role = "AGENT" if any(w in q_lower for w in ["who", "which animal"]) else "PATIENT"
         
-        # 2. Retrieve candidates by predicate
         predicate = q_roles.get("PREDICATE")
-        if not predicate: return None
         
+        # Special case for "What is X?"
+        if not predicate and "is" in q_lower:
+            predicate = "is"
+            words = question.replace("?", "").split()
+            if "is" in words:
+                idx = words.index("is")
+                subject = " ".join(words[idx+1:])
+                q_roles["PATIENT"] = subject
+        
+        if not predicate: 
+            # Fallback for empty roles
+            res = self.query(question, top_k=1)
+            return res if res else None
+
         candidates = self.retrieve_by_predicate(predicate)
         if not candidates:
-            # Fallback to general hierarchical retrieval
-            topic_res = self.query_hierarchical(question)
-            return topic_res
+            # Fallback: simple passage retrieval
+            passages = self.query(question, top_k=1)
+            return passages if passages else None
             
         # 3. Score candidates by role alignment
-        best_sent = None
+        best_cand = None
         best_score = -1.0
         
-        for sent_node in candidates:
-            s_roles = self.extract_roles_from_node(sent_node)
-            score = self.score_role_match(q_roles, s_roles)
+        for cand in candidates:
+            c_roles = self.extract_roles_from_node(cand)
+            score = 0
+            # Predicate match (already filtered but reinforce)
+            if c_roles.get("PREDICATE") == predicate: score += 2
+            
+            # Context match (other roles)
+            for role, val in q_roles.items():
+                if role != "PREDICATE" and c_roles.get(role) == val:
+                    score += 5
+            
             if score > best_score:
                 best_score = score
-                best_sent = sent_node
+                best_cand = cand
                 
-        # 4. Extract answer role
-        if best_sent and best_score > 0.5:
-            s_roles = self.extract_roles_from_node(best_sent)
-            ans = s_roles.get(target_role)
-            if ans:
-                # Reconstruct full NP if needed, for now return the word
-                return ans
-            else:
-                # Fallback to rendering the whole sentence as evidence
-                return self.renderer.render(best_sent)
-                
-        return None
+        if best_cand and best_score > 0:
+            return self.renderer.render(best_cand)
+            
+        # Fallback to general retrieval
+        return self.query(question, top_k=1)
 
     def query_hierarchical(self, question: str) -> Optional[str]:
         """Perform top-down hierarchical search with analogical fallback."""
