@@ -20,7 +20,8 @@ class PatternPopulation:
                  lambda_s: float = 0.3,
                  decay_rate: float = 0.005,
                  interference_strength: float = 0.02,
-                 age_decay_rate: float = 0.01):
+                 age_decay_rate: float = 0.01,
+                 pruning_threshold: float = 1e-4):
         self.patterns = initial_patterns
         self.eta = eta
         self.beta_c = beta_c
@@ -29,6 +30,7 @@ class PatternPopulation:
         self.decay_rate = decay_rate
         self.interference_strength = interference_strength
         self.age_decay_rate = age_decay_rate
+        self.pruning_threshold = pruning_threshold
         self._device = get_device(verbose=False)
         
         self._update_kappa_matrix()
@@ -145,12 +147,12 @@ class PatternPopulation:
         total_w = new_weights.sum()
         if total_w > 0:
             for i, p in enumerate(self.patterns):
-                p.weight = new_weights[i] / total_w
+                p.weight = max(1e-6, new_weights[i] / total_w)
         else:
             for p in self.patterns:
                 p.weight = 1.0 / n
                 
-        self.patterns = [p for p in self.patterns if p.weight > 1e-4]
+        self.patterns = [p for p in self.patterns if p.weight > self.pruning_threshold]
         self._update_kappa_matrix()
         
     def get_top_patterns(self, k: int = 3) -> List[HPMPattern]:

@@ -35,6 +35,10 @@ class EvaluatorManager:
         ) / 4.0
         
     def update_epistemic(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
+        # Skip if pattern can't be evaluated with these observations
+        for k in getattr(pattern, 'required_observation_keys', []):
+            if k not in observations: return
+            
         obs = {k: (v.to(pattern._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         with torch.no_grad():
             logp = pattern.log_prob(obs)
@@ -78,6 +82,10 @@ class EvaluatorManager:
         pattern.social_score = 0.9 * pattern.social_score + 0.1 * social_signal
         
     def update_invariance(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
+        # Skip if pattern can't be evaluated with these observations
+        for k in getattr(pattern, 'required_observation_keys', []):
+            if k not in observations: return
+            
         # Find a suitable input key for this pattern to perturb
         input_key = "input"
         if input_key not in observations or (hasattr(pattern, 'required_observation_keys') and input_key not in pattern.required_observation_keys):
