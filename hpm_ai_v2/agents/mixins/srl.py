@@ -31,7 +31,11 @@ class SemanticRoleMixin:
         
         # 1. Register the discovery of roles in metadata
         mu = np.zeros(self.m_dim)
-        mu[1] = 1.0 # Type: SRL Macro
+        prim = "SRL_AGENT"
+        if hasattr(self, 'config') and prim in self.config.concepts:
+            mu[self.config.S_DIM + self.config.concepts.index(prim)] = 1.0
+        else:
+            mu[1] = 1.0
         node = HFN(mu=mu, sigma=np.ones(self.m_dim), id="srl_macro", use_diag=True)
         node.metadata = {"type": "srl_macro", "description": "Subject-Verb-Object Role Mapping"}
         self.observer.register(node, protected=True)

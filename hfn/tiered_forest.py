@@ -196,9 +196,15 @@ class TieredForest(Forest):
     def __len__(self) -> int:
         return len(self._mu_index)
 
+    def update_mu_index(self, node: HFN) -> None:
+        """Update the μ-vector for a node in the index."""
+        if node.id in self._mu_index:
+            self._mu_index[node.id] = node.mu.copy()
+
     def _load_index(self) -> None:
         """Scan cold_dir to rebuild _mu_index, then restore hierarchy cache."""
         for p in self._cold_dir.glob("*.npz"):
+            nid = p.stem
             try:
                 data = np.load(p)
                 node_id = p.stem

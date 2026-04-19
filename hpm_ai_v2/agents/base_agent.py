@@ -275,14 +275,14 @@ class BaseHFNAgent:
         if len(path) == 1:
             self.patterns[task_id] = path[0]
             if path[0].id not in self.forest:
-                self.forest.register(path[0])
+                self.observer.register(path[0], protected=False)
         else:
             composed = self._compose_sequence(path)
             if composed:
                 composed.id = f"macro_{task_id}"
                 self.patterns[task_id] = composed
                 if composed.id not in self.forest:
-                    self.forest.register(composed)
+                    self.observer.register(composed, protected=False)
 
     def _maybe_auto_observe(self, x: Optional[np.ndarray] = None) -> None:
         """Periodically call observer.observe() to drive compression/absorption."""

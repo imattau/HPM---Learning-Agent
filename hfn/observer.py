@@ -563,6 +563,7 @@ class Observer:
 
                 # NEW: Update node's internal probabilistic model parameters
                 node.update(x, weight=float(s.mu[0]), learning_rate=self.alpha_gain)
+                self.forest.update_mu_index(node)
             else:
                 overlap_sum = 0.0
                 for explaining_node in result.explanation_tree:
@@ -615,6 +616,7 @@ class Observer:
             if node is None:
                 continue
             node.mu = node.mu + self.prior_drift_rate * (x - node.mu)
+            self.forest.update_mu_index(node)
             self._prior_miss_counts[nid] = 0
             self._prior_hit_counts[nid] = 0
 

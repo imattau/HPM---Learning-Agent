@@ -1,3 +1,5 @@
+import pyro
+import pyro.poutine as poutine
 import sys, os
 sys.path.append(os.path.abspath("hpm_ai_v3"))
 
@@ -65,16 +67,37 @@ def evaluate_sensitivity(pop, base_test_data):
         "structural_delta": ((pred_struct - y_struct)**2).mean().item() - ((pred_base - y_base)**2).mean().item()
     }
 
+def run_sensitivity_experiment(n_seeds=5):
+    results = []
+    for seed in range(n_seeds):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        train_data = generate_task1_data(n_samples=2000)
+        test_data = generate_task1_data(n_samples=500)
+        pop, _ = train_hpm_agent(train_data, n_epochs=20)
+        sens = evaluate_sensitivity(pop, test_data)
+        results.append((sens['surface_delta'], sens['structural_delta']))
+        
+        # Analyze latent correlation for the top pattern
+        X_sample, _ = create_torch_dataset(test_data)
+        top = sorted(pop.patterns, key=lambda p: p.weight, reverse=True)[0]
+        with torch.no_grad():
+            guide_trace = poutine.trace(top.guide).get_trace({"input": X_sample[:200]})
+            z2 = guide_trace.nodes["z2"]["value"]
+        
+        print(f"Seed {seed} Top Pattern Latent Correlations:")
+        for i in range(X_sample.shape[1]):
+            corr = np.corrcoef(X_sample[:200, i].cpu(), z2.norm(dim=1).cpu())[0,1]
+            print(f"  Feature {i}: corr={corr:.3f}")
+            
+    surf_deltas = [r[0] for r in results]
+    struct_deltas = [r[1] for r in results]
+    print(f"\nFinal Results ({n_seeds} seeds):")
+    print(f"Surface ΔMSE: {np.mean(surf_deltas):.4f} ± {np.std(surf_deltas):.4f}")
+    print(f"Structural ΔMSE: {np.mean(struct_deltas):.4f} ± {np.std(struct_deltas):.4f}")
+
 def main():
-    train_data = generate_task1_data(n_samples=2000)
-    test_data = generate_task1_data(n_samples=500)
-    print("Training HPM agent...")
-    hpm_pop, hpm_losses = train_hpm_agent(train_data, n_epochs=20)
-    
-    sens = evaluate_sensitivity(hpm_pop, test_data)
-    print("\nSensitivity to surface vs structural changes:")
-    print(f"Surface ΔMSE: {sens['surface_delta']:.4f}")
-    print(f"Structural ΔMSE: {sens['structural_delta']:.4f}")
+    run_sensitivity_experiment(n_seeds=5)
 
 if __name__ == "__main__":
     main()

@@ -55,8 +55,11 @@ class SyntaxMixin:
         # 2. Represent this as an HFN macro (simplified for now)
         # We create a node representing the POS tagger function
         mu = np.zeros(self.m_dim)
-        # We could use a specific subspace for 'syntax operations'
-        mu[0] = 1.0 # Type: Syntax Macro
+        prim = "POS_NOUN"
+        if hasattr(self, 'config') and prim in self.config.concepts:
+            mu[self.config.S_DIM + self.config.concepts.index(prim)] = 1.0
+        else:
+            mu[0] = 1.0
         node = HFN(mu=mu, sigma=np.ones(self.m_dim), id="pos_tagger_macro", use_diag=True)
         node.metadata = {"rules": rules, "type": "syntax_macro"}
         self.observer.register(node, protected=True)

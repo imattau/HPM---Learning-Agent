@@ -54,18 +54,27 @@ def observer_state_to_vec(result: ExplanationResult, observer: Observer) -> np.n
     if result.accuracy_scores:
         vec[1] = float(np.clip(np.mean(list(result.accuracy_scores.values())), 0.0, 1.0))
 
-    # [2–5] weight statistics
-    weights = list(observer._weights.values())
+    # [2–6, 11] state statistics from meta_forest
+    weights = []
+    scores = []
+    miss_counts = []
+    for node in observer.meta_forest.active_nodes():
+        if node.id.startswith("state:"):
+            weights.append(float(node.mu[0]))
+            scores.append(float(node.mu[1]))
+            miss_counts.append(float(node.mu[2]))
+
     if weights:
         vec[2] = float(np.clip(np.mean(weights), 0.0, 1.0))
         vec[3] = float(np.clip(np.std(weights), 0.0, 1.0))
         vec[4] = float(np.clip(min(weights), 0.0, 1.0))
         vec[5] = float(np.clip(max(weights), 0.0, 1.0))
 
-    # [6] mean score
-    scores = list(observer._scores.values())
     if scores:
         vec[6] = float(np.clip((np.mean(scores) + 1.0) / 2.0, 0.0, 1.0))
+    
+    if miss_counts:
+        vec[11] = float(np.clip(np.mean(miss_counts) / 10.0, 0.0, 1.0))
 
     # [7] forest size (log-scaled, normalize assuming ~1000 nodes max)
     n_nodes = len(observer.forest)
@@ -82,11 +91,6 @@ def observer_state_to_vec(result: ExplanationResult, observer: Observer) -> np.n
 
     # [10] surprising leaves count
     vec[10] = float(np.clip(len(result.surprising_leaves) / 5.0, 0.0, 1.0))
-
-    # [11] mean miss count
-    miss_counts = list(observer._miss_counts.values())
-    if miss_counts:
-        vec[11] = float(np.clip(np.mean(miss_counts) / 10.0, 0.0, 1.0))
 
     return vec
 

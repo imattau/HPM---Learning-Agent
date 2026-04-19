@@ -96,7 +96,7 @@ def test_build_topic_clusters_creates_nodes():
     for p in passages: agent.observe_passage(p)
     
     agent.build_topic_clusters(n_clusters=2)
-    topic_nodes = [k for k in agent.patterns if k.startswith("topic_")]
+    topic_nodes = [n for n in agent.forest.active_nodes() if n.id.startswith("topic_")]
     assert len(topic_nodes) == 2
 
 def test_cross_doc_patterns_finds_shared_terms():

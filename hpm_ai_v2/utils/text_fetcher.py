@@ -70,5 +70,10 @@ def fetch_passages(
     if mode == "sentence":
         chunks = split_sentences(text)
     else:
-        chunks = [p.strip() for p in re.split(r"\n\n+", text)]
+        para_chunks = [p.strip() for p in re.split(r"\n\n+", text)]
+        # If paragraph split yields only one chunk (no paragraph breaks), use sentence splitting
+        if len(para_chunks) <= 1:
+            chunks = split_sentences(text)
+        else:
+            chunks = para_chunks
     return [c for c in chunks if len(c) >= min_length]

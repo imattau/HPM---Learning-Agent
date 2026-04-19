@@ -15,6 +15,7 @@ from hpm_ai_v2.domains.text_renderer import TextRenderer
 from hpm_ai_v2.utils.oracle.text_oracle import TextOracle
 from hpm_ai_v2.utils.text_fetcher import fetch_passages
 from hpm_ai_v2.utils.sentence_splitter import SentenceSplitter
+from hpm_ai_v2.utils.text_chunker import chunk_passages
 
 
 class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
@@ -25,11 +26,10 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     Upgraded for Wikipedia ingestion and dynamic vocabulary (SP-Reader 9).
     """
 
-    def __init__(self, config: TextDomainConfig, dynamic_vocab: bool = True, max_vocab: Optional[int] = None, web_agent: Optional[WebAgent] = None, **kwargs) -> None:
+    def __init__(self, config: TextDomainConfig, dynamic_vocab: bool = True, max_vocab: Optional[int] = None, web_agent: Optional["WebAgent"] = None, **kwargs) -> None:
         renderer = TextRenderer(config)
         super().__init__(config, renderer=renderer, **kwargs)
         self.oracle = TextOracle(config)
-        self.counting_oracle.wrapped = self.oracle
         self._documents: List[List[int]] = []
         self._last_topic_mu: Optional[np.ndarray] = None
         self._analogy_map: Dict[str, str] = {} # target_node_id -> source_node_id
@@ -91,7 +91,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         for i, p_mu in enumerate(self.config._passage_vecs):
             node_id = f"passage_{i}"
             if hasattr(self.forest, "_mu_index"): self.forest._mu_index[node_id] = p_mu
-            if node_id in self.patterns: self.patterns[node_id].mu = p_mu
+            node = self.forest.get(node_id)
+            if node: node.mu = p_mu
             
         # 4. Update Retriever Target Slice
         from hfn.retriever import GoalConditionedRetriever
@@ -119,7 +120,6 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         sentence_node.metadata = {"tokens": tokens, "type": "sentence"}
         sentence_node.relation_type = "sentence"
         self.observer.register(sentence_node, protected=False)
-        self.patterns[sentence_id] = sentence_node
         return sentence_node
 
     def build_paragraph_node(self, sentence_nodes: List[HFN]) -> HFN:
@@ -140,7 +140,6 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         para_node.metadata = {"type": "paragraph"}
         para_node.relation_type = "paragraph"
         self.observer.register(para_node, protected=False)
-        self.patterns[para_id] = para_node
         return para_node
 
     def build_document_node(self, para_nodes: List[HFN], title: str = "document") -> HFN:
@@ -162,7 +161,6 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         doc_node.metadata = {"type": "document", "title": title}
         doc_node.relation_type = "document"
         self.observer.register(doc_node, protected=False)
-        self.patterns[doc_id] = doc_node
         return doc_node
 
     def _update_corpus(self, doc_node: HFN, source_doc: Optional[HFN] = None) -> None:
@@ -173,7 +171,6 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             self.corpus_node.metadata = {"type": "corpus"}
             self.corpus_node.relation_type = "corpus"
             self.observer.register(self.corpus_node, protected=True)
-            self.patterns["corpus_root"] = self.corpus_node
         
         # Add doc as child if not already
         if doc_node not in self.corpus_node.children():
@@ -193,8 +190,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     def _ensure_word_macro(self, word: str) -> HFN:
         """Ensure a character-level macro exists for the word, adding to vocab if needed."""
         word_id = f"word_spelling_{word.lower()}"
-        if word_id in self.patterns:
-            return self.patterns[word_id]
+        node = self.forest.get(word_id)
+        if node:
+            return node
         
         # Add to config vocabulary (dynamic expansion)
         if self.dynamic_vocab:
@@ -230,15 +228,15 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         mu = self.config.encode_passage(text)
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.1, id=f"passage_{idx}", use_diag=True)
         node.metadata = {"passage_idx": idx, "text": text, "type": "passage"}
+        node.relation_type = "passage"
         
         # Link paragraph node to passage node
         if para_node: node.add_child(para_node)
         
         self.observer.register(node, protected=False, initial_weight=1.0)
-        self.patterns[f"passage_{idx}"] = node
         
         # Update last topic mu for predictive curiosity
-        topics = [n for k,n in self.patterns.items() if k.startswith("topic_")]
+        topics = [n for n in self.forest.active_nodes() if n.id.startswith("topic_")]
         if topics:
             best_t = min(topics, key=lambda t: np.linalg.norm(t.mu - mu))
             self._last_topic_mu = best_t.mu.copy()
@@ -258,7 +256,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         for p in passages:
             idx = self.observe_passage(p)
             indices.append(idx)
-            passage_nodes.append(self.patterns[f"passage_{idx}"])
+            passage_nodes.append(self.forest.get(f"passage_{idx}"))
         
         # Build Document hierarchy
         para_nodes = []
@@ -288,7 +286,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         Identify the most 'curious' topic based on current knowledge.
         Uses topic coverage or entropy as a proxy for information gaps.
         """
-        topic_nodes = [n for k, n in self.patterns.items() if k.startswith("topic_")]
+        topic_nodes = [n for n in self.forest.active_nodes() if n.id.startswith("topic_")]
         
         # Filter concepts to avoid characters, padding, and common words
         valid_concepts = [
@@ -323,11 +321,11 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         start_id = f"document_{start_title.replace(' ', '_')}"
         end_id = f"document_{end_title.replace(' ', '_')}"
         
-        if start_id not in self.patterns or end_id not in self.patterns:
+        if start_id not in self.forest or end_id not in self.forest:
             return []
             
         # BFS over edges
-        queue = [(self.patterns[start_id], [start_title])]
+        queue = [(self.forest.get(start_id), [start_title])]
         visited = {start_id}
         
         while queue:
@@ -352,7 +350,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
 
     def query(self, question: str, top_k: int = 1, node_type: Optional[str] = None) -> Optional[str]:
         """Query the HFN forest for the most relevant node content."""
-        if not self.config._passages and not self.patterns: return None
+        if not self.config._passages and len(self.forest) == 0: return None
         
         # Ensure words in the question are in our vocabulary if dynamic_vocab is on
         if self.dynamic_vocab:
@@ -382,11 +380,21 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             # Filter out non-content nodes like priors or character primitives
             candidates = [n for n in candidates if getattr(n, "relation_type", None) in ["sentence", "paragraph", "passage", "document", "spelling"]]
 
-        if not candidates: 
+        if not candidates:
             print("      [DEBUG] No suitable candidates after filtering.")
             return None
-        
-        res = self.renderer.render(candidates[0])
+
+        # Prefer passage nodes — they store the original text in metadata
+        passage_candidates = [n for n in candidates if getattr(n, "relation_type", None) == "passage"]
+        best = passage_candidates[0] if passage_candidates else candidates[0]
+
+        # Return original text from metadata when available
+        original_text = getattr(best, "metadata", {}).get("text")
+        if original_text:
+            print(f"      [DEBUG] Best match: {original_text[:50]}...")
+            return original_text
+
+        res = self.renderer.render(best)
         print(f"      [DEBUG] Best match: {res[:50]}...")
         return res
 
@@ -436,7 +444,11 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         agent.role_knowledge = meta.get("role_knowledge", [])
         agent.word_spellings = meta.get("word_spellings", {})
         agent.load_state(str(path / "agent_state.pkl"))
-        # FIX: Explicitly reindex all nodes (hot and cold) after load
+        # Re-insert restored pattern nodes into the fresh forest
+        for nid, node in agent.patterns.items():
+            if nid not in agent.forest._mu_index:
+                agent.forest._mu_index[nid] = node.mu
+                agent.forest._hot[nid] = node
         agent.reindex_knowledge_base()
         return agent
 
@@ -465,7 +477,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
     def build_topic_clusters(self, n_clusters: int = 5) -> None:
         """K-means clustering of structural nodes (sentences/paragraphs)."""
         # Find all sentence nodes
-        struct_nodes = [n for k,n in self.patterns.items() if getattr(n, "relation_type", None) in ["sentence", "paragraph"]]
+        struct_nodes = [n for n in self.forest.active_nodes() if getattr(n, "relation_type", None) in ["sentence", "paragraph"]]
         if not struct_nodes:
             # Fallback to passage vectors if no structural nodes found
             if not self.config._passage_vecs: return
@@ -504,13 +516,13 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             indices = np.where(labels == i)[0]
             for idx in indices:
                 child_id = node_ids[idx]
-                if child_id in self.patterns: node.add_child(self.patterns[child_id])
+                child_node = self.forest.get(child_id)
+                if child_node: node.add_child(child_node)
             self.observer.register(node, protected=True, initial_weight=2.0)
-            self.patterns[node.id] = node
 
     def stabilize_universal_concepts(self, n_concepts: int = 3) -> int:
         """Higher-order clustering with deep structural wiring (L5 -> L3)."""
-        topics = [n for k,n in self.patterns.items() if k.startswith("topic_")]
+        topics = [n for n in self.forest.active_nodes() if n.id.startswith("topic_")]
         if not topics: return 0
         s_dim, dim = self.config.S_DIM, self.config.DIM
         vecs = np.array([n.mu[s_dim : s_dim + dim] for n in topics])
@@ -539,8 +551,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             
             # Preserve metadata if node already exists
             old_metadata = {}
-            if node_id in self.patterns:
-                old_metadata = getattr(self.patterns[node_id], "metadata", {})
+            old_node = self.forest.get(node_id)
+            if old_node:
+                old_metadata = getattr(old_node, "metadata", {})
             
             node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.15, id=node_id, use_diag=True)
             node.relation_type = "concept"
@@ -550,13 +563,12 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             indices = np.where(labels == i)[0]
             for idx in indices: node.add_child(topics[idx])
             self.observer.register(node, protected=True, initial_weight=5.0)
-            self.patterns[node_id] = node
         return k
 
     def summarize_node(self, node_id: str, top_n: int = 5) -> str:
         """Extract top-N keywords from an HFN mu vector."""
-        if node_id not in self.patterns: return "Unknown Node"
-        node = self.patterns[node_id]
+        node = self.forest.get(node_id)
+        if not node: return "Unknown Node"
         s_dim, dim = self.config.S_DIM, self.config.DIM
         mu_vec = node.mu[s_dim : s_dim + dim]
         indices = np.argsort(mu_vec)[::-1][:top_n]
@@ -573,7 +585,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         else:
             p_lower = p_lower[:4]
 
-        for k, n in self.patterns.items():
+        for n in self.forest.active_nodes():
+            k = n.id
             if getattr(n, "relation_type", None) == "sentence":
                 roles = self.extract_roles_from_node(n)
                 c_pred = roles.get("PREDICATE", "").lower()
@@ -643,7 +656,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
 
     def query_hierarchical(self, question: str) -> Optional[str]:
         """Perform top-down hierarchical search with analogical fallback."""
-        concepts = [n for k,n in self.patterns.items() if k.startswith("concept_")]
+        concepts = [n for n in self.forest.active_nodes() if n.id.startswith("concept_")]
         if not concepts: return self.query(question)
         q_mu = self.config.encode_passage(question)
         s_dim, dim = self.config.S_DIM, self.config.DIM
@@ -662,8 +675,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Analogical traversal: if this topic is mapped to another domain, 
         # we might want to return results from BOTH.
         source_topic_id = self._analogy_map.get(target_topic.id)
-        if source_topic_id and source_topic_id in self.patterns:
-            source_topic = self.patterns[source_topic_id]
+        source_topic = self.forest.get(source_topic_id) if source_topic_id else None
+        if source_topic:
             # [Optional] We could return a joint summary, but for now we find best passage
             target_passage = best_child(target_topic)
             source_passage = best_child(source_topic)
@@ -678,7 +691,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         """Learns sequential transitions and updates concept transition matrix."""
         indices = self._documents[doc_idx] if doc_idx < len(self._documents) else []
         if len(indices) < 2: return 0
-        all_topics = [n for k,n in self.patterns.items() if k.startswith("topic_")]
+        all_topics = [n for n in self.forest.active_nodes() if n.id.startswith("topic_")]
         if not all_topics:
             print("      [DEBUG] learn_thematic_transitions: No topics found in forest.")
             return 0
@@ -686,7 +699,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Find which concept this document mostly belongs to
         doc_passage_vecs = [self.config._passage_vecs[idx] for idx in indices]
         doc_topics = [min(all_topics, key=lambda t: np.linalg.norm(t.mu-v)) for v in doc_passage_vecs]
-        concepts = [n for k,n in self.patterns.items() if k.startswith("concept_")]
+        concepts = [n for n in self.forest.active_nodes() if n.id.startswith("concept_")]
         if not concepts:
             print("      [DEBUG] learn_thematic_transitions: No concepts found.")
             return 0
@@ -712,7 +725,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Use children of this concept to build local transition matrix
         concept_topics = best_c.children()
         # Filter children to only include those still in forest (if we rebuilt)
-        concept_topics = [t for t in concept_topics if t.id in self.patterns]
+        concept_topics = [t for t in concept_topics if t.id in self.forest]
         
         if not concept_topics:
             print(f"      [DEBUG] learn_thematic_transitions: {best_c.id} has no valid children.")
@@ -736,7 +749,6 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             node = HFN(mu=delta, sigma=np.ones(delta.size)*0.1, id=node_id, use_diag=True)
             node.relation_type = "theme_transition"
             self.observer.register(node)
-            self.patterns[node_id] = node; count += 1
             
         # Normalize and store in concept metadata
         row_sums = trans_counts.sum(axis=1, keepdims=True)
@@ -753,8 +765,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         return count
 
     def get_concept_transition_matrix(self, concept_id: str) -> Optional[np.ndarray]:
-        if concept_id not in self.patterns: return None
-        return getattr(self.patterns[concept_id], "metadata", {}).get("transition_matrix")
+        node = self.forest.get(concept_id)
+        if not node: return None
+        return getattr(node, "metadata", {}).get("transition_matrix")
 
     def find_structural_analogy(self, target_concept_id: str) -> Optional[str]:
         """Finds most similar Source concept based on transition matrix isomorphism."""
@@ -763,7 +776,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             print(f"      [DEBUG] find_structural_analogy: No target matrix for {target_concept_id}")
             return None
         
-        concepts = [n for k,n in self.patterns.items() if k.startswith("concept_") and k != target_concept_id]
+        concepts = [n for n in self.forest.active_nodes() if n.id.startswith("concept_") and n.id != target_concept_id]
         print(f"      [DEBUG] find_structural_analogy: comparing {target_concept_id} against {len(concepts)} concepts")
         
         best_source = None
@@ -798,8 +811,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
 
     def transfer_strategy(self, source_concept_id: str, target_concept_id: str) -> Dict[str, str]:
         """Maps functional roles between source and target domains."""
-        source_concept = self.patterns[source_concept_id]
-        target_concept = self.patterns[target_concept_id]
+        source_concept = self.forest.get(source_concept_id)
+        target_concept = self.forest.get(target_concept_id)
         
         source_matrix = source_concept.metadata["transition_matrix"]
         target_matrix = target_concept.metadata["transition_matrix"]
@@ -828,7 +841,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         return mapping
 
     def predict_next_topic(self, current_topic_mu: np.ndarray) -> np.ndarray:
-        trans = [n for k,n in self.patterns.items() if n.relation_type == "theme_transition"]
+        trans = [n for n in self.forest.active_nodes() if n.relation_type == "theme_transition"]
         if not trans: return current_topic_mu
         return current_topic_mu + trans[0].mu
 

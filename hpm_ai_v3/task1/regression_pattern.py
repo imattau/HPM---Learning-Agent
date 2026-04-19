@@ -104,12 +104,13 @@ class RegressionPattern(HPMPattern):
             guide_trace = poutine.trace(self.guide).get_trace({"input": x})
             z2 = guide_trace.nodes["z2"]["value"]
         return min(1.0, z2.var(dim=0).mean().item() / 3.0)
-    
     def surface_dependence(self, x_batch: torch.Tensor) -> float:
+        if x_batch.dim() == 1: x_batch = x_batch.unsqueeze(0)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x_batch})
             z2 = guide_trace.nodes["z2"]["value"]
         surface = x_batch[:, 2:6]
+        # ... remainder ...
         z2_centered = z2 - z2.mean(dim=0)
         surface_centered = surface - surface.mean(dim=0)
         try:

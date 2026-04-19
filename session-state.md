@@ -1,0 +1,93 @@
+# Session State
+
+## Work Completed
+
+- Created `session-state.md` to track work during this session.
+- Reviewed work on `ReaderAgent`, `WebAgent`, and `WriterAgent`.
+- Investigated the integration of `spaCy` into the `ReaderAgent`.
+- Fixed the cooperative web research experiment (`experiment_sp_reader_web_coop.py`) by adding `get_most_curious_topic` to `ReaderAgent` and updating how `document` nodes are retrieved.
+- Investigated and resolved massive performance bottlenecks in `experiment_sp_web3_autonomous_research_marathon.py` and its agents:
+  - Re-structured `HtmlReaderAgent.ingest_html` to iterate directly over `spaCy` tokens, avoiding redundant parsing.
+  - Eliminated synchronously expensive `observe_hfn_node` calls during bulk document and link ingestion, allowing the node registration logic to handle tree construction instantly.
+  - Replaced a catastrophic-backtracking regex in `WebAgent.extract_links_hierarchical` with a safe alternative and capped maximum extracted links to 50.
+- Modified `experiment_sp_web3_autonomous_research_marathon.py` to persist the knowledge forest across multiple runs by removing directory deletion logic.
+- Implemented **SP-Web3: DictionaryAgent**:
+  - Planned and created `DictionaryAgent` to parse external lexical knowledge into deterministic HFN nodes without learning.
+  - Updated `ReaderAgent` to perform proactive, zero-shot semantic grounding by querying the `DictionaryAgent` when encountering new vocabulary.
+  - Updated `WriterAgent` to enrich natural language answers with definitions fetched via the `DictionaryAgent`.
+  - Created and successfully verified the integration using `experiment_sp_web3_dictionary.py`.
+- Achieved **HFN-Native Configuration (Total Uniformity)**:
+  - Enhanced `TieredForest` to autodetect dimensionality (`D`) from disk metadata or nodes.
+  - Refactored `DomainConfig` and `TextDomainConfig` to store manifold metadata (vocabulary, IDF, dimensions) as structural HFN nodes within the forest.
+  - Added formal `metadata` attribute to `HFN` class and ensured full persistence in `TieredForest`.
+  - Updated `BaseHFNAgent` to bootstrap itself from the forest, eliminating the dependency on `config.pkl`.
+  - Verified with `experiment_sp_web3_fractal_config.py`, demonstrating successful "Re-Awakening" of agents from fractal memory.
+- Implemented **NLP Quality Audit & Aesthetic Enhancement**:
+  - Created `NLPAuditor` utility to score text on aesthetics, lexical diversity, and forest-based coherence.
+  - Enhanced `WriterMixin` with improved subject-verb agreement, article handling, and a `_smart_join` helper for natural lists.
+  - Integrated a **Self-Correction Loop** into `WriterAgent`, allowing it to generate multiple candidates and select the one with highest HPM Utility.
+  - Verified via `experiment_sp_web3_nlp_quality.py`, showing significant improvements in answer readability and the detection of repetitive text.
+- Implemented **SP-Math1: MathAgent & Symbolic Discovery**:
+  - Created `MathAgent` with deterministic symbolic primitives (differentiation, integration, solving) using `sympy` as an engine.
+  - Implemented `MathDomainConfig` and `MathOracle` for structural fingerprinting and verification of expression trees.
+  - Developed `MathRenderer` for recursive conversion of HFN DAGs back to math strings.
+  - Verified one-shot rule learning (Power Rule) and generalization via `experiment_sp_math1_power_rule.py`.
+- Implemented **SP-Math2: Symbolic Derivation & Generative Reasoning**:
+  - Enhanced `MathAgent` with **Intent Detection** (recognizing "differentiate", "integrate", etc.) and a **Derive** method.
+  - Updated `WriterAgent` to prioritize symbolic derivation over text retrieval for mathematical queries.
+  - Integrated specialized math rendering into the NLP formulation loop.
+  - Verified via `experiment_sp_math2_symbolic_derivation.py`, where the agent derived `4*x**3 + cos(x)` from a natural language query and contextual information, producing a polished NLP response.
+- Implemented **SP-Web7: Incremental Persistence & Large-Scale Synthesis**:
+  - Tasked the HPM society with ingesting an expanded corpus of **8 scientific papers** spanning Biology, Chemistry, CS, Psychology, Astronomy, Sociology, Physics, and Math.
+  - Achieved **True Persistence**: Removed all `shutil.rmtree` calls and implemented **Dimension Bootstrapping**, ensuring the society accumulates knowledge across multiple runs.
+  - Verified **Incremental Resumption**: Demonstrated the system skipping already-ingested papers and maintaining a **949-dimensional** manifold upon resume.
+  - Demonstrated **Thematic Cross-Linking**: The `LibrarianAgent` autonomously linked "Evolution" between Biology and Astronomy, and "Space" between Astronomy and Mathematics.
+  - Confirmed **High-Capacity Forest**: The society now successfully manages **3,032 patterns** with near-instant boot times.
+- Implemented **SP-Web6: Librarian Specialist & Division of Labor**:
+  - Refactored the monolithic `ReaderAgent` to focus exclusively on **Perception** (Spelling, Syntax, SRL, Structural assembly).
+  - Introduced the **`LibrarianAgent`** as a specialist for **Concept Discovery** (L3 topics, thematic mapping, cross-document analogies).
+  - Verified **Modular Curiosity**: The `ReaderAgent` now triggers the `LibrarianAgent` upon document completion, allowing for clean separation of "perceptual surprise" and "conceptual discovery."
+  - Fixed **Metadata Propagation**: Paragraph nodes now carry text data to enable thematic discovery by the Librarian.
+  - Verified via `experiment_sp_web6_librarian_specialist.py`, demonstrating the Librarian autonomously identifying "gravity" as a shared theme between physics and math documents.
+- Implemented **SP-Web5: Multi-Lens Cross-Domain Synthesis**:
+  - Tasked the `WriterAgent` with synthesizing a response combining Physics, Math, and Sentiment: *"Discuss the emotional impact of physical forces like gravity in mathematical terms."*
+  - Verified **Dimensional Continuity**: Successfully handled the loading and synthesis of nodes across different domain configs (Physics, Math, Affective) within a unified manifold.
+- Achieved **HPM Society Hardening & Optimization**:
+  - Implemented **Lazy Weight Initialization** in the `Observer`, reducing agent boot times from 5 minutes to near-instant for large forests.
+  - Developed **Library-Aware Persistence** in `TieredForest`, consolidating primitives (characters) into `data/library` and preventing experiment folder pollution.
+  - Implemented **Auto-Fitting for Cold Storage**, ensuring nodes loaded from disk are automatically resized to the current forest dimension, eliminating broadcasting errors.
+  - Verified via `experiment_sp_web5_cross_domain_synthesis.py`, showing a robust, multi-expert response from a 1,733-node world model.
+- Implemented **SP-Web4: Project "Scientific Curiosity" & Large-Scale Learning**:
+  - Initiated a multi-agent learning session where the HPM society ingested a diverse corpus of scientific text (Physics, Math, Cognitive Science).
+  - Populated the HFN forest to **1,678 patterns** and **457 relational edges**, achieving a dense "semantic web" of knowledge.
+  - Verified **Dimensional Scaling**: The society successfully synchronized across **D=667** dimensions as the vocabulary expanded.
+  - Hardened the **Persistence Layer**: Implemented filesystem path sanitization (safe char IDs) and relational edge serialization in `TieredForest`.
+  - Achieved **Autonomous Grounding**: The agent automatically learned 86 real-world definitions via WordNet during the reading process.
+- Implemented **SP-Web3: Real-World Lexical Grounding via WordNet**:
+  - Replaced the `DictionaryAgent` mock source with **NLTK WordNet**, enabling access to real definitions, POS tags, and hierarchical relations.
+  - Implemented **Recursion Protection** and **Structural Fitting** to handle the massive influx of new vocabulary and accompanying dimension shifts safely.
+  - Mapped WordNet `hypernyms` to HFN `is_a` relational edges, allowing the agent to inherit category-level knowledge (e.g., "gravity" is a type of "attraction").
+  - Verified via `experiment_sp_web3_wordnet.py`, showing robust real-world learning and hierarchy extraction.
+- Implemented **SP-Sent1: HPM-Native Sentiment & Affective Grounding**:
+  - Created `SentimentAgent` and `SentimentDomainConfig` for few-shot emotion and opinion analysis.
+  - Achieved **HPM-Native Grounding**: Replaced mock dictionaries with the `AffectiveEvaluator`, making "sentiment" a structural, learned property of HFN nodes.
+  - Implemented `get_affect_score` and `set_affect_score` in `AffectiveEvaluator` to enable native affective grounding.
+  - Developed L1 primitives for negation detection ("not", "never") and intensifiers ("really", "very"), enabling complex compositional reasoning.
+  - Updated `WriterAgent` to perform real-time sentiment analysis and report findings in natural language.
+  - Verified via `experiment_sp_sent1_few_shot.py`, achieving a **100% score** on sentiment classification, including correctly flipping polarity on negations.
+- Implemented **SP-Orchestra: Agent Orchestrator & Collaborative Society**:
+  - Created `AgentOrchestrator` to centralize the management of multi-agent HPM systems.
+  - Developed a **Registration & Discovery** mechanism, allowing agents to find specialists (e.g., Physics, Math) dynamically.
+  - Implemented **Manifold Broadcast synchronization**: The Orchestrator now automatically broadcasts reindexing events to all registered agents whenever the shared `TieredForest` expands its dimensionality.
+  - Refactored `ReaderAgent` and `BaseHFNAgent` to leverage the Orchestrator for system-wide consistency, moving away from manual "collaborator" lists.
+  - Verified via `experiment_sp_orchestra_test1.py`, showing seamless, real-time synchronization of 4 different agents during a dynamic vocabulary expansion and scientific problem-solving session.
+- Implemented **SP-Sci1: Physics & Cross-Domain Reasoning**:
+  - Created `PhysicsAgent` and `PhysicsDomainConfig` to handle scientific constants and classical mechanics calculations.
+  - Updated `WriterAgent` to prioritize Physics derivation, enabling it to solve word problems by extracting variables (mass, acceleration, force) from natural language.
+  - Resolved a critical **Dimension Mismatch Bug**: Implemented `BaseHFNAgent.reindex` and a `collaborators` hook in `ReaderAgent` to ensure all agents sharing a forest (Math, Physics, Writer) stay in sync when vocabulary expansion triggers a dimensionality change.
+  - Successfully verified via `experiment_sp_sci_physics_exam.py`, where the agent learned Newton's Second Law from a Wikipedia snippet and scored 100% on a physics exam with clean, error-free output.
+- **Enforced Persistence Mandate**: Audited and refactored all experiment scripts in `hpm_ai_v2/experiments/` to remove `shutil.rmtree` calls, ensuring that agents can benefit from long-term memory across multiple sessions and runs.
+
+## Next Steps
+
+- Continue with user-directed tasks.
