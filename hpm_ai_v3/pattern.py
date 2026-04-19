@@ -21,6 +21,7 @@ class HPMPattern(ABC):
         self.curiosity_reward: float = 0.0
         self.coherence_score: float = 0.0
         self.insight_boost: float = 0.0
+        self.invariance_score: float = 0.0
         
         self.structural_connectivity: float = 0.0
         self.evaluator_reinforcement: float = 0.0
@@ -68,10 +69,11 @@ class HPMPattern(ABC):
         for obs in observations_batch:
             self.update_parameters(obs, learning_rate)
 
-    def total_score(self, beta_aff=0.3, gamma_soc=0.1, delta_cur=0.2, eta_coh=0.2, zeta_ins=0.5) -> float:
+    def total_score(self, beta_aff=0.3, gamma_soc=0.1, delta_cur=0.2, eta_coh=0.2, zeta_ins=0.5, zeta_inv=0.3) -> float:
         return (self.accuracy + beta_aff * self.affective_score + 
                 gamma_soc * self.social_score + delta_cur * self.curiosity_reward +
-                eta_coh * self.coherence_score + zeta_ins * self.insight_boost)
+                eta_coh * self.coherence_score + zeta_ins * self.insight_boost +
+                zeta_inv * self.invariance_score)
 
     def filter_observations(self, observations: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         return {k: v for k, v in observations.items() if k in self.required_observation_keys}

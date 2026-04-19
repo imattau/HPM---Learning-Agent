@@ -76,6 +76,21 @@ class EvaluatorManager:
     def update_social(self, pattern: HPMPattern, social_signal: float):
         pattern.social_score = 0.9 * pattern.social_score + 0.1 * social_signal
         
+    def update_invariance(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
+        x = observations.get("input")
+        if x is None: return
+        if x.dim() == 1: x = x.unsqueeze(0)
+        x_pert = x.clone()
+        perm = torch.randperm(x.shape[0])
+        x_pert[:, 2:6] = x[perm][:, 2:6]
+        
+        with torch.no_grad():
+            pred_orig = pattern.sample({"input": x})["y"]
+            pred_pert = pattern.sample({"input": x_pert})["y"]
+        
+        mse = ((pred_orig - pred_pert) ** 2).mean().item()
+        pattern.invariance_score = 0.9 * pattern.invariance_score + 0.1 * np.exp(-mse)
+        
     def compute_insight(self, new_pattern: HPMPattern, parent_a: HPMPattern, parent_b: HPMPattern) -> float:
         nov_a = new_pattern.structural_distance(parent_a)
         nov_b = new_pattern.structural_distance(parent_b)

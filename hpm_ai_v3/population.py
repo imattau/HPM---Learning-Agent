@@ -49,7 +49,8 @@ class PatternPopulation:
         # 1. Update evaluators
         for i, p in enumerate(self.patterns):
             evaluator_mgr.update_epistemic(p, observations)
-            evaluator_mgr.update_coherence(p, self.patterns)
+            evaluator_mgr.update_invariance(p, observations)
+            evaluator_mgr.update_coherence(p, self.patterns, observations)
             
             if hasattr(p, 'compression_score'):
                 comp = p.compression_score(observations)
