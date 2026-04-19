@@ -38,10 +38,13 @@ class SymbolicPattern(HPMPattern):
         observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         x_pred = self.forward_fn(observations)
         if not isinstance(x_pred, torch.Tensor):
-            if isinstance(x_pred, (int, float, list, np.ndarray)):
-                x_pred = torch.tensor(x_pred, dtype=torch.float32, device=self._device)
-            else:
-                return torch.tensor(0.0, device=self._device) # Non-numeric output
+            try:
+                if isinstance(x_pred, (int, float, list, np.ndarray)):
+                    x_pred = torch.tensor(x_pred, dtype=torch.float32, device=self._device)
+                else:
+                    return torch.tensor(0.0, device=self._device) # Non-numeric output
+            except (ValueError, TypeError):
+                return torch.tensor(0.0, device=self._device)
         
         if self.output_key not in observations:
             return torch.tensor(-1.0, device=self._device)
@@ -59,10 +62,14 @@ class SymbolicPattern(HPMPattern):
         for _ in range(num_samples):
             out = self.forward_fn(context)
             if not isinstance(out, torch.Tensor):
-                if isinstance(out, (int, float, list, np.ndarray)):
-                    out = torch.tensor(out, dtype=torch.float32, device=self._device)
-                else:
-                    # Keep as is (e.g. string tool name)
+                try:
+                    if isinstance(out, (int, float, list, np.ndarray)):
+                        out = torch.tensor(out, dtype=torch.float32, device=self._device)
+                    else:
+                        # Keep as is (e.g. string tool name)
+                        pass
+                except (ValueError, TypeError):
+                    # Fallback for non-numeric lists
                     pass
             samples.append(out)
         

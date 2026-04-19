@@ -6,7 +6,9 @@ from hpm_ai_v3.symbolic_pattern import SymbolicPattern
 from hpm_ai_v3.motor_pattern import MotorPattern
 from hpm_ai_v3.pattern import HPMPattern
 from hpm_ai_v3.composite_tool_pattern import CompositeToolPattern
+from hpm_ai_v3.composite_agent_pattern import CompositeAgentPattern
 from hpm_ai_v3.tool_registry import ToolRegistry
+from hpm_ai_v3.agent_registry import AgentRegistry
 import sympy as sp
 from sklearn.linear_model import LinearRegression
 
@@ -24,9 +26,9 @@ class SubstrateCompiler:
         
     def should_compile(self, pattern: HPMPattern) -> bool:
         """Decision rule: high compression and stable accuracy."""
-        if pattern.substrate_type == "symbolic" or pattern.substrate_type == "symbolic_pipeline":
+        if pattern.substrate_type in ["symbolic", "symbolic_pipeline", "symbolic_agent_pipeline"]:
             return False
-        if hasattr(pattern, 'substrate_type') and pattern.substrate_type == "composite_tool":
+        if hasattr(pattern, 'substrate_type') and pattern.substrate_type in ["composite_tool", "composite_agent"]:
             # Compile composite if it has high weight and low loss
             return (pattern.weight > 0.15 and 
                     pattern.loss_ema is not None and 
@@ -84,7 +86,6 @@ class SubstrateCompiler:
         func_code = "\n".join(lines)
         
         # Compile the function
-        # We need to import ToolRegistry inside or pass it in
         namespace = {"ToolRegistry": ToolRegistry, "torch": torch, "np": np}
         try:
             exec(func_code, namespace)
@@ -103,6 +104,79 @@ class SubstrateCompiler:
         sym_pat.accuracy = composite.accuracy
         sym_pat.loss_ema = composite.loss_ema
         sym_pat.substrate_type = "symbolic_pipeline"
+        
+        # Store source for inspection
+        sym_pat.source_code = func_code
+        
+        return sym_pat
+
+    def compile_agent_composite_to_symbolic(self, composite: CompositeAgentPattern) -> Optional[SymbolicPattern]:
+        """
+        Compile a CompositeAgentPattern into a symbolic Python function.
+        The function directly chains the agent calls without meta-orchestration.
+        """
+        agent_names = [p.agent_name for p in composite.patterns]
+        input_keys = composite.required_observation_keys
+        output_key = composite.output_key
+        
+        # Build the source code of the pipeline function
+        lines = ["def agent_pipeline(context):"]
+        lines.append("    # Auto-generated symbolic agent workflow")
+        lines.append("    # Agents: " + " -> ".join(agent_names))
+        
+        # We need to keep track of the current variables
+        current_context = "context.copy()"
+        lines.append(f"    ctx = {current_context}")
+        
+        for i, a_name in enumerate(agent_names):
+            # Get agent info from registry
+            agent_info = AgentRegistry.get_agent_info(a_name)
+            if not agent_info:
+                print(f"[Compiler] Warning: Agent '{a_name}' not found in registry.")
+                return None
+            
+            agent_input_keys = agent_info['input_keys']
+            agent_output_key = agent_info['output_key']
+            
+            lines.append(f"    # Agent: {a_name}")
+            
+            # Build arguments for agent call
+            args = []
+            for inp in agent_input_keys:
+                args.append(f"{inp}=ctx.get('{inp}')")
+            
+            arg_str = ", ".join(args)
+            lines.append(f"    res = AgentRegistry.call('{a_name}', {arg_str})")
+            
+            # Agent result might be a dict or a value
+            lines.append(f"    if isinstance(res, dict):")
+            lines.append(f"        ctx.update(res)")
+            lines.append(f"    else:")
+            lines.append(f"        ctx['{agent_output_key}'] = res")
+        
+        lines.append(f"    return ctx['{output_key}']")
+        
+        func_code = "\n".join(lines)
+        
+        # Compile the function
+        namespace = {"AgentRegistry": AgentRegistry, "torch": torch, "np": np}
+        try:
+            exec(func_code, namespace)
+            pipeline_fn = namespace["agent_pipeline"]
+        except Exception as e:
+            print(f"[Compiler] Failed to compile agent composite: {e}")
+            return None
+        
+        # Create symbolic pattern
+        sym_pat = SymbolicPattern(
+            forward_fn=pipeline_fn,
+            required_keys=input_keys,
+            pattern_id=f"sym_{composite.id}",
+            output_key=output_key
+        )
+        sym_pat.accuracy = composite.accuracy
+        sym_pat.loss_ema = composite.loss_ema
+        sym_pat.substrate_type = "symbolic_agent_pipeline"
         
         # Store source for inspection
         sym_pat.source_code = func_code
@@ -136,6 +210,9 @@ class SubstrateCompiler:
         """
         if isinstance(pattern, CompositeToolPattern):
             return self.compile_composite_to_symbolic(pattern)
+            
+        if isinstance(pattern, CompositeAgentPattern):
+            return self.compile_agent_composite_to_symbolic(pattern)
         
         if isinstance(pattern, MotorPattern):
             return self.compile_motor_to_symbolic(pattern)

@@ -45,6 +45,26 @@ class AgentRegistry:
         return cls._agents.get(name)
 
     @classmethod
+    def call(cls, name: str, **kwargs) -> Any:
+        """Directly call a registered agent by name."""
+        if name not in cls._agents:
+            raise ValueError(f"Agent '{name}' not registered.")
+        agent_info = cls._agents[name]
+        agent = agent_info['instance']
+        
+        # Determine interface by inspecting agent
+        if hasattr(agent, 'invoke'):
+            return agent.invoke(kwargs)
+        elif hasattr(agent, 'process'):
+            return agent.process(kwargs)
+        elif hasattr(agent, 'predict'):
+            return agent.predict(kwargs)
+        elif hasattr(agent, 'step'):
+            return agent.step(kwargs)
+        else:
+            raise AttributeError(f"Agent {name} has no callable interface.")
+
+    @classmethod
     def clear(cls):
         """Clear registry."""
         cls._agents.clear()
