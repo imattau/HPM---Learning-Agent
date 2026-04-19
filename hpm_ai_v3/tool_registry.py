@@ -52,6 +52,14 @@ class ToolRegistry:
     def get_tool_info(cls, name: str) -> Optional[Dict]:
         """Return metadata for a tool."""
         return cls._tools.get(name)
+
+    @classmethod
+    def call(cls, name: str, **kwargs) -> Any:
+        """Directly call a registered tool by name."""
+        if name not in cls._tools:
+            raise ValueError(f"Tool '{name}' not registered.")
+        tool_fn = cls._tools[name]['fn']
+        return tool_fn(**kwargs)
     
     @classmethod
     def clear(cls):
