@@ -78,20 +78,44 @@ class EvaluatorManager:
         pattern.social_score = 0.9 * pattern.social_score + 0.1 * social_signal
         
     def update_invariance(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
-        x = observations.get("input")
-        if x is None: return
+        # Find a suitable input key for this pattern
+        input_key = "input"
+        if input_key not in observations or (hasattr(pattern, 'required_observation_keys') and input_key not in pattern.required_observation_keys):
+            for k in getattr(pattern, 'required_observation_keys', []):
+                if k in observations:
+                    input_key = k
+                    break
+        
+        x = observations.get(input_key)
+        if x is None or not isinstance(x, torch.Tensor): return
+        
         x = x.to(pattern._device)
         if x.dim() == 1: x = x.unsqueeze(0)
         x_pert = x.clone()
-        perm = torch.randperm(x.shape[0], device=pattern._device)
-        x_pert[:, 2:6] = x[perm][:, 2:6]
+        if x.shape[1] > 6:
+            perm = torch.randperm(x.shape[0], device=pattern._device)
+            x_pert[:, 2:6] = x[perm][:, 2:6]
         
         with torch.no_grad():
-            pred_orig = pattern.sample({"input": x})["y"]
-            pred_pert = pattern.sample({"input": x_pert})["y"]
+            out_orig = pattern.sample({input_key: x})
+            out_pert = pattern.sample({input_key: x_pert})
+            
+            # Use probabilities if available (more stable for classification)
+            if "probs" in out_orig:
+                p_orig = out_orig["probs"]
+                p_pert = out_pert["probs"]
+                dist_val = ((p_orig - p_pert) ** 2).mean().item()
+            elif "y" in out_orig:
+                pred_orig = out_orig["y"]
+                pred_pert = out_pert["y"]
+                if isinstance(pred_orig, torch.Tensor) and isinstance(pred_pert, torch.Tensor):
+                    dist_val = ((pred_orig.float() - pred_pert.float()) ** 2).mean().item()
+                else:
+                    dist_val = 0.0
+            else:
+                dist_val = 0.0
         
-        mse = ((pred_orig - pred_pert) ** 2).mean().item()
-        pattern.invariance_score = 0.9 * pattern.invariance_score + 0.1 * np.exp(-mse)
+        pattern.invariance_score = 0.9 * pattern.invariance_score + 0.1 * np.exp(-dist_val)
         
     def compute_insight(self, new_pattern: HPMPattern, parent_a: HPMPattern, parent_b: HPMPattern) -> float:
         nov_a = new_pattern.structural_distance(parent_a)
