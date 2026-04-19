@@ -2,12 +2,12 @@ import sys, os
 sys.path.append(os.path.abspath("hpm_ai_v3"))
 
 import torch, numpy as np, matplotlib.pyplot as plt
-from task4.composable_pattern import ComposableRegressionPattern
-from task4.recombination import RecombinationOperator
+from composable_pattern import ComposableRegressionPattern
+from recombination import RecombinationOperator
 from population import PatternPopulation
 from evaluators import EvaluatorManager
 from compiler import SubstrateCompiler
-from task4.task4_data import *
+from task4_data import *
 
 def run_experiment(use_rec=True):
     pop = PatternPopulation([ComposableRegressionPattern(input_dim=1, output_dim=1) for _ in range(3)])

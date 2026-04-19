@@ -3,7 +3,7 @@ sys.path.append(os.path.abspath("hpm_ai_v3"))
 
 import torch
 import numpy as np
-from task1.regression_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 from pattern_field import PatternField
 from task2_data import generate_task2_data
 

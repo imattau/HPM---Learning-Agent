@@ -4,7 +4,7 @@ import pyro
 import pyro.distributions as dist
 import pyro.poutine as poutine
 from typing import Dict, Any, Optional
-from task1.regression_pattern import RegressionPattern
+from .neural_pattern import RegressionPattern
 
 class ComposableRegressionPattern(RegressionPattern):
     def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 8, pattern_id: Optional[str] = None):

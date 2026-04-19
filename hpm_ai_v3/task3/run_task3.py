@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
-from task1.regression_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 from population import PatternPopulation
 from evaluators import EvaluatorManager
 from compiler import SubstrateCompiler

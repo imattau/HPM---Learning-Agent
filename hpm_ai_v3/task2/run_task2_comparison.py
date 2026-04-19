@@ -4,7 +4,7 @@ sys.path.append(os.path.abspath("hpm_ai_v3"))
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from task1.regression_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 from pattern_field import PatternField
 from population import PatternPopulation
 from evaluators import EvaluatorManager

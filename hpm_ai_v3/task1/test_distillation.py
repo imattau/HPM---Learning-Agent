@@ -1,6 +1,6 @@
 import sys, os; sys.path.append(os.path.abspath("hpm_ai_v3"))
 import torch, numpy as np
-from task1.regression_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 from compiler.symbolic_compiler import SymbolicRegressionCompiler
 from task1.task1_data import generate_task1_data
 
