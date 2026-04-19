@@ -52,7 +52,7 @@ class PatternPopulation:
             evaluator_mgr.update_coherence(p, self.patterns)
             
             if hasattr(p, 'compression_score'):
-                comp = p.compression_score(observations.get("x", torch.zeros(1)))
+                comp = p.compression_score(observations)
                 evaluator_mgr.update_curiosity(p, comp)
             
             if pattern_field_signal is not None:

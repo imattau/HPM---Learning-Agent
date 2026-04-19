@@ -44,9 +44,11 @@ class HPMPattern(ABC):
                 0.3 * self.field_amplification)
     
     def compute_stickiness(self, base_loss: float) -> float:
+        from scipy.special import expit
         eta, delta = 2.0, 0.5
-        x = eta * self.pattern_density - delta * base_loss
-        self.stickiness = 1.0 / (1.0 + np.exp(-x))
+        safe_loss = base_loss if np.isfinite(base_loss) else 1.0
+        x = eta * self.pattern_density - delta * safe_loss
+        self.stickiness = float(expit(x))
         return self.stickiness
 
     @abstractmethod

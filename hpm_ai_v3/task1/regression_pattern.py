@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List
 from pattern import HPMPattern
 
 class RegressionPattern(HPMPattern):
-    def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 4, pattern_id: Optional[str] = None):
+    def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 8, pattern_id: Optional[str] = None):
         super().__init__(pattern_id)
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -18,6 +18,7 @@ class RegressionPattern(HPMPattern):
         self.z2_dim = z2_dim
         self.required_observation_keys = ["input", "target"]
         self.substrate_type = "neural"
+        self.sparsity_lambda = 0.01
         
         self.fc_x_to_z1 = nn.Linear(input_dim, z1_dim * 2)
         self.z2_loc = nn.Parameter(torch.zeros(z2_dim))
@@ -42,6 +43,7 @@ class RegressionPattern(HPMPattern):
         batch_size = observations["input"].shape[0] if observations else 1
         with pyro.plate("batch", batch_size):
             z2 = pyro.sample("z2", dist.Normal(self.z2_loc, torch.exp(self.z2_scale)).to_event(1))
+            pyro.factor("z2_sparsity", -self.sparsity_lambda * z2.abs().sum())
             z1_p = self.fc_z2_to_z1(z2).chunk(2, dim=-1)
             z1 = pyro.sample("z1", dist.Normal(z1_p[0], torch.exp(0.5 * z1_p[1])).to_event(1))
             y_p = self.fc_z1_to_y(z1).chunk(2, dim=-1)
@@ -95,3 +97,27 @@ class RegressionPattern(HPMPattern):
         return 0.7 * graph_dist + 0.3 * dim_dist
     
     def extract_causal_graph(self) -> nx.DiGraph: return self.causal_graph.copy()
+    
+    def compression_score(self, observations: Any) -> float:
+        x = observations["input"] if isinstance(observations, dict) else observations
+        with torch.no_grad():
+            guide_trace = poutine.trace(self.guide).get_trace({"input": x})
+            z2 = guide_trace.nodes["z2"]["value"]
+        return min(1.0, z2.var(dim=0).mean().item() / 3.0)
+    
+    def surface_dependence(self, x_batch: torch.Tensor) -> float:
+        with torch.no_grad():
+            guide_trace = poutine.trace(self.guide).get_trace({"input": x_batch})
+            z2 = guide_trace.nodes["z2"]["value"]
+        surface = x_batch[:, 2:6]
+        z2_centered = z2 - z2.mean(dim=0)
+        surface_centered = surface - surface.mean(dim=0)
+        try:
+            ridge = 1e-5 * torch.eye(surface.shape[1])
+            gram = surface_centered.T @ surface_centered + ridge
+            coeffs = torch.linalg.solve(gram, surface_centered.T @ z2_centered)
+            pred = surface_centered @ coeffs
+            r2 = 1 - ((z2_centered - pred) ** 2).sum() / (z2_centered ** 2).sum()
+            return float(r2.mean().item())
+        except:
+            return float(torch.corrcoef(torch.cat([z2.T, surface.T]))[:z2.shape[1], z2.shape[1]:].abs().mean().item())
