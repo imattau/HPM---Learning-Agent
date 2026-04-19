@@ -1,12 +1,12 @@
 import torch
 import numpy as np
 from typing import List, Tuple, Optional
-from ..causal_pattern import CausalPattern
-from ..symbolic_pattern import SymbolicPattern
-from ..motor_pattern import MotorPattern
-from ..pattern import HPMPattern
-from ..composite_tool_pattern import CompositeToolPattern
-from ..tool_registry import ToolRegistry
+from hpm_ai_v3.causal_pattern import CausalPattern
+from hpm_ai_v3.symbolic_pattern import SymbolicPattern
+from hpm_ai_v3.motor_pattern import MotorPattern
+from hpm_ai_v3.pattern import HPMPattern
+from hpm_ai_v3.composite_tool_pattern import CompositeToolPattern
+from hpm_ai_v3.tool_registry import ToolRegistry
 import sympy as sp
 from sklearn.linear_model import LinearRegression
 

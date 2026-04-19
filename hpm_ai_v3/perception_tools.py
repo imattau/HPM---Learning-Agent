@@ -70,14 +70,27 @@ def extract_resnet_features(image: Union[str, np.ndarray, torch.Tensor, Image.Im
             img = Image.open(BytesIO(response.content)).convert("RGB")
         else:
             img = Image.open(image).convert("RGB")
-    elif isinstance(image, np.ndarray):
-        img = Image.fromarray(image.astype('uint8')).convert("RGB")
     elif isinstance(image, torch.Tensor):
+        from torchvision.transforms import ToPILImage
+        if image.dim() == 4: # Batch
+            image = image[0]
         if image.dim() == 3:
-            from torchvision.transforms import ToPILImage
-            img = ToPILImage()(image.cpu())
+            # Check if (C, H, W) or (H, W, C)
+            if image.shape[0] in [1, 3]: # likely (C, H, W)
+                img = ToPILImage()(image.cpu())
+            else:
+                img = Image.fromarray((image.cpu().numpy() * 255).astype('uint8')).convert("RGB")
         else:
-            raise ValueError("Tensor must be 3D (C,H,W)")
+            raise ValueError(f"Tensor must be 3D (C,H,W), got {image.shape}")
+    elif isinstance(image, np.ndarray):
+        if image.ndim == 3:
+            if image.shape[0] in [1, 3]: # (C, H, W)
+                image = image.transpose(1, 2, 0)
+            if image.max() <= 1.0:
+                image = (image * 255).astype('uint8')
+            img = Image.fromarray(image.astype('uint8')).convert("RGB")
+        else:
+            img = Image.fromarray(image.astype('uint8')).convert("RGB")
     elif isinstance(image, Image.Image):
         img = image.convert("RGB")
     else:
