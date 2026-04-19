@@ -5,12 +5,12 @@ pipeline_recombination.py - Operator that creates composite patterns from freque
 from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict
 import numpy as np
-from .pattern import HPMPattern
-from .tool_pattern import ToolPattern
-from .agent_pattern import AgentPattern
-from .composite_tool_pattern import CompositeToolPattern
-from .composite_agent_pattern import CompositeAgentPattern
-from .population import PatternPopulation
+from ..pattern import HPMPattern
+from ..tools.base import ToolPattern
+from ..agents.base import AgentPattern
+from ..tools.composite import CompositeToolPattern
+from ..agents.composite import CompositeAgentPattern
+from ..population import PatternPopulation
 
 
 class PipelineRecombinationOperator:

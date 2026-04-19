@@ -7,9 +7,9 @@ sys.path.append(os.path.abspath("hpm_ai_v3"))
 
 import torch
 import numpy as np
-from hpm_ai_v3.agent_registry import AgentRegistry
-from hpm_ai_v3.agent_pattern import AgentPattern
-from hpm_ai_v3.composite_agent_pattern import CompositeAgentPattern
+from hpm_ai_v3.agents.registry import AgentRegistry
+from hpm_ai_v3.agents.base import AgentPattern
+from hpm_ai_v3.agents.composite import CompositeAgentPattern
 from hpm_ai_v3.compiler.base_compiler import SubstrateCompiler
 from hpm_ai_v3.augmented_agent import AugmentedHPMAgent
 

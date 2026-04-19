@@ -23,6 +23,7 @@ class ComposableRegressionPattern(RegressionPattern):
         self.decoder_part1.to(device)
         self.decoder_part2.to(device)
         self.fc_z1_to_z2.to(device)
+        return self
 
     def parameters(self):
         return (list(self.fc_x_to_z1.parameters()) + list(self.fc_z2_to_z1.parameters()) +

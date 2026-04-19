@@ -26,7 +26,7 @@ class AgentRegistry:
         if name not in cls._agents:
             return None
         info = cls._agents[name]
-        from .agent_pattern import AgentPattern
+        from .base import AgentPattern
         return AgentPattern(
             agent=info['instance'],
             agent_name=name,

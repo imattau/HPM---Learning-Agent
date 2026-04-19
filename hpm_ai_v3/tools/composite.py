@@ -7,8 +7,8 @@ import torch
 import numpy as np
 import networkx as nx
 from typing import Dict, Any, Optional, List
-from .pattern import HPMPattern
-from .tool_pattern import ToolPattern
+from ..pattern import HPMPattern
+from .base import ToolPattern
 
 
 class CompositeToolPattern(HPMPattern):

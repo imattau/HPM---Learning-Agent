@@ -12,10 +12,10 @@ from typing import Dict, List, Tuple, Optional, Any
 import random
 from tqdm import tqdm
 
-from hpm_ai_v3.tool_registry import ToolRegistry
+from hpm_ai_v3.tools.registry import ToolRegistry
 from hpm_ai_v3.augmented_agent import AugmentedHPMAgent
-from hpm_ai_v3.perception_tools import extract_resnet_features, register_perception_tools
-from hpm_ai_v3.memory_tools import vector_store, vector_search, episodic_append, register_memory_tools
+from hpm_ai_v3.tools.perception import extract_resnet_features, register_perception_tools
+from hpm_ai_v3.tools.memory import vector_store, vector_search, episodic_append, register_memory_tools
 from hpm_ai_v3.classification_pattern import ClassificationPattern
 
 # ----------------------------------------------------------------------

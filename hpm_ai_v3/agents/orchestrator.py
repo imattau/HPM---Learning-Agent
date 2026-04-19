@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 from typing import Dict, Any, Optional, List
 
-from .meta_tool_orchestrator import MetaToolOrchestrator
-from .tool_registry import ToolRegistry
-from .agent_registry import AgentRegistry
-from .pattern import HPMPattern
+from ..meta_tool_orchestrator import MetaToolOrchestrator
+from ..tools.registry import ToolRegistry
+from .registry import AgentRegistry
+from ..pattern import HPMPattern
 
 
 class UnifiedOrchestrator(MetaToolOrchestrator):

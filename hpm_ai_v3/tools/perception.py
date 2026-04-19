@@ -10,14 +10,14 @@ from PIL import Image
 import warnings
 import os
 
-from .tool_registry import ToolRegistry
+from .registry import ToolRegistry
 
 # ----------------------------------------------------------------------
 # Helper: Get device (respect HPM's global device if set)
 # ----------------------------------------------------------------------
 def _get_device() -> torch.device:
     try:
-        from .pattern import HPMPattern
+        from ..pattern import HPMPattern
         if HPMPattern._global_device is not None:
             return HPMPattern._global_device
     except:

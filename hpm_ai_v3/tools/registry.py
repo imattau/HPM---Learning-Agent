@@ -3,7 +3,7 @@ tool_registry.py - Global registry of available tools for HPM agents.
 """
 
 from typing import Dict, Callable, List, Optional, Any
-from .tool_pattern import ToolPattern
+from .base import ToolPattern
 
 
 class ToolRegistry:

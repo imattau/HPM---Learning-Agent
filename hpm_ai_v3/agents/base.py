@@ -6,7 +6,7 @@ import torch
 import numpy as np
 import networkx as nx
 from typing import Dict, Any, Optional, List
-from .pattern import HPMPattern
+from ..pattern import HPMPattern
 
 
 class AgentPattern(HPMPattern):

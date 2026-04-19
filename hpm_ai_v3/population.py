@@ -3,13 +3,13 @@ import time
 import torch
 import networkx as nx
 from typing import List, Tuple, Optional, Dict
-from hpm_ai_v3.pattern import HPMPattern
-from hpm_ai_v3.causal_pattern import CausalPattern
-from hpm_ai_v3.symbolic_pattern import SymbolicPattern
-from hpm_ai_v3.motor_pattern import MotorPattern
-from hpm_ai_v3.evaluators import EvaluatorManager
-from hpm_ai_v3.compiler import SubstrateCompiler
-from hpm_ai_v3.device_utils import get_device
+from .pattern import HPMPattern
+from .causal_pattern import CausalPattern
+from .symbolic_pattern import SymbolicPattern
+from .motor_pattern import MotorPattern
+from .evaluators import EvaluatorManager
+from .compiler import SubstrateCompiler
+from .device_utils import get_device
 
 class PatternPopulation:
     def __init__(self, 

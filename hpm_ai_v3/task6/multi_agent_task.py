@@ -8,13 +8,13 @@ sys.path.append(os.path.abspath("hpm_ai_v3"))
 import torch
 import numpy as np
 from typing import Dict, Any, List
-from hpm_ai_v3.agent_registry import AgentRegistry
-from hpm_ai_v3.agent_pattern import AgentPattern
-from hpm_ai_v3.unified_orchestrator import UnifiedOrchestrator
+from hpm_ai_v3.agents.registry import AgentRegistry
+from hpm_ai_v3.agents.base import AgentPattern
+from hpm_ai_v3.agents.orchestrator import UnifiedOrchestrator
 from hpm_ai_v3.augmented_agent import AugmentedHPMAgent
-from hpm_ai_v3.perception_tools import register_perception_tools
-from hpm_ai_v3.memory_tools import register_memory_tools
-from hpm_ai_v3.tool_registry import ToolRegistry
+from hpm_ai_v3.tools.perception import register_perception_tools
+from hpm_ai_v3.tools.memory import register_memory_tools
+from hpm_ai_v3.tools.registry import ToolRegistry
 
 
 def create_specialist_agents():

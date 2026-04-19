@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional, Union
 from collections import deque
 import warnings
 
-from .tool_registry import ToolRegistry
+from .registry import ToolRegistry
 
 # ----------------------------------------------------------------------
 # Vector Memory (FAISS)

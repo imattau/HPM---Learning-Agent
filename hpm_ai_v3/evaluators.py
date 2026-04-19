@@ -1,9 +1,9 @@
 import torch
 import numpy as np
 from typing import List, Dict, Any
-from pattern import HPMPattern
-from causal_pattern import CausalPattern
-from symbolic_pattern import SymbolicPattern
+from .pattern import HPMPattern
+from .causal_pattern import CausalPattern
+from .symbolic_pattern import SymbolicPattern
 
 class EvaluatorManager:
     def __init__(self, lambda_L: float = 0.1):

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any
 from .population import PatternPopulation
 from .evaluators import EvaluatorManager
 from .compiler import SubstrateCompiler
-from .tool_registry import ToolRegistry
+from .tools.registry import ToolRegistry
 from .meta_tool_orchestrator import MetaToolOrchestrator
 from .classification_pattern import ClassificationPattern
 from .pattern import HPMPattern

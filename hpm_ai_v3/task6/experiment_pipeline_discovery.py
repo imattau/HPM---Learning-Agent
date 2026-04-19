@@ -10,10 +10,10 @@ import numpy as np
 from collections import deque
 from typing import Dict, List, Any
 
-from hpm_ai_v3.tool_registry import ToolRegistry
-from hpm_ai_v3.tool_pattern import ToolPattern
-from hpm_ai_v3.composite_tool_pattern import CompositeToolPattern
-from hpm_ai_v3.pipeline_recombination import PipelineRecombinationOperator
+from hpm_ai_v3.tools.registry import ToolRegistry
+from hpm_ai_v3.tools.base import ToolPattern
+from hpm_ai_v3.tools.composite import CompositeToolPattern
+from hpm_ai_v3.operators.pipeline_recombination import PipelineRecombinationOperator
 from hpm_ai_v3.meta_tool_orchestrator import MetaToolOrchestrator
 from hpm_ai_v3.population import PatternPopulation
 from hpm_ai_v3.evaluators import EvaluatorManager

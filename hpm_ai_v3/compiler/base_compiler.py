@@ -5,10 +5,10 @@ from hpm_ai_v3.causal_pattern import CausalPattern
 from hpm_ai_v3.symbolic_pattern import SymbolicPattern
 from hpm_ai_v3.motor_pattern import MotorPattern
 from hpm_ai_v3.pattern import HPMPattern
-from hpm_ai_v3.composite_tool_pattern import CompositeToolPattern
-from hpm_ai_v3.composite_agent_pattern import CompositeAgentPattern
-from hpm_ai_v3.tool_registry import ToolRegistry
-from hpm_ai_v3.agent_registry import AgentRegistry
+from hpm_ai_v3.tools.composite import CompositeToolPattern
+from hpm_ai_v3.agents.composite import CompositeAgentPattern
+from hpm_ai_v3.tools.registry import ToolRegistry
+from hpm_ai_v3.agents.registry import AgentRegistry
 import sympy as sp
 from sklearn.linear_model import LinearRegression
 

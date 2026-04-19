@@ -53,6 +53,7 @@ class HPMPattern(ABC):
     def to(self, device: torch.device):
         """Move pattern parameters to device (override in subclasses)."""
         self._device = device
+        return self
 
     @property
     def pattern_density(self) -> float:
