@@ -52,30 +52,30 @@ class ClassificationPattern(HPMPattern):
 
     def model(self, observations: Optional[Dict[str, torch.Tensor]] = None):
         if observations:
-            observations = {k: v.to(self._device) for k, v in observations.items()}
+            observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         batch_size = observations["input"].shape[0] if observations else 1
         with pyro.plate("batch", batch_size):
-            z2 = pyro.sample("z2", dist.Normal(self.z2_loc, torch.exp(self.z2_scale)).to_event(1))
+            z2 = pyro.sample("z2", dist.Normal(self.z2_loc, torch.exp(self.z2_scale.clamp(-10, 10))).to_event(1))
             pyro.factor("z2_sparsity", -self.sparsity_lambda * z2.abs().sum())
             z1_p = self.fc_z2_to_z1(z2).chunk(2, dim=-1)
-            z1 = pyro.sample("z1", dist.Normal(z1_p[0], torch.exp(0.5 * z1_p[1])).to_event(1))
+            z1 = pyro.sample("z1", dist.Normal(z1_p[0], torch.exp(0.5 * z1_p[1].clamp(-10, 10))).to_event(1))
             logits = self.fc_z1_to_logits(z1)
             y = pyro.sample("y", dist.Categorical(logits=logits),
                             obs=observations["target"].long().squeeze() if observations and "target" in observations else None)
         return y
 
     def guide(self, observations: Dict[str, torch.Tensor]):
-        observations = {k: v.to(self._device) for k, v in observations.items()}
+        observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         x = observations["input"]
         with pyro.plate("batch", x.shape[0]):
             z1_p = self.fc_x_to_z1(x).chunk(2, dim=-1)
-            z1 = pyro.sample("z1", dist.Normal(z1_p[0], torch.exp(0.5 * z1_p[1])).to_event(1))
+            z1 = pyro.sample("z1", dist.Normal(z1_p[0], torch.exp(0.5 * z1_p[1].clamp(-10, 10))).to_event(1))
             z2_p = self.fc_z1_to_z2(z1).chunk(2, dim=-1)
-            z2 = pyro.sample("z2", dist.Normal(z2_p[0], torch.exp(0.5 * z2_p[1])).to_event(1))
+            z2 = pyro.sample("z2", dist.Normal(z2_p[0], torch.exp(0.5 * z2_p[1].clamp(-10, 10))).to_event(1))
         return z1, z2
 
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        observations = {k: v.to(self._device) for k, v in observations.items()}
+        observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         conditioned = poutine.condition(self.model, data=observations)
         return poutine.trace(conditioned).get_trace().log_prob_sum()
 
@@ -96,7 +96,7 @@ class ClassificationPattern(HPMPattern):
             return out["probs"].argmax(dim=-1)
 
     def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 0.01):
-        observations = {k: v.to(self._device) for k, v in observations.items()}
+        observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         if self.svi is None: self.svi = pyro.infer.SVI(self.model, self.guide, self.optimizer, loss=pyro.infer.Trace_ELBO())
         loss = self.svi.step(observations)
         self.loss_ema = loss if self.loss_ema is None else 0.9 * self.loss_ema + 0.1 * loss

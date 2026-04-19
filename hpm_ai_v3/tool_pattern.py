@@ -51,6 +51,7 @@ class ToolPattern(HPMPattern):
         
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Tool patterns are deterministic; return high log prob if output present."""
+        observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         if self.output_key not in observations:
             return torch.tensor(-10.0, device=self._device)
         

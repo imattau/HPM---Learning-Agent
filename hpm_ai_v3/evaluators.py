@@ -35,7 +35,7 @@ class EvaluatorManager:
         ) / 4.0
         
     def update_epistemic(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
-        obs = {k: v.to(pattern._device) for k, v in observations.items()}
+        obs = {k: (v.to(pattern._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         with torch.no_grad():
             logp = pattern.log_prob(obs)
             instant_loss = -logp.item()
@@ -78,27 +78,37 @@ class EvaluatorManager:
         pattern.social_score = 0.9 * pattern.social_score + 0.1 * social_signal
         
     def update_invariance(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
-        # Find a suitable input key for this pattern
+        # Find a suitable input key for this pattern to perturb
         input_key = "input"
         if input_key not in observations or (hasattr(pattern, 'required_observation_keys') and input_key not in pattern.required_observation_keys):
             for k in getattr(pattern, 'required_observation_keys', []):
                 if k in observations:
                     input_key = k
                     break
-        
+
         x = observations.get(input_key)
         if x is None or not isinstance(x, torch.Tensor): return
-        
+
         x = x.to(pattern._device)
         if x.dim() == 1: x = x.unsqueeze(0)
         x_pert = x.clone()
         if x.shape[1] > 6:
             perm = torch.randperm(x.shape[0], device=pattern._device)
             x_pert[:, 2:6] = x[perm][:, 2:6]
-        
+        else:
+            # Small random noise for low-dim inputs
+            x_pert = x + torch.randn_like(x) * 0.1
+
+        # Build full context for patterns that need multiple inputs
+        context_orig = {k: observations[k] for k in getattr(pattern, 'required_observation_keys', []) if k in observations}
+        context_pert = context_orig.copy()
+        context_orig[input_key] = x
+        context_pert[input_key] = x_pert
+
         with torch.no_grad():
-            out_orig = pattern.sample({input_key: x})
-            out_pert = pattern.sample({input_key: x_pert})
+            out_orig = pattern.sample(context_orig)
+            out_pert = pattern.sample(context_pert)
+
             
             # Use probabilities if available (more stable for classification)
             if "probs" in out_orig:
