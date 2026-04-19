@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 from hpm_ai_v3.causal_pattern import CausalPattern
 from hpm_ai_v3.symbolic_pattern import SymbolicPattern
 from hpm_ai_v3.motor_pattern import MotorPattern
@@ -182,6 +182,33 @@ class SubstrateCompiler:
         sym_pat.source_code = func_code
         
         return sym_pat
+
+    def spawn_agent_from_composite(self, composite: CompositeAgentPattern, agent_id: str = None) -> Any:
+        """
+        Create a new standalone HPM agent from a composite agent pattern.
+        """
+        # 1. Compile to symbolic pattern
+        sym_pat = self.compile_agent_composite_to_symbolic(composite)
+        if sym_pat is None:
+            return None
+        
+        # 2. Create new agent with this pattern as its core
+        from hpm_ai_v3.augmented_agent import AugmentedHPMAgent
+        new_agent = AugmentedHPMAgent(
+            tool_names=[],  # Uses agents, not raw tools
+            base_patterns=[sym_pat],
+            agent_id=agent_id or f"spawned_{composite.id}"
+        )
+        
+        # 3. Register the new agent
+        AgentRegistry.register(
+            new_agent.agent_id, 
+            new_agent,
+            description=f"Spawned from workflow: {' -> '.join(composite.get_sequence())}"
+        )
+        
+        print(f"[Compiler] Spawned new agent '{new_agent.agent_id}' from composite.")
+        return new_agent
     
     def compile_motor_to_symbolic(self, motor_pattern: MotorPattern) -> Optional[SymbolicPattern]:
         """

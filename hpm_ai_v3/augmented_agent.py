@@ -24,8 +24,10 @@ class AugmentedHPMAgent:
                  tool_names: List[str],
                  base_patterns: Optional[List[HPMPattern]] = None,
                  context_feature_dim: int = 16,
-                 history_len: int = 20):
+                 history_len: int = 20,
+                 agent_id: Optional[str] = None):
         
+        self.agent_id = agent_id or f"agent_{id(self) % 1000}"
         self.tool_names = tool_names
         self.tool_patterns = []
         for name in tool_names:
@@ -105,28 +107,29 @@ class AugmentedHPMAgent:
     def invoke(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Invoke the agent as a functional pattern.
-        This is used when this agent is wrapped by an AgentPattern.
         """
-        # Execute one step without learning if possible, or just return result
-        context_features = self._compute_context_features(context)
-        meta_out = self.meta.sample({"context_features": context_features})
-        selected_tool = meta_out["selected_tool"]
-        
-        # Execute tool
         working_context = context.copy()
-        if selected_tool in [p.tool_name for p in self.tool_patterns]:
-            tool_pat = next(p for p in self.tool_patterns if p.tool_name == selected_tool)
-            try:
-                tool_result = tool_pat.sample(working_context)
-                working_context.update(tool_result)
-            except:
-                pass
         
-        # Return best prediction from population
+        # 1. Tool Orchestration (if tools available)
+        if self.tool_names:
+            context_features = self._compute_context_features(context)
+            meta_out = self.meta.sample({"context_features": context_features})
+            selected_tool = meta_out["selected_tool"]
+            
+            if selected_tool in [p.tool_name for p in self.tool_patterns]:
+                tool_pat = next(p for p in self.tool_patterns if p.tool_name == selected_tool)
+                try:
+                    tool_result = tool_pat.sample(working_context)
+                    working_context.update(tool_result)
+                except:
+                    pass
+        
+        # 2. Prediction from population
         top_p = self.population.get_top_patterns(k=1)
         if top_p:
             pred = top_p[0].sample(working_context)
             return pred
+            
         return working_context
 
     def step(self, raw_input: Dict[str, Any], target: Optional[torch.Tensor] = None):

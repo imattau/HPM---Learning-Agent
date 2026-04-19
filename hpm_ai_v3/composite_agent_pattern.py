@@ -58,6 +58,10 @@ class CompositeAgentPattern(HPMPattern):
                 self.causal_graph.add_edge(inp, pat.agent_name)
             self.causal_graph.add_edge(pat.agent_name, pat.output_key)
             
+    def get_sequence(self) -> List[str]:
+        """Return list of agent names in order."""
+        return [p.agent_name for p in self.patterns]
+        
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Approximate log prob based on end-to-end matching.
