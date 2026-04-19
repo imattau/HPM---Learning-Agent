@@ -9,6 +9,7 @@ from symbolic_pattern import SymbolicPattern
 from motor_pattern import MotorPattern
 from evaluators import EvaluatorManager
 from compiler import SubstrateCompiler
+from device_utils import get_device
 
 class PatternPopulation:
     def __init__(self, 
@@ -28,24 +29,25 @@ class PatternPopulation:
         self.decay_rate = decay_rate
         self.interference_strength = interference_strength
         self.age_decay_rate = age_decay_rate
+        self._device = get_device(verbose=False)
         
         self._update_kappa_matrix()
         
     def _update_kappa_matrix(self):
         n = len(self.patterns)
+        if n == 0: return
         self.kappa = np.ones((n, n))
         for i in range(n):
-            for j in range(n):
-                if i != j:
-                    self.kappa[i, j] = self.patterns[i].structural_distance(self.patterns[j])
+            for j in range(i+1, n):
+                d = self.patterns[i].structural_distance(self.patterns[j])
+                self.kappa[i, j] = d
+                self.kappa[j, i] = d
                     
     def step(self, 
              evaluator_mgr: EvaluatorManager,
              observations: Dict,
              compiler: SubstrateCompiler,
              pattern_field_signal: Optional[List[float]] = None):
-        n = len(self.patterns)
-        
         # 1. Update evaluators
         for i, p in enumerate(self.patterns):
             evaluator_mgr.update_epistemic(p, observations)
@@ -170,5 +172,5 @@ class PatternPopulation:
                 if isinstance(out1, torch.Tensor):
                     return (out1 + out2) / 2.0
                 return (torch.tensor(out1) + torch.tensor(out2)) / 2.0
-            return SymbolicPattern(combined_fn)
+            return SymbolicPattern(combined_fn, p1.required_observation_keys)
         return None

@@ -1,10 +1,13 @@
+import os
 import numpy as np
 import torch
+import multiprocessing as mp
 from typing import List, Dict, Any, Optional
 from population import PatternPopulation
 from pattern import HPMPattern
 from evaluators import EvaluatorManager
 from compiler import SubstrateCompiler
+from device_utils import get_parallel_context
 from collections import deque
 
 class HPMAgent:
@@ -82,15 +85,12 @@ class PatternField:
                 self.global_pattern_frequency[pat.id] = self.global_pattern_frequency.get(pat.id, 0) + 1
         
         # Replication tests
-        unique_patterns = {pat.id: pat for _, pat in all_published}
-        
         for pub_agent_idx, pattern in all_published:
             scores = []
             for agent_idx, agent in enumerate(self.agents):
                 if agent_idx == pub_agent_idx: continue
                 scores.append(agent.test_patterns([pattern])[pattern.id])
                 
-            avg_score = np.mean(scores) if scores else 0.0
             succ = sum(1 for s in scores if s > self.replication_threshold)
             ratio = succ / len(scores) if scores else 0
             
@@ -113,3 +113,63 @@ class PatternField:
         if len(all_p) < 2: return 1.0
         dists = [all_p[i].structural_distance(all_p[j]) for i in range(len(all_p)) for j in range(i+1, len(all_p))]
         return 1.0 - np.mean(dists)
+
+class ParallelPatternField(PatternField):
+    """PatternField with multiprocessing support for CPU."""
+    def __init__(self, num_agents=5, pattern_factory=None, n_workers=None, **kwargs):
+        super().__init__(num_agents, pattern_factory, **kwargs)
+        self.n_workers = n_workers or min(num_agents, os.cpu_count())
+        self._pool = None
+
+    def step_field(self, observations_batch: List[Dict]):
+        self._step_counter += 1
+        
+        if self._pool is None:
+            ctx = get_parallel_context()
+            self._pool = ctx.Pool(self.n_workers)
+        
+        # Parallel agent steps
+        step_args = [(agent, obs) for agent, obs in zip(self.agents, observations_batch)]
+        self.agents = self._pool.starmap(_agent_step_wrapper, step_args)
+        
+        if self._step_counter % self.replication_frequency != 0: return
+        
+        # Collect top patterns
+        all_published = []
+        for agent_idx, agent in enumerate(self.agents):
+            for pat in agent.get_top_patterns(k=1):
+                all_published.append((agent_idx, pat))
+                self.global_pattern_frequency[pat.id] = self.global_pattern_frequency.get(pat.id, 0) + 1
+        
+        # Replication tests (kept sequential for simplicity, but could be parallelized)
+        for pub_agent_idx, pattern in all_published:
+            scores = []
+            for agent_idx, agent in enumerate(self.agents):
+                if agent_idx == pub_agent_idx: continue
+                scores.append(agent.test_patterns([pattern])[pattern.id])
+                
+            succ = sum(1 for s in scores if s > self.replication_threshold)
+            ratio = succ / len(scores) if scores else 0
+            
+            base_sig = self.social_signal_magnitude if ratio >= self.consensus_required else -self.social_signal_magnitude
+            sig = base_sig + self.field_amplification_bias * np.log1p(self.global_pattern_frequency.get(pattern.id, 0))
+            
+            if sig < 0:
+                self.penalty_memory[pub_agent_idx][pattern.id] = self.penalty_memory[pub_agent_idx].get(pattern.id, 0) * self.penalty_persistence + abs(sig)
+                self.agents[pub_agent_idx].apply_weight_penalty(pattern.id, self.penalty_memory[pub_agent_idx][pattern.id] * 0.05)
+            else:
+                self.penalty_memory[pub_agent_idx].pop(pattern.id, None)
+                self.agents[pub_agent_idx].receive_social_signal(pattern.id, sig)
+            
+            if sig > 0:
+                for i in range(len(self.agents)):
+                    if i != pub_agent_idx: self.agents[i].receive_social_signal(pattern.id, sig * 0.5)
+
+    def __del__(self):
+        if hasattr(self, '_pool') and self._pool:
+            self._pool.close()
+            self._pool.terminate()
+
+def _agent_step_wrapper(agent, obs):
+    agent.step(obs)
+    return agent

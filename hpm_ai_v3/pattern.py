@@ -6,10 +6,22 @@ import uuid
 import time
 import networkx as nx
 
+from device_utils import get_device, get_optimal_dtype
+
 class HPMPattern(ABC):
     """Abstract base for all HPM patterns."""
+    _global_device: Optional[torch.device] = None
+    _global_dtype: Optional[torch.dtype] = None
+
+    @classmethod
+    def set_device(cls, device: torch.device):
+        cls._global_device = device
+        cls._global_dtype = get_optimal_dtype(device)
+
     def __init__(self, pattern_id: Optional[str] = None):
         self.id = pattern_id or str(uuid.uuid4())[:8]
+        self._device = self._global_device or get_device(verbose=False)
+        self._dtype = self._global_dtype or torch.float32
         self.weight = 0.01
         self.substrate_type: str = "neural"
         self.required_observation_keys: List[str] = []
@@ -37,6 +49,10 @@ class HPMPattern(ABC):
     def mark_used(self):
         self.last_used = time.time()
         self.use_count += 1
+
+    def to(self, device: torch.device):
+        """Move pattern parameters to device (override in subclasses)."""
+        self._device = device
 
     @property
     def pattern_density(self) -> float:

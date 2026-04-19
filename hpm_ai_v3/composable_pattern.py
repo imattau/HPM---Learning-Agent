@@ -4,7 +4,7 @@ import pyro
 import pyro.distributions as dist
 import pyro.poutine as poutine
 from typing import Dict, Any, Optional
-from .neural_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 
 class ComposableRegressionPattern(RegressionPattern):
     def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 8, pattern_id: Optional[str] = None):
@@ -12,6 +12,17 @@ class ComposableRegressionPattern(RegressionPattern):
         self.decoder_part1 = nn.Sequential(nn.Linear(z1_dim, z1_dim), nn.ReLU(), nn.Linear(z1_dim, z1_dim))
         self.decoder_part2 = nn.Linear(z1_dim, output_dim * 2)
         del self.fc_z1_to_y
+        self.to(self._device)
+
+    def to(self, device: torch.device):
+        self._device = device
+        self.fc_x_to_z1.to(device)
+        self.z2_loc.data = self.z2_loc.data.to(device)
+        self.z2_scale.data = self.z2_scale.data.to(device)
+        self.fc_z2_to_z1.to(device)
+        self.decoder_part1.to(device)
+        self.decoder_part2.to(device)
+        self.fc_z1_to_z2.to(device)
 
     def parameters(self):
         return (list(self.fc_x_to_z1.parameters()) + list(self.fc_z2_to_z1.parameters()) +
@@ -23,6 +34,7 @@ class ComposableRegressionPattern(RegressionPattern):
 
     def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, torch.Tensor]:
         x = context["input"].unsqueeze(0) if context["input"].dim() == 1 else context["input"]
+        x = x.to(self._device)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x})
             z1 = guide_trace.nodes["z1"]["value"]
@@ -31,6 +43,8 @@ class ComposableRegressionPattern(RegressionPattern):
         return {"y": y.squeeze(0)}
 
     def model(self, observations: Optional[Dict[str, torch.Tensor]] = None):
+        if observations:
+            observations = {k: v.to(self._device) for k, v in observations.items()}
         batch_size = observations["input"].shape[0] if observations else 1
         with pyro.plate("batch", batch_size):
             z2 = pyro.sample("z2", dist.Normal(self.z2_loc, torch.exp(self.z2_scale)).to_event(1))

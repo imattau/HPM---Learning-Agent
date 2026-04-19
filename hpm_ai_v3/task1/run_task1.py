@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath("hpm_ai_v3"))
 import torch
 import numpy as np
 from task1_data import generate_task1_data, create_torch_dataset
-from regression_pattern import RegressionPattern
+from neural_pattern import RegressionPattern
 from population import PatternPopulation
 from evaluators import EvaluatorManager
 from compiler import SubstrateCompiler

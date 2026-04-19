@@ -7,7 +7,7 @@ from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 import networkx as nx
 from typing import Dict, Any, Optional, List
-from .pattern import HPMPattern
+from pattern import HPMPattern
 
 class RegressionPattern(HPMPattern):
     def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 8, pattern_id: Optional[str] = None):
@@ -33,13 +33,26 @@ class RegressionPattern(HPMPattern):
         self.causal_graph.add_edge("x", "z1")
         self.causal_graph.add_edge("z2", "z1")
         self.causal_graph.add_edge("z1", "y")
+
+        self.to(self._device)
         
+    def to(self, device: torch.device):
+        self._device = device
+        self.fc_x_to_z1.to(device)
+        self.z2_loc.data = self.z2_loc.data.to(device)
+        self.z2_scale.data = self.z2_scale.data.to(device)
+        self.fc_z2_to_z1.to(device)
+        self.fc_z1_to_y.to(device)
+        self.fc_z1_to_z2.to(device)
+
     def parameters(self):
         return (list(self.fc_x_to_z1.parameters()) + list(self.fc_z2_to_z1.parameters()) +
                 list(self.fc_z1_to_y.parameters()) + list(self.fc_z1_to_z2.parameters()) +
                 [self.z2_loc, self.z2_scale])
     
     def model(self, observations: Optional[Dict[str, torch.Tensor]] = None):
+        if observations:
+            observations = {k: v.to(self._device) for k, v in observations.items()}
         batch_size = observations["input"].shape[0] if observations else 1
         with pyro.plate("batch", batch_size):
             z2 = pyro.sample("z2", dist.Normal(self.z2_loc, torch.exp(self.z2_scale)).to_event(1))
@@ -52,6 +65,7 @@ class RegressionPattern(HPMPattern):
         return y
     
     def guide(self, observations: Dict[str, torch.Tensor]):
+        observations = {k: v.to(self._device) for k, v in observations.items()}
         x = observations["input"]
         with pyro.plate("batch", x.shape[0]):
             z1_p = self.fc_x_to_z1(x).chunk(2, dim=-1)
@@ -61,11 +75,13 @@ class RegressionPattern(HPMPattern):
         return z1, z2
     
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+        observations = {k: v.to(self._device) for k, v in observations.items()}
         conditioned = poutine.condition(self.model, data=observations)
         return poutine.trace(conditioned).get_trace().log_prob_sum()
     
     def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, torch.Tensor]:
         x = context["input"].unsqueeze(0) if context["input"].dim() == 1 else context["input"]
+        x = x.to(self._device)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x})
             z1 = guide_trace.nodes["z1"]["value"]
@@ -74,6 +90,7 @@ class RegressionPattern(HPMPattern):
         return {"y": y.squeeze(0)}
     
     def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 0.01):
+        observations = {k: v.to(self._device) for k, v in observations.items()}
         if self.svi is None: self.svi = SVI(self.model, self.guide, self.optimizer, loss=Trace_ELBO())
         loss = self.svi.step(observations)
         self.loss_ema = loss if self.loss_ema is None else 0.9 * self.loss_ema + 0.1 * loss
@@ -100,21 +117,23 @@ class RegressionPattern(HPMPattern):
     
     def compression_score(self, observations: Any) -> float:
         x = observations["input"] if isinstance(observations, dict) else observations
+        x = x.to(self._device)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x})
             z2 = guide_trace.nodes["z2"]["value"]
         return min(1.0, z2.var(dim=0).mean().item() / 3.0)
+
     def surface_dependence(self, x_batch: torch.Tensor) -> float:
         if x_batch.dim() == 1: x_batch = x_batch.unsqueeze(0)
+        x_batch = x_batch.to(self._device)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x_batch})
             z2 = guide_trace.nodes["z2"]["value"]
         surface = x_batch[:, 2:6]
-        # ... remainder ...
         z2_centered = z2 - z2.mean(dim=0)
         surface_centered = surface - surface.mean(dim=0)
         try:
-            ridge = 1e-5 * torch.eye(surface.shape[1])
+            ridge = 1e-5 * torch.eye(surface.shape[1], device=self._device)
             gram = surface_centered.T @ surface_centered + ridge
             coeffs = torch.linalg.solve(gram, surface_centered.T @ z2_centered)
             pred = surface_centered @ coeffs

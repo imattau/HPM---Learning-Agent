@@ -35,8 +35,9 @@ class EvaluatorManager:
         ) / 4.0
         
     def update_epistemic(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
+        obs = {k: v.to(pattern._device) for k, v in observations.items()}
         with torch.no_grad():
-            logp = pattern.log_prob(observations)
+            logp = pattern.log_prob(obs)
             instant_loss = -logp.item()
         if pattern.loss_ema is None:
             pattern.loss_ema = instant_loss
@@ -79,9 +80,10 @@ class EvaluatorManager:
     def update_invariance(self, pattern: HPMPattern, observations: Dict[str, torch.Tensor]):
         x = observations.get("input")
         if x is None: return
+        x = x.to(pattern._device)
         if x.dim() == 1: x = x.unsqueeze(0)
         x_pert = x.clone()
-        perm = torch.randperm(x.shape[0])
+        perm = torch.randperm(x.shape[0], device=pattern._device)
         x_pert[:, 2:6] = x[perm][:, 2:6]
         
         with torch.no_grad():
