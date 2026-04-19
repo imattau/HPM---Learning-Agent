@@ -1,0 +1,75 @@
+from abc import ABC, abstractmethod
+import torch
+import numpy as np
+from typing import Dict, Any, Optional, List
+import uuid
+import time
+import networkx as nx
+
+class HPMPattern(ABC):
+    """Abstract base for all HPM patterns."""
+    def __init__(self, pattern_id: Optional[str] = None):
+        self.id = pattern_id or str(uuid.uuid4())[:8]
+        self.weight = 0.01
+        self.substrate_type: str = "neural"
+        self.required_observation_keys: List[str] = []
+        
+        self.loss_ema: Optional[float] = None
+        self.accuracy: float = -10.0  # Penalty until first update
+        self.affective_score: float = 0.0
+        self.social_score: float = 0.0
+        self.curiosity_reward: float = 0.0
+        self.coherence_score: float = 0.0
+        self.insight_boost: float = 0.0
+        
+        self.structural_connectivity: float = 0.0
+        self.evaluator_reinforcement: float = 0.0
+        self.field_amplification: float = 0.0
+        self.density_weight: float = 0.2
+        self.stickiness: float = 0.0
+
+        self.birth_time: float = time.time()
+        self.last_used: float = self.birth_time
+        self.use_count: int = 0
+        self.compilation_count: int = 0
+        
+    def mark_used(self):
+        self.last_used = time.time()
+        self.use_count += 1
+
+    @property
+    def pattern_density(self) -> float:
+        return (0.4 * self.structural_connectivity + 
+                0.3 * self.evaluator_reinforcement + 
+                0.3 * self.field_amplification)
+    
+    def compute_stickiness(self, base_loss: float) -> float:
+        eta, delta = 2.0, 0.5
+        x = eta * self.pattern_density - delta * base_loss
+        self.stickiness = 1.0 / (1.0 + np.exp(-x))
+        return self.stickiness
+
+    @abstractmethod
+    def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor: pass
+    @abstractmethod
+    def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, torch.Tensor]: pass
+    @abstractmethod
+    def intervene(self, intervention: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, torch.Tensor]: pass
+    @abstractmethod
+    def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 0.01): pass
+    @abstractmethod
+    def structural_distance(self, other: 'HPMPattern') -> float: pass
+    @abstractmethod
+    def extract_causal_graph(self) -> nx.DiGraph: pass
+
+    def batch_update(self, observations_batch: List[Dict[str, torch.Tensor]], learning_rate: float = 0.01):
+        for obs in observations_batch:
+            self.update_parameters(obs, learning_rate)
+
+    def total_score(self, beta_aff=0.3, gamma_soc=0.1, delta_cur=0.2, eta_coh=0.2, zeta_ins=0.5) -> float:
+        return (self.accuracy + beta_aff * self.affective_score + 
+                gamma_soc * self.social_score + delta_cur * self.curiosity_reward +
+                eta_coh * self.coherence_score + zeta_ins * self.insight_boost)
+
+    def filter_observations(self, observations: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {k: v for k, v in observations.items() if k in self.required_observation_keys}
