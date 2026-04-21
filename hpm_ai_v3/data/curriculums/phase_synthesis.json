@@ -1,0 +1,17 @@
+{
+  "phase": 0.5,
+  "name": "Quantitative Synthesis",
+  "description": "Capstone phase — no demos. Agent must compose tools from all prior phases: arithmetic, regex, and string processing.",
+  "tasks": [
+    {"text": "Extract the number from 'Score: 144' and compute its square root", "type": "pretraining", "answer": 12.0},
+    {"text": "Sum of numbers in: 3 apples and 5 oranges", "type": "pretraining", "answer": 8.0},
+    {"text": "Word count of: the quick brown fox jumps", "type": "pretraining", "answer": 5.0},
+    {"text": "Extract first number from 'factorial input: 5' and compute factorial", "type": "pretraining", "answer": 120.0},
+    {"text": "Count words in 'I love HPM learning agents' and square it", "type": "pretraining", "answer": 25.0},
+    {"text": "Largest number in: 3, 17, 8, 42, 11", "type": "pretraining", "answer": 42.0},
+    {"text": "Sum of: sqrt(16), sqrt(25), sqrt(36)", "type": "pretraining", "answer": 12.0},
+    {"text": "Floor of: sqrt(200) + factorial(3)", "type": "pretraining", "answer": 20.0},
+    {"text": "How many numbers in: 3 cats, 7 dogs, 2 fish, 1 bird", "type": "pretraining", "answer": 4.0},
+    {"text": "Product of first two numbers in: 6 and 7 are the inputs", "type": "pretraining", "answer": 42.0}
+  ]
+}
