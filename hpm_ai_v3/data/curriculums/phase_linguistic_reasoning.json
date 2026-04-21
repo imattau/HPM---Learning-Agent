@@ -1,0 +1,17 @@
+{
+  "phase": 0,
+  "name": "Linguistic Analysis",
+  "description": "Sentiment analysis and entity detection using TextBlob and spacy. Requires pattern extraction as substrate.",
+  "tasks": [
+    {"text": "I love this agent!", "type": "practice", "demo": {"module": "textblob", "function": "TextBlob", "args": ["I love this agent!"]}},
+    {"text": "Polarity of: I hate bugs", "type": "pretraining", "answer": 0.0},
+    {"text": "The cat and the dog", "type": "practice", "demo": {"module": "textblob", "function": "TextBlob", "args": ["The cat and the dog"]}},
+    {"text": "Word count of: the quick brown fox", "type": "pretraining", "answer": 4.0},
+    {"text": "Is 'Great work' positive?", "type": "practice", "demo": {"module": "textblob", "function": "TextBlob", "args": ["Great work"]}},
+    {"text": "How many words in: HPM learns fast", "type": "pretraining", "answer": 3.0},
+    {"text": "Sentence length of: I love HPM", "type": "pretraining", "answer": 3.0},
+    {"text": "Word count of: the quick brown fox jumps over", "type": "pretraining", "answer": 6.0},
+    {"text": "How many words in: learning agents discover patterns", "type": "pretraining", "answer": 4.0},
+    {"text": "Is 'I love learning' longer than 'Bad'?", "type": "pretraining", "answer": 1.0}
+  ]
+}
