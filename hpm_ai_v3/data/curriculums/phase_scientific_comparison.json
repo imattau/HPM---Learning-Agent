@@ -1,0 +1,17 @@
+{
+  "phase": -0.25,
+  "name": "Pattern Extraction",
+  "description": "Extract numeric and string patterns from text using re and str methods. Bridges arithmetic and language.",
+  "tasks": [
+    {"text": "The price is 42 dollars", "type": "practice", "demo": {"module": "re", "function": "findall", "args": ["\\d+", "The price is 42 dollars"]}},
+    {"text": "Score: 85", "type": "pretraining", "answer": [85.0]},
+    {"text": "10, 20, 30", "type": "practice", "demo": {"module": "re", "function": "findall", "args": ["\\d+", "10, 20, 30"]}},
+    {"text": "Scores: 85, 92, 78", "type": "pretraining", "answer": [85.0, 92.0, 78.0]},
+    {"text": "hello world", "type": "practice", "demo": {"module": "builtins", "function": "str.split", "args": ["hello world"]}},
+    {"text": "Count words: the cat sat", "type": "pretraining", "answer": 3.0},
+    {"text": "HELLO WORLD", "type": "practice", "demo": {"module": "builtins", "function": "str.lower", "args": ["HELLO WORLD"]}},
+    {"text": "Lowercase: HELLO AGENT", "type": "pretraining", "answer": "hello agent"},
+    {"text": "First number in: agent 42 scored 99", "type": "pretraining", "answer": 42.0},
+    {"text": "Sum of numbers in: 3 cats and 7 dogs and 2 fish", "type": "pretraining", "answer": 12.0}
+  ]
+}
