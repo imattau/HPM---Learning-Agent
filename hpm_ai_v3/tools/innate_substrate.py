@@ -393,6 +393,148 @@ class InnateCognitiveSubstrate:
             return hi_f
         return v
 
+    # ── Group G: Goal / Task Decomposition ─────────────────────────────────
+
+    _DECOMPOSE_VERBS = {
+        "find", "compute", "calculate", "sort", "filter", "group", "count",
+        "sum", "detect", "compare", "get", "list", "check", "estimate",
+        "build", "flatten", "split", "match",
+    }
+    _DECOMPOSE_STOPS = {"a", "an", "the", "in", "of", "for", "with", "from", "to", "that", "which"}
+    _DECOMPOSE_MODS = {"by", "with", "from", "greater", "less", "above", "below", "than", "where", "between"}
+
+    def decompose_text(self, text: str) -> dict:
+        """Extract {verb, object, modifier} from natural language goal text."""
+        empty = {"verb": "", "object": "", "modifier": ""}
+        try:
+            if not text or not text.strip():
+                return empty
+            tokens = text.strip().split()
+            if not tokens:
+                return empty
+
+            # Find verb
+            verb = ""
+            verb_idx = -1
+            for i, tok in enumerate(tokens):
+                if tok.lower().rstrip(".,!?") in self._DECOMPOSE_VERBS:
+                    verb = tok.lower().rstrip(".,!?")
+                    verb_idx = i
+                    break
+            if not verb:
+                verb = tokens[0].lower().rstrip(".,!?")
+                verb_idx = 0
+
+            # Find object: first token after verb not in stopwords
+            obj = ""
+            obj_idx = -1
+            for i in range(verb_idx + 1, len(tokens)):
+                tok = tokens[i].lower().rstrip(".,!?")
+                if tok not in self._DECOMPOSE_STOPS:
+                    obj = tok
+                    obj_idx = i
+                    break
+
+            # Find modifier: token after object starting with a modifier word
+            modifier = ""
+            if obj_idx >= 0:
+                for i in range(obj_idx + 1, len(tokens)):
+                    tok = tokens[i].lower().rstrip(".,!?")
+                    if tok in self._DECOMPOSE_MODS:
+                        modifier = " ".join(tokens[i:]).lower().rstrip(".,!?")
+                        break
+
+            return {"verb": verb, "object": obj, "modifier": modifier}
+        except Exception:
+            return empty
+
+    def estimate_progress(self, current, target) -> float:
+        """Normalised progress current/target clamped to [0, 1]."""
+        try:
+            c = float(current)
+            t = float(target)
+        except (TypeError, ValueError):
+            return 0.0
+        try:
+            if t == 0:
+                return 1.0 if c == 0 else 0.0
+            return self.clamp(c / t, 0.0, 1.0)
+        except Exception:
+            return 0.0
+
+    def check_constraint(self, value, constraint_str: str) -> bool:
+        """Evaluate a constraint string against value. Unknown constraints return True."""
+        try:
+            cs = constraint_str.strip()
+
+            # type:typename
+            m = re.match(r"^type:(\w+)$", cs)
+            if m:
+                type_name = m.group(1)
+                type_map = {
+                    "int": int, "float": float, "str": str,
+                    "list": list, "dict": dict, "bool": bool,
+                }
+                t = type_map.get(type_name)
+                if t is None:
+                    return True
+                # int check: bool is subclass of int, exclude
+                if type_name == "int":
+                    return isinstance(value, int) and not isinstance(value, bool)
+                return isinstance(value, t)
+
+            # len comparisons: len > N etc.
+            m = re.match(r"^len\s*(>=|<=|==|!=|>|<)\s*(-?\d+(?:\.\d+)?)$", cs)
+            if m:
+                op, n_str = m.group(1), m.group(2)
+                try:
+                    length = len(value)
+                    n = float(n_str)
+                    return self._apply_op(float(length), op, n)
+                except (TypeError, ValueError):
+                    return False
+
+            # in [a, b, c]
+            m = re.match(r"^in\s*\[(.+)\]$", cs)
+            if m:
+                parts = [p.strip() for p in m.group(1).split(",")]
+                candidates = []
+                for p in parts:
+                    try:
+                        candidates.append(float(p))
+                    except ValueError:
+                        candidates.append(p.strip("'\""))
+                try:
+                    return float(value) in candidates or value in candidates
+                except (TypeError, ValueError):
+                    return value in candidates
+
+            # numeric comparisons: >= N, > N, etc.
+            m = re.match(r"^(>=|<=|==|!=|>|<)\s*(-?\d+(?:\.\d+)?)$", cs)
+            if m:
+                op, n_str = m.group(1), m.group(2)
+                try:
+                    v = float(value)
+                    n = float(n_str)
+                    return self._apply_op(v, op, n)
+                except (TypeError, ValueError):
+                    return False
+
+            # Unknown constraint: permissive
+            return True
+        except Exception:
+            return True
+
+    def _apply_op(self, a: float, op: str, b: float) -> bool:
+        """Apply a comparison operator string."""
+        if op == ">":  return a > b
+        if op == ">=": return a >= b
+        if op == "<":  return a < b
+        if op == "<=": return a <= b
+        if op == "==": return a == b
+        if op == "!=": return a != b
+        return True
+
     # ── Core: resolve_call ──────────────────────────────────────────────────
 
     def resolve_call(
