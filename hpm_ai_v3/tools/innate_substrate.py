@@ -318,6 +318,81 @@ class InnateCognitiveSubstrate:
         except Exception:
             return []
 
+    # ── Group F: Uncertainty / Confidence ──────────────────────────────────
+
+    def normalize(self, values: list) -> list:
+        """Convert list of non-negative numerics to probability distribution."""
+        try:
+            if not values:
+                return []
+            floats = []
+            for v in values:
+                try:
+                    floats.append(float(v))
+                except (TypeError, ValueError):
+                    return []
+            total = sum(floats)
+            if total == 0:
+                n = len(floats)
+                return [1.0 / n] * n
+            return [v / total for v in floats]
+        except Exception:
+            return []
+
+    def entropy(self, probs: list) -> float:
+        """Shannon entropy in bits. Zeros skipped (0*log2(0) = 0 by convention)."""
+        try:
+            if not probs:
+                return 0.0
+            result = 0.0
+            for p in probs:
+                try:
+                    p = float(p)
+                except (TypeError, ValueError):
+                    continue
+                if p > 0:
+                    result -= p * math.log2(p)
+            return result
+        except Exception:
+            return 0.0
+
+    def argmax(self, values: list) -> int:
+        """Index of maximum value. Returns -1 for empty list. Ties: lowest index."""
+        try:
+            if not values:
+                return -1
+            best_idx = 0
+            best_val = values[0]
+            for i in range(1, len(values)):
+                if values[i] > best_val:
+                    best_val = values[i]
+                    best_idx = i
+            return best_idx
+        except Exception:
+            return -1
+
+    def clamp(self, value, lo, hi) -> float:
+        """Constrain value to [lo, hi]. Swaps lo/hi if lo > hi."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            try:
+                return float(lo)
+            except Exception:
+                return 0.0
+        try:
+            lo_f = float(lo)
+            hi_f = float(hi)
+        except (TypeError, ValueError):
+            return v
+        if lo_f > hi_f:
+            lo_f, hi_f = hi_f, lo_f
+        if v < lo_f:
+            return lo_f
+        if v > hi_f:
+            return hi_f
+        return v
+
     # ── Core: resolve_call ──────────────────────────────────────────────────
 
     def resolve_call(
