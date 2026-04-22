@@ -86,6 +86,11 @@ class LanguageModelPattern(HPMPattern):
         self.last_loss: float = float("inf")
         self.accuracy: float = 0.0
         self._pretrained: bool = False
+        self.substrate_type = "neural_lm"
+
+    @property
+    def tool_name(self) -> str:
+        return "language_model"
 
     # ── sample() ──────────────────────────────────────────────────────────────
 
@@ -139,6 +144,22 @@ class LanguageModelPattern(HPMPattern):
         """Self-supervised next-char prediction on corpus_file."""
         with open(corpus_file, "r", encoding="utf-8") as f:
             text = f.read()
+        self.fine_tune(text, epochs, lr, seq_len, device)
+
+    def fine_tune(
+        self,
+        text: str,
+        epochs: int = 1,
+        lr: float = 1e-3,
+        seq_len: int = 64,
+        device: str = "cpu",
+    ) -> None:
+        """Lightweight online training on text chunks."""
+        if not text: return
+        
+        # Adaptive seq_len for small chunks
+        if len(text) < seq_len:
+            seq_len = max(2, len(text) // 2)
 
         model = self.model.to(device)
         opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -147,6 +168,7 @@ class LanguageModelPattern(HPMPattern):
         indices = [min(ord(c), model.vocab_size - 1) for c in text]
         n = len(indices) - 1
         if n < seq_len:
+            # Emergency: pad or just return
             return
 
         for epoch in range(epochs):
