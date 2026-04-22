@@ -196,6 +196,7 @@ def _make_mock_agent():
     agent.population.get_population_entropy.return_value = 1.0
     agent.population.get_diversity.return_value = 0.5
     agent.population.get_top_patterns.return_value = []
+    agent.run_episode.return_value = (0.5, 1)
     agent._meta_success_history = [0.5] * 10
     agent._steps_since_advance = 5
     return agent
@@ -206,3 +207,45 @@ def _make_mock_curriculum():
     cm.phase = 0
     cm.difficulty = 0.5
     return cm
+
+from unittest.mock import MagicMock, patch
+from hpm_ai_v3.agents.meta_training import MetaTrainingLoop
+from hpm_ai_v3.meta_cognitive_pattern import MetaCognitivePattern, MetaDirective
+
+
+class TestMetaTrainingLoop:
+    def test_run_meta_step_calls_observe_and_act(self):
+        agent = _make_mock_agent()
+        curriculum = _make_mock_curriculum()
+        meta = MetaCognitivePattern()
+        loop = MetaTrainingLoop(agent, curriculum, meta, N=3)
+
+        with patch.object(meta, "observe_and_act", return_value=MetaDirective.CONTINUE) as mock_act:
+            with patch.object(meta, "record_transition") as mock_record:
+                with patch.object(meta, "update_policy") as mock_update:
+                    loop.run_meta_step()
+        mock_act.assert_called_once()
+
+    def test_run_meta_step_calls_update_policy(self):
+        agent = _make_mock_agent()
+        curriculum = _make_mock_curriculum()
+        meta = MetaCognitivePattern()
+        loop = MetaTrainingLoop(agent, curriculum, meta, N=3)
+
+        with patch.object(meta, "observe_and_act", return_value=MetaDirective.CONTINUE):
+            with patch.object(meta, "record_transition"):
+                with patch.object(meta, "update_policy") as mock_update:
+                    loop.run_meta_step()
+        mock_update.assert_called_once()
+
+    def test_reset_use_counts_resets_recent_use_count(self):
+        from hpm_ai_v3.agents.base_discovery import ActionPattern
+        agent = _make_mock_agent()
+        ap = ActionPattern("arithmetic")
+        ap.recent_use_count = 5
+        agent.population.patterns = [ap]
+        curriculum = _make_mock_curriculum()
+        meta = MetaCognitivePattern()
+        loop = MetaTrainingLoop(agent, curriculum, meta, N=3)
+        loop._reset_use_counts()
+        assert ap.recent_use_count == 0
