@@ -197,6 +197,7 @@ def _make_mock_agent():
     agent.population.get_diversity.return_value = 0.5
     agent.population.get_top_patterns.return_value = []
     agent.run_episode.return_value = (0.5, 1)
+    agent.evaluate_solution.return_value = 0.5
     agent._meta_success_history = [0.5] * 10
     agent._steps_since_advance = 5
     return agent
