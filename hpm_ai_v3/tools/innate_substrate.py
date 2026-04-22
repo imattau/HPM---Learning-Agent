@@ -254,6 +254,70 @@ class InnateCognitiveSubstrate:
             pass
         return result
 
+    # ── Group E: Temporal / Sequential Reasoning ───────────────────────────
+
+    def detect_trend(self, series: list) -> str:
+        """Characterise direction: 'increasing'|'decreasing'|'stable'|'volatile'."""
+        try:
+            nums = []
+            for v in series:
+                try:
+                    nums.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+            if len(nums) < 2:
+                return "stable"
+            diffs = [nums[i + 1] - nums[i] for i in range(len(nums) - 1)]
+            if all(d == 0 for d in diffs):
+                return "stable"
+            if all(d > 0 for d in diffs):
+                return "increasing"
+            if all(d < 0 for d in diffs):
+                return "decreasing"
+            return "volatile"
+        except Exception:
+            return "stable"
+
+    def diff_sequence(self, series: list) -> list:
+        """First-order differences: series[i+1] - series[i]."""
+        try:
+            nums = []
+            for v in series:
+                try:
+                    nums.append(float(v))
+                except (TypeError, ValueError):
+                    return []
+            if len(nums) < 2:
+                return []
+            return [nums[i + 1] - nums[i] for i in range(len(nums) - 1)]
+        except Exception:
+            return []
+
+    def find_repeating(self, sequence: list):
+        """Return smallest repeating sub-list, or None."""
+        try:
+            n = len(sequence)
+            if n < 2:
+                return None
+            for period in range(1, n // 2 + 1):
+                unit = sequence[:period]
+                tiles = (n // period)
+                remainder = n % period
+                if unit * tiles + unit[:remainder] == sequence:
+                    return unit
+            return None
+        except Exception:
+            return None
+
+    def sliding_window(self, sequence: list, n: int) -> list:
+        """All contiguous windows of size n."""
+        try:
+            if n <= 0 or n > len(sequence):
+                return []
+            return [sequence[i:i + n] for i in range(len(sequence) - n + 1)]
+        except Exception:
+            return []
+
     # ── Core: resolve_call ──────────────────────────────────────────────────
 
     def resolve_call(
