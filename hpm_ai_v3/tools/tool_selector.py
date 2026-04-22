@@ -31,14 +31,25 @@ class ToolSelector:
     Biases population pattern selection using LM semantic similarity.
     Selector only boosts relevant patterns — never suppresses.
     """
-    def __init__(self, lm, alpha: float = 0.5):
+    def __init__(self, lm, alpha: float = 2.0, decay_rate: float = 0.998):
         """
         lm: LanguageModelPattern instance (provides _embed())
-        alpha: bias strength — 0.0 = no effect, 1.0 = strong bias
+        alpha: initial bias strength
+        decay_rate: per-episode decay for alpha
         """
         self.lm = lm
-        self.alpha = alpha
+        # Bind for cache clearing
+        lm._tool_selector = self
+        
+        self.base_alpha = alpha
+        self.current_alpha = alpha
+        self.decay_rate = decay_rate
+        self.episode_count = 0
         self._cache: Dict[str, List[float]] = {}
+
+    def clear_cache(self):
+        """Clear the embedding cache. Call this when LM parameters change."""
+        self._cache = {}
 
     def _embed(self, text: str) -> List[float]:
         if text not in self._cache:
@@ -70,8 +81,13 @@ class ToolSelector:
         """Return adjusted weights: weights * (1 + alpha * similarity)."""
         if not task_text or len(patterns) == 0:
             return weights
+        
+        # Decay alpha based on episode count
+        self.current_alpha = self.base_alpha * (self.decay_rate ** self.episode_count)
+        self.episode_count += 1
+        
         similarity = self.score(task_text, patterns)
-        return weights * (1.0 + self.alpha * similarity)
+        return weights * (1.0 + self.current_alpha * similarity)
 
     def _pattern_description(self, pattern: Any) -> str:
         tool_name = getattr(pattern, 'tool_name', None)

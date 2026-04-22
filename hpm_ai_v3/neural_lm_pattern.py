@@ -157,6 +157,10 @@ class LanguageModelPattern(HPMPattern):
         """Lightweight online training on text chunks."""
         if not text: return
         
+        # Clear external caches if bound to a ToolSelector
+        if hasattr(self, '_tool_selector') and self._tool_selector:
+            self._tool_selector.clear_cache()
+
         # Adaptive seq_len for small chunks
         if len(text) < seq_len:
             seq_len = max(2, len(text) // 2)
@@ -168,7 +172,6 @@ class LanguageModelPattern(HPMPattern):
         indices = [min(ord(c), model.vocab_size - 1) for c in text]
         n = len(indices) - 1
         if n < seq_len:
-            # Emergency: pad or just return
             return
 
         for epoch in range(epochs):
@@ -194,6 +197,30 @@ class LanguageModelPattern(HPMPattern):
 
         self._pretrained = True
         self.model = model
+
+    def validate_internal(self) -> float:
+        """
+        Measure internal quality on a fixed set of linguistic tasks.
+        Returns accuracy [0,1].
+        """
+        # Simple test set for number extraction and tokenization
+        test_tasks = [
+            ("The speed of light is 299792458 m/s", 299792458),
+            ("Gold atomic number 79", 79),
+            ("Jupiter mass 1.898e27 kg", 1.898e27),
+            ("Nitrogen boils at 77.36 K", 77.36),
+            ("Water freezes at 273.15 K", 273.15)
+        ]
+        
+        matches = 0
+        for text, expected in test_tasks:
+            result = self._extract_numbers(text)
+            if any(abs(float(r) - float(expected)) < 1e-6 for r in result):
+                matches += 1
+        
+        score = matches / len(test_tasks)
+        self.accuracy = score # Update pattern accuracy for HPM evaluators
+        return score
 
     # ── HPMPattern interface ──────────────────────────────────────────────────
 

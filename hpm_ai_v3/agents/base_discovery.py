@@ -53,6 +53,11 @@ class ActionPattern(HPMPattern):
     def output_key(self) -> str:
         return "result"
 
+    @property
+    def input_keys(self) -> List[str]:
+        """Agnostic patterns don't specify keys, they use the pool."""
+        return ["pool", "text"]
+
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         reward = observations.get("reward", torch.tensor(0.0, device=self._device))
         return reward.to(self._device)
