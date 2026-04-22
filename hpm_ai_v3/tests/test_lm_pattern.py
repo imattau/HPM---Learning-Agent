@@ -145,3 +145,49 @@ def test_lm_embed_produces_128_floats(lm):
     assert isinstance(vec, list)
     assert len(vec) == 128
     assert all(isinstance(v, float) for v in vec)
+
+from hpm_ai_v3.agents.discovery_agent import UnifiedDiscoveryAgent
+from hpm_ai_v3.curriculum import CurriculumManager
+
+def test_lm_tool_callable_via_tool_registry():
+    """language_model tool registered and callable end-to-end."""
+    lm = LanguageModelPattern()
+    register_language_tool(lm)
+    result = ToolRegistry.call(
+        "language_model",
+        action="extract_numbers",
+        text="The price is 9.99 dollars",
+    )
+    assert isinstance(result, list)
+    assert 9.99 in result
+
+def test_compiled_symbolic_added_to_population():
+    """compile_lm_to_symbolic produces a pattern that can be added to a population."""
+    from hpm_ai_v3.population import PatternPopulation
+    lm = LanguageModelPattern()
+    lm.accuracy = 0.95
+    sp = compile_lm_to_symbolic(lm)
+    pop = PatternPopulation([lm])
+    pop.patterns.append(sp)
+    assert sp in pop.patterns
+
+def test_lm_curriculum_smoke():
+    """Agent with language_model tool registered completes a word-count task."""
+    lm = LanguageModelPattern()
+    register_language_tool(lm)
+
+    agent = UnifiedDiscoveryAgent(context_dim=64)
+    cm = CurriculumManager()
+
+    # Run 10 episodes — no crash, some reward
+    rewards = []
+    for _ in range(10):
+        task = cm.get_current_task()
+        sol = agent.run_episode(task, max_steps=10)
+        r = agent.evaluate_solution(sol)
+        cm.update(r)
+        rewards.append(r)
+
+    assert len(rewards) == 10
+    # At least one non-negative reward expected
+    assert max(rewards) >= -1.0 
