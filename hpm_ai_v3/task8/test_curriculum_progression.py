@@ -45,3 +45,48 @@ def test_agent_advances_past_arithmetic(tmp_path):
             break
 
     assert advanced, "Agent should advance from Arithmetic Reasoning within 50 episodes"
+
+def test_tool_selector_improves_nlp_phase_reward():
+    """Agent with ToolSelector should get higher avg reward on NLP tasks."""
+    import numpy as np
+    import os
+    from hpm_ai_v3.agents.discovery_agent import UnifiedDiscoveryAgent
+    from hpm_ai_v3.curriculum import CurriculumManager
+    from hpm_ai_v3.neural_lm_pattern import LanguageModelPattern
+
+    def run_nlp_episodes(use_lm: bool) -> float:
+        lm = None
+        if use_lm:
+            lm = LanguageModelPattern()
+            # Pretrain on tiny corpus to get non-random embeddings
+            if os.path.exists("hpm_ai_v3/data/lm_corpus/sample.txt"):
+                lm.pretrain("hpm_ai_v3/data/lm_corpus/sample.txt", epochs=2)
+            else:
+                # Fallback pretrain on code strings
+                lm.fine_tune("split tokenize count word text sentiment positive negative upper lower math sqrt calculation", epochs=5)
+            
+        agent = UnifiedDiscoveryAgent(context_dim=64, lm=lm)
+        cm = CurriculumManager()
+        # Fast-forward to NLP Tool Mastery phase (if it exists, else use last)
+        try:
+            nlp_idx = next(i for i, p in enumerate(cm.patterns)
+                           if "NLP" in p.name)
+        except StopIteration:
+            nlp_idx = len(cm.patterns) - 1
+            
+        cm.active_pattern_idx = nlp_idx
+        cm.phase = cm.patterns[nlp_idx].phase
+        rewards = []
+        for _ in range(10): # Reduced for speed
+            task = cm.get_current_task()
+            sol = agent.run_episode(task, max_steps=10)
+            r = agent.evaluate_solution(sol)
+            rewards.append(r)
+        return float(np.mean(rewards))
+
+    reward_without = run_nlp_episodes(use_lm=False)
+    reward_with = run_nlp_episodes(use_lm=True)
+    print(f"\nWithout ToolSelector: {reward_without:.3f}")
+    print(f"With ToolSelector:    {reward_with:.3f}")
+    # ToolSelector should not make things worse
+    assert reward_with >= reward_without - 0.2

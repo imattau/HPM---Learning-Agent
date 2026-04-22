@@ -27,7 +27,7 @@ class UnifiedDiscoveryAgent(PureAgnosticDiscoveryAgent):
     Learns to use different tools for different curriculum phases.
     Uses OnlineLearningBuffer to fetch domain knowledge on failure.
     """
-    def __init__(self, context_dim: int = 64):
+    def __init__(self, context_dim: int = 64, lm: Optional[LanguageModelPattern] = None):
         from hpm_ai_v3.tools.python_substrate import register_python_substrate
         from hpm_ai_v3.tools.innate import register_innate_tools
         register_python_substrate()
@@ -43,6 +43,10 @@ class UnifiedDiscoveryAgent(PureAgnosticDiscoveryAgent):
         # Online Learning Infrastructure
         self.online_buffer = OnlineLearningBuffer()
         self.current_phase_id = "initial"
+
+        if lm is not None:
+            from hpm_ai_v3.tools.tool_selector import ToolSelector
+            self.tool_selector = ToolSelector(lm, alpha=0.5)
 
     def initialize_task(self, task: Dict) -> Dict:
         """Set up agent state for a new task."""

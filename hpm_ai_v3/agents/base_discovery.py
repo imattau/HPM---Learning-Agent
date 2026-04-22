@@ -44,6 +44,12 @@ class ActionPattern(HPMPattern):
         return f"{self.module}.{self.function}" if self.module and self.function else self.action_type
 
     @property
+    def tool_description(self) -> str:
+        if self.module and self.function:
+            return f"{self.module}.{self.function}: call {self.function} from {self.module}"
+        return self.action_type
+
+    @property
     def output_key(self) -> str:
         return "result"
 
@@ -126,6 +132,7 @@ class PureAgnosticDiscoveryAgent(ABC):
             max_pipeline_length=3
         )
         self.substrate = InnateCognitiveSubstrate()
+        self.tool_selector = None  # Set externally with ToolSelector instance
 
         self.context = {}
         self.discovered_modules = set()
@@ -153,6 +160,12 @@ class PureAgnosticDiscoveryAgent(ABC):
 
         # 1. SELECTION (Evaluator-Gated Replicator)
         weights = np.array([p.weight for p in self.population.patterns])
+        if self.tool_selector is not None and self.current_task:
+            weights = self.tool_selector.apply(
+                self.current_task.get("text", ""),
+                weights,
+                self.population.patterns
+            )
         total = weights.sum()
         probs = weights / total if total > 1e-6 else np.ones(len(weights)) / len(weights)
         chosen = np.random.choice(len(self.population.patterns), p=probs)
