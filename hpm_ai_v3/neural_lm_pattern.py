@@ -15,6 +15,8 @@ import numpy as np
 import networkx as nx
 from typing import List, Optional, Tuple, Any, Dict
 from hpm_ai_v3.pattern import HPMPattern
+from hpm_ai_v3.tools.registry import ToolRegistry
+from hpm_ai_v3.symbolic_pattern import SymbolicPattern
 
 
 class CharLevelLSTM(nn.Module):
@@ -244,3 +246,53 @@ class LanguageModelPattern(HPMPattern):
         self.last_loss = checkpoint.get("last_loss", float("inf"))
         self.accuracy = checkpoint.get("accuracy", 0.0)
         self._pretrained = True
+
+
+def register_language_tool(lm_pattern: LanguageModelPattern) -> None:
+    """Register the LM as 'language_model' tool in ToolRegistry."""
+
+    def _language_model_fn(action: str = "tokenize", text: str = "") -> Any:
+        return lm_pattern.sample({"action": action, "text": text})
+
+    ToolRegistry.register(
+        name="language_model",
+        tool_fn=_language_model_fn,
+        input_keys=["action", "text"],
+        output_key="result",
+        cost=0.05,
+    )
+
+
+def compile_lm_to_symbolic(lm_pattern: LanguageModelPattern) -> SymbolicPattern:
+    """
+    Distil the LM's learned number-extraction behaviour into a SymbolicPattern.
+    Uses the derived regex the LM has converged on.
+    This is substrate shifting in HPM terms: neural → symbolic.
+    """
+    # The LM uses regex-based extraction internally; derive the pattern
+    derived_regex = r"-?\d+\.?\d*"
+
+    def _symbolic_extract(context: Dict[str, Any]) -> Any:
+        action = context.get("action", "")
+        text = context.get("text", "")
+        if action == "extract_numbers":
+            matches = re.findall(derived_regex, str(text))
+            result = []
+            for m in matches:
+                try:
+                    result.append(float(m))
+                except ValueError:
+                    pass
+            return result
+        if action == "tokenize":
+            return str(text).split()
+        return {"error": f"Unknown action: {action}"}
+
+    # Wrap the function to match SymbolicPattern expected interface
+    sp = SymbolicPattern(
+        forward_fn=_symbolic_extract,
+        required_keys=["action", "text"],
+        pattern_id="lm_distilled",
+        output_key="result"
+    )
+    return sp

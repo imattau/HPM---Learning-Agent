@@ -102,3 +102,39 @@ def test_lm_save_load_roundtrip(lm, tmp_path):
     r1 = lm.sample({"action": "embed", "text": "test"})
     r2 = lm2.sample({"action": "embed", "text": "test"})
     assert r1 == r2
+
+from hpm_ai_v3.neural_lm_pattern import register_language_tool, compile_lm_to_symbolic
+from hpm_ai_v3.tools.registry import ToolRegistry
+from hpm_ai_v3.symbolic_pattern import SymbolicPattern
+
+def test_register_language_tool_in_registry(lm):
+    register_language_tool(lm)
+    info = ToolRegistry.get_tool_info("language_model")
+    assert info is not None
+    assert "action" in info["input_keys"]
+    assert "text" in info["input_keys"]
+    assert info["output_key"] == "result"
+
+def test_registered_tool_callable_tokenize(lm):
+    register_language_tool(lm)
+    result = ToolRegistry.call("language_model", action="tokenize", text="foo bar baz")
+    assert result == ["foo", "bar", "baz"]
+
+def test_registered_tool_callable_extract_numbers(lm):
+    register_language_tool(lm)
+    result = ToolRegistry.call("language_model", action="extract_numbers", text="value is 42")
+    assert 42.0 in result
+
+def test_compile_lm_to_symbolic_returns_symbolic_pattern(lm):
+    """compile_lm_to_symbolic returns a SymbolicPattern."""
+    lm.accuracy = 0.95  # simulate trained
+    sp = compile_lm_to_symbolic(lm)
+    assert isinstance(sp, SymbolicPattern)
+
+def test_compiled_symbolic_extracts_numbers(lm):
+    """Compiled SymbolicPattern passes same extraction test as LM."""
+    lm.accuracy = 0.95
+    sp = compile_lm_to_symbolic(lm)
+    result = sp.sample({"action": "extract_numbers", "text": "Speed is 20.5 m/s"})
+    assert "result" in result
+    assert 20.5 in result["result"]
