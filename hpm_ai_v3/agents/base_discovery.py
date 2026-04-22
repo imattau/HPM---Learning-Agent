@@ -38,6 +38,8 @@ class ActionPattern(HPMPattern):
         self.required_observation_keys = ["reward", "outcome"]
         self.cost = 0.01
         self.accuracy = 0.0
+        self.exploration_temperature: float = 1.0
+        self.recent_use_count: int = 0
 
     @property
     def tool_name(self) -> str:
@@ -93,6 +95,10 @@ class ActionPattern(HPMPattern):
 
     def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 0.01):
         pass
+
+    def mark_used(self):
+        super().mark_used()
+        self.recent_use_count += 1
 
     def structural_distance(self, other: 'HPMPattern') -> float:
         if not isinstance(other, ActionPattern):
@@ -211,7 +217,7 @@ class PureAgnosticDiscoveryAgent(ABC):
         # RECORD IN EPISODIC MEMORY
         if result.get("status") == "success":
             ToolRegistry.call("episodic_append", event={
-                "tool": action_pattern.tool_name,
+                "tool": getattr(action_pattern, 'tool_name', getattr(action_pattern, 'agent_name', action_pattern.id)),
                 "args": resolved_args,
                 "result": result.get("result")
             })
@@ -264,7 +270,10 @@ class PureAgnosticDiscoveryAgent(ABC):
         if hasattr(self, 'on_step_complete'):
             self.on_step_complete(reward, action_pattern, result)
 
-        return {"status": status, "result": val, "reward": reward, "action": action_pattern.tool_name}
+        # Defensive property access for ActionPattern/ToolPattern/Composite compatibility
+        action_name = getattr(action_pattern, 'tool_name', 
+                             getattr(action_pattern, 'agent_name', action_pattern.id))
+        return {"status": status, "result": val, "reward": reward, "action": action_name}
 
     def _get_pool(self) -> List[Any]:
         """Collect candidate values from episodic memory and task context."""
