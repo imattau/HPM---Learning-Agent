@@ -138,3 +138,10 @@ def test_compiled_symbolic_extracts_numbers(lm):
     result = sp.sample({"action": "extract_numbers", "text": "Speed is 20.5 m/s"})
     assert "result" in result
     assert 20.5 in result["result"]
+
+def test_lm_embed_produces_128_floats(lm):
+    """LM embed output is suitable for vector memory (128 floats)."""
+    vec = lm.sample({"action": "embed", "text": "The speed is 20 km/h"})
+    assert isinstance(vec, list)
+    assert len(vec) == 128
+    assert all(isinstance(v, float) for v in vec)
