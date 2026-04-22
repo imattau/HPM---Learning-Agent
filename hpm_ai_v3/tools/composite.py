@@ -31,6 +31,10 @@ class CompositeToolPattern(HPMPattern):
         self.substrate_type = "composite_tool"
         self.cost_aggregation = cost_aggregation
         
+        # Add required interface fields for act() compatibility
+        self.module = "composite"
+        self.function = self.id
+        
         # Compute combined cost
         if cost_aggregation == 'sum':
             self.cost = sum(p.cost for p in patterns)
@@ -95,12 +99,26 @@ class CompositeToolPattern(HPMPattern):
             return -mse
         return torch.tensor(0.0, device=self._device)
     
-    def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, torch.Tensor]:
+    @property
+    def tool_name(self) -> str:
+        """Required property for population interface."""
+        return f"composite:{self.id}"
+
+    def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, Any]:
+        """Execute the pipeline sequentially, passing outputs as inputs."""
         current_context = context.copy()
         for pat in self.patterns:
             out = pat.sample(current_context, num_samples=num_samples)
+            
+            # If a tool in the pipeline fails, propagate the error
+            if isinstance(out, dict) and out.get("status") == "failed":
+                return out
+            
             current_context.update(out)
         
+        if self.output_key not in current_context:
+            return {"error": f"Output key {self.output_key} not found in pipeline results", "status": "failed"}
+
         final_output = current_context[self.output_key]
         return {self.output_key: final_output}
     
