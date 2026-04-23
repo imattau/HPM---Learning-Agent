@@ -264,6 +264,14 @@ class MetaCognitivePattern(HPMPattern):
                 p.weight = agent.population.pruning_threshold
 
     def _do_advance_phase(self, agent: Any, curriculum: Any):
+        history = getattr(agent, "_meta_success_history", [])
+        current_accuracy = float(np.mean(history)) if history else 0.0
+        if current_accuracy < 0.3:
+            print(
+                f"  [MetaCognitive] ADVANCE_PHASE blocked: "
+                f"accuracy={current_accuracy:.2f} < 0.30 minimum competency"
+            )
+            return
         if hasattr(curriculum, "advance_phase"):
             curriculum.advance_phase()
             agent._steps_since_advance = 0

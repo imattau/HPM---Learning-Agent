@@ -130,17 +130,18 @@ class UnifiedDiscoveryAgent(PureAgnosticDiscoveryAgent):
     def evaluate_solution(self, solution: Any) -> float:
         """
         Generic evaluation based on task type.
+        Returns 1.0 for correct, -0.5 for wrong/null. Never returns -1.0.
         """
-        if solution is None: return -1.0
+        if solution is None: return -0.5
         task = self.current_task
-        if not task: return -1.0
+        if not task: return -0.5
 
         try:
             # 0. TOOL FAMILIARIZATION (Child-like practice)
             if task.get("type") == "practice":
                 # For execution practice (demo), any successful return is a win
                 if "demo" in task:
-                    return 1.0 if solution is not None else 0.0
+                    return 1.0 if solution is not None else -0.5
 
                 # For listing tasks, check if the expected items are present
                 if isinstance(task.get("answer"), list) and isinstance(solution, list):
@@ -158,42 +159,66 @@ class UnifiedDiscoveryAgent(PureAgnosticDiscoveryAgent):
                         if any(str(a).lower() == str(sn).lower() for sn in sol_names):
                             matches += 1
 
-                    if not task["answer"]: return 0.0
+                    if not task["answer"]: return -0.5
                     score = matches / len(task["answer"])
                     return 1.0 if score >= 0.8 else score
-                return 0.0
+                return -0.5
 
             if task["type"] in ["arithmetic", "function_eval", "pretraining"]:
+                answer = task.get("answer")
+                if answer is None:
+                    return -0.5
+
+                # 0. Handle boolean targets
+                if isinstance(answer, bool):
+                    # Coerce solution to bool if it's truthy/falsy but not exactly bool
+                    sol_bool = bool(solution) if solution is not None else None
+                    return 1.0 if sol_bool == answer else -0.5
+
                 # 1. Handle Dict-based targets (like Dissection)
-                if isinstance(task["answer"], dict):
-                    if not isinstance(solution, dict): return 0.0
+                if isinstance(answer, dict):
+                    if not isinstance(solution, dict): return -0.5
                     match_count = 0
-                    for k, v in task["answer"].items():
-                        if k in solution and solution[k] == v:
+                    for k, v in answer.items():
+                        # Use string keys for comparison as JSON keys are always strings
+                        # but substrate might return numeric keys
+                        val = solution.get(k) or solution.get(str(k)) or solution.get(int(k) if str(k).isdigit() else None)
+                        if val == v or str(val) == str(v):
                             match_count += 1
-                    return float(match_count) / len(task["answer"])
+                    return float(match_count) / len(answer)
 
-                # 2. Handle list-based targets
-                if isinstance(task["answer"], list):
-                    if not isinstance(solution, list): return 0.0
-                    if len(solution) == len(task["answer"]):
-                        try:
-                            if all(abs(float(a) - float(s)) < 1e-6 for a, s in zip(task["answer"], solution)):
-                                return 1.0
-                        except: pass
-                    return 0.0
+                # 2. Handle list-based targets (element-wise comparison)
+                if isinstance(answer, list):
+                    if not isinstance(solution, list):
+                        return -0.5
+                    if len(solution) != len(answer):
+                        return -0.5
+                    try:
+                        tol = 1e-4
+                        all_close = all(
+                            abs(float(s) - float(a)) < tol
+                            for s, a in zip(solution, answer)
+                        )
+                        return 1.0 if all_close else -0.5
+                    except (TypeError, ValueError):
+                        return -0.5
 
-                # 3. Numeric match
-                ans = float(task["answer"])
-                sol = float(solution)
-                error = abs(ans - sol)
-                if error < 1e-6:
-                    return 1.0
-                else:
-                    return 0.0
+                # 3. Handle string targets
+                if isinstance(answer, str):
+                    return 1.0 if str(solution).lower() == answer.lower() else -0.5
+
+                # 4. Numeric match (safe float conversion)
+                try:
+                    sol_f = float(solution)
+                    ans_f = float(answer)
+                    tol = max(1e-4, abs(ans_f) * 1e-4)
+                    return 1.0 if abs(sol_f - ans_f) < tol else -0.5
+                except (TypeError, ValueError):
+                    # solution is non-numeric string or object
+                    return -0.5
                 
             elif task["type"] == "formula_discovery":
-                if not self.points: return -1.0
+                if not self.points: return -0.5
                 errors = []
                 for px, py in self.points:
                     pred = np.polyval(solution, px)
@@ -202,9 +227,10 @@ class UnifiedDiscoveryAgent(PureAgnosticDiscoveryAgent):
                 self.confidence = 1.0 - min(np.sqrt(mse) / 0.1, 1.0)
                 return 1.0 - min(mse, 2.0)
 
-        except:
+        except Exception as e:
+            print(f"  [EvalError] evaluate_solution raised: {e}")
             return -0.5
-        return -1.0
+        return -0.5
 
     def extract_features(self) -> torch.Tensor:
         """Truly agnostic: The agent only sees the raw numbers and environment state."""

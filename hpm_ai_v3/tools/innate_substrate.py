@@ -27,6 +27,12 @@ class InnateCognitiveSubstrate:
                 fn = getattr(type_obj, parts[1], None) if type_obj else None
             else:
                 fn = getattr(mod, function, None)
+                if fn is None and "innate_substrate" in module:
+                    # Heuristic: if not found at module level, try InnateCognitiveSubstrate class
+                    cls = getattr(mod, "InnateCognitiveSubstrate", None)
+                    if cls:
+                        fn = getattr(cls, function, None)
+            
             if fn is None:
                 return None
             sig = inspect.signature(fn)
@@ -153,10 +159,18 @@ class InnateCognitiveSubstrate:
 
     def find_in_list(self, value: Any, lst: list) -> Optional[int]:
         """Return index of value in lst, or None."""
+        if not isinstance(lst, list):
+            raise TypeError(
+                f"find_in_list requires 'lst' argument to be a list, got {type(lst).__name__}"
+            )
         try:
             return lst.index(value)
         except (ValueError, TypeError):
             return None
+
+    def list_index(self, value: Any, lst: list) -> Optional[int]:
+        """Alias for find_in_list. Return index of value in lst, or None."""
+        return self.find_in_list(value, lst)
 
     def split_text(self, text: str, delimiter: Optional[str] = None) -> List[str]:
         """Split text by delimiter (default: whitespace)."""
