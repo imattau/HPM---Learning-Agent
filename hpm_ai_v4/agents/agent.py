@@ -91,6 +91,11 @@ class HPMAgent:
         # 1. Update Epistemic State (running loss) and Parameters for all patterns
         for p in self.patterns:
             p.observe(obs, learning_rate=0.02)
+            # Hierarchical patterns also perform within-pattern sequence adaptation (EM)
+            if p.complexity >= 2 and len(self.obs_buffer) >= 10:
+                # Use a sliding window of the last 20 observations for stability
+                p.adapt(self.obs_buffer[-20:])
+                
             p.update_running_loss(self.obs_buffer, lambda_l=0.1)
 
         # 2. Update Social Context (Pattern Field)

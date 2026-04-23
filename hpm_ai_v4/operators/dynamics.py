@@ -87,7 +87,7 @@ def recombine(parent_a, parent_b, constraints=None):
             row_sums = new.sum(axis=1, keepdims=True)
             return new / (row_sums + 1e-12)
 
-        child = HierarchicalPattern(pattern_id=None)
+        child = HierarchicalPattern(pattern_id=None, obs_dim=parent_a.obs_dim)
         child.A3 = crossover_mat(parent_a.A3, parent_b.A3)
         child.A32 = crossover_mat(parent_a.A32, parent_b.A32)
         child.A21 = crossover_mat(parent_a.A21, parent_b.A21)
