@@ -308,6 +308,15 @@ def register_innate_tools():
                           "Replace regex matches in string.",
                           module="hpm_ai_v3.tools.innate", function="regex_sub")
 
+    # Perception Tools (Fix: give the agent "eyes")
+    from hpm_ai_v3.tools.perception import summarize_task, summarize_pool
+    ToolRegistry.register("summarize_task", summarize_task, ["task"], "result", 0.005,
+                          "Describe the keys and data shapes in the current task.",
+                          module="hpm_ai_v3.tools.perception", function="summarize_task")
+    ToolRegistry.register("summarize_pool", summarize_pool, ["pool"], "result", 0.005,
+                          "Describe the shapes and types of values in the episodic pool.",
+                          module="hpm_ai_v3.tools.perception", function="summarize_pool")
+
     # Innate Substrate Extensions (Groups A-G)
     from hpm_ai_v3.tools.innate_substrate import InnateCognitiveSubstrate
     substrate = InnateCognitiveSubstrate()

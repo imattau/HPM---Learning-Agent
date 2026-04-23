@@ -203,7 +203,13 @@ class PureAgnosticDiscoveryAgent(ABC):
         if isinstance(action_pattern, ActionPattern):
             mod = action_pattern.module
             func = action_pattern.function
-            if not mod or not func:
+            
+            # Special case for perception tools that need full objects (Task 3)
+            if func == "summarize_task":
+                resolved_args = [self.current_task]
+            elif func == "summarize_pool":
+                resolved_args = [pool]
+            elif not mod or not func:
                 # Builtin tool: find its underlying Python mapping if possible
                 info = ToolRegistry.get_tool_info(action_pattern.action_type)
                 if info and info.get("module") and info.get("function"):
@@ -232,6 +238,10 @@ class PureAgnosticDiscoveryAgent(ABC):
         
         # 3. EXECUTION
         result = action_pattern.sample(context)
+        
+        # Ensure result is a dict (ActionPattern.sample returns result dict directly)
+        if not isinstance(result, dict):
+            result = {"result": result, "status": "success" if result is not None else "failed"}
 
         # RECORD IN EPISODIC MEMORY
         if result.get("status") == "success":
