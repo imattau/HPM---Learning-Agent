@@ -41,7 +41,14 @@ class InnateCognitiveSubstrate:
                 if name in ("self", "cls"):
                     continue
                 ann = param.annotation
-                type_hint = ann.__name__ if ann != inspect.Parameter.empty and hasattr(ann, "__name__") else None
+                if ann == inspect.Parameter.empty:
+                    type_hint = None
+                elif hasattr(ann, "__name__"):
+                    type_hint = ann.__name__
+                else:
+                    # Handle typing.Union, etc.
+                    type_hint = str(ann).replace("typing.", "")
+                
                 default = None if param.default is inspect.Parameter.empty else param.default
                 has_default = param.default is not inspect.Parameter.empty
                 params.append({
@@ -143,12 +150,59 @@ class InnateCognitiveSubstrate:
             return list(value)
         return [value]
 
-    def safe_call(self, module: str, function: str, *args) -> Any:
-        """Call module.function(*args). Returns error dict instead of raising."""
+    def safe_call(self, module: str, function: str, *args, **kwargs) -> Any:
+        """
+        Call module.function with validation. 
+        Returns error dict with signature details on failure.
+        """
         try:
             mod = importlib.import_module(module)
-            fn = getattr(mod, function)
-            return fn(*args)
+            # Handle dotted names like str.upper
+            if "." in function:
+                parts = function.split(".", 1)
+                type_obj = getattr(mod, parts[0], None) or getattr(__builtins__ if isinstance(__builtins__, dict) else __import__("builtins"), parts[0], None)
+                fn = getattr(type_obj, parts[1], None) if type_obj else None
+            else:
+                fn = getattr(mod, function, None)
+            
+            if fn is None:
+                return {"error": f"Function '{function}' not found in module '{module}'", "status": "failed"}
+
+            # Signature validation
+            sig = inspect.signature(fn)
+            try:
+                sig.bind(*args, **kwargs)
+            except TypeError as te:
+                return {
+                    "error": f"Signature mismatch for {function}: {str(te)}",
+                    "expected": str(sig),
+                    "received_args": len(args),
+                    "received_kwargs": list(kwargs.keys()),
+                    "status": "failed"
+                }
+
+            # Runtime type guard (lightweight)
+            # Check for common failures like "float is not iterable"
+            for i, (name, param) in enumerate(sig.parameters.items()):
+                val = None
+                if i < len(args):
+                    val = args[i]
+                elif name in kwargs:
+                    val = kwargs[name]
+                else:
+                    continue
+
+                ann = param.annotation
+                # If expecting list/iterable but got float/int
+                # Handle Union[List, str], etc.
+                ann_str = str(ann)
+                if ann != inspect.Parameter.empty and ("List" in ann_str or "Iterable" in ann_str) and not hasattr(val, "__iter__"):
+                    return {
+                        "error": f"Argument '{name}' expected iterable but got {type(val).__name__}",
+                        "status": "failed"
+                    }
+
+            return fn(*args, **kwargs)
         except Exception as e:
             return {"error": str(e), "status": "failed"}
 

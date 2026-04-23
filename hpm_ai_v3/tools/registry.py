@@ -17,16 +17,36 @@ class ToolRegistry:
                  input_keys: List[str], 
                  output_key: str, 
                  cost: float = 0.1,
-                 description: str = ""):
+                 description: str = "",
+                 module: Optional[str] = None,
+                 function: Optional[str] = None):
         """
         Register a tool function that can be wrapped as a ToolPattern.
+        Automatically wraps tool_fn in a validation proxy if module/function provided.
         """
+        final_fn = tool_fn
+        if module and function:
+            # Create a smart proxy that validates signature before calling
+            from .innate_substrate import InnateCognitiveSubstrate
+            substrate = InnateCognitiveSubstrate()
+            
+            def smart_proxy(**kwargs):
+                # Try to call via safe_call for validation
+                # Note: safe_call expects positional args or kwargs
+                # We'll pass them as kwargs
+                res = substrate.safe_call(module, function, **kwargs)
+                return res
+            
+            final_fn = smart_proxy
+
         cls._tools[name] = {
-            'fn': tool_fn,
+            'fn': final_fn,
             'input_keys': input_keys,
             'output_key': output_key,
             'cost': cost,
-            'description': description
+            'description': description,
+            'module': module,
+            'function': function
         }
     
     @classmethod

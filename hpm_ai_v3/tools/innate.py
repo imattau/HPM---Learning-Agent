@@ -252,15 +252,19 @@ def register_innate_tools():
     
     # Arithmetic
     ToolRegistry.register("arithmetic", arithmetic_eval, ["expression"], "result", 0.01,
-                          "Safely evaluate arithmetic expression.")
+                          "Safely evaluate arithmetic expression.",
+                          module="hpm_ai_v3.tools.innate", function="arithmetic_eval")
     
     # Type conversion
     ToolRegistry.register("float", to_float, ["x"], "result", 0.001,
-                          "Convert input to float.")
+                          "Convert input to float.",
+                          module="hpm_ai_v3.tools.innate", function="to_float")
     ToolRegistry.register("int", to_int, ["x"], "result", 0.001,
-                          "Convert input to integer.")
+                          "Convert input to integer.",
+                          module="hpm_ai_v3.tools.innate", function="to_int")
     ToolRegistry.register("str", to_str, ["x"], "result", 0.001,
-                          "Convert input to string.")
+                          "Convert input to string.",
+                          module="hpm_ai_v3.tools.innate", function="to_str")
     
     # String Operations
     ToolRegistry.register("split", string_split, ["s", "sep"], "result", 0.005,
@@ -344,15 +348,20 @@ def register_innate_tools():
     
     # Math functions
     ToolRegistry.register("sin", math_sin, ["x"], "result", 0.01,
-                          "Sine of angle in radians.")
+                          "Sine of angle in radians.",
+                          module="hpm_ai_v3.tools.innate", function="math_sin")
     ToolRegistry.register("cos", math_cos, ["x"], "result", 0.01,
-                          "Cosine of angle in radians.")
+                          "Cosine of angle in radians.",
+                          module="hpm_ai_v3.tools.innate", function="math_cos")
     ToolRegistry.register("sqrt", math_sqrt, ["x"], "result", 0.01,
-                          "Square root.")
+                          "Square root.",
+                          module="hpm_ai_v3.tools.innate", function="math_sqrt")
     ToolRegistry.register("pow", math_pow, ["x", "y"], "result", 0.01,
-                          "Raise x to power y.")
+                          "Raise x to power y.",
+                          module="hpm_ai_v3.tools.innate", function="math_pow")
     ToolRegistry.register("log", math_log, ["x", "base"], "result", 0.01,
-                          "Logarithm of x with given base.")
+                          "Logarithm of x with given base.",
+                          module="hpm_ai_v3.tools.innate", function="math_log")
     
     print("[InnateTools] Registered minimal viable innate tools.")
 
