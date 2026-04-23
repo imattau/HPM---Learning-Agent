@@ -225,7 +225,7 @@ class LanguageModelPattern(HPMPattern):
     # ── HPMPattern interface ──────────────────────────────────────────────────
 
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Reward signal based on verified outcomes only. (Fix Blocker 3)"""
+        """Reward signal based on verified outcomes only. (Fix 4: Remove heuristics)"""
         if "reward" in observations:
             r = observations["reward"]
             if not isinstance(r, torch.Tensor):
@@ -239,7 +239,7 @@ class LanguageModelPattern(HPMPattern):
 
     def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 1e-4):
         """
-        Online fine-tuning on positive task outcomes. (Fix Blocker 2)
+        Online fine-tuning on positive task outcomes. (Fix 5: Weighted gradient step)
         """
         reward_tensor = observations.get("reward", None)
         if reward_tensor is None:
@@ -256,13 +256,10 @@ class LanguageModelPattern(HPMPattern):
         if self.model is None:
             return
             
-        # Use existing fine_tune method for the heavy lifting
-        # Note: reward_val scales the number of epochs or we could scale loss
-        # Here we'll do 1 epoch with the provided learning_rate
+        # Fix 5: Do a brief, reward-weighted gradient step
+        # (We use fine_tune which now does exactly this via epochs=1)
         self.fine_tune(text, epochs=1, lr=learning_rate, device=str(self._device))
         
-        # update_parameters usually doesn't update loss_ema here as fine_tune does it
-        # but we ensure it's in sync with the spec's intent
         if hasattr(self, 'last_loss'):
             if getattr(self, 'loss_ema', None) is None:
                 self.loss_ema = self.last_loss

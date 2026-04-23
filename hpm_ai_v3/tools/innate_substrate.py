@@ -593,13 +593,33 @@ class InnateCognitiveSubstrate:
 
         # Special case: regex pattern parameter
         if param_name == "pattern" or "pattern" in param_name.lower():
+            # If there's a string in the pool that looks like a regex, use it
+            # Otherwise return a default digit matcher
+            for val in pool:
+                if isinstance(val, str) and any(c in val for c in r"\[].*+?^$|"):
+                    return val
             return r"\d+"
+
+        # Special case: list parameter
+        if target_type == "list" or param_name in ("lst", "obj", "items", "values"):
+            for val in pool:
+                if isinstance(val, list):
+                    return val
+            # Fallback: extract list from task_text if possible
+            # (Very basic extraction of [a, b, c] strings)
+            m = re.search(r"\[(.*)\]", task_text)
+            if m:
+                try:
+                    return [x.strip().strip("'\"") for x in m.group(1).split(",")]
+                except: pass
+            return self.to_list(task_text)
 
         # Special case: string/text parameter
         if target_type == "str" or param_name in ("string", "text", "s", "seq"):
-            # Prefer task_text for string params
+            # Prefer task_text for string params IF it's likely the target
+            # but if there's a string in the pool that ISN'T task_text, use it
             for val in pool:
-                if isinstance(val, str):
+                if isinstance(val, str) and val != task_text:
                     return val
             return task_text
 

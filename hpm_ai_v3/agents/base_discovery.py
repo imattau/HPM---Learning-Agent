@@ -242,12 +242,14 @@ class PureAgnosticDiscoveryAgent(ABC):
         is_valid = self._is_solution_valid(val)
         reward = 1.0 if is_valid else -0.5
 
-        # EMA UPDATE FOR ACCURACY (Fix Blocker 1)
+        # EMA UPDATE FOR ACCURACY (Fix 1: Track success rate, not magnitude)
         EMA_ALPHA = 0.1
-        # Clamp accuracy to [0.0, 1.0]; initial sentinel -10.0 becomes 0.0 on first update
+        # TRACK SUCCESS RATE: 1.0 if successful, 0.0 otherwise
+        success_val = 1.0 if reward > 0 else 0.0
         prev_acc = max(0.0, action_pattern.accuracy)
-        action_pattern.accuracy = (1 - EMA_ALPHA) * prev_acc + EMA_ALPHA * max(0.0, reward)
+        action_pattern.accuracy = (1 - EMA_ALPHA) * prev_acc + EMA_ALPHA * success_val
         
+        # TRACK REWARD MAGNITUDE separately in loss_ema (binary loss for simplicity)
         loss_val = 0.0 if reward > 0 else 1.0
         if getattr(action_pattern, "loss_ema", None) is None:
             action_pattern.loss_ema = loss_val
