@@ -43,10 +43,25 @@ class InnateCognitiveSubstrate:
                 ann = param.annotation
                 type_hint = ann.__name__ if ann != inspect.Parameter.empty and hasattr(ann, "__name__") else None
                 default = None if param.default is inspect.Parameter.empty else param.default
-                params.append({"name": name, "type": type_hint, "default": default})
+                has_default = param.default is not inspect.Parameter.empty
+                params.append({
+                    "name": name, 
+                    "type": type_hint, 
+                    "default": default,
+                    "has_default": has_default
+                })
             return {"params": params}
         except Exception:
             return None
+
+    # ── Group H: Task Perception ───────────────────────────────────────────
+
+    def perceive_task(self, text: str) -> dict:
+        """Classify task text into a structured percept. Always returns a valid dict."""
+        from hpm_ai_v3.tools.task_perceptor import TaskPerceptor
+        if not hasattr(self, '_task_perceptor'):
+            self._task_perceptor = TaskPerceptor()
+        return self._task_perceptor.perceive(text)
 
     def get_type(self, value: Any) -> str:
         """Return string type name of value."""

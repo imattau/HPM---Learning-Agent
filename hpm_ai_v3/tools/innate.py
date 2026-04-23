@@ -28,6 +28,13 @@ def arithmetic_eval(expression: str) -> Dict[str, Any]:
     if not any(c.isdigit() for c in s_expr):
         return {"error": f"Expression '{s_expr}' does not appear to be arithmetic.", "status": "failed"}
 
+    # Fast path: bare number — convert directly without expression parsing
+    try:
+        bare = float(s_expr)
+        return {"result": bare, "status": "success"}
+    except ValueError:
+        pass  # not a bare number — fall through to expression parsing
+
     if not SAFE_EVAL:
         # Fallback to basic string parsing for simple cases if simpleeval missing
         try:

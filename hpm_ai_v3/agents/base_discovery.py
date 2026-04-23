@@ -176,8 +176,15 @@ class PureAgnosticDiscoveryAgent(ABC):
             if not self.population.patterns: return {"status": "failed", "error": "No patterns"}
 
         # 1. SELECTION (Evaluator-Gated Replicator)
+        task_text_for_percept = self.current_task.get("text", "") if self.current_task else ""
+        self.current_percept = self.substrate.perceive_task(task_text_for_percept)
+
         weights = np.array([p.weight for p in self.population.patterns])
         if self.tool_selector is not None and self.current_task:
+            # Hard gate: zero incompatible tools before soft semantic scoring
+            weights = self.tool_selector.filter_by_percept(
+                self.current_percept, weights, self.population.patterns
+            )
             weights = self.tool_selector.apply(
                 self.current_task.get("text", ""),
                 weights,

@@ -34,6 +34,22 @@ TOOL_DESCRIPTIONS = {
     "get_type": "check data type object class category",
 }
 
+# Tools allowed per input_type. None means "all allowed" (no filter).
+TOOL_COMPAT = {
+    "numeric":    {"arithmetic", "float", "int", "extract_numbers",
+                   "math.sqrt", "math.factorial", "math.floor", "math.gcd",
+                   "operator.add", "operator.mul", "sympy.sympify"},
+    "expression": {"arithmetic", "math.sqrt", "math.factorial", "math.floor",
+                   "math.gcd", "operator.add", "operator.mul", "sympy.sympify"},
+    "string":     {"split", "re_findall", "get_type", "index", "slice", "re_search", "re_sub",
+                   "builtins.str.split", "builtins.str.lower", "builtins.str.upper",
+                   "spacy.nlp", "language_model", "textblob.TextBlob"},
+    "boolean":    {"get_type", "builtins.str.split", "builtins.str.lower", "builtins.str.upper"},
+    "list":       {"index", "arithmetic", "extract_numbers", "float", "int", "slice",
+                   "builtins.str.split"},
+    "mixed":      None,  # no filtering
+}
+
 
 class ToolSelector:
     """
@@ -109,6 +125,35 @@ class ToolSelector:
         
         similarity = self.score(task_text, patterns)
         return weights * (1.0 + self.current_alpha * similarity)
+
+    def filter_by_percept(self, percept: Dict, weights: np.ndarray,
+                          patterns: List[Any]) -> np.ndarray:
+        """Zero weights for tools incompatible with percept input_type.
+
+        Fail-safe: if filtering would zero all patterns, returns original weights.
+        """
+        input_type = percept.get("input_type", "mixed")
+        allowed = TOOL_COMPAT.get(input_type)
+        if allowed is None:
+            return weights  # mixed — no filtering
+
+        new_weights = weights.copy()
+        for i, pat in enumerate(patterns):
+            tool_name = getattr(pat, 'tool_name', None)
+            module = getattr(pat, 'module', None)
+            function = getattr(pat, 'function', None)
+            candidates = set()
+            if tool_name:
+                candidates.add(tool_name)
+            if module and function:
+                candidates.add(f"{module}.{function}")
+            if not candidates.intersection(allowed):
+                new_weights[i] = 0.0
+
+        # Fail-safe: if all zeroed, return original
+        if new_weights.sum() < 1e-8:
+            return weights
+        return new_weights
 
     def _pattern_description(self, pattern: Any) -> str:
         tool_name = getattr(pattern, 'tool_name', None)
