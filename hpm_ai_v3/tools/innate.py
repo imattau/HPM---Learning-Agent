@@ -263,27 +263,39 @@ def register_innate_tools():
                           "Strip whitespace from string.",
                           module="hpm_ai_v3.tools.innate", function="string_strip")
     ToolRegistry.register("lower", string_lower, ["s"], "result", 0.001,
-                          "Convert string to lowercase.")
+                          "Convert string to lowercase.",
+                          module="hpm_ai_v3.tools.innate", function="string_lower")
     ToolRegistry.register("upper", string_upper, ["s"], "result", 0.001,
-                          "Convert string to uppercase.")
+                          "Convert string to uppercase.",
+                          module="hpm_ai_v3.tools.innate", function="string_upper")
     ToolRegistry.register("replace", string_replace, ["s", "old", "new"], "result", 0.002,
-                          "Replace substring in string.")
+                          "Replace substring in string.",
+                          module="hpm_ai_v3.tools.innate", function="string_replace")
     ToolRegistry.register("contains", string_contains, ["s", "substring"], "result", 0.001,
-                          "Check if string contains substring.")
+                          "Check if string contains substring.",
+                          module="hpm_ai_v3.tools.innate", function="string_contains")
 
     # List operations
     ToolRegistry.register("len", list_length, ["obj"], "result", 0.001,
-                          "Get length of list or string.")
+                          "Get length of list or string.",
+                          module="hpm_ai_v3.tools.innate", function="list_length")
     ToolRegistry.register("index", list_index, ["obj", "idx"], "result", 0.001,
                           "Get item at index.",
                           module="hpm_ai_v3.tools.innate", function="list_index")
     ToolRegistry.register("slice", list_slice, ["obj", "start", "end"], "result", 0.002,
-                          "Slice a list or string.")
+                          "Slice a list or string.",
+                          module="hpm_ai_v3.tools.innate", function="list_slice")
 
     # Regex
     ToolRegistry.register("re_findall", regex_findall, ["pattern", "string"], "result", 0.005,
                           "Find all regex matches in string.",
                           module="hpm_ai_v3.tools.innate", function="regex_findall")
+    ToolRegistry.register("re_search", regex_search, ["pattern", "string"], "result", 0.005,
+                          "Search for first regex match.",
+                          module="hpm_ai_v3.tools.innate", function="regex_search")
+    ToolRegistry.register("re_sub", regex_sub, ["pattern", "repl", "string"], "result", 0.005,
+                          "Replace regex matches in string.",
+                          module="hpm_ai_v3.tools.innate", function="regex_sub")
 
     # Innate Substrate Extensions (Groups A-G)
     from hpm_ai_v3.tools.innate_substrate import InnateCognitiveSubstrate

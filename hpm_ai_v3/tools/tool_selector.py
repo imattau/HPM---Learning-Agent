@@ -4,7 +4,6 @@ ToolSelector - Uses LM embeddings to bias pattern selection toward
 semantically relevant tools. Acts as a pattern evaluator in HPM terms.
 """
 import numpy as np
-import urllib.parse
 from typing import Any, Dict, List, Optional
 
 TOOL_DESCRIPTIONS = {
@@ -23,6 +22,16 @@ TOOL_DESCRIPTIONS = {
     "operator.add": "add sum two numbers arithmetic",
     "operator.mul": "multiply product two numbers arithmetic",
     "language_model": "language tokenize embed extract text nlp",
+    # Innate tools (Fix 4: differentiate math vs text)
+    "arithmetic": "evaluate numeric expression calculate math calculation numbers addition subtraction",
+    "float": "convert to decimal float numeric number",
+    "int": "convert to integer whole number",
+    "str": "convert to string text character",
+    "split": "split text into words tokens whitespace partition",
+    "index": "get item from list or string at position index sequence",
+    "re_findall": "regex pattern match extraction find all text search",
+    "extract_numbers": "extract numbers numeric values from text",
+    "get_type": "check data type object class category",
 }
 
 
@@ -31,15 +40,16 @@ class ToolSelector:
     Biases population pattern selection using LM semantic similarity.
     Selector only boosts relevant patterns — never suppresses.
     """
-    def __init__(self, lm, alpha: float = 2.0, decay_rate: float = 0.998):
+    def __init__(self, lm, alpha: float = 5.0, decay_rate: float = 0.998):
         """
         lm: LanguageModelPattern instance (provides _embed())
-        alpha: initial bias strength
+        alpha: initial bias strength (Fix 4: increased from 2.0 to 5.0)
         decay_rate: per-episode decay for alpha
         """
         self.lm = lm
         # Bind for cache clearing
-        lm._tool_selector = self
+        if hasattr(lm, '_tool_selector'):
+            lm._tool_selector = self
         
         self.base_alpha = alpha
         self.current_alpha = alpha
@@ -51,22 +61,33 @@ class ToolSelector:
         """Clear the embedding cache. Call this when LM parameters change."""
         self._cache = {}
 
-    def _embed(self, text: str) -> List[float]:
-        if text not in self._cache:
-            # LanguageModelPattern has _embed(text)
-            self._cache[text] = self.lm._embed(text)
-        return self._cache[text]
+    def _embed(self, input_val: Any) -> List[float]:
+        """Convert input to string and get embedding from LM."""
+        # Always convert to string for hashing to avoid TypeError: unhashable type: 'list'
+        if isinstance(input_val, (list, tuple)):
+            safe_key = " ".join(map(str, input_val))
+        else:
+            safe_key = str(input_val)
+
+        try:
+            if safe_key not in self._cache:
+                # LanguageModelPattern has _embed(text)
+                self._cache[safe_key] = self.lm._embed(safe_key)
+            return self._cache[safe_key]
+        except TypeError as e:
+            # Fallback for unexpected unhashable types
+            print(f"  [ToolSelector] Warning: Unhashable type {type(safe_key)} encountered. Bypassing cache.")
+            return self.lm._embed(str(safe_key))
 
     def _cosine(self, a: List[float], b: List[float]) -> float:
         va, vb = np.array(a, dtype=float), np.array(b, dtype=float)
         denom = np.linalg.norm(va) * np.linalg.norm(vb)
         if denom < 1e-8:
             return 0.0
-        # dot(va, vb) / denom can be slightly > 1 or < -1 due to precision
         sim = float(np.dot(va, vb) / denom)
         return float(np.clip(sim, 0.0, 1.0))
 
-    def score(self, task_text: str, patterns: List[Any]) -> np.ndarray:
+    def score(self, task_text: Any, patterns: List[Any]) -> np.ndarray:
         """Return similarity score [0,1] per pattern."""
         task_emb = self._embed(task_text)
         scores = []
@@ -76,7 +97,7 @@ class ToolSelector:
             scores.append(self._cosine(task_emb, pat_emb))
         return np.array(scores)
 
-    def apply(self, task_text: str, weights: np.ndarray,
+    def apply(self, task_text: Any, weights: np.ndarray,
               patterns: List[Any]) -> np.ndarray:
         """Return adjusted weights: weights * (1 + alpha * similarity)."""
         if not task_text or len(patterns) == 0:
