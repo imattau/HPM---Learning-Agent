@@ -10,7 +10,8 @@ def test_meta_layer_simulation():
     
     print("\nStarting HPM Meta-Layer Simulation...")
     for step in range(300):
-        meta.run_step()
+        obs = env.step()
+        meta.run_step(obs)
         
         if step % 50 == 0:
             meta.report()

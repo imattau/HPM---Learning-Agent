@@ -71,18 +71,18 @@ class HPMAgent:
 
         self.external = external_substrate if external_substrate else ExternalSubstrate()
         self.field = PatternField()
-        self.institution = InstitutionalField()
         self.development = DevelopmentalStage(self)
         self.reasoner = Reasoner(self)
         
         self.step_counter = 0
         self.obs_buffer = []
+        self.external_social_scores = {} # pattern_id -> reliability score [0, 1]
         
         # Default evaluator weights (will be modulated by development)
         self.beta_aff = 0.4
         self.gamma_soc = 0.3
 
-    def perceive_and_learn(self, obs: int, env: Any):
+    def perceive_and_learn(self, obs: int):
         """Update patterns based on a new observation."""
         self.obs_buffer.append(obs)
         if len(self.obs_buffer) > 100:
@@ -99,14 +99,15 @@ class HPMAgent:
         # 3. Compute Total Scores (Utilities)
         totals = {}
         for p in self.patterns:
-            # Get peer review / institutional feedback
-            inst_boost = self.institution.evaluate(p, self.obs_buffer)
+            # Get peer review / institutional feedback from stored scores
+            ext_soc = self.external_social_scores.get(p.id, 0.5)
             
             totals[p.id] = total_score(
                 p, self.obs_buffer, field_freq,
                 beta_aff=self.beta_aff,
-                gamma_soc=self.gamma_soc
-            ) + inst_boost
+                gamma_soc=self.gamma_soc,
+                external_soc=ext_soc
+            )
 
         # 4. Meta Pattern Update (Replicator Dynamics with Conflict)
         k_mat = compute_conflict_matrix(self.patterns)

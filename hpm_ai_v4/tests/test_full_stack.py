@@ -9,7 +9,8 @@ def test_agent_reasoning_integration():
     
     # 1. Give the agent some history
     for _ in range(20):
-        agent.perceive_and_learn(1, None) # Obs 1 is common
+        agent.perceive_and_learn(1)
+ # Obs 1 is common
         
     # 2. Test standard action selection (compositional inference)
     action = agent.act()

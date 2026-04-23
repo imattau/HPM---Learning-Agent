@@ -29,7 +29,7 @@ class Reasoner:
             
         preds = []
         for p in patterns:
-            dist = self._predict_next_distribution(p, obs_seq)
+            dist = p.predict_next_distribution(obs_seq)
             preds.append((p.weight, dist))
             
         total_weight = sum(w for w, _ in preds) + 1e-12
@@ -38,18 +38,23 @@ class Reasoner:
             blended += (w / total_weight) * d
         return blended
 
-    def _predict_next_distribution(self, pattern: HierarchicalPattern, obs_seq: List[int]) -> np.ndarray:
-        """Return probability vector over next observation given history."""
-        if pattern.complexity >= 2:
-            belief = pattern.get_belief(obs_seq)
-            # Marginalise to emission: P(x_next) = sum_{z1} P(z1|history) * B[z1, :]
-            # belief is (z3, z2, z1)
-            p_z1 = np.sum(belief, axis=(0, 1))  # Shape (K,)
-            return p_z1 @ pattern.B
-        else:
-            # Flat pattern: use its theta parameter
-            theta = getattr(pattern, 'theta', 0.5)
-            return np.array([1 - theta, theta])
+    def counterfactual(self, pattern: HierarchicalPattern, obs_seq: List[int], intervention_idx: int):
+        """
+        Force a latent state or emission and observe the change in prediction.
+        Returns (original_dist, intervened_dist).
+        """
+        orig_dist = pattern.predict_next_distribution(obs_seq)
+        
+        # Temporary intervention: force emission to the intervention_idx
+        B_orig = pattern.B.copy()
+        for z1 in range(pattern.latent_dim):
+            pattern.B[z1] = 0.0
+            pattern.B[z1, intervention_idx] = 1.0
+            
+        intervened_dist = pattern.predict_next_distribution(obs_seq)
+        pattern.B = B_orig # Restore
+        
+        return orig_dist, intervened_dist
 
     def simulate(self, pattern: HierarchicalPattern, initial_obs_seq: List[int], steps: int = 10) -> List[int]:
         """Generate a possible future sequence using the pattern as a generative model."""
@@ -92,7 +97,7 @@ class Reasoner:
                 relevant = self.get_relevant_patterns(curr_obs, top_k=1)
                 if not relevant: break
                 
-                dist = self._predict_next_distribution(relevant[0], curr_obs)
+                dist = relevant[0].predict_next_distribution(curr_obs)
                 action = np.argmax(dist) # In this simple sim, 'action' is targeting next obs
                 seq.append(int(action))
                 curr_obs.append(int(action))

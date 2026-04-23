@@ -132,18 +132,22 @@ class HierarchicalPattern:
         belief = np.exp(last_alpha - logsumexp(last_alpha))
         return belief
 
-    def predict_next(self, obs_seq):
-        """Predict the next observation given current history."""
+    def predict_next_distribution(self, obs_seq):
+        """Return the probability distribution over the next observation."""
         if self.complexity >= 2:
             belief = self.get_belief(obs_seq)
             # Marginalise over z3, z2 to get p(z1)
             p_z1 = np.sum(belief, axis=(0, 1))
             # Next observation distribution: p(x) = sum_z1 p(x|z1)p(z1)
-            next_dist = p_z1 @ self.B
-            return int(np.argmax(next_dist))
+            return p_z1 @ self.B
         else:
-            # Flat pattern: return most likely emission from B[0]
-            return int(np.argmax(self.B[0]))
+            # Flat pattern: return emission distribution from B[0]
+            return self.B[0]
+
+    def predict_next(self, obs_seq):
+        """Predict the most likely next observation."""
+        dist = self.predict_next_distribution(obs_seq)
+        return int(np.argmax(dist))
 
     def update_running_loss(self, obs_seq, lambda_l=0.1):
         ll = self.log_likelihood(obs_seq)

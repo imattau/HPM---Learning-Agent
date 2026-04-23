@@ -39,19 +39,19 @@ class AgentPool:
     def step(self, observation: int):
         """Synchronized step for all agents in the pool."""
         for agent in self.agents:
-            agent.perceive_and_learn(observation, None)
+            agent.perceive_and_learn(observation)
 
 class HPMMetaLayer:
     """
     Unified orchestrator for social, institutional, and developmental layers.
     """
     def __init__(self, env: Any, num_agents: int = 5, obs_dim: int = 2):
-        self.env = env
+        self.env = env # Still needed for curriculum/reflection to know context, but not for stepping
         self.substrate = ExternalSubstrate()
         self.agent_pool = AgentPool(num_agents=num_agents, external_substrate=self.substrate, obs_dim=obs_dim)
         
         self.repository = PatternRepository()
-        self.institution = InstitutionalField() # From core field.py
+        self.institution = InstitutionalField()
         self.curriculum = CurriculumScheduler(env)
         self.social_network = SocialNetwork()
         self.reflection = ReflectionEngine(self.agent_pool, self.repository)
@@ -59,10 +59,9 @@ class HPMMetaLayer:
         self.global_step = 0
         self.observations = []
 
-    def run_step(self) -> int:
-        """Execute a single global step of the multi-agent HPM stack."""
+    def run_step(self, obs: int) -> int:
+        """Execute a single global step using an external observation."""
         # 1. Perception and individual learning
-        obs = self.env.step()
         self.observations.append(obs)
         self.agent_pool.step(obs)
         
@@ -73,12 +72,13 @@ class HPMMetaLayer:
         # 3. Institutional validation (peer review)
         if self.global_step % 50 == 0 and self.global_step > 0:
             val_seq = self.observations[-30:]
-            for p_list in self._group_patterns_by_id():
-                if len(p_list) >= 2:
-                    # Replication check across agents
-                    for p in p_list:
-                        boost = self.institution.evaluate(p, val_seq)
-                        p.weight *= (1 + boost)
+            for agent in self.agent_pool.agents:
+                for p in agent.patterns:
+                    # Provide social reliability bonus back to the agent
+                    bonus = self.institution.evaluate(p, val_seq)
+                    # Mapping boost [-0.3, 0.5] to a score [0, 1] for the social evaluator
+                    score = np.clip(0.5 + bonus, 0, 1)
+                    agent.external_social_scores[p.id] = score
 
         # 4. Social field propagation
         if self.global_step % 5 == 0:

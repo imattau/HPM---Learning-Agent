@@ -48,12 +48,15 @@ def pattern_density(pattern, obs_seq, evaluator_values, field_amplification=0.0)
     return alpha * C + beta * E + gamma * F
 
 def total_score(pattern, obs_seq, field_freq, beta_aff=0.4, gamma_soc=0.3,
-                gamma_field=0.2, density_weight=0.1):
+                gamma_field=0.2, density_weight=0.1, external_soc=0.5):
     """Combines all evaluators and density into a final utility score."""
     ep = epistemic_score(pattern)
     aff = affective_score(pattern, obs_seq)
-    soc = social_score(pattern, field_freq)
+    soc_local = social_score(pattern, field_freq)
     
+    # Blended social score: mix of local field frequency and external reliability
+    soc = 0.5 * soc_local + 0.5 * external_soc
+
     # Non-epistemic evaluator sum J = beta*aff + gamma*soc
     J = beta_aff * aff + gamma_soc * soc
     

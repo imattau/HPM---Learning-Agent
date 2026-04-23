@@ -18,23 +18,22 @@ class TotalHPMSystem:
         # 1. Input Processing: Raw Data -> Discrete Tokens
         obs_seq = self.input_adapter.to_observations(raw_input)
         
-        # 2. Learning: Update population based on observations
+        # 2. Sequential Cognitive Processing (Learning, Social, Institutional)
         for obs in obs_seq:
-            self.meta_layer.agent_pool.step(obs)
+            self.meta_layer.run_step(obs)
             
-        # 3. Decision: Best pattern predicts next outcome
+        # 3. Decision / Action: Select best pattern from population
         all_patterns = [p for a in self.meta_layer.agent_pool.agents for p in a.patterns]
         if all_patterns:
-            # Replicator weights prioritize the most reliable pattern
             best_pattern = max(all_patterns, key=lambda p: p.weight)
-            # Use history in buffer for prediction
-            prediction = best_pattern.predict_next(self.meta_layer.observations[-20:])
+            # Use representative history from first agent
+            history = self.meta_layer.agent_pool.agents[0].obs_buffer[-20:]
+            prediction = best_pattern.predict_next(history)
             
-            # 4. Action: Translate prediction into real-world effect
+            # 4. Output Adaptation
             self.output_adapter.act(prediction, context=None)
-            
-        # 5. Global Meta-updates (Institutions, Reflection, Curriculum)
-        self.meta_layer.run_step()
+            return prediction
+        return None
 
     def run_loop(self, raw_input_stream: List[Any]):
         """Run the cognitive architecture over a stream of raw data."""

@@ -36,8 +36,7 @@ def test_deep_vs_surface_change():
     # Train agent longer to adapt hierarchical patterns
     for _ in range(200):
         obs = env.step()
-        agent.perceive_and_learn(obs, env)
-        
+        agent.perceive_and_learn(obs)
     def get_avg_ll(seq):
         # average log likelihood of best patterns (lower threshold to include emerging hierarchical)
         best_patterns = [p for p in agent.patterns if p.weight > 0.005]
@@ -78,8 +77,8 @@ def test_affective_stabilization():
     # Train on pure random noise
     for _ in range(150):
         obs = np.random.choice([0, 1]) # Pure noise
-        agent_neutral.perceive_and_learn(obs, None)
-        agent_emotional.perceive_and_learn(obs, None)
+        agent_neutral.perceive_and_learn(obs)
+        agent_emotional.perceive_and_learn(obs)
         
     def count_spurious(agent):
         # Pattern is 'spurious' if it has high weight but poor epistemic score (high loss)
