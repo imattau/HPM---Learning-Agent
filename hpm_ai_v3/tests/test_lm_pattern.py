@@ -70,7 +70,7 @@ def test_lm_log_prob_returns_tensor(lm):
     obs = {"text": "hello world", "result": ["hello", "world"]}
     lp = lm.log_prob(obs)
     assert isinstance(lp, torch.Tensor)
-    assert lp.item() > 0
+    assert lp.item() == 0.0  # Heuristic removed (Fix Blocker 3)
 
 def test_lm_structural_distance_same(lm):
     other = LanguageModelPattern()

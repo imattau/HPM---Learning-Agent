@@ -61,8 +61,14 @@ class ActionPattern(HPMPattern):
         return ["pool", "text"]
 
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+        # Fix: Only return reward if this pattern was the one that produced it (Fix Reward Broadcast)
+        if "actor_id" in observations and observations["actor_id"] != self.id:
+            return torch.tensor(0.0, device=self._device)
         reward = observations.get("reward", torch.tensor(0.0, device=self._device))
-        return reward.to(self._device)
+        # Fix: Clamp log_prob to [0, 1] to match spec accuracy requirement (Fix Blocker 1)
+        # Higher reward -> higher log_prob -> lower loss -> higher accuracy.
+        val = max(0.0, float(reward.item() if hasattr(reward, 'item') else reward))
+        return torch.tensor(val, device=self._device)
 
     def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, Any]:
         """Execute the action using resolved_args provided in context."""
@@ -193,8 +199,14 @@ class PureAgnosticDiscoveryAgent(ABC):
             if not mod or not func:
                 # Builtin tool: find its underlying Python mapping if possible
                 info = ToolRegistry.get_tool_info(action_pattern.action_type)
-                # For builtins like 'arithmetic', we just pass task_text or first pool item
-                resolved_args = [pool[0]] if pool else [task_text]
+                if info and info.get("module") and info.get("function"):
+                    # Use substrate to resolve arguments correctly for builtins with multiple args
+                    _, _, resolved_args = self.substrate.resolve_call(
+                        info["module"], info["function"], pool, task_text
+                    )
+                else:
+                    # For simple builtins like 'arithmetic', we just pass task_text or first pool item
+                    resolved_args = [pool[0]] if pool else [task_text]
             else:
                 _, _, resolved_args = self.substrate.resolve_call(mod, func, pool, task_text)
         else:
@@ -202,7 +214,7 @@ class PureAgnosticDiscoveryAgent(ABC):
 
         action_pattern.mark_used()
         if isinstance(action_pattern, ActionPattern):
-            self.episode_sequence.append(action_pattern.tool_name)
+            self.episode_sequence.append(getattr(action_pattern, 'tool_name', action_pattern.id))
 
         context = {
             "pool": pool,
@@ -230,16 +242,34 @@ class PureAgnosticDiscoveryAgent(ABC):
         is_valid = self._is_solution_valid(val)
         reward = 1.0 if is_valid else -0.5
 
+        # EMA UPDATE FOR ACCURACY (Fix Blocker 1)
+        EMA_ALPHA = 0.1
+        # Clamp accuracy to [0.0, 1.0]; initial sentinel -10.0 becomes 0.0 on first update
+        prev_acc = max(0.0, action_pattern.accuracy)
+        action_pattern.accuracy = (1 - EMA_ALPHA) * prev_acc + EMA_ALPHA * max(0.0, reward)
+        
+        loss_val = 0.0 if reward > 0 else 1.0
+        if getattr(action_pattern, "loss_ema", None) is None:
+            action_pattern.loss_ema = loss_val
+        else:
+            action_pattern.loss_ema = (1 - EMA_ALPHA) * action_pattern.loss_ema + EMA_ALPHA * loss_val
+
         # 5. REINFORCE & ABSORB
         obs = {
             "reward": torch.tensor([reward], device=action_pattern._device),
+            "actor_id": action_pattern.id,
             "outcome": result,
             "input": context["context_features"].unsqueeze(0),
             "context_features": context["context_features"].unsqueeze(0)
         }
         
+        # Include task text for patterns that can learn from it (like LM)
+        if self.current_task and "text" in self.current_task:
+            obs["text"] = self.current_task["text"]
+
         if step_population:
-            self.evaluator_mgr.update_epistemic(action_pattern, obs)
+            # We skip explicit update_epistemic here as it's redundant with population.step()
+            # but we still need update_affective for the actor as step() doesn't do it.
             self.evaluator_mgr.update_affective(action_pattern, reward)
             
             # Pattern Field (Attention Signal)
@@ -283,20 +313,23 @@ class PureAgnosticDiscoveryAgent(ABC):
             res = event.get("result")
             if res is not None and isinstance(res, (int, float, str, list, dict)):
                 pool.append(res)
+        
+        # Also include task-specific numbers if any
         if self.current_task:
+            pool.extend(self.substrate.extract_numbers(self.current_task.get("text", "")))
             if "inputs" in self.current_task:
                 pool.extend(self.current_task["inputs"])
             text = self.current_task.get("text", "")
             if text:
                 pool.append(text)
-        # Deduplicate
-        seen = set()
+                
+        return self._deduplicate_pool(pool)
+
+    def _deduplicate_pool(self, pool: List[Any]) -> List[Any]:
         unique = []
-        for item in pool:
-            key = (type(item).__name__, str(item))
-            if key not in seen:
-                unique.append(item)
-                seen.add(key)
+        for x in pool:
+            if x not in unique:
+                unique.append(x)
         return unique
 
     def _reinject_innate_tools(self):
@@ -304,14 +337,18 @@ class PureAgnosticDiscoveryAgent(ABC):
         patterns = [
             ActionPattern("arithmetic", pattern_id="innate_calc"),
             ActionPattern("float", pattern_id="innate_float"),
+            ActionPattern("int", pattern_id="innate_int"),
+            ActionPattern("str", pattern_id="innate_str"),
             ActionPattern("split", pattern_id="innate_split"),
-            ActionPattern("re_findall", pattern_id="innate_regex"),
             ActionPattern("index", pattern_id="innate_index"),
+            ActionPattern("re_findall", pattern_id="innate_regex"),
+            ActionPattern("extract_numbers", pattern_id="innate_extract"),
+            ActionPattern("get_type", pattern_id="innate_type"),
             ActionPattern("list_modules", pattern_id="discovery_mod")
         ]
         for p in patterns:
             if not any(op.id == p.id for op in self.population.patterns):
-                p.weight = 0.01
+                p.weight = 0.05
                 self.population.patterns.append(p)
 
     def run_episode(self, task: Dict[str, Any], max_steps: int = 50) -> Optional[Any]:

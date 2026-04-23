@@ -225,31 +225,50 @@ class LanguageModelPattern(HPMPattern):
     # ── HPMPattern interface ──────────────────────────────────────────────────
 
     def log_prob(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Reward signal based on result non-emptiness."""
-        # Note: In discovery, reward is passed in observations['reward']
+        """Reward signal based on verified outcomes only. (Fix Blocker 3)"""
         if "reward" in observations:
-            return observations["reward"].to(self._device)
-            
-        result = observations.get("result", None)
-        if result is None:
-            return torch.tensor(-1.0, device=self._device)
-        
-        # Simple heuristic reward for active results
-        if isinstance(result, list) and len(result) > 0:
-            val = min(1.0, len(result) * 0.1)
-        elif isinstance(result, str) and result:
-            val = 0.5
-        else:
-            val = 0.0
-        return torch.tensor(val, device=self._device)
+            r = observations["reward"]
+            if not isinstance(r, torch.Tensor):
+                r = torch.tensor(float(r), device=self._device)
+            return r.to(self._device)
+        return torch.tensor(0.0, device=self._device)
 
     def intervene(self, intervention: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Wrap sample for intervention."""
         return self.sample(context)
 
-    def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 0.01):
-        """No-op: pretraining is offline. Online updates not supported."""
-        pass
+    def update_parameters(self, observations: Dict[str, torch.Tensor], learning_rate: float = 1e-4):
+        """
+        Online fine-tuning on positive task outcomes. (Fix Blocker 2)
+        """
+        reward_tensor = observations.get("reward", None)
+        if reward_tensor is None:
+            return
+        
+        reward_val = float(reward_tensor.item() if hasattr(reward_tensor, 'item') else reward_tensor)
+        if reward_val <= 0.0:
+            return  # only learn from positive outcomes
+            
+        text = observations.get("text", None)
+        if not isinstance(text, str) or len(text.strip()) == 0:
+            return
+            
+        if self.model is None:
+            return
+            
+        # Use existing fine_tune method for the heavy lifting
+        # Note: reward_val scales the number of epochs or we could scale loss
+        # Here we'll do 1 epoch with the provided learning_rate
+        self.fine_tune(text, epochs=1, lr=learning_rate, device=str(self._device))
+        
+        # update_parameters usually doesn't update loss_ema here as fine_tune does it
+        # but we ensure it's in sync with the spec's intent
+        if hasattr(self, 'last_loss'):
+            if getattr(self, 'loss_ema', None) is None:
+                self.loss_ema = self.last_loss
+            else:
+                alpha = 0.1
+                self.loss_ema = (1 - alpha) * self.loss_ema + alpha * self.last_loss
 
     def structural_distance(self, other: 'HPMPattern') -> float:
         """0.0 if same hidden_dim, 0.5 if different hidden_dim, 1.0 if not LM."""
