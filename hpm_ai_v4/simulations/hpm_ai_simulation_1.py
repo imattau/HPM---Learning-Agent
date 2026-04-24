@@ -194,10 +194,13 @@ class HierarchicalPattern:
                 stat = stationary[:, 0]
                 stat = np.abs(stat) / np.sum(np.abs(stat))
         else:
-            # Use last observation to update belief (simple forward step)
-            # For simplicity, approximate using running belief from last forward pass
-            # We'll just use stationary for stability
-            stat = None   # fallback to stationary
+            eigvals2, eigvecs2 = np.linalg.eig(self.A.T)
+            stationary2 = np.real(eigvecs2[:, np.isclose(eigvals2, 1.0)])
+            if stationary2.size == 0:
+                stat = np.ones(self.latent_dim) / self.latent_dim
+            else:
+                stat = stationary2[:, 0]
+                stat = np.abs(stat) / np.sum(np.abs(stat))
         # Emission distribution mixture
         p_obs = stat @ self.B
         ent = -np.sum(p_obs * np.log(p_obs + 1e-12))
@@ -348,12 +351,15 @@ def recombine(parent_a, parent_b):
         child.A, child.B, child.pi = A_new, B_new, pi_new
         child.weight = 0.05
         return child
-    else:
-        # flat patterns: average theta
+    elif hasattr(parent_a, 'theta') and hasattr(parent_b, 'theta'):
+        # Both flat: average theta
         theta_new = (parent_a.theta + parent_b.theta) / 2
         child = FlatPattern(pattern_id=None, theta=theta_new)
         child.weight = 0.05
         return child
+    else:
+        # Mixed types: return None (caller handles)
+        return None
 
 # ============================================================================
 # Agent (contains the pattern population)
@@ -445,7 +451,7 @@ def run_simulation(steps=500):
             print(f"Step {step:3d}: best pattern id={best.id}, "
                   f"type={'hier' if hasattr(best,'A') else 'flat'}, "
                   f"weight={best.weight:.3f}, ep_score={epistemic_score(best):.3f}, "
-                  f"comp={best.compression():.3f if hasattr(best,'A') else 0:.3f}, "
+                  f"comp={best.compression() if hasattr(best,'A') else 0:.3f}, "
                   f"pop_size={len(agent.patterns)}")
             history.append((step, best.id, best.weight, epistemic_score(best)))
 
