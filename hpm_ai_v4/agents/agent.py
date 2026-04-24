@@ -2,7 +2,8 @@ import numpy as np
 import copy
 from typing import List, Dict, Any, Optional
 
-from hpm_ai_v4.pattern import HierarchicalPattern
+from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
+from hpm_ai_v4.operators.parallel import ParallelPatternPool
 from hpm_ai_v4.evaluators.metrics import total_score
 from hpm_ai_v4.operators.dynamics import compute_conflict_matrix, meta_pattern_update, recombine
 from hpm_ai_v4.field import PatternField, InstitutionalField
@@ -57,7 +58,7 @@ class DevelopmentalStage:
 class HPMAgent:
     """The central HPM learner, integrating patterns, evaluators, and fields."""
     def __init__(self, num_initial_patterns: int = 5, external_substrate: Optional[ExternalSubstrate] = None,
-                 obs_dim: int = 2):
+                 obs_dim: int = 2, num_workers: int = 1):
         self.obs_dim = obs_dim
         self.patterns = []
         for i in range(num_initial_patterns):
@@ -66,7 +67,7 @@ class HPMAgent:
             self.patterns.append(p)
             
         # Include one flat pattern for comparative baseline (strong initial weight)
-        flat_p = HierarchicalPattern.flat(num_initial_patterns, obs_dim=obs_dim)
+        flat_p = FlatPattern.flat(num_initial_patterns, obs_dim=obs_dim)
         flat_p.weight = 0.95
         self.patterns.append(flat_p)
 
@@ -82,6 +83,8 @@ class HPMAgent:
         # Default evaluator weights (will be modulated by development)
         self.beta_aff = 0.4
         self.gamma_soc = 0.3
+        
+        self._pool = ParallelPatternPool(num_workers=num_workers)
 
     def gossip_with_substrate(self, substrate: ExternalSubstrate):
         """Retrieve a random pattern from the collective substrate and inject it into the local population."""
@@ -99,31 +102,35 @@ class HPMAgent:
         if len(self.obs_buffer) > 100:
             self.obs_buffer = self.obs_buffer[-100:]
 
-        # 1. Update Epistemic State (running loss) and Parameters for all patterns
-        for p in self.patterns:
-            p.observe(obs, learning_rate=0.02)
-            # Hierarchical patterns also perform within-pattern sequence adaptation (EM)
-            if p.complexity >= 2 and len(self.obs_buffer) >= 10:
-                # Use a sliding window of the last 20 observations for stability
-                p.adapt(self.obs_buffer[-20:])
-                
-            p.update_running_loss(self.obs_buffer, lambda_l=0.1)
-
-        # 2. Update Social Context (Pattern Field)
+        # 1. Update Social Context (Pattern Field) - Move up for workers
         field_freq = self.field.update(self.patterns)
 
-        # 3. Compute Total Scores (Utilities)
+        # 2. Parallel per-pattern update + score computation
+        worker_params = {
+            'learning_rate': 0.02,
+            'lambda_l': 0.1,
+            'adapt_window': 20,
+            'beta_aff': self.beta_aff,
+            'gamma_soc': self.gamma_soc,
+            'external_soc_map': self.external_social_scores,
+        }
+
+        results = self._pool.map_patterns(
+            self.patterns, self.obs_buffer, field_freq, worker_params
+        )
+
+        # 3. Write updated state back into pattern objects and collect totals
+        result_by_id = {r['pattern_id']: r for r in results}
         totals = {}
         for p in self.patterns:
-            # Get peer review / institutional feedback from stored scores
-            ext_soc = self.external_social_scores.get(p.id, 0.5)
-            
-            totals[p.id] = total_score(
-                p, self.obs_buffer, field_freq,
-                beta_aff=self.beta_aff,
-                gamma_soc=self.gamma_soc,
-                external_soc=ext_soc
-            )
+            r = result_by_id[p.id]
+            p.A3   = r['A3'];  p.A32  = r['A32']
+            p.A21  = r['A21']; p.B    = r['B']
+            p.pi3  = r['pi3']
+            p.SS_A3  = r['SS_A3'];  p.SS_A32 = r['SS_A32']
+            p.SS_A21 = r['SS_A21']; p.SS_B   = r['SS_B']
+            p.running_loss = r['running_loss']
+            totals[p.id] = r['total_score']
 
         # 4. Meta Pattern Update (Replicator Dynamics with Conflict)
         k_mat = compute_conflict_matrix(self.patterns)

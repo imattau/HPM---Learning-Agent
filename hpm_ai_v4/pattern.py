@@ -311,33 +311,38 @@ class HierarchicalPattern:
                     mi += joint_z2z1[z2, z1] * np.log(joint_z2z1[z2, z1] / (p_z2[z2] * p_z1[z1] + 1e-12))
         return mi
 
+class FlatPattern(HierarchicalPattern):
+    """Degenerate hierarchical pattern that only learns surface-level frequencies."""
+    def __init__(self, pattern_id, obs_dim=2):
+        super().__init__(pattern_id, latent_dim=1, obs_dim=obs_dim)
+        self.complexity = 1
+        self.B = np.random.dirichlet(np.ones(obs_dim), size=1)
+
+    def log_likelihood(self, obs_seq):
+        if len(obs_seq) == 0: return 0.0
+        # Use B[0, obs] as the probability of observation
+        log_probs = [np.log(self.B[0, int(o) % self.obs_dim] + 1e-12) for o in obs_seq]
+        return np.sum(log_probs)
+
+    def update_running_loss(self, obs_seq, lambda_l=0.1):
+        ll = self.log_likelihood(obs_seq)
+        avg_loss = -ll / max(1, len(obs_seq))
+        self.running_loss = (1 - lambda_l) * self.running_loss + lambda_l * avg_loss
+
+    def observe(self, obs, learning_rate=0.01):
+        # Nudge the emission entry for the seen observation
+        idx = int(obs) % self.obs_dim
+        self.B[0, idx] += learning_rate
+        self.B[0] /= self.B[0].sum()
+
+    def adapt(self, obs_seq):
+        # Flat patterns don't need EM; they just update via observe
+        pass
+
+    def compression(self, obs_seq):
+        return 0.0
+
     @staticmethod
     def flat(id, obs_dim=2):
-        """Create a flat categorical pattern for baseline comparison."""
-        p = HierarchicalPattern(id, obs_dim=obs_dim)
-        p.complexity = 1
-        # Emissions: p(x | z1), but z1 is always 0 for flat
-        p.B = np.random.dirichlet(np.ones(obs_dim), size=p.latent_dim)
-        
-        def flat_ll(obs_seq):
-            if len(obs_seq) == 0: return 0.0
-            # Use B[0, obs] as the probability of observation
-            log_probs = [np.log(p.B[0, int(o) % p.obs_dim] + 1e-12) for o in obs_seq]
-            return np.sum(log_probs)
-            
-        def flat_update_loss(obs_seq, lambda_l=0.1):
-            ll = flat_ll(obs_seq)
-            avg_loss = -ll / max(1, len(obs_seq))
-            p.running_loss = (1 - lambda_l) * p.running_loss + lambda_l * avg_loss
-
-        def flat_observe(obs, learning_rate=0.01):
-            # Nudge the emission entry for the seen observation
-            idx = int(obs) % p.obs_dim
-            p.B[0, idx] += learning_rate
-            p.B[0] /= p.B[0].sum()
-
-        p.log_likelihood = flat_ll
-        p.update_running_loss = flat_update_loss
-        p.observe = flat_observe
-        p.compression = lambda obs_seq: 0.0
-        return p
+        """Backwards compatibility for creating flat patterns."""
+        return FlatPattern(id, obs_dim=obs_dim)
