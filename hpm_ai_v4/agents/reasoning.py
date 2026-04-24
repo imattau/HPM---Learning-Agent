@@ -83,6 +83,26 @@ class Reasoner:
             
         return simulated
 
+    def simulate_future(self, steps: int = 10, top_k: int = 3) -> List[int]:
+        """Generate imagined future sequence by sampling from blended population prediction."""
+        context = list(self.agent.obs_buffer[-20:]) if self.agent.obs_buffer else []
+        simulated: List[int] = []
+
+        for _ in range(steps):
+            relevant = self.get_relevant_patterns(context, top_k=top_k)
+            if not relevant:
+                simulated.append(0)
+                continue
+            dist = self.compose_predictions(relevant, context)
+            dist = dist / (dist.sum() + 1e-12)
+            obs = int(np.random.choice(len(dist), p=dist))
+            simulated.append(obs)
+            context.append(obs)
+            if len(context) > 40:
+                context = context[-40:]
+
+        return simulated
+
     def plan(self, goal_state: int, horizon: int = 5, num_rollouts: int = 10) -> List[int]:
         """Search for a sequence of observations that reaches the goal state using stochastic rollouts."""
         best_seq = []

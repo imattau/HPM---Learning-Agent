@@ -13,7 +13,7 @@ class TotalHPMSystem:
         self.output_adapter = output_adapter
         self.meta_layer = HPMMetaLayer(env, num_agents=num_agents, obs_dim=input_adapter.obs_dim)
 
-    def step(self, raw_input: Any):
+    def step(self, raw_input: Any) -> Optional[int]:
         """Perform one complete cognitive cycle from raw input to action."""
         # 1. Input Processing: Raw Data -> Discrete Tokens
         obs_seq = self.input_adapter.to_observations(raw_input)
@@ -22,13 +22,11 @@ class TotalHPMSystem:
         for obs in obs_seq:
             self.meta_layer.run_step(obs)
             
-        # 3. Decision / Action: Select best pattern from population
-        all_patterns = [p for a in self.meta_layer.agent_pool.agents for p in a.patterns]
-        if all_patterns:
-            best_pattern = max(all_patterns, key=lambda p: p.weight)
-            # Use representative history from first agent
-            history = self.meta_layer.agent_pool.agents[0].obs_buffer[-20:]
-            prediction = best_pattern.predict_next(history)
+        # 3. Decision / Action: Deliberative act via primary agent's reasoning layer
+        agents = self.meta_layer.agent_pool.agents
+        if agents:
+            primary_agent = agents[0]
+            prediction = primary_agent.act()
             
             # 4. Output Adaptation
             self.output_adapter.act(prediction, context=None)
