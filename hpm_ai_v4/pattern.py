@@ -238,15 +238,65 @@ class HierarchicalPattern:
             # Flat pattern: return emission distribution from B[0]
             return self.B[0]
 
-    def predict_next(self, obs_seq):
-        """Predict the most likely next observation."""
-        dist = self.predict_next_distribution(obs_seq)
-        return int(np.argmax(dist))
-
     def update_running_loss(self, obs_seq, lambda_l=0.1):
         ll = self.log_likelihood(obs_seq)
         avg_loss = -ll / max(1, len(obs_seq))
         self.running_loss = (1 - lambda_l) * self.running_loss + lambda_l * avg_loss
+
+    def grow_latent(self, noise_scale: float = 0.01) -> None:
+        """
+        Expand latent dimension from K to K+1 in-place.
+
+        Existing parameter rows are preserved; the new row/column is
+        initialised near uniform with small noise. All rows are
+        re-normalised after expansion.
+        """
+        K = self.latent_dim
+        K1 = K + 1
+        rng = np.random.default_rng()
+
+        def expand_transition(A):
+            new_A = np.zeros((K1, K1))
+            new_A[:K, :K] = A
+            new_A[K, :] = 1.0 / K1 + rng.normal(0, noise_scale, K1)
+            new_A[:K, K] = np.abs(rng.normal(0, noise_scale, K))
+            new_A = np.abs(new_A)
+            row_sums = new_A.sum(axis=1, keepdims=True)
+            return new_A / (row_sums + 1e-12)
+
+        def expand_emission(B):
+            new_B = np.zeros((K1, self.obs_dim))
+            new_B[:K, :] = B
+            new_B[K, :] = B.mean(axis=0) + rng.normal(0, noise_scale, self.obs_dim)
+            new_B = np.abs(new_B)
+            row_sums = new_B.sum(axis=1, keepdims=True)
+            return new_B / (row_sums + 1e-12)
+
+        def expand_ss_transition(SS):
+            new_SS = np.ones((K1, K1)) * 0.1
+            new_SS[:K, :K] = SS
+            return new_SS
+
+        def expand_ss_emission(SS):
+            new_SS = np.ones((K1, self.obs_dim)) * 0.1
+            new_SS[:K, :] = SS
+            return new_SS
+
+        self.A3  = expand_transition(self.A3)
+        self.A32 = expand_transition(self.A32)
+        self.A21 = expand_transition(self.A21)
+        self.B   = expand_emission(self.B)
+
+        new_pi = np.append(self.pi3, 1.0 / K1)
+        new_pi = np.abs(new_pi)
+        self.pi3 = new_pi / (new_pi.sum() + 1e-12)
+
+        self.SS_A3  = expand_ss_transition(self.SS_A3)
+        self.SS_A32 = expand_ss_transition(self.SS_A32)
+        self.SS_A21 = expand_ss_transition(self.SS_A21)
+        self.SS_B   = expand_ss_emission(self.SS_B)
+
+        self.latent_dim = K1
 
     def compression(self, obs_seq):
         """Compute Comp(h) = I(z1; z2) = H[z1] - H[z1 | z2] as in Appendix A.3."""

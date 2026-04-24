@@ -128,3 +128,49 @@ class VisualisationAdapter(OutputAdapter):
         plt.savefig(path)
         plt.close()
         return path
+
+class CharClassAdapter:
+    """
+    Maps 95 printable ASCII character IDs (ord(ch)-32 for ch in range(32,127))
+    to 5 coarse character classes, reducing obs_dim from 95 to 5.
+
+    Classes:
+        0 = letter      (A-Z: IDs 33-58, a-z: IDs 65-90)
+        1 = digit       (0-9: IDs 16-25)
+        2 = space       (ID 0)
+        3 = punctuation (all other printable ASCII)
+        4 = newline     (ord('\n')-32 = -22, passed as sentinel)
+    """
+
+    CLASS_NAMES = ['letter', 'digit', 'space', 'punctuation', 'newline']
+    NEWLINE_ID = -22  # ord('\n') - 32
+
+    def __init__(self):
+        # Build lookup table for IDs 0-94
+        self._table = {}
+        for char_id in range(95):
+            ch = chr(char_id + 32)
+            if ch == ' ':
+                self._table[char_id] = 2
+            elif ch.isdigit():
+                self._table[char_id] = 1
+            elif ch.isalpha():
+                self._table[char_id] = 0
+            else:
+                self._table[char_id] = 3
+
+    @property
+    def obs_dim(self) -> int:
+        return 5
+
+    def encode(self, char_id: int) -> int:
+        """Map a character ID (ord(ch)-32) to a class ID 0-4."""
+        if char_id == self.NEWLINE_ID:
+            return 4
+        return self._table.get(char_id, 3)  # default to punctuation
+
+    def decode_class(self, class_id: int) -> str:
+        """Return the name of the character class."""
+        if class_id < 0 or class_id >= len(self.CLASS_NAMES):
+            raise ValueError(f"class_id {class_id} out of range [0, 4]")
+        return self.CLASS_NAMES[class_id]

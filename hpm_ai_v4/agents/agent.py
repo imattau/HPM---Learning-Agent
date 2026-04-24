@@ -96,6 +96,26 @@ class HPMAgent:
             new_p.weight = 0.05
             self.patterns.append(new_p)
 
+    def _maybe_grow_patterns(self, max_K: int = 8, loss_threshold: float = 1.0) -> None:
+        """
+        Check each pattern and grow its latent dimension if:
+          - compression() > 0.3  (pattern has learned structure)
+          - running_loss > loss_threshold  (still has significant error)
+          - latent_dim < max_K  (not already at cap)
+        """
+        for p in self.patterns:
+            if p.complexity < 2:
+                continue  # FlatPattern: not eligible
+            if p.latent_dim >= max_K:
+                continue
+            if p.running_loss <= loss_threshold:
+                continue
+            compression = p.compression(self.obs_buffer)
+            if compression > 0.3:
+                p.grow_latent()
+                print(f"[HPMAgent] Pattern {p.id} grew to K={p.latent_dim} "
+                      f"(compression={compression:.3f}, loss={p.running_loss:.3f})")
+
     def perceive_and_learn(self, obs: int):
         """Update patterns based on a new observation."""
         self.obs_buffer.append(obs)
@@ -164,6 +184,10 @@ class HPMAgent:
 
         # 8. Developmental Update
         self.development.update(self.patterns, self.step_counter)
+
+        # 9. Adaptive K growth (checked every 500 steps)
+        if self.step_counter > 0 and self.step_counter % 500 == 0:
+            self._maybe_grow_patterns()
 
         self.step_counter += 1
 
