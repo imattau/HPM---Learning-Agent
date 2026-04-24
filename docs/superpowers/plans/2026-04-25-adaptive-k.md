@@ -389,7 +389,7 @@ def test_grow_called_when_conditions_met():
     pattern = make_mock_pattern(compression_val=0.5, running_loss_val=2.0, latent_dim=2)
     agent.patterns = [pattern]
 
-    agent._maybe_grow_patterns(max_K=8, loss_threshold=1.0)
+    agent._maybe_grow_patterns(max_K=4, loss_threshold=1.0)
 
     pattern.grow_latent.assert_called_once()
 
@@ -403,7 +403,7 @@ def test_grow_not_called_when_compression_low():
     pattern = make_mock_pattern(compression_val=0.1, running_loss_val=2.0, latent_dim=2)
     agent.patterns = [pattern]
 
-    agent._maybe_grow_patterns(max_K=8, loss_threshold=1.0)
+    agent._maybe_grow_patterns(max_K=4, loss_threshold=1.0)
 
     pattern.grow_latent.assert_not_called()
 
@@ -417,7 +417,7 @@ def test_grow_not_called_when_loss_low():
     pattern = make_mock_pattern(compression_val=0.5, running_loss_val=0.5, latent_dim=2)
     agent.patterns = [pattern]
 
-    agent._maybe_grow_patterns(max_K=8, loss_threshold=1.0)
+    agent._maybe_grow_patterns(max_K=4, loss_threshold=1.0)
 
     pattern.grow_latent.assert_not_called()
 
@@ -431,7 +431,7 @@ def test_grow_not_called_at_max_k():
     pattern = make_mock_pattern(compression_val=0.5, running_loss_val=2.0, latent_dim=8)
     agent.patterns = [pattern]
 
-    agent._maybe_grow_patterns(max_K=8, loss_threshold=1.0)
+    agent._maybe_grow_patterns(max_K=4, loss_threshold=1.0)
 
     pattern.grow_latent.assert_not_called()
 
@@ -485,7 +485,7 @@ AttributeError: 'HPMAgent' object has no attribute '_maybe_grow_patterns'
 Add the private method to `HPMAgent` in `hpm_ai_v4/agents/agent.py`, after the `gossip_with_substrate` method:
 
 ```python
-def _maybe_grow_patterns(self, max_K: int = 8, loss_threshold: float = 1.0) -> None:
+def _maybe_grow_patterns(self, max_K: int = 4, loss_threshold: float = 1.0) -> None:
     """
     Check each pattern and grow its latent dimension if:
       - compression() > 0.3  (pattern has learned structure)
