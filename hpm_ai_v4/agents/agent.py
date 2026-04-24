@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 from typing import List, Dict, Any, Optional
 
 from hpm_ai_v4.pattern import HierarchicalPattern
@@ -82,6 +83,16 @@ class HPMAgent:
         self.beta_aff = 0.4
         self.gamma_soc = 0.3
 
+    def gossip_with_substrate(self, substrate: ExternalSubstrate):
+        """Retrieve a random pattern from the collective substrate and inject it into the local population."""
+        other = substrate.get_random_pattern()
+        if other is not None and other.id not in [p.id for p in self.patterns]:
+            # Incorporate as a low-weight hypothesis to avoid population destabilization
+            new_p = copy.deepcopy(other)
+            # Re-id to avoid local collisions if necessary, or just keep global ID
+            new_p.weight = 0.05
+            self.patterns.append(new_p)
+
     def perceive_and_learn(self, obs: int):
         """Update patterns based on a new observation."""
         self.obs_buffer.append(obs)
@@ -137,8 +148,11 @@ class HPMAgent:
                     child.weight = 0.05
                     self.patterns.append(child)
 
-        # 7. Persistence / Substrate Sharing
-        if self.step_counter % 10 == 0:
+        # 7. Persistence / Substrate Sharing & Gossip
+        if self.step_counter % 20 == 0:
+            self.external.broadcast(self.patterns)
+            self.gossip_with_substrate(self.external)
+        elif self.step_counter % 10 == 0:
             self.external.broadcast(self.patterns)
 
         # 8. Developmental Update

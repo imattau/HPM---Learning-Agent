@@ -84,7 +84,7 @@ class Reasoner:
         return simulated
 
     def plan(self, goal_state: int, horizon: int = 5, num_rollouts: int = 10) -> List[int]:
-        """Search for a sequence of observations that reaches the goal state."""
+        """Search for a sequence of observations that reaches the goal state using stochastic rollouts."""
         best_seq = []
         best_score = -np.inf
         
@@ -97,13 +97,18 @@ class Reasoner:
                 relevant = self.get_relevant_patterns(curr_obs, top_k=1)
                 if not relevant: break
                 
+                # Stochastic rollout: sample from the predictive distribution
                 dist = relevant[0].predict_next_distribution(curr_obs)
-                action = np.argmax(dist) # In this simple sim, 'action' is targeting next obs
+                # Ensure it sums to 1
+                dist = dist / (dist.sum() + 1e-12)
+                action = np.random.choice(len(dist), p=dist)
+                
                 seq.append(int(action))
                 curr_obs.append(int(action))
                 
             if seq:
-                # Score based on goal proximity
+                # Score based on goal proximity at the end of the horizon
+                # (Could also be cumulative, but we'll stick to target reaching)
                 score = -abs(seq[-1] - goal_state)
                 if score > best_score:
                     best_score = score

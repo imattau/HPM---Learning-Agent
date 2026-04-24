@@ -67,6 +67,23 @@ class ContinuousSignalAdapter(InputAdapter):
         inds = np.clip(inds, 0, self.num_bins - 1)
         return inds[:max_length].tolist()
 
+class DiscreteInputAdapter(InputAdapter):
+    """Simple pass-through for already discretized integer tokens."""
+    def __init__(self, obs_dim=2):
+        self._obs_dim = obs_dim
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        if isinstance(raw_input, int):
+            return [raw_input % self._obs_dim]
+        elif isinstance(raw_input, (list, np.ndarray)):
+            return [int(x) % self._obs_dim for x in raw_input][:max_length]
+        else:
+            return [0]
+
 class OutputAdapter:
     """Base class for converting internal pattern output to external action."""
     def act(self, token: int, context: Any) -> Any:
@@ -78,6 +95,12 @@ class MotorAdapter(OutputAdapter):
         mapping = {0: (-1, 0), 1: (1, 0), 2: (0, 1), 3: (0, -1)}
         dx, dy = mapping.get(token, (0, 0))
         return dx, dy
+
+class ConsoleOutputAdapter(OutputAdapter):
+    """Simple adapter that prints the prediction to the console."""
+    def act(self, token: int, context: Any = None):
+        print(f"[HPM Action] Predicted next observation: {token}")
+        return token
 
 class VisualisationAdapter(OutputAdapter):
     """Render a pattern's transition matrices into an image file."""

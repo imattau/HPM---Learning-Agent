@@ -36,10 +36,12 @@ class SocialNetwork:
         """Create a structural signature for grouping similar patterns."""
         if p.complexity < 2:
             return "flat"
-        # Discretize top-level dynamics and emission for identification
+        # Discretize multiple parameters to create a robust structural hash
+        # Use mean of diagonals to capture 'stability' vs 'alternating' dynamics
         key = (
-            np.round(p.A3[0,0], 1),
-            np.round(p.B[0,0], 1),
+            np.round(np.diag(p.A3).mean(), 1),
+            np.round(np.diag(p.A32).mean(), 1),
+            np.round(p.B.mean(axis=0)[0], 1), # average emission bias
             p.complexity
         )
         return str(key)
