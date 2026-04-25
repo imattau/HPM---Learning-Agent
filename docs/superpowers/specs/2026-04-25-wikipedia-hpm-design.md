@@ -101,25 +101,37 @@ B matrix shape: (2×5) — trivially fast EM. A3, A32, A21 all (2×2).
 
 A separate **PatternField** tracks population-level frequencies for Level-1 replicator dynamics.
 
-### Level 2 — Chunk Detectors (5 patterns, K=2, obs_dim=2)
+### Level 2 — Bigram/Trigram Detectors (5 patterns, K=4, obs_dim=95)
 
-**Input**: SEQUENCE of Level-1 latent state (argmax of `alpha[-1]` from the best Level-1 pattern,
-yielding a binary symbol 0 or 1).
+**Input**: ACTUAL character ID stream — `ord(ch) - 32` for printable ASCII 32–126, yielding IDs in
+{0, …, 94}. This is the raw character stream, NOT Level-1 latent states.
 
-Each pattern is a `HierarchicalPattern(latent_dim=2, obs_dim=2)`. Five patterns specialise into:
+Each pattern is a `HierarchicalPattern(latent_dim=4, obs_dim=95)`. K=4 is used here because a
+(2×95) B matrix is underdetermined: with only 2 latent states covering 95 observed values, many
+rare characters would collapse onto a single state. K=4 gives a (4×95) B matrix (380 parameters)
+— still tractable but sufficient to capture distinctions such as "vowel-following-consonant" vs
+"consonant-following-vowel" vs "space-following-word" vs "digit/punctuation context".
+
+Five patterns specialise into:
 
 | Pattern | Expected specialisation |
 |---|---|
-| P1 | word-start detector (space→letter transition) |
-| P2 | word-end detector (letter→space transition) |
-| P3 | space-run detector (space→space) |
-| P4–P5 | other short-sequence regularities |
+| P1 | common bigrams (e.g. "th", "he", "in") |
+| P2 | word-ending patterns (e.g. "ing", "ed", "er") |
+| P3 | space-following-letter vs letter-following-space transitions |
+| P4–P5 | vowel/consonant alternation and rare character contexts |
 
-B matrix shape: (2×2). All transition matrices (2×2).
+B matrix shape: (4×95). All transition matrices (4×4).
+
+**Chunked EM**: Level 2 B matrix updates run every 100 steps (chunked EM) rather than per-step,
+to keep (4×95) = 380-parameter updates tractable.
 
 ### Level 3 — Grammar Patterns (3 patterns, K=2, obs_dim=2)
 
-**Input**: SEQUENCE of Level-2 latent state (argmax of `alpha[-1]` from the best Level-2 pattern).
+**Input**: SEQUENCE of Level-1 latent state (argmax of `alpha[-1]` from the best Level-1 pattern,
+yielding a binary symbol 0 or 1). Level 3 receives Level 1 output — NOT Level 2 output — because
+Level 1's binary char-class state captures word-boundary grammar (letter/non-letter transitions)
+at the right abstraction for sentence-level patterns.
 
 Three patterns learn transitions between word-level units (e.g. word-boundary sequences,
 punctuation clusters, paragraph structure).

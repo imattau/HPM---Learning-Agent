@@ -2,10 +2,16 @@ import numpy as np
 from typing import List, Optional
 from hpm_ai_v4.pattern import HierarchicalPattern
 
+from hpm_ai_v4.tools.dictionary import DictionaryValidator
+from hpm_ai_v4.tools.grammar import GrammarValidator
+
 class Reasoner:
     """Deliberative reasoning layer sitting above the HPM core."""
-    def __init__(self, agent):
+    def __init__(self, agent, dictionary: Optional[DictionaryValidator] = None,
+                 grammar: Optional[GrammarValidator] = None):
         self.agent = agent
+        self.dictionary = dictionary
+        self.grammar = grammar
 
     def get_relevant_patterns(self, context_obs: List[int], top_k: int = 5) -> List[HierarchicalPattern]:
         """Return patterns with highest predictive likelihood for given context."""
@@ -99,8 +105,12 @@ class Reasoner:
 
         return simulated
 
-    def plan(self, goal_state: int, horizon: int = 5, num_rollouts: int = 10) -> List[int]:
-        """Search for a sequence of observations that reaches the goal state using stochastic rollouts."""
+    def plan(self, goal_state: int, horizon: int = 5, num_rollouts: int = 10,
+             require_valid_words: bool = True, require_grammatical: bool = True) -> List[int]:
+        """
+        Search for a sequence of observations that reaches the goal state using stochastic rollouts.
+        Prunes invalid word completions and ungrammatical POS transitions.
+        """
         best_seq = []
         best_score = -np.inf
         
@@ -110,27 +120,117 @@ class Reasoner:
             seq = []
             curr_obs = list(curr_obs_base)
             for _ in range(horizon):
-                relevant = self.get_relevant_patterns(curr_obs, top_k=1)
+                relevant = self.get_relevant_patterns(curr_obs, top_k=3)
                 if not relevant: break
                 
-                # Stochastic rollout: sample from the predictive distribution
-                dist = relevant[0].predict_next_distribution(curr_obs)
-                # Ensure it sums to 1
+                # Get blended prediction
+                dist = self.compose_predictions(relevant, curr_obs)
                 dist = dist / (dist.sum() + 1e-12)
+                
+                # Sample a candidate
                 action = np.random.choice(len(dist), p=dist)
+                
+                # Linguistic guidance
+                if self._is_word_boundary(curr_obs, action):
+                    # Check grammar when finishing a word
+                    if self.grammar and require_grammatical:
+                        prev_word = self._last_word(curr_obs)
+                        curr_word = self._partial_word(curr_obs, action)
+                        if prev_word and curr_word:
+                            if not self.grammar.is_valid_transition(prev_word, curr_word):
+                                # Penalise by sampling again
+                                action = np.random.choice(len(dist), p=dist)
+                else:
+                    # Check dictionary prefix
+                    if self.dictionary and require_valid_words:
+                        word_so_far = self._partial_word(curr_obs, action)
+                        if word_so_far and not self.dictionary.is_prefix(word_so_far):
+                            action = np.random.choice(len(dist), p=dist)
                 
                 seq.append(int(action))
                 curr_obs.append(int(action))
                 
             if seq:
-                # Score based on goal proximity at the end of the horizon
-                # (Could also be cumulative, but we'll stick to target reaching)
+                # Score based on goal proximity
                 score = -abs(seq[-1] - goal_state)
+                
+                # Linguistic bonus
+                if self._word_completed(curr_obs):
+                    last_word = self._last_word(curr_obs)
+                    # Lexical
+                    if self.dictionary:
+                        score += 0.5 * self.dictionary.score_word(last_word)
+                    # Syntactic
+                    if self.grammar:
+                        prev_word = self._word_before_last(curr_obs)
+                        if prev_word and last_word:
+                            if self.grammar.is_valid_transition(prev_word, last_word):
+                                score += 0.3
+                    
                 if score > best_score:
                     best_score = score
                     best_seq = seq
                     
         return best_seq
+
+    def _is_word_boundary(self, obs_seq, next_obs) -> bool:
+        """Space (approx token 0 in TextAdapter or 2 in CharClass) indicates boundary."""
+        if not obs_seq: return True
+        # Space followed by letter/digit
+        return obs_seq[-1] in (0, 2) and next_obs not in (0, 2)
+
+    def _partial_word(self, obs_seq, next_obs) -> str:
+        """Reconstruct partial word from recent tokens."""
+        # Find last space
+        tokens = obs_seq + [next_obs]
+        last_space = -1
+        for i in range(len(tokens)-1, -1, -1):
+            if tokens[i] in (0, 2): # Space token
+                last_space = i
+                break
+        
+        word_tokens = tokens[last_space+1:]
+        if not word_tokens: return ""
+        
+        # Convert tokens to chars. Assuming TextAdapter (token + 32 = ord)
+        chars = []
+        for t in word_tokens:
+            if t < 256:
+                chars.append(chr(t + 32))
+            else:
+                chars.append('?')
+        return "".join(chars)
+
+    def _word_completed(self, obs_seq) -> bool:
+        """True if last token was a space or punctuation."""
+        if not obs_seq: return False
+        return obs_seq[-1] in (0, 2)
+
+    def _last_word(self, obs_seq) -> str:
+        if not obs_seq: return ""
+        # Find the segment before the last space
+        idx = -1
+        for i in range(len(obs_seq)-2, -1, -1):
+            if obs_seq[i] in (0, 2):
+                idx = i
+                break
+        return self._partial_word(obs_seq[:idx+1], obs_seq[idx+1] if idx+1 < len(obs_seq) else 0)
+
+    def _word_before_last(self, obs_seq) -> str:
+        """Extract the word before the last completed word."""
+        if not obs_seq: return ""
+        # Find last space
+        spaces = [i for i, t in enumerate(obs_seq) if t in (0, 2)]
+        if len(spaces) < 2: return ""
+        
+        last_space = spaces[-1]
+        second_last_space = spaces[-2]
+        
+        word_tokens = obs_seq[second_last_space+1 : last_space]
+        if not word_tokens: return ""
+        
+        chars = [chr(t + 32) if t < 256 else '?' for t in word_tokens]
+        return "".join(chars).lower()
 
     def explain(self, pattern: HierarchicalPattern) -> str:
         """Translate pattern structure into human-readable description."""

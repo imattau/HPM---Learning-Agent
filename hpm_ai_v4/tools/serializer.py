@@ -6,7 +6,7 @@ from hpm_ai_v4.pattern import HierarchicalPattern
 
 FIELDS = ['id', 'A', 'B', 'pi', 'latent_dim', 'obs_dim',
           'running_loss', 'weight', 'creation_step']
-OPTIONAL = ['source_corpus', 'density_at_save']
+OPTIONAL = ['source_corpus', 'density_at_save', 'level']
 
 
 class PatternSerializer:

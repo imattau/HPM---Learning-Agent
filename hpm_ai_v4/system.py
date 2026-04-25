@@ -2,16 +2,21 @@ import numpy as np
 from typing import List, Any, Optional
 from hpm_ai_v4.meta import HPMMetaLayer
 from hpm_ai_v4.io.adapters import InputAdapter, OutputAdapter
+from hpm_ai_v4.tools.dictionary import DictionaryValidator
+from hpm_ai_v4.tools.grammar import GrammarValidator
 
 class TotalHPMSystem:
     """
     Complete HPM cognitive architecture integrating I/O, Core, and Meta layers.
     """
     def __init__(self, input_adapter: InputAdapter, output_adapter: OutputAdapter, 
-                 env: Any, num_agents: int = 3):
+                 env: Any, num_agents: int = 3, 
+                 dictionary: Optional[DictionaryValidator] = None,
+                 grammar: Optional[GrammarValidator] = None):
         self.input_adapter = input_adapter
         self.output_adapter = output_adapter
-        self.meta_layer = HPMMetaLayer(env, num_agents=num_agents, obs_dim=input_adapter.obs_dim)
+        self.meta_layer = HPMMetaLayer(env, num_agents=num_agents, obs_dim=input_adapter.obs_dim, 
+                                       dictionary=dictionary, grammar=grammar)
 
     def step(self, raw_input: Any) -> Optional[int]:
         """Perform one complete cognitive cycle from raw input to action."""

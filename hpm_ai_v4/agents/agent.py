@@ -9,6 +9,8 @@ from hpm_ai_v4.operators.dynamics import compute_conflict_matrix, meta_pattern_u
 from hpm_ai_v4.field import PatternField, InstitutionalField
 from hpm_ai_v4.tools.substrate import ExternalSubstrate
 from hpm_ai_v4.agents.reasoning import Reasoner
+from hpm_ai_v4.tools.dictionary import DictionaryValidator
+from hpm_ai_v4.tools.grammar import GrammarValidator
 
 class DevelopmentalStage:
     """Modulates evaluator focus based on current population complexity."""
@@ -58,8 +60,12 @@ class DevelopmentalStage:
 class HPMAgent:
     """The central HPM learner, integrating patterns, evaluators, and fields."""
     def __init__(self, num_initial_patterns: int = 5, external_substrate: Optional[ExternalSubstrate] = None,
-                 obs_dim: int = 2, num_workers: int = 1):
+                 obs_dim: int = 2, num_workers: int = 1, 
+                 dictionary: Optional[DictionaryValidator] = None,
+                 grammar: Optional[GrammarValidator] = None):
         self.obs_dim = obs_dim
+        self.dictionary = dictionary
+        self.grammar = grammar
         self.patterns = []
         for i in range(num_initial_patterns):
             p = HierarchicalPattern(pattern_id=i, obs_dim=obs_dim)
@@ -74,7 +80,7 @@ class HPMAgent:
         self.external = external_substrate if external_substrate else ExternalSubstrate()
         self.field = PatternField()
         self.development = DevelopmentalStage(self)
-        self.reasoner = Reasoner(self)
+        self.reasoner = Reasoner(self, dictionary=dictionary, grammar=grammar)
         
         self.step_counter = 0
         self.obs_buffer = []
