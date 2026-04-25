@@ -34,3 +34,36 @@ def test_wikipedia_stream_loops():
         if i >= 5: break
     os.unlink(path)
     assert len(ids) == 6  # loops back (0, 1, 0, 1, 0, 1)
+
+from hpm_ai_v4.simulations.full_simulation import _metrics_snapshot
+from hpm_ai_v4.agents.agent import HPMAgent
+
+def _make_agent():
+    agent = HPMAgent(obs_dim=95, num_initial_patterns=3, num_workers=1)
+    # Feed some observations so buffer is not empty
+    for i in range(50):
+        agent.perceive_and_learn(i % 95)
+    return agent
+
+def test_metrics_snapshot_returns_dict():
+    agent = _make_agent()
+    recent = list(range(50))
+    snap = _metrics_snapshot(agent, recent, step=50)
+    assert 'accuracy' in snap
+    assert 'compression_mi' in snap
+    assert 'pop_size' in snap
+    assert 'best_weight' in snap
+    assert 'dev_stage' in snap
+    assert 'best_loss' in snap
+
+def test_metrics_snapshot_accuracy_range():
+    agent = _make_agent()
+    recent = list(range(100))
+    snap = _metrics_snapshot(agent, recent, step=100)
+    assert 0.0 <= snap['accuracy'] <= 1.0
+
+def test_metrics_snapshot_no_dict():
+    agent = _make_agent()
+    recent = list(range(50))
+    snap = _metrics_snapshot(agent, recent, step=50)
+    assert snap.get('word_completion') is None  # no dictionary attached
