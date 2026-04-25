@@ -67,3 +67,41 @@ def test_metrics_snapshot_no_dict():
     recent = list(range(50))
     snap = _metrics_snapshot(agent, recent, step=50)
     assert snap.get('word_completion') is None  # no dictionary attached
+
+from hpm_ai_v4.simulations.full_simulation import _benchmark_report
+import io, sys
+
+def test_benchmark_report_outputs_table(capsys):
+    history = [
+        {'step': 0,     'accuracy': 0.01, 'compression_mi': 0.0,  'pop_size': 6, 'word_completion': None},
+        {'step': 50000, 'accuracy': 0.45, 'compression_mi': 0.15, 'pop_size': 4, 'word_completion': 0.25},
+        {'step': 99000, 'accuracy': 0.55, 'compression_mi': 0.22, 'pop_size': 5, 'word_completion': 0.35},
+    ]
+    _benchmark_report(history)
+    out = capsys.readouterr().out
+    assert 'accuracy' in out.lower()
+    assert 'PASS' in out or 'FAIL' in out
+
+def test_benchmark_report_pass_fail():
+    history = [
+        {'step': 99000, 'accuracy': 0.60, 'compression_mi': 0.25, 'pop_size': 5, 'word_completion': 0.40},
+    ]
+    import io, sys
+    captured = io.StringIO()
+    sys.stdout = captured
+    _benchmark_report(history)
+    sys.stdout = sys.__stdout__
+    out = captured.getvalue()
+    assert 'PASS' in out
+
+def test_benchmark_report_fail():
+    history = [
+        {'step': 99000, 'accuracy': 0.02, 'compression_mi': 0.01, 'pop_size': 1, 'word_completion': 0.05},
+    ]
+    import io, sys
+    captured = io.StringIO()
+    sys.stdout = captured
+    _benchmark_report(history)
+    sys.stdout = sys.__stdout__
+    out = captured.getvalue()
+    assert 'FAIL' in out

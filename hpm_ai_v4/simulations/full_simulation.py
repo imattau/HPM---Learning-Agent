@@ -93,6 +93,47 @@ def _extract_prefixes(chars: List[int], n: int = 10) -> List[List[int]]:
     return prefixes
 
 
+def _benchmark_report(history: List[Dict[str, Any]]) -> None:
+    """Print pass/fail benchmark summary from metric history."""
+    if not history:
+        print("No metrics recorded.")
+        return
+
+    final = history[-1]
+    targets = [
+        ('Prediction accuracy',  'accuracy',        0.50),
+        ('Compression MI',       'compression_mi',  0.20),
+        ('Population survived',  'pop_size',        2),     # > 1 pattern
+    ]
+    if final.get('word_completion') is not None:
+        targets.append(('Word completion', 'word_completion', 0.30))
+
+    print("\n" + "=" * 60)
+    print("BENCHMARK REPORT")
+    print("=" * 60)
+    print(f"{'Metric':<28} {'Target':>8} {'Final':>8} {'':>6}")
+    print("-" * 60)
+    all_pass = True
+    for label, key, target in targets:
+        val = final.get(key, 0.0)
+        passed = val > target
+        if not passed:
+            all_pass = False
+        mark = 'PASS' if passed else 'FAIL'
+        print(f"{label:<28} {target:>8.2f} {val:>8.2f} {mark:>6}")
+
+    print("=" * 60)
+    print(f"Overall: {'ALL PASS' if all_pass else 'SOME FAILED'}")
+    print()
+
+    # Trajectory
+    print("Accuracy trajectory:")
+    for snap in history[::max(1, len(history)//10)]:
+        bar = '#' * int(snap.get('accuracy', 0) * 40)
+        print(f"  step {snap['step']:6d}: {snap.get('accuracy', 0):.3f} {bar}")
+    print()
+
+
 def _parse_args():
     p = argparse.ArgumentParser(description="Full HPM AI simulation")
     p.add_argument('--corpus', required=True, help='Path to plain-text corpus file')
