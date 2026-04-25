@@ -142,7 +142,7 @@ class HPMAgent:
         self.patterns = [p for p in self.patterns if p.weight > 1e-4]
 
         # 6. Recombination / Innovation
-        if self.step_counter > 0 and self.step_counter % 20 == 0:
+        if self.step_counter > 0 and self.step_counter % 20 == 0 and len(self.patterns) >= 2:
             weights = np.array([p.weight for p in self.patterns])
             if np.sum(weights) > 0:
                 probs = weights / np.sum(weights)
@@ -167,6 +167,22 @@ class HPMAgent:
         self.development.update(self.patterns, self.step_counter)
 
         self.step_counter += 1
+
+    def load_library(self, path: str, reset_weights: bool = True) -> int:
+        """Load patterns from a serialised library file.
+
+        Replaces self.patterns with the loaded population.
+        If reset_weights=True, normalises all weights to 1/N so no single
+        prior pattern dominates at the start of the new learning session.
+        Returns N (number of patterns loaded).
+        """
+        from hpm_ai_v4.tools.serializer import PatternSerializer
+        self.patterns = PatternSerializer.load(path)
+        if reset_weights and self.patterns:
+            w = 1.0 / len(self.patterns)
+            for p in self.patterns:
+                p.weight = w
+        return len(self.patterns)
 
     def act(self, goal: Optional[int] = None) -> int:
         """Select an action (next observation to aim for) using the reasoning layer."""
