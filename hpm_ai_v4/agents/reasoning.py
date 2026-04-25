@@ -232,6 +232,28 @@ class Reasoner:
         chars = [chr(t + 32) if t < 256 else '?' for t in word_tokens]
         return "".join(chars).lower()
 
+    def observe_outcome(self, actual_obs: int, context_obs: List[int], lambda_l: float = 0.1):
+        """Feed actual observation back as per-pattern prediction error.
+
+        Called after each real observation to close the loop between reasoning
+        outputs and pattern learning. Updates running_loss on each pattern
+        proportional to how wrong its prediction was, then applies lexical
+        reward at word boundaries if a dictionary is attached.
+        """
+        for p in self.agent.patterns:
+            dist = p.predict_next_distribution(context_obs)
+            error = float(-np.log(dist[actual_obs % p.obs_dim] + 1e-12))
+            p.running_loss = (1 - lambda_l) * p.running_loss + lambda_l * error
+
+        if self.dictionary and self._word_completed(context_obs + [actual_obs]):
+            word = self._last_word(context_obs + [actual_obs])
+            if word:
+                lex_score = self.dictionary.score_word(word)
+                # Positive score reduces loss; negative score increases it
+                reward = (lex_score - 0.5) * 0.1
+                for p in self.agent.patterns:
+                    p.running_loss = max(0.0, p.running_loss - reward)
+
     def explain(self, pattern: HierarchicalPattern) -> str:
         """Translate pattern structure into human-readable description."""
         if pattern.complexity >= 1:
