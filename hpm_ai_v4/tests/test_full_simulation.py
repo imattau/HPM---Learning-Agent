@@ -105,3 +105,36 @@ def test_benchmark_report_fail():
     sys.stdout = sys.__stdout__
     out = captured.getvalue()
     assert 'FAIL' in out
+
+from hpm_ai_v4.simulations.full_simulation import run_simulation
+
+def test_run_simulation_short(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("the quick brown fox jumps over the lazy dog " * 20)
+    history = run_simulation(
+        corpus_path=str(corpus),
+        total_steps=201,
+        log_every=100,
+        num_workers=1,
+        use_dict=False,
+        library_path=None,
+        checkpoint_dir=str(tmp_path),
+    )
+    assert len(history) >= 2
+    assert 'accuracy' in history[-1]
+    assert 'compression_mi' in history[-1]
+
+def test_run_simulation_saves_checkpoint(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("hello world " * 100)
+    run_simulation(
+        corpus_path=str(corpus),
+        total_steps=500,
+        log_every=200,
+        num_workers=1,
+        use_dict=False,
+        library_path=None,
+        checkpoint_dir=str(tmp_path),
+    )
+    # Should save final_library.pkl
+    assert (tmp_path / "final_library.pkl").exists()

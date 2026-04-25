@@ -134,6 +134,78 @@ def _benchmark_report(history: List[Dict[str, Any]]) -> None:
     print()
 
 
+def run_simulation(
+    corpus_path: str,
+    total_steps: int = 100_000,
+    log_every: int = 1_000,
+    num_workers: int = 1,
+    use_dict: bool = False,
+    library_path: Optional[str] = None,
+    checkpoint_dir: str = '.',
+) -> List[Dict[str, Any]]:
+    """Run the full HPM AI simulation. Returns metric history."""
+
+    dictionary = NLTKWordList() if use_dict else None
+
+    agent = HPMAgent(
+        obs_dim=95,
+        num_initial_patterns=6,
+        num_workers=num_workers,
+        dictionary=dictionary,
+    )
+
+    if library_path and os.path.exists(library_path):
+        n = agent.load_library(library_path, reset_weights=True)
+        print(f"Loaded {n} patterns from {library_path}")
+
+    stream = WikipediaStream(corpus_path)
+    stream_iter = iter(stream)
+
+    history: List[Dict[str, Any]] = []
+    recent_chars: List[int] = []
+    accuracy_buffer: List[int] = []  # actual chars for accuracy computation
+
+    print(f"Starting simulation: steps={total_steps} log_every={log_every} "
+          f"workers={num_workers} dict={use_dict}")
+
+    for step in range(total_steps):
+        char_id = next(stream_iter)
+        accuracy_buffer.append(char_id)
+        if len(accuracy_buffer) > log_every + 21:
+            accuracy_buffer = accuracy_buffer[-(log_every + 21):]
+
+        agent.perceive_and_learn(char_id)
+
+        recent_chars.append(char_id)
+        if len(recent_chars) > log_every:
+            recent_chars = recent_chars[-log_every:]
+
+        if step % log_every == 0 and step > 0:
+            snap = _metrics_snapshot(agent, list(accuracy_buffer), step)
+            history.append(snap)
+            wc = f"{snap['word_completion']:.3f}" if snap['word_completion'] is not None else 'n/a'
+            print(
+                f"[step {step:6d}] acc={snap['accuracy']:.3f} "
+                f"mi={snap['compression_mi']:.3f} "
+                f"wc={wc} "
+                f"pop={snap['pop_size']} "
+                f"stage={snap['dev_stage']} "
+                f"loss={snap['best_loss']:.3f}"
+            )
+
+        if step % 10_000 == 0 and step > 0:
+            ckpt_path = os.path.join(checkpoint_dir, f"checkpoint_{step}.pkl")
+            PatternSerializer.save(agent.patterns, ckpt_path)
+            print(f"  [checkpoint saved: {ckpt_path}]")
+
+    final_path = os.path.join(checkpoint_dir, "final_library.pkl")
+    PatternSerializer.save(agent.patterns, final_path)
+    print(f"Final library saved: {final_path}")
+
+    _benchmark_report(history)
+    return history
+
+
 def _parse_args():
     p = argparse.ArgumentParser(description="Full HPM AI simulation")
     p.add_argument('--corpus', required=True, help='Path to plain-text corpus file')
@@ -148,4 +220,12 @@ def _parse_args():
 
 if __name__ == '__main__':
     args = _parse_args()
-    print(f"corpus={args.corpus} steps={args.steps} workers={args.workers}")
+    run_simulation(
+        corpus_path=args.corpus,
+        total_steps=args.steps,
+        log_every=args.log_every,
+        num_workers=args.workers,
+        use_dict=args.dict,
+        library_path=args.library,
+        checkpoint_dir=args.checkpoint_dir,
+    )
