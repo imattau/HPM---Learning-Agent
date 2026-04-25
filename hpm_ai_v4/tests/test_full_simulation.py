@@ -1,6 +1,8 @@
 # hpm_ai_v4/tests/test_full_simulation.py
 import tempfile, os, pytest
-from hpm_ai_v4.simulations.full_simulation import WikipediaStream
+import numpy as np
+from hpm_ai_v4.simulations.full_simulation import WikipediaStream, _metrics_snapshot, _benchmark_report, run_simulation
+from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 
 def _write_corpus(text):
     f = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
@@ -35,14 +37,11 @@ def test_wikipedia_stream_loops():
     os.unlink(path)
     assert len(ids) == 6  # loops back (0, 1, 0, 1, 0, 1)
 
-from hpm_ai_v4.simulations.full_simulation import _metrics_snapshot
-from hpm_ai_v4.agents.agent import HPMAgent
-
 def _make_agent():
-    agent = HPMAgent(obs_dim=95, num_initial_patterns=3, num_workers=1)
+    agent = LayeredAgent(num_workers=1)
     # Feed some observations so buffer is not empty
     for i in range(50):
-        agent.perceive_and_learn(i % 95)
+        agent.perceive(i % 95)
     return agent
 
 def test_metrics_snapshot_returns_dict():
@@ -55,21 +54,20 @@ def test_metrics_snapshot_returns_dict():
     assert 'best_weight' in snap
     assert 'dev_stage' in snap
     assert 'best_loss' in snap
+    assert 'l2_accuracy' in snap
 
 def test_metrics_snapshot_accuracy_range():
     agent = _make_agent()
     recent = list(range(100))
     snap = _metrics_snapshot(agent, recent, step=100)
     assert 0.0 <= snap['accuracy'] <= 1.0
+    assert 0.0 <= snap['l2_accuracy'] <= 1.0
 
 def test_metrics_snapshot_no_dict():
     agent = _make_agent()
     recent = list(range(50))
     snap = _metrics_snapshot(agent, recent, step=50)
     assert snap.get('word_completion') is None  # no dictionary attached
-
-from hpm_ai_v4.simulations.full_simulation import _benchmark_report
-import io, sys
 
 def test_benchmark_report_outputs_table(capsys):
     history = [
@@ -106,8 +104,6 @@ def test_benchmark_report_fail():
     out = captured.getvalue()
     assert 'FAIL' in out
 
-from hpm_ai_v4.simulations.full_simulation import run_simulation
-
 def test_run_simulation_short(tmp_path):
     corpus = tmp_path / "corpus.txt"
     corpus.write_text("the quick brown fox jumps over the lazy dog " * 20)
@@ -136,5 +132,20 @@ def test_run_simulation_saves_checkpoint(tmp_path):
         library_path=None,
         checkpoint_dir=str(tmp_path),
     )
-    # Should save final_library.pkl
-    assert (tmp_path / "final_library.pkl").exists()
+    # Should save final_library.l1.pkl + .l2.pkl
+    assert (tmp_path / "final_library.l1.pkl").exists()
+    assert (tmp_path / "final_library.l2.pkl").exists()
+
+def test_run_simulation_has_l2_accuracy(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("the quick brown fox " * 30)
+    history = run_simulation(
+        corpus_path=str(corpus),
+        total_steps=301,
+        log_every=100,
+        num_workers=1,
+        use_dict=False,
+        library_path=None,
+        checkpoint_dir=str(tmp_path),
+    )
+    assert 'l2_accuracy' in history[-1]

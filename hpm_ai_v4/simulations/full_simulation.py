@@ -7,10 +7,9 @@ from typing import Iterator, List, Optional, Dict, Any
 import numpy as np
 
 from hpm_ai_v4.agents.agent import HPMAgent
-from hpm_ai_v4.io.adapters import CharClassAdapter
-from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.serializer import PatternSerializer
+from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 
 
 class WikipediaStream:
@@ -31,45 +30,48 @@ class WikipediaStream:
                             yield code - 32
 
 
-def _metrics_snapshot(agent: HPMAgent, recent_chars: List[int], step: int) -> Dict[str, Any]:
+def _metrics_snapshot(layered: LayeredAgent, recent_chars: List[int], step: int) -> Dict[str, Any]:
     """Compute metrics over the recent character buffer."""
     snap: Dict[str, Any] = {'step': step}
 
-    # --- Prediction accuracy ---
+    # L1 metrics
+    m1 = layered.l1_metrics()
+    snap['compression_mi'] = m1['mi']
+    snap['pop_size'] = m1['pop_size']
+    snap['best_weight'] = m1['best_weight']
+    snap['dev_stage'] = m1['stage']
+    snap['best_loss'] = float(min(p.running_loss for p in layered.l1.patterns)) if layered.l1.patterns else 0.0
+
+    # L1 accuracy (class level)
+    adapter = layered._adapter
     correct = 0
     total = max(1, len(recent_chars) - 1)
     for i in range(len(recent_chars) - 1):
-        context = recent_chars[max(0, i - 20):i]
-        actual = recent_chars[i + 1]
-        relevant = agent.reasoner.get_relevant_patterns(context, top_k=3)
+        ctx_cls = [adapter.encode(v) for v in recent_chars[max(0, i - 20):i]]
+        actual_cls = adapter.encode(recent_chars[i + 1])
+        relevant = layered.l1.reasoner.get_relevant_patterns(ctx_cls, top_k=3)
         if relevant:
-            pred_dist = agent.reasoner.compose_predictions(relevant, context)
-            if int(np.argmax(pred_dist)) == actual:
+            dist = layered.l1.reasoner.compose_predictions(relevant, ctx_cls)
+            if int(np.argmax(dist)) == actual_cls:
                 correct += 1
     snap['accuracy'] = correct / total
 
-    # --- Compression MI ---
-    top3 = sorted(agent.patterns, key=lambda p: p.weight, reverse=True)[:3]
-    snap['compression_mi'] = float(np.mean([p.compression() for p in top3])) if top3 else 0.0
-
-    # --- Population stats ---
-    snap['pop_size'] = len(agent.patterns)
-    snap['best_weight'] = float(max(p.weight for p in agent.patterns)) if agent.patterns else 0.0
-    snap['dev_stage'] = agent.development.level
-    snap['best_loss'] = float(min(p.running_loss for p in agent.patterns)) if agent.patterns else 0.0
-
-    # --- Word completion (only if dictionary attached) ---
-    if agent.dictionary:
+    # L2 accuracy (raw char, sampled over last 200 for speed)
+    sample = recent_chars[-200:] if len(recent_chars) > 200 else recent_chars
+    m2 = layered.l2_metrics(sample)
+    snap['l2_accuracy'] = m2['accuracy']
+    snap['l2_pop_size'] = m2['pop_size']
+    
+    # --- Word completion (only if dictionary attached to L2) ---
+    if layered.l2.dictionary:
         hits = 0
-        # Extract up to 10 word prefixes of length 2-4 from recent chars
         prefixes = _extract_prefixes(recent_chars, n=10)
         for prefix_ids in prefixes:
-            future = agent.reasoner.simulate_future(steps=8, top_k=3)
+            future = layered.l2.reasoner.simulate_future(steps=8, top_k=3)
             word_ids = prefix_ids + future
-            # Decode: char_id + 32 = ASCII
             word = ''.join(chr(v + 32) for v in word_ids if 0 <= v <= 94).strip()
             word = word.split()[0] if ' ' in word else word
-            if word and agent.dictionary.contains(word.lower()):
+            if word and layered.l2.dictionary.contains(word.lower()):
                 hits += 1
         snap['word_completion'] = hits / max(1, len(prefixes))
     else:
@@ -103,12 +105,13 @@ def _benchmark_report(history: List[Dict[str, Any]]) -> None:
 
     final = history[-1]
     targets = [
-        ('Prediction accuracy',  'accuracy',        0.50),
-        ('Compression MI',       'compression_mi',  0.20),
-        ('Population survived',  'pop_size',        2),     # > 1 pattern
+        ('L1 Prediction accuracy', 'accuracy',        0.50),
+        ('L1 Compression MI',       'compression_mi',  0.10),
+        ('L2 Prediction accuracy', 'l2_accuracy',     0.10),
+        ('Population survived',    'pop_size',        2),
     ]
     if final.get('word_completion') is not None:
-        targets.append(('Word completion', 'word_completion', 0.30))
+        targets.append(('Word completion', 'word_completion', 0.20))
 
     print("\n" + "=" * 60)
     print("BENCHMARK REPORT")
@@ -129,7 +132,7 @@ def _benchmark_report(history: List[Dict[str, Any]]) -> None:
     print()
 
     # Trajectory
-    print("Accuracy trajectory:")
+    print("Accuracy trajectory (L1):")
     for snap in history[::max(1, len(history)//10)]:
         bar = '#' * int(snap.get('accuracy', 0) * 40)
         print(f"  step {snap['step']:6d}: {snap.get('accuracy', 0):.3f} {bar}")
@@ -148,35 +151,20 @@ def run_simulation(
     """Run the full HPM AI simulation. Returns metric history."""
 
     dictionary = NLTKWordList() if use_dict else None
-    adapter = CharClassAdapter()  # maps 95 chars → 5 classes (obs_dim=5)
+    layered = LayeredAgent(num_workers=num_workers)
+    
+    if use_dict:
+        layered.l2.dictionary = dictionary
 
-    agent = HPMAgent(
-        obs_dim=5,
-        num_initial_patterns=4,
-        num_workers=num_workers,
-        dictionary=dictionary,
-    )
-
-    # Equal initial weights: hier patterns compete fairly against flat baseline
-    agent.patterns = []
-    for i in range(4):
-        p = HierarchicalPattern(i, latent_dim=2, obs_dim=5)
-        p.weight = 0.15
-        agent.patterns.append(p)
-    for i in range(4, 6):
-        p = FlatPattern(i, obs_dim=5)
-        p.weight = 0.1
-        agent.patterns.append(p)
-
-    if library_path and os.path.exists(library_path):
-        n = agent.load_library(library_path, reset_weights=True)
-        print(f"Loaded {n} patterns from {library_path}")
+    if library_path and os.path.exists(library_path + ".l1.pkl"):
+        layered.l1.patterns = PatternSerializer.load(library_path + ".l1.pkl")
+        layered.l2.patterns = PatternSerializer.load(library_path + ".l2.pkl")
+        print(f"Loaded library from {library_path}")
 
     stream = WikipediaStream(corpus_path)
     stream_iter = iter(stream)
 
     history: List[Dict[str, Any]] = []
-    recent_chars: List[int] = []
     accuracy_buffer: List[int] = []  # actual chars for accuracy computation
 
     print(f"Starting simulation: steps={total_steps} log_every={log_every} "
@@ -184,38 +172,33 @@ def run_simulation(
 
     for step in range(total_steps):
         raw_id = next(stream_iter)
-        char_id = adapter.encode(raw_id)  # 0–94 → 0–4 char class
-        accuracy_buffer.append(char_id)
+        accuracy_buffer.append(raw_id)
         if len(accuracy_buffer) > log_every + 21:
             accuracy_buffer = accuracy_buffer[-(log_every + 21):]
 
-        agent.perceive_and_learn(char_id)
-
-        recent_chars.append(char_id)
-        if len(recent_chars) > log_every:
-            recent_chars = recent_chars[-log_every:]
+        layered.perceive(raw_id)
 
         if step % log_every == 0 and step > 0:
-            snap = _metrics_snapshot(agent, list(accuracy_buffer), step)
+            snap = _metrics_snapshot(layered, list(accuracy_buffer), step)
             history.append(snap)
             wc = f"{snap['word_completion']:.3f}" if snap['word_completion'] is not None else 'n/a'
             print(
-                f"[step {step:6d}] acc={snap['accuracy']:.3f} "
-                f"mi={snap['compression_mi']:.3f} "
-                f"wc={wc} "
-                f"pop={snap['pop_size']} "
-                f"stage={snap['dev_stage']} "
-                f"loss={snap['best_loss']:.3f}"
+                f"[step {step:6d}] "
+                f"L1 acc={snap['accuracy']:.3f} mi={snap['compression_mi']:.3f} "
+                f"pop={snap['pop_size']} stage={snap['dev_stage']} | "
+                f"L2 acc={snap['l2_accuracy']:.3f} pop={snap['l2_pop_size']}"
             )
 
         if step % 10_000 == 0 and step > 0:
-            ckpt_path = os.path.join(checkpoint_dir, f"checkpoint_{step}.pkl")
-            PatternSerializer.save(agent.patterns, ckpt_path)
-            print(f"  [checkpoint saved: {ckpt_path}]")
+            base = os.path.join(checkpoint_dir, f"checkpoint_{step}")
+            PatternSerializer.save(layered.l1.patterns, base + ".l1.pkl")
+            PatternSerializer.save(layered.l2.patterns, base + ".l2.pkl")
+            print(f"  [checkpoint saved: {base}.l1.pkl + .l2.pkl]")
 
-    final_path = os.path.join(checkpoint_dir, "final_library.pkl")
-    PatternSerializer.save(agent.patterns, final_path)
-    print(f"Final library saved: {final_path}")
+    base_final = os.path.join(checkpoint_dir, "final_library")
+    PatternSerializer.save(layered.l1.patterns, base_final + ".l1.pkl")
+    PatternSerializer.save(layered.l2.patterns, base_final + ".l2.pkl")
+    print(f"Final library saved: {base_final}.l1.pkl + .l2.pkl")
 
     _benchmark_report(history)
     return history
@@ -228,7 +211,7 @@ def _parse_args():
     p.add_argument('--log-every', type=int, default=1_000)
     p.add_argument('--workers', type=int, default=1)
     p.add_argument('--dict', action='store_true', help='Enable NLTKWordList dictionary')
-    p.add_argument('--library', default=None, help='Path to pre-built pattern library (.pkl)')
+    p.add_argument('--library', default=None, help='Base path to pre-built pattern library (no .pkl suffix)')
     p.add_argument('--checkpoint-dir', default='.', help='Directory for checkpoint files')
     return p.parse_args()
 
