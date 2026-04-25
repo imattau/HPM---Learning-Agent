@@ -1,0 +1,6 @@
+HPM v4 Long Run Initialized
+Timestamp: Sat Apr 25 08:14:01 2026
+--- Starting Parallel HPM Simulation ---
+Config: 2000 steps, 4 CPUs, 4 initial patterns.
+[Step      0] patterns=  4  best_weight=0.961  comp=0.0000
+[Step    500] patterns= 26  best_weight=0.429  comp=-0.0000

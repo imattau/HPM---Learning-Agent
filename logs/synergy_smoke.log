@@ -1,0 +1,151 @@
+[MemoryTools] Registered 11 total tools.
+[PythonSubstrate] Registered unified Python discovery tools.
+
+>>> Starting Training: Baseline (LM=False, L5=False)
+[PythonSubstrate] Registered unified Python discovery tools.
+[InnateTools] Registered minimal viable innate tools.
+  [Importer] Loaded Curriculum: Hierarchical Chaining (Phase -1.0, 4 tasks)
+  [Importer] Loaded Curriculum: Container Mastery (Phase -1.5, 5 tasks)
+  [Importer] Loaded Curriculum: Sensory Conversion Mastery (Phase -1.7, 6 tasks)
+  [Importer] Loaded Curriculum: Tool Expansion (Phase -1.9, 11 tasks)
+  [Importer] Loaded Curriculum: Tool Familiarization (Phase -2.0, 6 tasks)
+  [Importer] Loaded Curriculum: Linguistic Analysis (Phase 0, 10 tasks)
+  [Importer] Loaded Curriculum: NLP Tool Mastery (Phase -1.8, 8 tasks)
+  [Importer] Loaded Curriculum: phase_online_linguistics.json (Phase 0, 4 tasks)
+  [Importer] Loaded Curriculum: Arithmetic Reasoning (Phase -0.5, 10 tasks)
+  [Importer] Loaded Curriculum: Pattern Extraction (Phase -0.25, 10 tasks)
+  [Importer] Loaded Curriculum: Sensory Priming (Phase -1.1, 4 tasks)
+  [Importer] Loaded Curriculum: Quantitative Synthesis (Phase 0.5, 10 tasks)
+
+[Episode] Task: 100, 50
+  [Observation] Observing demo step: operator.add([100, 50])
+
+[Episode] Task: 30, 10
+    -> Error: Expression '30, 10' does not appear to be arithmet...
+
+[Episode] Task: 100, 50
+  [Observation] Observing demo step: operator.add([100, 50])
+  [Failure Trigger] Stuck on pretraining_operator.add. Attempting online fetch...
+
+[Episode] Task: 30, 10
+    -> Error: could not convert string to float: '30, 1030, 10'...
+
+[Episode] Task: 100, 50
+  [Observation] Observing demo step: operator.add([100, 50])
+
+[Episode] Task: 10 * 5
+  [Observation] Observing demo step: sympy.sympify(['10 * 5'])
+  [Failure Trigger] Stuck on pretraining_operator.add. Attempting online fetch...
+
+[Episode] Task: 30, 10
+    -> Error: SympifyError: '30, 1030, 10'...
+    -> Error: regex_findall() missing 1 required positional argu...
+
+[Episode] Task: 10 * 5
+  [Observation] Observing demo step: sympy.sympify(['10 * 5'])
+
+[Episode] Task: 10 * 5
+  [Observation] Observing demo step: sympy.sympify(['10 * 5'])
+
+[Episode] Task: 100 / 4
+
+>>> Baseline Complete in 0.1s
+    Summary: {'total_episodes': 1010, 'avg_reward_recent': 0.02, 'success_rate_recent': 0.51, 'last_phase': 'Tool Familiarization'}
+
+>>> Starting Training: LM-Only (LM=True, L5=False)
+  [LM] Pretraining on rich corpus...
+[PythonSubstrate] Registered unified Python discovery tools.
+[InnateTools] Registered minimal viable innate tools.
+  [Importer] Loaded Curriculum: Hierarchical Chaining (Phase -1.0, 4 tasks)
+  [Importer] Loaded Curriculum: Container Mastery (Phase -1.5, 5 tasks)
+  [Importer] Loaded Curriculum: Sensory Conversion Mastery (Phase -1.7, 6 tasks)
+  [Importer] Loaded Curriculum: Tool Expansion (Phase -1.9, 11 tasks)
+  [Importer] Loaded Curriculum: Tool Familiarization (Phase -2.0, 6 tasks)
+  [Importer] Loaded Curriculum: Linguistic Analysis (Phase 0, 10 tasks)
+  [Importer] Loaded Curriculum: NLP Tool Mastery (Phase -1.8, 8 tasks)
+  [Importer] Loaded Curriculum: phase_online_linguistics.json (Phase 0, 4 tasks)
+  [Importer] Loaded Curriculum: Arithmetic Reasoning (Phase -0.5, 10 tasks)
+  [Importer] Loaded Curriculum: Pattern Extraction (Phase -0.25, 10 tasks)
+  [Importer] Loaded Curriculum: Sensory Priming (Phase -1.1, 4 tasks)
+  [Importer] Loaded Curriculum: Quantitative Synthesis (Phase 0.5, 10 tasks)
+
+[Episode] Task: 10 * 5
+  [Observation] Observing demo step: sympy.sympify(['10 * 5'])
+
+[Episode] Task: 30, 10
+    -> Error: Expression '30, 10' does not appear to be arithmet...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: '30, 10'...
+
+[Episode] Task: 100, 50
+  [Observation] Observing demo step: operator.add([100, 50])
+
+[Episode] Task: 100 / 4
+    [Discovery] Absorbed VERIFIED FACT: sympy.sympify
+    -> Result: 25.0
+
+[Episode] Task: 100 / 4
+    [Discovery] Absorbed VERIFIED FACT: sympy.sympify
+    -> Result: 25.0
+
+[Episode] Task: 10 * 5
+  [Observation] Observing demo step: sympy.sympify(['10 * 5'])
+  [Failure Trigger] Stuck on pretraining_operator.add. Attempting online fetch...
+
+[Episode] Task: 30, 10
+    -> Error: SympifyError: '30, 10'...
+    -> Error: SympifyError: ['30,', 10.0]...
+    -> Error: SympifyError: ['30,', 10.0]...
+    -> Error: SympifyError: ['30,', 10.0]...
+    -> Error: could not convert string to float: '30,'...
+    -> Error: SympifyError: ['30,', 10.0]...
+    -> Error: SympifyError: ['30,', 10.0]...
+    -> Error: SympifyError: ['30,', 10.0]...
+
+[Episode] Task: 100 / 4
+    [Discovery] Absorbed VERIFIED FACT: sympy.sympify
+    -> Result: 25.0
+
+[Episode] Task: 100, 50
+  [Observation] Observing demo step: operator.add([100, 50])
+
+[Episode] Task: 100 / 4
+    [Discovery] Absorbed VERIFIED FACT: sympy.sympify
+    -> Result: 25.0
+
+>>> LM-Only Complete in 0.1s
+    Summary: {'total_episodes': 163, 'avg_reward_recent': 0.34, 'success_rate_recent': 0.67, 'last_phase': 'Tool Familiarization'}
+
+>>> Starting Training: Full (LM+L5) (LM=True, L5=True)
+  [LM] Pretraining on rich corpus...
+[PythonSubstrate] Registered unified Python discovery tools.
+[InnateTools] Registered minimal viable innate tools.
+  [Importer] Loaded Curriculum: Hierarchical Chaining (Phase -1.0, 4 tasks)
+  [Importer] Loaded Curriculum: Container Mastery (Phase -1.5, 5 tasks)
+  [Importer] Loaded Curriculum: Sensory Conversion Mastery (Phase -1.7, 6 tasks)
+  [Importer] Loaded Curriculum: Tool Expansion (Phase -1.9, 11 tasks)
+  [Importer] Loaded Curriculum: Tool Familiarization (Phase -2.0, 6 tasks)
+  [Importer] Loaded Curriculum: Linguistic Analysis (Phase 0, 10 tasks)
+  [Importer] Loaded Curriculum: NLP Tool Mastery (Phase -1.8, 8 tasks)
+  [Importer] Loaded Curriculum: phase_online_linguistics.json (Phase 0, 4 tasks)
+  [Importer] Loaded Curriculum: Arithmetic Reasoning (Phase -0.5, 10 tasks)
+  [Importer] Loaded Curriculum: Pattern Extraction (Phase -0.25, 10 tasks)
+  [Importer] Loaded Curriculum: Sensory Priming (Phase -1.1, 4 tasks)
+  [Importer] Loaded Curriculum: Quantitative Synthesis (Phase 0.5, 10 tasks)
+Traceback (most recent call last):
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/experiments/verify_l5_lm_synergy.py", line 109, in <module>
+    results["Full (LM+L5)"] = run_training_v3("Full (LM+L5)", use_lm=True, use_l5=True, max_episodes=args.episodes)
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/experiments/verify_l5_lm_synergy.py", line 59, in run_training_v3
+    meta_loop.run_meta_step()
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/agents/meta_training.py", line 38, in run_meta_step
+    reward = self._run_single_episode()
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/agents/meta_training.py", line 62, in _run_single_episode
+    reward, _ = self.agent.run_episode()
+TypeError: UnifiedDiscoveryAgent.run_episode() missing 1 required positional argument: 'task'

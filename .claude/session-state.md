@@ -1,60 +1,51 @@
-# Session State: Task 1 Sentence-Level Chunking
+# HPM v4 Refactoring Review - Session State
 
-## Objective
-Implement sentence-level chunking for `fetch_passages()` in `hpm_ai_v2/utils/text_fetcher.py`:
-- Add `mode` parameter ("sentence" or "paragraph", default "paragraph")
-- Add `split_sentences()` helper function
-- Write and pass tests in `tests/test_reader_core.py`
-- Preserve backward compatibility (existing tests in `tests/test_webpage_reader.py` must pass)
+## Task Objective
+Review the HPM v4 codebase at `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4` to determine whether the planned refactoring has been properly implemented.
 
-## Progress
-- [x] Located files:
-  - `/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v2/utils/text_fetcher.py`
-  - `/home/mattthomson/workspace/HPM---Learning-Agent/tests/test_webpage_reader.py`
-- [ ] Read current `text_fetcher.py` implementation
-- [ ] Create `tests/test_reader_core.py` with failing tests
-- [ ] Run failing tests
-- [ ] Implement `split_sentences()` and modify `fetch_passages()`
-- [ ] Run all tests (new + existing)
-- [ ] Commit changes
-- [ ] Self-review and report
+## Execution Mode
+- unattended: true
+- auto_continue: true
+- Do NOT pause for confirmation
 
-## Implementation Details
-Required changes to `fetch_passages`:
-```python
-def split_sentences(text: str) -> List[str]:
-    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+## Items to Verify (10 total)
 
-def fetch_passages(
-    url: str = None,
-    text: str = None,
-    min_length: int = 40,
-    mode: str = "paragraph",  # NEW PARAM
-) -> List[str]:
-    if url is not None:
-        text = fetch_url(url)
-    if not text:
-        return []
-    if mode == "sentence":
-        chunks = split_sentences(text)
-    else:
-        chunks = [p.strip() for p in re.split(r'\n\s*\n', text)]
-    return [c for c in chunks if len(c) >= min_length]
-```
+1. **HierarchicalPattern (pattern.py)**: Is it simple single-level HMM (A: K×K, B: K×obs_dim, pi: K) or still 3-level joint HMM? What are actual matrix shapes?
 
-Test cases needed:
-1. `test_sentence_mode_splits_sentences()`
-2. `test_sentence_mode_filters_short()`
-3. `test_default_mode_unchanged()`
+2. **HierarchicalPattern.flat() classmethod**: Does it exist on HierarchicalPattern (not just FlatPattern)?
 
-## Next Steps
-1. Read current `text_fetcher.py` to understand existing implementation
-2. Create `tests/test_reader_core.py` with test cases
-3. Run pytest to confirm tests fail
-4. Implement changes to `text_fetcher.py`
-5. Run pytest to confirm all tests pass
-6. Commit with message: "feat: add sentence-level chunking mode to fetch_passages"
-7. Report final status
+3. **Reasoning layer (agents/reasoning.py)**: Does Reasoner have all 5 methods: compose_predictions, simulate_future, plan, counterfactual, explain? Are they stubs or implemented?
 
-execution_mode: unattended
-auto_continue: true
+4. **HPMAgent.act() (agents/agent.py)**: Does it exist and delegate to self.reasoner?
+
+5. **TotalHPMSystem.step() (system.py)**: Does it call agent.act() or still best_pattern.predict_next()?
+
+6. **CharClassAdapter (io/adapters.py)**: Does it exist with encode() method?
+
+7. **Fast online learning (pattern.py)**: Do these exist: _forward_filter(), update_parameters_online_fast(), maybe_update(), obs_chunk attribute?
+
+8. **Parallel pattern evaluation (operators/parallel.py)**: Does this file exist with pattern_worker() and ParallelPatternPool?
+
+9. **grow_latent() (pattern.py)**: Does it exist? What's the max_K cap?
+
+10. **Test suite**: How many test files exist in hpm_ai_v4/tests/? List them.
+
+## Progress Summary
+- Located directory structure
+- Identified all key files to review:
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/pattern.py (items 1, 2, 7, 9)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/agents/reasoning.py (item 3)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/agents/agent.py (item 4)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/system.py (item 5)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/io/adapters.py (item 6)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/operators/parallel.py (item 8)
+  - /home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/tests/ (item 10)
+
+## Remaining Work
+- Read and analyze each file to check for implementation status
+- For each item, report: IMPLEMENTED / PARTIAL / NOT IMPLEMENTED with 1-2 lines of evidence
+- Compile final report
+
+## Format for Output
+Report each item as:
+`[#]. [ITEM NAME]: IMPLEMENTED/PARTIAL/NOT IMPLEMENTED - [Evidence line 1]. [Evidence line 2]`

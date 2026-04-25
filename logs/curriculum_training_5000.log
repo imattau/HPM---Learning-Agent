@@ -1,0 +1,17 @@
+[MemoryTools] Registered 11 total tools.
+[PythonSubstrate] Registered unified Python discovery tools.
+============================================================
+HPM Curriculum Training  |  episodes=5000  LM=True  L5=True
+============================================================
+[LM] Pretraining on hpm_ai_v3/data/lm_corpus/rich_corpus.txt ...
+[PythonSubstrate] Registered unified Python discovery tools.
+Traceback (most recent call last):
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/experiments/curriculum_training.py", line 142, in <module>
+    run(
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/experiments/curriculum_training.py", line 46, in run
+    agent = UnifiedDiscoveryAgent(context_dim=64, lm=lm)
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/agents/discovery_agent.py", line 34, in __init__
+    register_innate_tools()
+  File "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v3/tools/innate.py", line 259, in register_innate_tools
+    ToolRegistry.register("split", string_split, ["s", "sep"], "result", 0.005,
+TypeError: ToolRegistry.register() got an unexpected keyword argument 'module'

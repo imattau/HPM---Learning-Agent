@@ -1,93 +1,77 @@
 import pytest
 import numpy as np
+import warnings
 from hpm_ai_v4.pattern import HierarchicalPattern
+
 
 @pytest.fixture
 def pattern():
     np.random.seed(42)
-    p = HierarchicalPattern(pattern_id=0, latent_dim=2, obs_dim=5)
-    return p
+    return HierarchicalPattern(pattern_id=0, latent_dim=2, obs_dim=5)
 
-def test_latent_dim_incremented(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    assert pattern.latent_dim == old_K + 1
 
-def test_A3_shape(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    assert pattern.A3.shape == (old_K + 1, old_K + 1)
+def test_A_shape(pattern):
+    assert pattern.A.shape == (2, 2)
 
-def test_A3_rows_sum_to_one(pattern):
-    pattern.grow_latent()
-    row_sums = pattern.A3.sum(axis=1)
-    np.testing.assert_allclose(row_sums, np.ones(pattern.latent_dim), atol=1e-6)
-
-def test_A32_shape(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    assert pattern.A32.shape == (old_K + 1, old_K + 1)
-
-def test_A32_rows_sum_to_one(pattern):
-    pattern.grow_latent()
-    row_sums = pattern.A32.sum(axis=1)
-    np.testing.assert_allclose(row_sums, np.ones(pattern.latent_dim), atol=1e-6)
-
-def test_A21_shape(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    assert pattern.A21.shape == (old_K + 1, old_K + 1)
 
 def test_B_shape(pattern):
-    old_K = pattern.latent_dim
-    obs_dim = pattern.obs_dim
-    pattern.grow_latent()
-    assert pattern.B.shape == (old_K + 1, obs_dim)
+    assert pattern.B.shape == (2, 5)
+
+
+def test_pi_shape(pattern):
+    assert pattern.pi.shape == (2,)
+
+
+def test_A_rows_sum_to_one(pattern):
+    np.testing.assert_allclose(pattern.A.sum(axis=1), np.ones(2), atol=1e-6)
+
 
 def test_B_rows_sum_to_one(pattern):
-    pattern.grow_latent()
-    row_sums = pattern.B.sum(axis=1)
-    np.testing.assert_allclose(row_sums, np.ones(pattern.latent_dim), atol=1e-6)
+    np.testing.assert_allclose(pattern.B.sum(axis=1), np.ones(2), atol=1e-6)
 
-def test_pi3_shape(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    assert pattern.pi3.shape == (old_K + 1,)
 
-def test_pi3_sums_to_one(pattern):
-    pattern.grow_latent()
-    assert abs(pattern.pi3.sum() - 1.0) < 1e-6
+def test_pi_sums_to_one(pattern):
+    assert abs(pattern.pi.sum() - 1.0) < 1e-6
 
-def test_old_A3_values_preserved(pattern):
-    old_A3 = pattern.A3.copy()
-    pattern.grow_latent(noise_scale=0.0)
-    # Old block should be preserved (up to re-normalisation)
-    K = old_A3.shape[0]
-    # Check ratios are consistent (rows of old block still normalise same way)
-    for i in range(K):
-        old_row = old_A3[i]
-        # After expansion with noise_scale=0, new col K is 0 so old rows
-        # re-normalise to same relative values
-        new_row = pattern.A3[i, :K]
-        old_norm = old_row / (old_row.sum() + 1e-12)
-        new_norm = new_row / (new_row.sum() + 1e-12)
-        np.testing.assert_allclose(old_norm, new_norm, atol=1e-5)
 
-def test_log_likelihood_finite_after_growth(pattern):
-    obs_seq = [0, 1, 2, 3, 4, 0, 1]
-    pattern.grow_latent()
-    ll = pattern.log_likelihood(obs_seq)
+def test_A_dtype(pattern):
+    assert pattern.A.dtype == np.float32
+
+
+def test_log_likelihood_finite_after_init(pattern):
+    ll = pattern.log_likelihood([0, 1, 2, 3, 4, 0, 1])
     assert np.isfinite(ll)
 
-def test_ss_shapes_updated(pattern):
-    old_K = pattern.latent_dim
-    pattern.grow_latent()
-    K1 = old_K + 1
-    assert pattern.SS_A3.shape == (K1, K1)
-    assert pattern.SS_B.shape == (K1, pattern.obs_dim)
 
-def test_grow_twice(pattern):
-    pattern.grow_latent()
-    pattern.grow_latent()
-    assert pattern.latent_dim == 4
-    assert pattern.A3.shape == (4, 4)
+def test_get_top_state_returns_valid_int():
+    p = HierarchicalPattern(pattern_id=0, latent_dim=2, obs_dim=5)
+    result = p.get_top_state([0, 1, 0, 2, 1])
+    assert isinstance(result, int)
+    assert result in {0, 1}
+
+
+def test_get_top_state_empty_returns_int():
+    p = HierarchicalPattern(pattern_id=0, latent_dim=2, obs_dim=5)
+    result = p.get_top_state([])
+    assert isinstance(result, int)
+
+
+def test_get_top_state_k3():
+    p = HierarchicalPattern(pattern_id=0, latent_dim=3, obs_dim=5)
+    result = p.get_top_state([0, 1, 2, 0, 1])
+    assert result in {0, 1, 2}
+
+
+def test_constructor_warns_if_k_gt_4():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        HierarchicalPattern(pattern_id=0, latent_dim=5, obs_dim=5)
+        assert len(w) == 1
+        assert "latent_dim" in str(w[0].message).lower() or "K" in str(w[0].message)
+
+
+def test_constructor_no_warn_k_eq_4():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        HierarchicalPattern(pattern_id=0, latent_dim=4, obs_dim=5)
+        assert len(w) == 0

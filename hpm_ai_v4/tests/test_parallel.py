@@ -3,29 +3,24 @@ import numpy as np
 import pytest
 from hpm_ai_v4.operators.parallel import pattern_worker
 
-def make_state_dict(complexity=3, latent_dim=2, obs_dim=2):
+def make_state_dict(complexity=1, latent_dim=2, obs_dim=2):
     K, D = latent_dim, obs_dim
     def rand_trans(r, c):
         m = np.random.dirichlet(np.ones(c), size=r)
         return m
-    return {
+    d = {
         'pattern_id': 0,
         'complexity': complexity,
         'latent_dim': K,
         'obs_dim': D,
-        'A3':  rand_trans(K, K),
-        'A32': rand_trans(K, K),
-        'A21': rand_trans(K, K),
         'B':   rand_trans(K, D),
-        'pi3': np.random.dirichlet(np.ones(K)),
-        'SS_A3':  np.ones((K, K)) * 0.1,
-        'SS_A32': np.ones((K, K)) * 0.1,
-        'SS_A21': np.ones((K, K)) * 0.1,
-        'SS_B':   np.ones((K, D)) * 0.1,
         'running_loss': 0.5,
         'weight': 0.2,
-        'statistics_decay': 0.9,
     }
+    if latent_dim > 1:
+        d['A'] = rand_trans(K, K)
+        d['pi'] = np.random.dirichlet(np.ones(K))
+    return d
 
 def make_params(pattern_id=0):
     return {
@@ -44,8 +39,7 @@ def test_worker_returns_required_keys():
     state = make_state_dict()
     params = make_params()
     result = pattern_worker(state, obs_buffer, field_freq, params)
-    required = {'pattern_id', 'A3', 'A32', 'A21', 'B', 'pi3',
-                'SS_A3', 'SS_A32', 'SS_A21', 'SS_B',
+    required = {'pattern_id', 'A', 'B', 'pi',
                 'running_loss', 'ep_score', 'aff_score',
                 'soc_score', 'total_score'}
     assert required.issubset(result.keys()), f"Missing keys: {required - result.keys()}"
@@ -76,7 +70,7 @@ from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 def make_pattern_population(n=4, obs_dim=2):
     patterns = []
     for i in range(n - 1):
-        p = HierarchicalPattern(pattern_id=i, obs_dim=obs_dim)
+        p = HierarchicalPattern(pattern_id=i, latent_dim=2, obs_dim=obs_dim)
         p.weight = 1.0 / n
         patterns.append(p)
     flat = FlatPattern(pattern_id=n - 1, obs_dim=obs_dim)

@@ -50,6 +50,9 @@ class PatternPopulation:
              observations: Dict,
              compiler: SubstrateCompiler,
              pattern_field_signal: Optional[List[float]] = None):
+        # 0. Ensure structural consistency before dynamics
+        self._update_kappa_matrix()
+        
         # 1. Update evaluators
         for i, p in enumerate(self.patterns):
             evaluator_mgr.update_epistemic(p, observations)
@@ -76,12 +79,9 @@ class PatternPopulation:
         # 2. Check for substrate shifting
         for i, p in enumerate(self.patterns):
             if compiler.should_compile(p):
-                sym_p = None
-                if isinstance(p, CausalPattern):
-                    sym_p = compiler.compile_to_symbolic(p)
-                elif isinstance(p, MotorPattern):
-                    sym_p = compiler.compile_motor_to_symbolic(p)
+                sym_p = compiler.compile_to_symbolic(p)
                 if sym_p is not None:
+                    print(f"  [Graduation] Pattern {p.id} ({getattr(p, 'substrate_type', 'unknown')}) compiled to Symbolic!")
                     sym_p.weight = p.weight
                     sym_p.accuracy = p.accuracy
                     self.patterns[i] = sym_p
@@ -120,6 +120,14 @@ class PatternPopulation:
         current_time = time.time()
         
         for i in range(n):
+            # Absolute Extinction: If a pattern is failing, it loses weight absolutely
+            # regardless of how other patterns are doing.
+            abs_fitness = totals[i] 
+            abs_decay = 0.0
+            if abs_fitness < 0:
+                # Strong absolute decay for failing patterns
+                abs_decay = self.eta * abs(abs_fitness) * weights[i]
+
             advantage = (totals[i] - avg_total) + self.lambda_s * (stickiness_bonus[i] - avg_stickiness)
             growth = self.eta * advantage * weights[i]
             
@@ -141,23 +149,46 @@ class PatternPopulation:
             idle_time = current_time - self.patterns[i].last_used
             age_decay = self.age_decay_rate * idle_time / 3600.0
             
-            new_weights[i] = weights[i] + growth - inhibition - decay - interference - age_decay
+            new_weights[i] = weights[i] + growth - abs_decay - inhibition - decay - interference - age_decay
             new_weights[i] = max(0.0, new_weights[i])
             
         total_w = new_weights.sum()
         if total_w > 0:
             for i, p in enumerate(self.patterns):
-                p.weight = max(1e-6, new_weights[i] / total_w)
+                p.weight = new_weights[i] / total_w
         else:
+            # If everything vanished, keep patterns but with near-zero weight
             for p in self.patterns:
-                p.weight = 1.0 / n
+                p.weight = self.pruning_threshold / 2.0
                 
+        # PRUNING: Consistently failing patterns vanish here
         self.patterns = [p for p in self.patterns if p.weight > self.pruning_threshold]
         self._update_kappa_matrix()
         
     def get_top_patterns(self, k: int = 3) -> List[HPMPattern]:
         sorted_pats = sorted(self.patterns, key=lambda p: p.weight, reverse=True)
         return sorted_pats[:k]
+
+    def get_population_entropy(self) -> float:
+        """Shannon entropy of weight distribution (nats)."""
+        weights = np.array([p.weight for p in self.patterns])
+        total = weights.sum()
+        if total < 1e-9 or len(weights) == 0:
+            return 0.0
+        probs = weights / total
+        probs = probs[probs > 1e-9]
+        return float(-np.sum(probs * np.log(probs)))
+
+    def get_diversity(self) -> float:
+        """Mean pairwise structural distance across all pattern pairs."""
+        n = len(self.patterns)
+        if n < 2:
+            return 0.0
+        distances = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                distances.append(self.patterns[i].structural_distance(self.patterns[j]))
+        return float(np.mean(distances))
     
     def _recombine(self, p1: HPMPattern, p2: HPMPattern) -> Optional[HPMPattern]:
         if isinstance(p1, CausalPattern) and isinstance(p2, CausalPattern):

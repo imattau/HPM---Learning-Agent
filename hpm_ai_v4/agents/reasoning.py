@@ -45,42 +45,38 @@ class Reasoner:
         """
         orig_dist = pattern.predict_next_distribution(obs_seq)
         
-        # Temporary intervention: force emission to the intervention_idx
-        B_orig = pattern.B.copy()
-        for z1 in range(pattern.latent_dim):
-            pattern.B[z1] = 0.0
-            pattern.B[z1, intervention_idx] = 1.0
+        # Determine next state distribution from context
+        if not obs_seq:
+            next_state = pattern.pi @ pattern.A
+        else:
+            alpha, _ = pattern._forward(obs_seq[-20:])
+            next_state = alpha[-1] @ pattern.A
             
-        intervened_dist = pattern.predict_next_distribution(obs_seq)
-        pattern.B = B_orig # Restore
+        # Intervened distribution: force next observation to be intervention_idx
+        intervened_dist = np.zeros(pattern.obs_dim, dtype=np.float32)
+        intervened_dist[intervention_idx % pattern.obs_dim] = 1.0
         
         return orig_dist, intervened_dist
 
     def simulate(self, pattern: HierarchicalPattern, initial_obs_seq: List[int], steps: int = 10) -> List[int]:
         """Generate a possible future sequence using the pattern as a generative model."""
-        belief = pattern.get_belief(initial_obs_seq)
+        if initial_obs_seq:
+            alpha, _ = pattern._forward(initial_obs_seq[-20:])
+            state_dist = alpha[-1]
+        else:
+            state_dist = pattern.pi.copy()
+
         simulated = []
-        
         K = pattern.latent_dim
         for _ in range(steps):
-            # Sample current latent state from belief
-            flat_belief = belief.flatten()
-            sample_idx = np.random.choice(len(flat_belief), p=flat_belief / (flat_belief.sum() + 1e-12))
-            z3_idx, z2_idx, z1_idx = np.unravel_index(sample_idx, belief.shape)
-            
-            # Sample next observation
-            next_obs = np.random.choice([0, 1], p=pattern.B[z1_idx])
-            simulated.append(next_obs)
-            
-            # Transition latent state
-            new_z3 = np.random.choice(K, p=pattern.A3[z3_idx])
-            new_z2 = np.random.choice(K, p=pattern.A32[new_z3])
-            new_z1 = np.random.choice(K, p=pattern.A21[new_z2])
-            
-            # Update belief to delta for next step simulation
-            belief = np.zeros_like(belief)
-            belief[new_z3, new_z2, new_z1] = 1.0
-            
+            # Sample current state
+            z = np.random.choice(K, p=state_dist / (state_dist.sum() + 1e-12))
+            # Sample observation
+            obs_probs = pattern.B[z]
+            next_obs = np.random.choice(pattern.obs_dim, p=obs_probs / (obs_probs.sum() + 1e-12))
+            simulated.append(int(next_obs))
+            # Transition
+            state_dist = pattern.A[z]
         return simulated
 
     def simulate_future(self, steps: int = 10, top_k: int = 3) -> List[int]:
@@ -138,11 +134,9 @@ class Reasoner:
 
     def explain(self, pattern: HierarchicalPattern) -> str:
         """Translate pattern structure into human-readable description."""
-        if pattern.complexity >= 2:
-            most_common_z1 = np.argmax(np.sum(pattern.B, axis=1)) # Heuristic
-            likely_obs = np.argmax(pattern.B[most_common_z1])
+        if pattern.complexity >= 1:
+            likely_obs = np.argmax(pattern.B[np.argmax(pattern.pi)])
             return (f"Hierarchical pattern (ID:{pattern.id}) predicts observation {likely_obs} "
-                    f"via {pattern.complexity} levels of latent abstraction.")
+                    f"via {pattern.latent_dim} latent states.")
         else:
-            theta = getattr(pattern, 'theta', 0.5)
-            return f"Flat pattern (ID:{pattern.id}) predicts state 1 with probability {theta:.2f}."
+            return f"Pattern (ID:{pattern.id}) is unknown."

@@ -21,7 +21,14 @@ class PatternRepository:
             for p in agent.patterns:
                 # Density proxy: epistemic score + compression bonus
                 ep = epistemic_score(p)
-                comp = p.compression(agent.obs_buffer) if hasattr(p, 'compression') else 0
+                if hasattr(p, 'compression'):
+                    try:
+                        comp = p.compression()
+                    except TypeError:
+                        # Fallback for old interface if any objects persist
+                        comp = p.compression(agent.obs_buffer)
+                else:
+                    comp = 0
                 density = ep + comp
                 
                 if density > self.density_threshold:
@@ -42,22 +49,25 @@ class PatternRepository:
 
     def _structural_similarity(self, p: HierarchicalPattern, q: HierarchicalPattern) -> float:
         """Compute cosine similarity of flattened parameter vectors."""
-        if p.complexity != q.complexity:
-            return 0.0
-            
         def get_params(pat):
-            if pat.complexity >= 2:
+            if pat.complexity >= 2 or pat.latent_dim > 1:
                 return np.concatenate([
-                    pat.A3.flatten(), pat.A32.flatten(), 
-                    pat.A21.flatten(), pat.B.flatten()
+                    pat.A.flatten(), pat.B.flatten(), pat.pi.flatten()
                 ])
             else:
-                return np.array([getattr(pat, 'theta', 0.5)])
+                return pat.B.flatten()
                 
         p_i = get_params(p)
         p_j = get_params(q)
         
-        if len(p_i) != len(p_j): return 0.0
+        if len(p_i) != len(p_j): 
+            # Pad shorter one with zeros
+            max_len = max(len(p_i), len(p_j))
+            tmp_i = np.zeros(max_len)
+            tmp_j = np.zeros(max_len)
+            tmp_i[:len(p_i)] = p_i
+            tmp_j[:len(p_j)] = p_j
+            p_i, p_j = tmp_i, tmp_j
         
         return np.dot(p_i, p_j) / (np.linalg.norm(p_i)*np.linalg.norm(p_j) + 1e-12)
 

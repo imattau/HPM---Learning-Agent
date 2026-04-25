@@ -58,6 +58,11 @@ class CompositeAgentPattern(HPMPattern):
                 self.causal_graph.add_edge(inp, pat.agent_name)
             self.causal_graph.add_edge(pat.agent_name, pat.output_key)
             
+    @property
+    def tool_name(self) -> str:
+        """Required property for population interface."""
+        return f"agent_composite:{self.id}"
+
     def get_sequence(self) -> List[str]:
         """Return list of agent names in order."""
         return [p.agent_name for p in self.patterns]

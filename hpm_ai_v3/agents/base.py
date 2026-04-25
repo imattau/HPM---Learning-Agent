@@ -96,10 +96,17 @@ class AgentPattern(HPMPattern):
             first_key = next(iter(result))
             result = {self.output_key: result[first_key]}
         
-        # Convert to tensor if needed
+        # Convert to tensor if needed (only for numeric types)
         for k, v in result.items():
             if not isinstance(v, torch.Tensor):
-                result[k] = torch.tensor(v, dtype=torch.float32, device=self._device)
+                try:
+                    if isinstance(v, (int, float, list, np.ndarray)):
+                        result[k] = torch.tensor(v, dtype=torch.float32, device=self._device)
+                    else:
+                        # Keep as is (e.g. dict, string)
+                        pass
+                except (ValueError, TypeError):
+                    pass
             else:
                 result[k] = v.to(self._device)
         

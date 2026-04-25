@@ -79,6 +79,8 @@ class PipelineRecombinationOperator:
         Check population for high-weight, frequently co-occurring pattern pairs
         and create a composite pattern if found.
         """
+        from hpm_ai_v3.agents.base_discovery import ActionPattern
+        
         # Collect all discoverable patterns in population with sufficient weight
         discoverable_patterns: Dict[str, HPMPattern] = {}
         for p in population.patterns:
@@ -89,6 +91,10 @@ class PipelineRecombinationOperator:
                 discoverable_patterns[p.tool_name] = p
             elif isinstance(p, AgentPattern):
                 discoverable_patterns[p.agent_name] = p
+            elif isinstance(p, ActionPattern) and p.action_type == "python_call":
+                # DISCOVERY RECOMBINATION: Use mod.func as key
+                name = f"{p.module}.{p.function}"
+                discoverable_patterns[name] = p
         
         if len(discoverable_patterns) < 2:
             return None
@@ -100,10 +106,17 @@ class PipelineRecombinationOperator:
                 pat1 = discoverable_patterns[n1]
                 pat2 = discoverable_patterns[n2]
                 
-                # Case 1: Both are tools -> CompositeToolPattern
-                if isinstance(pat1, ToolPattern) and isinstance(pat2, ToolPattern):
+                # Case 1: Both are tools or mastered actions -> CompositeToolPattern
+                # Mastered actions are functionally equivalent to tools for HPM
+                if (isinstance(pat1, (ToolPattern, ActionPattern)) and 
+                    isinstance(pat2, (ToolPattern, ActionPattern))):
+                    
                     if self._find_existing_tool_composite(population, [n1, n2]):
                         continue
+                    
+                    # We wrap ActionPatterns as ToolPatterns if needed
+                    # For now, if they are already Mastered/Symbolic, it's easy.
+                    # Otherwise we create a sequence-based composite.
                     composite = CompositeToolPattern([pat1, pat2])
                 
                 # Case 2: Both are agents -> CompositeAgentPattern

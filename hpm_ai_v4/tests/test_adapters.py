@@ -58,3 +58,27 @@ def test_obs_dim(adapter):
 def test_decode_invalid_raises(adapter):
     with pytest.raises(ValueError):
         adapter.decode_class(5)
+
+def test_encode_char_letter():
+    a = CharClassAdapter()
+    assert a.encode_char('a') == 0
+
+def test_encode_char_digit():
+    a = CharClassAdapter()
+    assert a.encode_char('3') == 1
+
+def test_encode_char_space():
+    a = CharClassAdapter()
+    assert a.encode_char(' ') == 2
+
+def test_encode_char_punctuation():
+    a = CharClassAdapter()
+    assert a.encode_char('!') == 3
+
+def test_encode_char_newline():
+    a = CharClassAdapter()
+    assert a.encode_char('\n') == 4
+
+def test_encode_char_uppercase():
+    a = CharClassAdapter()
+    assert a.encode_char('Z') == 0

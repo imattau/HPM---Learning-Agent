@@ -1,0 +1,6 @@
+[MemoryTools] Registered 11 total tools.
+[PythonSubstrate] Registered unified Python discovery tools.
+============================================================
+HPM Curriculum Training  |  episodes=2000  LM=True  L5=True
+============================================================
+[LM] Pretraining on hpm_ai_v3/data/lm_corpus/rich_corpus.txt ...

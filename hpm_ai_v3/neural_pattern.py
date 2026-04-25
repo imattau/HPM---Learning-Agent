@@ -7,7 +7,7 @@ from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 import networkx as nx
 from typing import Dict, Any, Optional, List
-from pattern import HPMPattern
+from .pattern import HPMPattern
 
 class RegressionPattern(HPMPattern):
     def __init__(self, input_dim: int, output_dim: int = 1, z1_dim: int = 16, z2_dim: int = 8, pattern_id: Optional[str] = None):

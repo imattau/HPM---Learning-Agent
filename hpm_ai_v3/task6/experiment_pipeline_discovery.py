@@ -92,8 +92,6 @@ class PipelineDiscoveryAgent:
             reward = 0.5 # More reward for success
         else:
             reward = -0.1 # Less penalty
-        ...
-        n_sessions = 1000
 
         self.meta.update_parameters({
             "context_features": features.unsqueeze(0),

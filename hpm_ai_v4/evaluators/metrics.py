@@ -12,7 +12,7 @@ def affective_score(pattern, obs_seq, target_entropy=0.5):
         curiosity = 1.0 - min(1.0, abs(recent_loss - 0.5)/0.5)
         
         # Additional compression bonus (mutual information between levels)
-        comp = pattern.compression(obs_seq)
+        comp = pattern.compression()
         return curiosity + 0.2 * comp
     else:
         # Flat pattern: curiosity based on entropy of its emission distribution
@@ -30,10 +30,10 @@ def pattern_density(pattern, obs_seq, evaluator_values, field_amplification=0.0)
     D(h) = alpha * C(h) + beta * sum(e_k(h)) + gamma * F(h)
     with C(h) = (1/n) * sum(w_ij) (structural connectivity).
     """
-    if pattern.complexity >= 2:
+    if pattern.complexity >= 2 or pattern.latent_dim > 1:
         # Structural connectivity: normalised number of parameters in the hierarchy
-        # (3 latent levels of transitions + 1 emission matrix)
-        n_params = (pattern.latent_dim**2 * 3) + (pattern.latent_dim * pattern.obs_dim) + pattern.latent_dim*2
+        # (1 transition matrix + 1 emission matrix + 1 initial distribution)
+        n_params = (pattern.latent_dim**2) + (pattern.latent_dim * pattern.obs_dim) + pattern.latent_dim
         C = n_params / 100.0   # normalising constant for visualization/scaling (approx 0.2)
     else:
         C = 0.05   # flat patterns have minimal internal connectivity

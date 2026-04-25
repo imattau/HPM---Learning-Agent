@@ -1,7 +1,7 @@
 import torch
 import numpy as np
-from causal_pattern import CausalPattern
-from pattern_field import PatternField
+from .causal_pattern import CausalPattern
+from .pattern_field import PatternField
 
 def create_random_pattern():
     return CausalPattern(input_dim=2, z1_dim=8, z2_dim=2)

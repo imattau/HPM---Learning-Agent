@@ -1,0 +1,1101 @@
+episode,phase,step0_tool,reward,success,top_patterns
+0,Tool Familiarization,float,-1.0,0,re_findall:0.172|index:0.170|split:0.167
+1,Tool Familiarization,none,1.0,1,re_findall:0.172|index:0.170|split:0.167
+2,Tool Familiarization,arithmetic,-1.0,0,split:0.150|re_findall:0.150|index:0.147
+3,Tool Familiarization,operator.add,-1.0,0,operator.add:0.225|split:0.145|re_findall:0.138
+4,Tool Familiarization,none,1.0,1,operator.add:0.225|split:0.145|re_findall:0.138
+5,Tool Familiarization,list_modules,-1.0,0,operator.add:0.328|operator.add:0.129|split:0.107
+6,Tool Familiarization,none,1.0,1,operator.add:0.328|operator.add:0.129|split:0.107
+7,Tool Familiarization,none,1.0,1,operator.add:0.328|operator.add:0.129|split:0.107
+8,Tool Familiarization,float,-1.0,0,operator.add:0.376|operator.add:0.158|operator.add:0.103
+9,Tool Familiarization,index,-1.0,0,operator.add:0.425|operator.add:0.217|operator.add:0.120
+10,Tool Familiarization,none,1.0,1,operator.add:0.425|operator.add:0.217|operator.add:0.120
+11,Tool Familiarization,none,1.0,1,operator.add:0.425|operator.add:0.217|operator.add:0.120
+12,Tool Familiarization,none,1.0,1,operator.add:0.425|operator.add:0.217|operator.add:0.120
+13,Tool Familiarization,operator.add,-1.0,0,operator.add:0.307|operator.add:0.218|operator.add:0.106
+14,Tool Familiarization,sympy.sympify,-1.0,0,operator.add:0.269|operator.add:0.249|operator.add:0.117
+15,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+16,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+17,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+18,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+19,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+20,Tool Familiarization,none,1.0,1,operator.add:0.269|operator.add:0.249|operator.add:0.117
+21,Tool Familiarization,operator.add,-1.0,0,operator.add:0.197|operator.add:0.121|operator.add:0.079
+22,Tool Familiarization,none,1.0,1,operator.add:0.197|operator.add:0.121|sympy.sympify:0.100
+23,Tool Familiarization,none,1.0,1,operator.add:0.197|operator.add:0.121|sympy.sympify:0.100
+24,Tool Familiarization,none,1.0,1,operator.add:0.197|operator.add:0.121|sympy.sympify:0.100
+25,Tool Expansion,none,1.0,1,operator.add:0.197|operator.add:0.121|sympy.sympify:0.100
+26,Tool Expansion,builtins.len,-1.0,0,operator.add:0.151|operator.add:0.077|sympy.sympify:0.067
+27,Tool Expansion,none,1.0,1,operator.add:0.151|math.sqrt:0.100|operator.add:0.077
+28,Tool Expansion,none,1.0,1,operator.add:0.151|math.sqrt:0.100|math.sqrt:0.100
+29,Tool Expansion,none,1.0,1,operator.add:0.151|math.sqrt:0.100|math.sqrt:0.100
+30,Tool Expansion,operator.add,-1.0,0,operator.add:0.113|operator.add:0.072|math.sqrt:0.068
+31,Tool Expansion,operator.add,-1.0,0,operator.add:0.098|operator.add:0.089|math.sqrt:0.067
+32,Tool Expansion,none,1.0,1,numpy.mean:0.100|operator.add:0.098|operator.add:0.089
+33,Tool Expansion,operator.add,-1.0,0,operator.add:0.099|numpy.mean:0.077|operator.add:0.071
+34,Tool Expansion,none,1.0,1,numpy.mean:0.100|operator.add:0.099|numpy.mean:0.077
+35,Tool Expansion,operator.add,-1.0,0,operator.add:0.105|numpy.mean:0.080|operator.add:0.073
+36,Tool Expansion,none,1.0,1,operator.add:0.105|math.sqrt:0.100|numpy.mean:0.080
+37,Tool Expansion,operator.add,-1.0,0,operator.add:0.107|numpy.mean:0.077|operator.add:0.072
+38,Tool Expansion,operator.add,-1.0,0,operator.add:0.116|numpy.mean:0.084|operator.add:0.074
+39,Tool Expansion,none,1.0,1,operator.add:0.116|math.sqrt:0.100|numpy.mean:0.084
+40,Tool Expansion,operator.add,-1.0,0,operator.add:0.108|math.sqrt:0.086|numpy.mean:0.086
+41,Tool Expansion,none,1.0,1,operator.add:0.108|math.sqrt:0.100|math.sqrt:0.086
+42,Tool Expansion,none,1.0,1,operator.add:0.108|math.sqrt:0.100|math.sqrt:0.100
+43,Tool Expansion,none,1.0,1,operator.add:0.108|math.sqrt:0.100|math.sqrt:0.100
+44,Tool Expansion,math.sqrt,1.0,1,math.sqrt:0.100|math.sqrt:0.085|math.sqrt:0.085
+45,Tool Expansion,none,1.0,1,math.sqrt:0.100|math.sqrt:0.100|math.sqrt:0.085
+46,Tool Expansion,sympy.sympify,-1.0,0,math.sqrt:0.140|math.sqrt:0.132|numpy.mean:0.125
+47,Tool Expansion,math.sqrt,-1.0,0,math.sqrt:0.182|math.sqrt:0.170|numpy.mean:0.146
+48,Tool Expansion,math.sqrt,1.0,1,math.sqrt:0.183|math.sqrt:0.174|numpy.mean:0.146
+49,Tool Expansion,numpy.mean,1.0,1,math.sqrt:0.187|math.sqrt:0.174|numpy.mean:0.128
+50,Tool Expansion,numpy.mean,1.0,1,math.sqrt:0.183|math.sqrt:0.161|numpy.mean:0.112
+51,Tool Expansion,none,1.0,1,math.sqrt:0.183|math.sqrt:0.161|numpy.mean:0.112
+52,Tool Expansion,none,1.0,1,math.sqrt:0.183|math.sqrt:0.161|numpy.mean:0.112
+53,Tool Expansion,none,1.0,1,math.sqrt:0.183|math.sqrt:0.161|numpy.mean:0.112
+54,Tool Expansion,math.sqrt,1.0,1,math.sqrt:0.130|math.sqrt:0.113|math.sqrt:0.100
+55,Tool Expansion,none,1.0,1,math.sqrt:0.130|math.sqrt:0.113|math.sqrt:0.100
+56,Tool Expansion,none,1.0,1,math.sqrt:0.130|math.sqrt:0.113|math.sqrt:0.100
+57,NLP Tool Mastery,operator.gt,-1.0,0,math.sqrt:0.109|math.sqrt:0.106|math.sqrt:0.101
+58,NLP Tool Mastery,math.sqrt,-1.0,0,math.sqrt:0.135|math.sqrt:0.115|numpy.mean:0.109
+59,NLP Tool Mastery,numpy.mean,1.0,1,math.sqrt:0.138|math.sqrt:0.117|numpy.mean:0.111
+60,NLP Tool Mastery,math.sqrt,1.0,1,math.sqrt:0.131|math.sqrt:0.111|numpy.mean:0.102
+61,NLP Tool Mastery,math.sqrt,1.0,1,math.sqrt:0.121|math.sqrt:0.105|operator.gt:0.100
+62,NLP Tool Mastery,operator.gt,-1.0,0,math.sqrt:0.117|math.sqrt:0.106|numpy.mean:0.088
+63,NLP Tool Mastery,math.sqrt,-1.0,0,math.sqrt:0.124|math.sqrt:0.108|numpy.mean:0.088
+64,NLP Tool Mastery,numpy.mean,-1.0,0,math.sqrt:0.133|math.sqrt:0.106|numpy.mean:0.084
+65,NLP Tool Mastery,numpy.mean,1.0,1,math.sqrt:0.139|math.sqrt:0.104|operator.gt:0.100
+66,NLP Tool Mastery,numpy.mean,1.0,1,math.sqrt:0.132|operator.gt:0.100|math.sqrt:0.094
+67,NLP Tool Mastery,numpy.mean,1.0,1,math.sqrt:0.122|operator.gt:0.100|operator.gt:0.085
+68,NLP Tool Mastery,numpy.mean,1.0,1,math.sqrt:0.116|operator.gt:0.100|operator.gt:0.080
+69,NLP Tool Mastery,math.sqrt,-1.0,0,math.sqrt:0.100|operator.gt:0.090|operator.gt:0.077
+70,NLP Tool Mastery,numpy.mean,1.0,1,operator.gt:0.100|math.sqrt:0.098|operator.gt:0.094
+71,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.101|operator.gt:0.082|math.sqrt:0.078
+72,NLP Tool Mastery,numpy.mean,1.0,1,operator.gt:0.106|operator.gt:0.100|operator.gt:0.083
+73,NLP Tool Mastery,math.sqrt,1.0,1,operator.gt:0.109|operator.gt:0.100|operator.gt:0.083
+74,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.122|operator.gt:0.087|operator.gt:0.079
+75,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.125|operator.gt:0.100|operator.gt:0.088
+76,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.129|operator.gt:0.096|operator.gt:0.081
+77,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.133|operator.gt:0.108|operator.gt:0.093
+78,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.133|operator.gt:0.111|operator.gt:0.100
+79,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.119|operator.gt:0.102|operator.gt:0.101
+80,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.106|operator.gt:0.100|operator.gt:0.099
+81,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.100|operator.gt:0.097|operator.gt:0.097
+82,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.144|operator.gt:0.135|operator.gt:0.109
+83,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.169|operator.gt:0.164|operator.gt:0.105
+84,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.193|operator.gt:0.177|operator.gt:0.096
+85,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.197|operator.gt:0.178|operator.gt:0.100
+86,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.181|operator.gt:0.161|operator.gt:0.100
+87,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.164|operator.gt:0.146|operator.gt:0.100
+88,NLP Tool Mastery,math.sqrt,-1.0,0,operator.gt:0.157|operator.gt:0.154|operator.gt:0.141
+89,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.162|operator.gt:0.159|operator.gt:0.141
+90,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.193|operator.gt:0.183|operator.gt:0.115
+91,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.197|operator.gt:0.185|operator.gt:0.114
+92,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.181|operator.gt:0.169|operator.gt:0.101
+93,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.165|operator.gt:0.152|operator.gt:0.100
+94,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.151|operator.gt:0.145|operator.gt:0.140
+95,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.155|operator.gt:0.144|operator.gt:0.141
+96,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.172|operator.gt:0.157|operator.gt:0.133
+97,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.176|operator.gt:0.159|operator.gt:0.132
+98,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.162|operator.gt:0.145|operator.gt:0.119
+99,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.164|operator.gt:0.151|operator.gt:0.130
+0,Tool Familiarization,none,1.0,1,sympy.sympify:0.100|arithmetic:0.010|float:0.010
+1,Tool Familiarization,sympy.sympify,1.0,1,sympy.sympify:0.635|sympy.sympify:0.100|list_modules:0.061
+2,Tool Familiarization,none,1.0,1,sympy.sympify:0.635|sympy.sympify:0.100|operator.add:0.100
+3,Tool Familiarization,none,1.0,1,sympy.sympify:0.635|sympy.sympify:0.100|operator.add:0.100
+4,Tool Familiarization,none,1.0,1,sympy.sympify:0.635|sympy.sympify:0.100|operator.add:0.100
+5,Tool Expansion,none,1.0,1,sympy.sympify:0.635|sympy.sympify:0.100|operator.add:0.100
+6,Tool Expansion,list_modules,-1.0,0,sympy.sympify:0.621|sympy.sympify:0.040|sympy.sympify:0.036
+7,Tool Expansion,none,1.0,1,sympy.sympify:0.621|math.sqrt:0.100|sympy.sympify:0.040
+8,Tool Expansion,split,-1.0,0,sympy.sympify:0.639|math.sqrt:0.064|sympy.sympify:0.040
+9,Tool Expansion,none,1.0,1,sympy.sympify:0.639|numpy.mean:0.100|math.sqrt:0.064
+10,Tool Expansion,none,1.0,1,sympy.sympify:0.639|numpy.mean:0.100|math.sqrt:0.100
+11,Tool Expansion,none,1.0,1,sympy.sympify:0.639|numpy.mean:0.100|math.sqrt:0.100
+12,Tool Expansion,none,1.0,1,sympy.sympify:0.639|numpy.mean:0.100|math.sqrt:0.100
+13,Tool Expansion,none,1.0,1,sympy.sympify:0.639|numpy.mean:0.100|math.sqrt:0.100
+14,Tool Expansion,sympy.sympify,-1.0,0,sympy.sympify:0.424|numpy.mean:0.071|math.sqrt:0.068
+15,Tool Expansion,none,1.0,1,sympy.sympify:0.424|math.sqrt:0.100|numpy.mean:0.071
+16,Tool Expansion,operator.add,-1.0,0,sympy.sympify:0.341|math.sqrt:0.084|numpy.mean:0.079
+17,Tool Expansion,sympy.sympify,-1.0,0,sympy.sympify:0.267|numpy.mean:0.096|math.sqrt:0.089
+18,Tool Expansion,math.sqrt,1.0,1,sympy.sympify:0.261|math.sqrt:0.100|numpy.mean:0.097
+19,Tool Expansion,sympy.sympify,1.0,1,sympy.sympify:0.226|math.sqrt:0.100|numpy.mean:0.090
+20,Tool Expansion,sympy.sympify,1.0,1,sympy.sympify:0.185|operator.gt:0.100|numpy.mean:0.085
+21,Tool Expansion,sympy.sympify,-1.0,0,sympy.sympify:0.116|numpy.mean:0.087|math.sqrt:0.081
+22,Tool Expansion,none,1.0,1,sympy.sympify:0.116|numpy.mean:0.100|numpy.mean:0.087
+23,Tool Expansion,none,1.0,1,sympy.sympify:0.116|numpy.mean:0.100|numpy.mean:0.100
+24,Tool Expansion,numpy.mean,-1.0,0,numpy.mean:0.081|numpy.mean:0.080|math.sqrt:0.079
+25,Tool Expansion,numpy.mean,1.0,1,math.sqrt:0.100|numpy.mean:0.086|math.sqrt:0.086
+26,Tool Expansion,numpy.mean,1.0,1,math.sqrt:0.100|numpy.mean:0.084|math.sqrt:0.084
+27,Tool Expansion,none,1.0,1,math.sqrt:0.100|numpy.mean:0.100|numpy.mean:0.084
+28,Tool Expansion,none,1.0,1,math.sqrt:0.100|numpy.mean:0.100|math.sqrt:0.100
+29,Tool Expansion,numpy.mean,-1.0,0,math.sqrt:0.079|numpy.mean:0.078|math.sqrt:0.070
+30,Tool Expansion,none,1.0,1,numpy.mean:0.100|math.sqrt:0.079|numpy.mean:0.078
+31,Tool Expansion,none,1.0,1,numpy.mean:0.100|operator.gt:0.100|math.sqrt:0.079
+32,Tool Expansion,numpy.mean,1.0,1,operator.gt:0.100|numpy.mean:0.078|operator.gt:0.076
+33,Tool Expansion,math.sqrt,-1.0,0,numpy.mean:0.077|operator.gt:0.074|operator.gt:0.074
+34,Tool Expansion,numpy.mean,-1.0,0,numpy.mean:0.092|operator.gt:0.081|operator.gt:0.074
+35,Tool Expansion,math.sqrt,1.0,1,operator.gt:0.100|numpy.mean:0.096|operator.gt:0.084
+36,Tool Expansion,math.sqrt,1.0,1,operator.gt:0.100|math.sqrt:0.100|numpy.mean:0.088
+37,Tool Expansion,none,1.0,1,operator.gt:0.100|math.sqrt:0.100|numpy.mean:0.100
+38,Tool Expansion,numpy.mean,-1.0,0,operator.gt:0.162|numpy.mean:0.078|operator.gt:0.069
+39,Tool Expansion,none,1.0,1,operator.gt:0.162|numpy.mean:0.100|numpy.mean:0.078
+40,Tool Expansion,none,1.0,1,operator.gt:0.162|numpy.mean:0.100|math.sqrt:0.100
+41,Tool Expansion,none,1.0,1,operator.gt:0.162|numpy.mean:0.100|math.sqrt:0.100
+42,Tool Expansion,none,1.0,1,operator.gt:0.162|numpy.mean:0.100|math.sqrt:0.100
+43,Tool Expansion,math.sqrt,1.0,1,operator.gt:0.116|math.sqrt:0.100|math.sqrt:0.078
+44,Tool Expansion,none,1.0,1,operator.gt:0.116|math.sqrt:0.100|operator.gt:0.100
+45,NLP Tool Mastery,numpy.mean,-1.0,0,math.sqrt:0.117|math.sqrt:0.113|math.sqrt:0.109
+46,NLP Tool Mastery,math.sqrt,1.0,1,math.sqrt:0.127|math.sqrt:0.123|math.sqrt:0.115
+47,NLP Tool Mastery,operator.gt,1.0,1,math.sqrt:0.117|math.sqrt:0.113|math.sqrt:0.105
+48,NLP Tool Mastery,math.sqrt,1.0,1,operator.gt:0.125|math.sqrt:0.115|math.sqrt:0.111
+49,NLP Tool Mastery,math.sqrt,-1.0,0,operator.gt:0.159|math.sqrt:0.120|math.sqrt:0.115
+50,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.176|math.sqrt:0.133|math.sqrt:0.121
+51,NLP Tool Mastery,math.sqrt,-1.0,0,operator.gt:0.177|math.sqrt:0.146|math.sqrt:0.121
+52,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.177|math.sqrt:0.147|math.sqrt:0.121
+53,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.161|math.sqrt:0.133|math.sqrt:0.108
+54,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.145|math.sqrt:0.119|operator.gt:0.100
+55,NLP Tool Mastery,math.sqrt,-1.0,0,operator.gt:0.160|operator.gt:0.143|operator.gt:0.113
+56,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.210|operator.gt:0.168|operator.gt:0.089
+57,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.214|operator.gt:0.169|operator.gt:0.100
+58,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.196|operator.gt:0.154|operator.gt:0.100
+59,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.178|operator.gt:0.140|operator.gt:0.100
+60,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.160|operator.gt:0.127|operator.gt:0.100
+61,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.144|operator.gt:0.114|operator.gt:0.100
+62,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.130|operator.gt:0.102|operator.gt:0.100
+63,NLP Tool Mastery,math.sqrt,-1.0,0,operator.gt:0.115|operator.gt:0.112|operator.gt:0.112
+64,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.134|operator.gt:0.131|operator.gt:0.130
+65,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.136|operator.gt:0.133|operator.gt:0.132
+66,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.145|operator.gt:0.137|operator.gt:0.133
+67,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.156|operator.gt:0.149|operator.gt:0.143
+68,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.157|operator.gt:0.149|operator.gt:0.145
+69,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.157|operator.gt:0.154|operator.gt:0.140
+70,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.170|operator.gt:0.160|operator.gt:0.144
+71,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.171|operator.gt:0.160|operator.gt:0.145
+72,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.154|operator.gt:0.143|operator.gt:0.132
+73,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.139|operator.gt:0.127|operator.gt:0.120
+74,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.124|operator.gt:0.112|operator.gt:0.108
+75,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.111|operator.gt:0.100|operator.gt:0.098
+76,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.100|operator.gt:0.098|operator.gt:0.094
+77,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.100|operator.gt:0.093|operator.gt:0.088
+78,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.106|operator.gt:0.105|operator.gt:0.103
+79,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.108|operator.gt:0.107|operator.gt:0.105
+80,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.119|operator.gt:0.117|operator.gt:0.116
+81,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.132|operator.gt:0.130|operator.gt:0.128
+82,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.133|operator.gt:0.131|operator.gt:0.129
+83,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.121|operator.gt:0.119|operator.gt:0.116
+84,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.170|operator.gt:0.113|operator.gt:0.105
+85,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.219|operator.gt:0.111|operator.gt:0.109
+86,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.219|operator.gt:0.121|operator.gt:0.116
+87,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.219|operator.gt:0.122|operator.gt:0.117
+88,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.196|operator.gt:0.111|operator.gt:0.106
+89,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.174|operator.gt:0.100|operator.gt:0.100
+90,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.155|operator.gt:0.100|operator.gt:0.097
+91,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.137|operator.gt:0.100|operator.gt:0.095
+92,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.125|operator.gt:0.124|operator.gt:0.123
+93,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.158|operator.gt:0.145|operator.gt:0.134
+94,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.161|operator.gt:0.148|operator.gt:0.134
+95,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.164|operator.gt:0.162|operator.gt:0.124
+96,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.184|operator.gt:0.169|operator.gt:0.124
+97,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.195|operator.gt:0.167|operator.gt:0.120
+98,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.200|operator.gt:0.165|operator.gt:0.118
+99,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.194|operator.gt:0.160|operator.gt:0.119
+100,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.193|operator.gt:0.162|operator.gt:0.118
+101,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.164|operator.gt:0.158|operator.gt:0.118
+102,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.161|operator.gt:0.150|operator.gt:0.137
+103,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.161|operator.gt:0.148|operator.gt:0.138
+104,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.147|operator.gt:0.138|operator.gt:0.121
+105,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.159|operator.gt:0.131|operator.gt:0.123
+106,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.160|operator.gt:0.135|operator.gt:0.122
+107,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.157|operator.gt:0.156|operator.gt:0.104
+108,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.181|operator.gt:0.157|operator.gt:0.107
+109,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.189|operator.gt:0.158|operator.gt:0.121
+110,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.189|operator.gt:0.158|operator.gt:0.123
+111,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.169|operator.gt:0.141|operator.gt:0.112
+112,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.150|operator.gt:0.125|operator.gt:0.101
+113,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.165|operator.gt:0.143|operator.gt:0.116
+114,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.170|operator.gt:0.145|operator.gt:0.114
+115,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.158|operator.gt:0.134|operator.gt:0.101
+116,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.146|operator.gt:0.123|operator.gt:0.100
+117,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.153|operator.gt:0.145|operator.gt:0.132
+118,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.155|operator.gt:0.149|operator.gt:0.135
+119,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.143|operator.gt:0.137|operator.gt:0.124
+120,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.131|operator.gt:0.125|operator.gt:0.113
+121,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.120|operator.gt:0.114|operator.gt:0.103
+122,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.122|operator.gt:0.121|operator.gt:0.116
+123,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.124|operator.gt:0.124|operator.gt:0.117
+124,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.114|operator.gt:0.113|operator.gt:0.107
+125,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.146|operator.gt:0.121|operator.gt:0.108
+126,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.149|operator.gt:0.123|operator.gt:0.109
+127,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.138|operator.gt:0.112|operator.gt:0.100
+128,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.148|operator.gt:0.126|operator.gt:0.107
+129,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.152|operator.gt:0.127|operator.gt:0.107
+130,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.140|operator.gt:0.114|operator.gt:0.100
+131,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.128|operator.gt:0.102|operator.gt:0.100
+132,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.131|operator.gt:0.129|operator.gt:0.124
+133,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.146|operator.gt:0.139|operator.gt:0.138
+134,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.147|operator.gt:0.140|operator.gt:0.140
+135,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.133|operator.gt:0.128|operator.gt:0.126
+136,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.119|operator.gt:0.116|operator.gt:0.113
+137,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.106|operator.gt:0.104|operator.gt:0.101
+138,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.100|operator.gt:0.095|operator.gt:0.094
+139,NLP Tool Mastery,operator.gt,-1.0,0,operator.gt:0.125|operator.gt:0.122|operator.gt:0.115
+140,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.129|operator.gt:0.126|operator.gt:0.117
+141,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.120|operator.gt:0.116|operator.gt:0.108
+142,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.111|operator.gt:0.106|operator.gt:0.100
+143,NLP Tool Mastery,operator.gt,1.0,1,operator.gt:0.102|operator.gt:0.100|operator.gt:0.097
+144,Sensory Conversion Mastery,operator.gt,-1.0,0,operator.gt:0.117|operator.gt:0.115|operator.gt:0.109
+145,Sensory Conversion Mastery,operator.gt,-1.0,0,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+146,Sensory Conversion Mastery,none,1.0,1,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+147,Sensory Conversion Mastery,none,1.0,1,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+148,Sensory Conversion Mastery,none,1.0,1,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+149,Sensory Conversion Mastery,none,1.0,1,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+150,Sensory Conversion Mastery,none,1.0,1,operator.gt:0.135|operator.gt:0.121|operator.gt:0.118
+151,Sensory Conversion Mastery,builtins.float,1.0,1,builtins.float:0.100|operator.gt:0.088|operator.gt:0.079
+152,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.100|builtins.float:0.100|operator.gt:0.088
+153,Sensory Conversion Mastery,operator.gt,-1.0,0,builtins.float:0.093|builtins.float:0.093|builtins.float:0.093
+154,Sensory Conversion Mastery,operator.gt,-1.0,0,builtins.float:0.114|builtins.float:0.110|builtins.float:0.109
+155,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.114|builtins.float:0.110|builtins.float:0.109
+156,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.114|builtins.float:0.110|builtins.float:0.109
+157,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.114|builtins.float:0.110|builtins.float:0.109
+158,Sensory Conversion Mastery,operator.gt,-1.0,0,builtins.float:0.107|builtins.float:0.094|builtins.float:0.093
+159,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.107|builtins.float:0.100|builtins.float:0.094
+160,Sensory Conversion Mastery,re.findall,1.0,1,builtins.float:0.101|builtins.float:0.100|builtins.float:0.089
+161,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.101|builtins.float:0.100|builtins.float:0.100
+162,Sensory Conversion Mastery,none,1.0,1,builtins.float:0.101|builtins.float:0.100|builtins.float:0.100
+163,Sensory Conversion Mastery,builtins.float,1.0,1,builtins.float:0.100|builtins.float:0.084|builtins.float:0.084
+164,Sensory Conversion Mastery,builtins.float,1.0,1,builtins.float:0.100|builtins.float:0.097|builtins.float:0.082
+165,Container Mastery,builtins.float,-1.0,0,builtins.float:0.140|builtins.float:0.119|builtins.float:0.107
+166,Container Mastery,none,1.0,1,builtins.float:0.140|builtins.float:0.119|builtins.float:0.107
+167,Container Mastery,none,1.0,1,builtins.float:0.140|builtins.float:0.119|builtins.float:0.107
+168,Container Mastery,none,1.0,1,builtins.float:0.140|builtins.float:0.119|builtins.float:0.107
+169,Container Mastery,none,1.0,1,builtins.float:0.140|builtins.float:0.119|builtins.float:0.107
+170,Container Mastery,builtins.float,-1.0,0,builtins.float:0.141|builtins.float:0.115|builtins.float:0.098
+171,Container Mastery,none,1.0,1,builtins.float:0.141|builtins.float:0.115|operator.getitem:0.100
+172,Container Mastery,builtins.float,-1.0,0,builtins.float:0.159|builtins.float:0.120|builtins.float:0.104
+173,Container Mastery,none,1.0,1,builtins.float:0.159|builtins.float:0.120|builtins.float:0.104
+174,Container Mastery,none,1.0,1,builtins.float:0.159|builtins.float:0.120|builtins.float:0.104
+175,Container Mastery,none,1.0,1,builtins.float:0.159|builtins.float:0.120|builtins.float:0.104
+176,Container Mastery,none,1.0,1,builtins.float:0.159|builtins.float:0.120|builtins.float:0.104
+177,Container Mastery,builtins.float,-1.0,0,builtins.float:0.130|builtins.float:0.092|builtins.float:0.088
+178,Container Mastery,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|builtins.float:0.092
+179,Container Mastery,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|re.findall:0.100
+180,Container Mastery,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|re.findall:0.100
+181,Container Mastery,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|re.findall:0.100
+182,Container Mastery,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|re.findall:0.100
+183,Sensory Priming,none,1.0,1,builtins.float:0.130|operator.getitem:0.100|re.findall:0.100
+184,Sensory Priming,builtins.float,-1.0,0,builtins.float:0.083|operator.getitem:0.061|operator.getitem:0.061
+185,Sensory Priming,operator.getitem,-1.0,0,builtins.float:0.080|operator.getitem:0.067|operator.getitem:0.066
+186,Sensory Priming,none,1.0,1,re.findall:0.100|builtins.float:0.080|operator.getitem:0.067
+187,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|builtins.float:0.080
+188,Sensory Priming,builtins.float,-1.0,0,re.findall:0.079|re.findall:0.078|operator.getitem:0.064
+189,Sensory Priming,operator.getitem,-1.0,0,re.findall:0.084|re.findall:0.080|operator.getitem:0.074
+190,Sensory Priming,builtins.float,-1.0,0,re.findall:0.091|re.findall:0.087|operator.getitem:0.082
+191,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.091|re.findall:0.087
+192,Sensory Priming,re.findall,-1.0,0,re.findall:0.089|re.findall:0.084|re.findall:0.082
+193,Sensory Priming,re.findall,-1.0,0,re.findall:0.092|re.findall:0.091|operator.getitem:0.084
+194,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.092|re.findall:0.091
+195,Sensory Priming,operator.getitem,-1.0,0,re.findall:0.093|re.findall:0.092|re.findall:0.083
+196,Sensory Priming,re.findall,-1.0,0,re.findall:0.104|re.findall:0.098|re.findall:0.089
+197,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.098
+198,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+199,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+200,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+201,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+202,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+203,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+204,Sensory Priming,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+205,Sensory Priming,operator.getitem,-1.0,0,re.findall:0.066|re.findall:0.058|re.findall:0.058
+206,Sensory Priming,re.findall,-1.0,0,re.findall:0.072|re.findall:0.066|re.findall:0.066
+207,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.072|re.findall:0.066
+208,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.072
+209,Sensory Priming,re.findall,-1.0,0,re.findall:0.083|re.findall:0.081|re.findall:0.065
+210,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.083|re.findall:0.081
+211,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.083
+212,Sensory Priming,operator.getitem,-1.0,0,re.findall:0.083|re.findall:0.083|re.findall:0.073
+213,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.083|re.findall:0.083
+214,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.083
+215,Sensory Priming,re.findall,-1.0,0,re.findall:0.082|re.findall:0.077|re.findall:0.076
+216,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.082|re.findall:0.077
+217,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.082
+218,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+219,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+220,Sensory Priming,re.findall,-1.0,0,re.findall:0.070|re.findall:0.070|re.findall:0.070
+221,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.070|re.findall:0.070
+222,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.070
+223,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+224,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+225,Sensory Priming,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+226,Hierarchical Chaining,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+227,Hierarchical Chaining,re.findall,-1.0,0,re.findall:0.062|re.findall:0.062|re.findall:0.061
+228,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|re.findall:0.062|re.findall:0.062
+229,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|re.findall:0.062
+230,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+231,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+232,Hierarchical Chaining,re.findall,-1.0,0,math.sqrt:0.057|math.sqrt:0.057|math.sqrt:0.054
+233,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.057|math.sqrt:0.057
+234,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.057
+235,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+236,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.064|math.sqrt:0.064|builtins.float:0.059
+237,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.064|math.sqrt:0.064
+238,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|math.sqrt:0.064
+239,Hierarchical Chaining,math.sqrt,-1.0,0,builtins.float:0.066|math.sqrt:0.065|math.sqrt:0.053
+240,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|builtins.float:0.066|math.sqrt:0.065
+241,Hierarchical Chaining,re.findall,-1.0,0,builtins.float:0.073|builtins.float:0.057|math.sqrt:0.054
+242,Hierarchical Chaining,re.findall,-1.0,0,builtins.float:0.063|builtins.float:0.055|re.findall:0.052
+243,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.063|builtins.float:0.055
+244,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|builtins.float:0.063
+245,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+246,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+247,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+248,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.062|builtins.float:0.059|builtins.float:0.059
+249,Hierarchical Chaining,re.findall,-1.0,0,math.sqrt:0.062|math.sqrt:0.056|builtins.float:0.056
+250,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.062|math.sqrt:0.056
+251,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.100|math.sqrt:0.062
+252,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.100|builtins.float:0.100
+253,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.100|builtins.float:0.100
+254,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.069|math.sqrt:0.069|math.sqrt:0.064
+255,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.069|math.sqrt:0.069
+256,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.078|math.sqrt:0.069|math.sqrt:0.066
+257,Hierarchical Chaining,re.findall,-1.0,0,math.sqrt:0.078|math.sqrt:0.077|math.sqrt:0.069
+258,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.078|math.sqrt:0.077
+259,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|math.sqrt:0.078
+260,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.082|math.sqrt:0.078|math.sqrt:0.068
+261,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.090|math.sqrt:0.089|math.sqrt:0.073
+262,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.103|math.sqrt:0.091|math.sqrt:0.080
+263,Hierarchical Chaining,none,1.0,1,math.sqrt:0.103|builtins.float:0.100|math.sqrt:0.091
+264,Hierarchical Chaining,none,1.0,1,math.sqrt:0.103|builtins.float:0.100|math.sqrt:0.100
+265,Hierarchical Chaining,none,1.0,1,math.sqrt:0.103|builtins.float:0.100|math.sqrt:0.100
+266,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.090|math.sqrt:0.079|math.sqrt:0.078
+267,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.102|math.sqrt:0.087|math.sqrt:0.086
+268,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.110|math.sqrt:0.096|math.sqrt:0.092
+269,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.096
+270,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.100
+271,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.098|math.sqrt:0.088|math.sqrt:0.088
+272,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.105|math.sqrt:0.102|math.sqrt:0.091
+273,Hierarchical Chaining,none,1.0,1,math.sqrt:0.105|math.sqrt:0.102|math.sqrt:0.100
+274,Hierarchical Chaining,none,1.0,1,math.sqrt:0.105|math.sqrt:0.102|math.sqrt:0.100
+275,Hierarchical Chaining,none,1.0,1,math.sqrt:0.105|math.sqrt:0.102|math.sqrt:0.100
+276,Hierarchical Chaining,none,1.0,1,math.sqrt:0.105|math.sqrt:0.102|math.sqrt:0.100
+277,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.093|math.sqrt:0.076|math.sqrt:0.074
+278,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.107|math.sqrt:0.084|math.sqrt:0.075
+279,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.120|math.sqrt:0.095|math.sqrt:0.075
+280,Hierarchical Chaining,none,1.0,1,math.sqrt:0.120|math.sqrt:0.100|math.sqrt:0.095
+281,Hierarchical Chaining,none,1.0,1,math.sqrt:0.120|math.sqrt:0.100|builtins.float:0.100
+282,Hierarchical Chaining,none,1.0,1,math.sqrt:0.120|math.sqrt:0.100|builtins.float:0.100
+283,Hierarchical Chaining,none,1.0,1,math.sqrt:0.120|math.sqrt:0.100|builtins.float:0.100
+284,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.094|math.sqrt:0.074|math.sqrt:0.073
+285,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.097|math.sqrt:0.081|builtins.float:0.074
+286,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.093|math.sqrt:0.088|builtins.float:0.084
+287,Hierarchical Chaining,math.sqrt,-1.0,0,builtins.float:0.095|math.sqrt:0.090|math.sqrt:0.087
+288,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.095|math.sqrt:0.090
+289,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.096|builtins.float:0.095|builtins.float:0.081
+290,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.096|builtins.float:0.095
+291,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.106|math.sqrt:0.094|builtins.float:0.089
+292,Hierarchical Chaining,none,1.0,1,math.sqrt:0.106|builtins.float:0.100|math.sqrt:0.094
+293,Hierarchical Chaining,none,1.0,1,math.sqrt:0.106|builtins.float:0.100|math.sqrt:0.100
+294,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.110|math.sqrt:0.089|math.sqrt:0.086
+295,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.089
+296,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.100
+297,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.100
+298,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.100
+299,Hierarchical Chaining,none,1.0,1,math.sqrt:0.110|math.sqrt:0.100|math.sqrt:0.100
+300,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.089|math.sqrt:0.071|math.sqrt:0.068
+301,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.104|math.sqrt:0.083|math.sqrt:0.073
+302,Hierarchical Chaining,none,1.0,1,math.sqrt:0.104|builtins.float:0.100|math.sqrt:0.083
+303,Hierarchical Chaining,none,1.0,1,math.sqrt:0.104|builtins.float:0.100|math.sqrt:0.100
+304,Hierarchical Chaining,none,1.0,1,math.sqrt:0.104|builtins.float:0.100|math.sqrt:0.100
+305,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.088|math.sqrt:0.080|math.sqrt:0.078
+306,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.096|math.sqrt:0.093|math.sqrt:0.087
+307,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.096|math.sqrt:0.093
+308,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|math.sqrt:0.096
+309,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+310,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+311,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+312,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+313,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.074|math.sqrt:0.063|math.sqrt:0.062
+314,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.090|math.sqrt:0.067|math.sqrt:0.065
+315,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.090|math.sqrt:0.067
+316,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|math.sqrt:0.090
+317,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.091|math.sqrt:0.084|builtins.float:0.075
+318,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.091|math.sqrt:0.084
+319,Hierarchical Chaining,builtins.float,-1.0,0,math.sqrt:0.096|builtins.float:0.085|math.sqrt:0.085
+320,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.096|builtins.float:0.085
+321,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.099|builtins.float:0.082|builtins.float:0.082
+322,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.105|builtins.float:0.089|builtins.float:0.085
+323,Hierarchical Chaining,none,1.0,1,math.sqrt:0.105|math.sqrt:0.100|builtins.float:0.089
+324,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.094|builtins.float:0.086|math.sqrt:0.086
+325,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.094|builtins.float:0.086
+326,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|math.sqrt:0.094
+327,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+328,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+329,Hierarchical Chaining,none,1.0,1,builtins.float:0.100|math.sqrt:0.100|builtins.float:0.100
+330,Hierarchical Chaining,math.sqrt,-1.0,0,math.sqrt:0.068|math.sqrt:0.066|builtins.float:0.065
+331,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|math.sqrt:0.068|math.sqrt:0.066
+332,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.068
+333,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+334,Hierarchical Chaining,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+335,Arithmetic Reasoning,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+336,Arithmetic Reasoning,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+337,Arithmetic Reasoning,none,1.0,1,math.sqrt:0.100|builtins.float:0.100|math.sqrt:0.100
+338,Arithmetic Reasoning,math.sqrt,-1.0,0,math.sqrt:0.059|math.sqrt:0.058|builtins.float:0.058
+339,Arithmetic Reasoning,builtins.float,1.0,1,builtins.float:0.100|math.sqrt:0.059|math.sqrt:0.058
+340,Arithmetic Reasoning,builtins.float,-1.0,0,builtins.float:0.081|builtins.float:0.057|math.sqrt:0.056
+341,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.081|builtins.float:0.057
+342,Arithmetic Reasoning,builtins.float,1.0,1,sympy.sympify:0.100|builtins.float:0.100|builtins.float:0.073
+343,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.100|sympy.sympify:0.100
+344,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.100|sympy.sympify:0.100
+345,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.100|sympy.sympify:0.100
+346,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.100|sympy.sympify:0.100
+347,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.100|builtins.float:0.100|sympy.sympify:0.100
+348,Arithmetic Reasoning,math.sqrt,-1.0,0,sympy.sympify:0.130|math.sqrt:0.054|math.sqrt:0.053
+349,Arithmetic Reasoning,none,1.0,1,sympy.sympify:0.130|sympy.sympify:0.100|math.sqrt:0.054
+350,Arithmetic Reasoning,sympy.sympify,1.0,1,sympy.sympify:0.122|sympy.sympify:0.101|sympy.sympify:0.100
+351,Pattern Extraction,none,1.0,1,sympy.sympify:0.122|sympy.sympify:0.101|sympy.sympify:0.100
+352,Pattern Extraction,builtins.float,-1.0,0,sympy.sympify:0.158|sympy.sympify:0.134|sympy.sympify:0.062
+353,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.134|re.findall:0.100
+354,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.134|re.findall:0.100
+355,Pattern Extraction,math.sqrt,-1.0,0,sympy.sympify:0.165|sympy.sympify:0.138|re.findall:0.067
+356,Pattern Extraction,none,1.0,1,sympy.sympify:0.165|sympy.sympify:0.138|re.findall:0.100
+357,Pattern Extraction,sympy.sympify,-1.0,0,sympy.sympify:0.153|sympy.sympify:0.152|re.findall:0.077
+358,Pattern Extraction,none,1.0,1,sympy.sympify:0.153|sympy.sympify:0.152|re.findall:0.100
+359,Pattern Extraction,none,1.0,1,sympy.sympify:0.153|sympy.sympify:0.152|re.findall:0.100
+360,Pattern Extraction,builtins.float,-1.0,0,sympy.sympify:0.146|sympy.sympify:0.125|re.findall:0.075
+361,Pattern Extraction,re.findall,-1.0,0,sympy.sympify:0.158|sympy.sympify:0.117|re.findall:0.073
+362,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.117|re.findall:0.100
+363,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.117|re.findall:0.100
+364,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.117|re.findall:0.100
+365,Pattern Extraction,none,1.0,1,sympy.sympify:0.158|sympy.sympify:0.117|re.findall:0.100
+366,Pattern Extraction,re.findall,-1.0,0,sympy.sympify:0.114|sympy.sympify:0.076|re.findall:0.071
+367,Pattern Extraction,none,1.0,1,sympy.sympify:0.114|re.findall:0.100|sympy.sympify:0.076
+368,Pattern Extraction,none,1.0,1,sympy.sympify:0.114|re.findall:0.100|re.findall:0.100
+369,Pattern Extraction,re.findall,-1.0,0,sympy.sympify:0.088|re.findall:0.084|re.findall:0.082
+370,Pattern Extraction,sympy.sympify,-1.0,0,re.findall:0.090|re.findall:0.085|re.findall:0.082
+371,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.095|re.findall:0.092
+372,Pattern Extraction,re.findall,-1.0,0,re.findall:0.111|re.findall:0.101|re.findall:0.092
+373,Pattern Extraction,math.sqrt,-1.0,0,re.findall:0.133|re.findall:0.105|re.findall:0.103
+374,Pattern Extraction,builtins.float,-1.0,0,re.findall:0.149|re.findall:0.127|re.findall:0.095
+375,Pattern Extraction,none,1.0,1,re.findall:0.149|re.findall:0.127|re.findall:0.100
+376,Pattern Extraction,re.findall,-1.0,0,re.findall:0.144|re.findall:0.133|re.findall:0.087
+377,Pattern Extraction,none,1.0,1,re.findall:0.144|re.findall:0.133|re.findall:0.100
+378,Pattern Extraction,none,1.0,1,re.findall:0.144|re.findall:0.133|re.findall:0.100
+379,Pattern Extraction,re.findall,-1.0,0,re.findall:0.123|re.findall:0.121|re.findall:0.088
+380,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.121|re.findall:0.100
+381,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.121|re.findall:0.100
+382,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.121|re.findall:0.100
+383,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.121|re.findall:0.100
+384,Pattern Extraction,re.findall,-1.0,0,re.findall:0.087|re.findall:0.082|re.findall:0.075
+385,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.087|re.findall:0.082
+386,Pattern Extraction,re.findall,-1.0,0,re.findall:0.088|re.findall:0.078|re.findall:0.078
+387,Pattern Extraction,re.findall,-1.0,0,re.findall:0.094|re.findall:0.090|re.findall:0.087
+388,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.094|re.findall:0.090
+389,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.094
+390,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.084|re.findall:0.084
+391,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.084
+392,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.095
+393,Pattern Extraction,re.findall,-1.0,0,re.findall:0.096|re.findall:0.083|re.findall:0.079
+394,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.096|re.findall:0.083
+395,Pattern Extraction,re.findall,-1.0,0,re.findall:0.102|re.findall:0.090|re.findall:0.080
+396,Pattern Extraction,none,1.0,1,re.findall:0.102|re.findall:0.100|re.findall:0.090
+397,Pattern Extraction,re.findall,-1.0,0,re.findall:0.103|re.findall:0.093|re.findall:0.091
+398,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.100|re.findall:0.093
+399,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.100|re.findall:0.100
+400,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.100|re.findall:0.100
+401,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.083|re.findall:0.077
+402,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.085|re.findall:0.083
+403,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.085
+404,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+405,Pattern Extraction,re.findall,-1.0,0,re.findall:0.077|re.findall:0.076|re.findall:0.076
+406,Pattern Extraction,re.findall,-1.0,0,re.findall:0.091|re.findall:0.084|re.findall:0.079
+407,Pattern Extraction,re.findall,-1.0,0,re.findall:0.107|re.findall:0.097|re.findall:0.088
+408,Pattern Extraction,none,1.0,1,re.findall:0.107|re.findall:0.100|re.findall:0.097
+409,Pattern Extraction,re.findall,-1.0,0,re.findall:0.117|re.findall:0.103|re.findall:0.091
+410,Pattern Extraction,re.findall,-1.0,0,re.findall:0.141|re.findall:0.115|re.findall:0.097
+411,Pattern Extraction,re.findall,-1.0,0,re.findall:0.165|re.findall:0.123|re.findall:0.105
+412,Pattern Extraction,re.findall,-1.0,0,re.findall:0.188|re.findall:0.130|re.findall:0.111
+413,Pattern Extraction,none,1.0,1,re.findall:0.188|re.findall:0.130|re.findall:0.111
+414,Pattern Extraction,none,1.0,1,re.findall:0.188|re.findall:0.130|re.findall:0.111
+415,Pattern Extraction,re.findall,-1.0,0,re.findall:0.182|re.findall:0.113|re.findall:0.092
+416,Pattern Extraction,none,1.0,1,re.findall:0.182|re.findall:0.113|re.findall:0.100
+417,Pattern Extraction,none,1.0,1,re.findall:0.182|re.findall:0.113|re.findall:0.100
+418,Pattern Extraction,re.findall,-1.0,0,re.findall:0.174|re.findall:0.094|re.findall:0.085
+419,Pattern Extraction,re.findall,-1.0,0,re.findall:0.190|re.findall:0.094|re.findall:0.090
+420,Pattern Extraction,none,1.0,1,re.findall:0.190|re.findall:0.100|re.findall:0.094
+421,Pattern Extraction,re.findall,-1.0,0,re.findall:0.186|re.findall:0.098|re.findall:0.093
+422,Pattern Extraction,none,1.0,1,re.findall:0.186|re.findall:0.100|re.findall:0.098
+423,Pattern Extraction,none,1.0,1,re.findall:0.186|re.findall:0.100|re.findall:0.100
+424,Pattern Extraction,re.findall,-1.0,0,re.findall:0.156|re.findall:0.095|re.findall:0.088
+425,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.100|re.findall:0.095
+426,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.100|re.findall:0.100
+427,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.100|re.findall:0.100
+428,Pattern Extraction,re.findall,-1.0,0,re.findall:0.118|re.findall:0.086|re.findall:0.079
+429,Pattern Extraction,re.findall,-1.0,0,re.findall:0.111|re.findall:0.098|re.findall:0.090
+430,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.103|re.findall:0.099
+431,Pattern Extraction,re.findall,-1.0,0,re.findall:0.113|re.findall:0.105|re.findall:0.098
+432,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.105|re.findall:0.100
+433,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.105|re.findall:0.100
+434,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.105|re.findall:0.100
+435,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.085|re.findall:0.080
+436,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.085
+437,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.087|re.findall:0.083
+438,Pattern Extraction,re.findall,-1.0,0,re.findall:0.110|re.findall:0.089|re.findall:0.087
+439,Pattern Extraction,none,1.0,1,re.findall:0.110|re.findall:0.100|re.findall:0.089
+440,Pattern Extraction,re.findall,-1.0,0,re.findall:0.113|re.findall:0.087|re.findall:0.087
+441,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.100|re.findall:0.087
+442,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.100|re.findall:0.100
+443,Pattern Extraction,none,1.0,1,re.findall:0.113|re.findall:0.100|re.findall:0.100
+444,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.081|re.findall:0.077
+445,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.081
+446,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.095
+447,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.085|re.findall:0.085
+448,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.085|re.findall:0.085
+449,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.085
+450,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+451,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+452,Pattern Extraction,re.findall,-1.0,0,re.findall:0.073|re.findall:0.072|re.findall:0.070
+453,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.073|re.findall:0.072
+454,Pattern Extraction,re.findall,-1.0,0,re.findall:0.091|re.findall:0.073|re.findall:0.073
+455,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.091|re.findall:0.073
+456,Pattern Extraction,re.findall,-1.0,0,re.findall:0.091|re.findall:0.089|re.findall:0.075
+457,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.091|re.findall:0.089
+458,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.087|re.findall:0.086
+459,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.093|re.findall:0.087
+460,Pattern Extraction,re.findall,-1.0,0,re.findall:0.096|re.findall:0.091|re.findall:0.083
+461,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.096|re.findall:0.091
+462,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.090|re.findall:0.086
+463,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.090
+464,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.092|re.findall:0.088
+465,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.093|re.findall:0.092
+466,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.093
+467,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+468,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+469,Pattern Extraction,re.findall,-1.0,0,re.findall:0.077|re.findall:0.073|re.findall:0.073
+470,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.082|re.findall:0.080
+471,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.092|re.findall:0.085
+472,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.093|re.findall:0.092
+473,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.093
+474,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.084|re.findall:0.083
+475,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.085|re.findall:0.084
+476,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.085
+477,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+478,Pattern Extraction,re.findall,-1.0,0,re.findall:0.079|re.findall:0.077|re.findall:0.076
+479,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.079|re.findall:0.077
+480,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.077|re.findall:0.072
+481,Pattern Extraction,re.findall,-1.0,0,re.findall:0.105|re.findall:0.080|re.findall:0.074
+482,Pattern Extraction,re.findall,-1.0,0,re.findall:0.119|re.findall:0.083|re.findall:0.077
+483,Pattern Extraction,none,1.0,1,re.findall:0.119|re.findall:0.100|re.findall:0.083
+484,Pattern Extraction,none,1.0,1,re.findall:0.119|re.findall:0.100|re.findall:0.100
+485,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.086|re.findall:0.084
+486,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.086
+487,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+488,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+489,Pattern Extraction,re.findall,-1.0,0,re.findall:0.079|re.findall:0.079|re.findall:0.079
+490,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.079|re.findall:0.079
+491,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.079
+492,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.080|re.findall:0.075
+493,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.089|re.findall:0.085
+494,Pattern Extraction,re.findall,-1.0,0,re.findall:0.107|re.findall:0.101|re.findall:0.096
+495,Pattern Extraction,none,1.0,1,re.findall:0.107|re.findall:0.101|re.findall:0.100
+496,Pattern Extraction,none,1.0,1,re.findall:0.107|re.findall:0.101|re.findall:0.100
+497,Pattern Extraction,none,1.0,1,re.findall:0.107|re.findall:0.101|re.findall:0.100
+498,Pattern Extraction,none,1.0,1,re.findall:0.107|re.findall:0.101|re.findall:0.100
+499,Pattern Extraction,re.findall,-1.0,0,re.findall:0.084|re.findall:0.080|re.findall:0.079
+500,Pattern Extraction,re.findall,-1.0,0,re.findall:0.089|re.findall:0.084|re.findall:0.083
+501,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.089|re.findall:0.084
+502,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.089
+503,Pattern Extraction,re.findall,-1.0,0,re.findall:0.083|re.findall:0.082|re.findall:0.082
+504,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.083|re.findall:0.082
+505,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.083
+506,Pattern Extraction,re.findall,-1.0,0,re.findall:0.083|re.findall:0.083|re.findall:0.078
+507,Pattern Extraction,re.findall,-1.0,0,re.findall:0.092|re.findall:0.091|re.findall:0.084
+508,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.092|re.findall:0.091
+509,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.092
+510,Pattern Extraction,re.findall,-1.0,0,re.findall:0.090|re.findall:0.083|re.findall:0.082
+511,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.090|re.findall:0.083
+512,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.090
+513,Pattern Extraction,re.findall,-1.0,0,re.findall:0.089|re.findall:0.082|re.findall:0.081
+514,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.090|re.findall:0.087
+515,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.090
+516,Pattern Extraction,re.findall,-1.0,0,re.findall:0.101|re.findall:0.090|re.findall:0.089
+517,Pattern Extraction,none,1.0,1,re.findall:0.101|re.findall:0.100|re.findall:0.090
+518,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.091|re.findall:0.088
+519,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.093|re.findall:0.091
+520,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.093
+521,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+522,Pattern Extraction,re.findall,-1.0,0,re.findall:0.079|re.findall:0.078|re.findall:0.075
+523,Pattern Extraction,re.findall,-1.0,0,re.findall:0.087|re.findall:0.085|re.findall:0.079
+524,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.087|re.findall:0.085
+525,Pattern Extraction,re.findall,-1.0,0,re.findall:0.094|re.findall:0.091|re.findall:0.083
+526,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.094|re.findall:0.091
+527,Pattern Extraction,re.findall,-1.0,0,re.findall:0.102|re.findall:0.093|re.findall:0.082
+528,Pattern Extraction,none,1.0,1,re.findall:0.102|re.findall:0.100|re.findall:0.093
+529,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.092|re.findall:0.086
+530,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.092
+531,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+532,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+533,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+534,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+535,Pattern Extraction,re.findall,-1.0,0,re.findall:0.073|re.findall:0.067|re.findall:0.067
+536,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.073|re.findall:0.067
+537,Pattern Extraction,re.findall,-1.0,0,re.findall:0.090|re.findall:0.068|re.findall:0.068
+538,Pattern Extraction,re.findall,-1.0,0,re.findall:0.099|re.findall:0.077|re.findall:0.071
+539,Pattern Extraction,re.findall,-1.0,0,re.findall:0.110|re.findall:0.090|re.findall:0.078
+540,Pattern Extraction,re.findall,-1.0,0,re.findall:0.116|re.findall:0.104|re.findall:0.089
+541,Pattern Extraction,re.findall,-1.0,0,re.findall:0.125|re.findall:0.109|re.findall:0.104
+542,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+543,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+544,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+545,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+546,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+547,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.109|re.findall:0.104
+548,Pattern Extraction,re.findall,-1.0,0,re.findall:0.082|re.findall:0.076|re.findall:0.068
+549,Pattern Extraction,re.findall,-1.0,0,re.findall:0.084|re.findall:0.083|re.findall:0.073
+550,Pattern Extraction,re.findall,-1.0,0,re.findall:0.086|re.findall:0.086|re.findall:0.081
+551,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.086|re.findall:0.086
+552,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.090|re.findall:0.080
+553,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.090
+554,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.095
+555,Pattern Extraction,re.findall,-1.0,0,re.findall:0.095|re.findall:0.085|re.findall:0.082
+556,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.095|re.findall:0.085
+557,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.095
+558,Pattern Extraction,re.findall,-1.0,0,re.findall:0.092|re.findall:0.085|re.findall:0.082
+559,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.092|re.findall:0.085
+560,Pattern Extraction,re.findall,-1.0,0,re.findall:0.090|re.findall:0.088|re.findall:0.086
+561,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.090|re.findall:0.088
+562,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.090
+563,Pattern Extraction,re.findall,-1.0,0,re.findall:0.087|re.findall:0.083|re.findall:0.081
+564,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.087|re.findall:0.083
+565,Pattern Extraction,re.findall,-1.0,0,re.findall:0.094|re.findall:0.090|re.findall:0.081
+566,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.094|re.findall:0.090
+567,Pattern Extraction,re.findall,-1.0,0,re.findall:0.101|re.findall:0.088|re.findall:0.086
+568,Pattern Extraction,none,1.0,1,re.findall:0.101|re.findall:0.100|re.findall:0.088
+569,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.089|re.findall:0.085
+570,Pattern Extraction,re.findall,-1.0,0,re.findall:0.112|re.findall:0.096|re.findall:0.091
+571,Pattern Extraction,none,1.0,1,re.findall:0.112|re.findall:0.100|re.findall:0.096
+572,Pattern Extraction,none,1.0,1,re.findall:0.112|re.findall:0.100|re.findall:0.100
+573,Pattern Extraction,none,1.0,1,re.findall:0.112|re.findall:0.100|re.findall:0.100
+574,Pattern Extraction,re.findall,-1.0,0,re.findall:0.092|re.findall:0.085|re.findall:0.075
+575,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.092|re.findall:0.085
+576,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.092
+577,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.083|re.findall:0.078
+578,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.085|re.findall:0.083
+579,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.085
+580,Pattern Extraction,re.findall,-1.0,0,re.findall:0.084|re.findall:0.084|re.findall:0.081
+581,Pattern Extraction,re.findall,-1.0,0,re.findall:0.096|re.findall:0.096|re.findall:0.090
+582,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.096|re.findall:0.096
+583,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.096
+584,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+585,Pattern Extraction,re.findall,-1.0,0,re.findall:0.087|re.findall:0.084|re.findall:0.078
+586,Pattern Extraction,re.findall,-1.0,0,re.findall:0.098|re.findall:0.088|re.findall:0.088
+587,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.098|re.findall:0.088
+588,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.098
+589,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+590,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.100
+591,Pattern Extraction,re.findall,-1.0,0,re.findall:0.077|re.findall:0.074|re.findall:0.072
+592,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.077|re.findall:0.074
+593,Pattern Extraction,re.findall,-1.0,0,re.findall:0.083|re.findall:0.079|re.findall:0.073
+594,Pattern Extraction,re.findall,-1.0,0,re.findall:0.088|re.findall:0.083|re.findall:0.083
+595,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.088|re.findall:0.083
+596,Pattern Extraction,re.findall,-1.0,0,re.findall:0.090|re.findall:0.087|re.findall:0.082
+597,Pattern Extraction,re.findall,-1.0,0,re.findall:0.102|re.findall:0.094|re.findall:0.083
+598,Pattern Extraction,re.findall,-1.0,0,re.findall:0.116|re.findall:0.099|re.findall:0.094
+599,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.100|re.findall:0.099
+600,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.100|re.findall:0.100
+601,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.100|re.findall:0.100
+602,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.100|re.findall:0.100
+603,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.100|re.findall:0.100
+604,Pattern Extraction,re.findall,-1.0,0,re.findall:0.082|re.findall:0.073|re.findall:0.069
+605,Pattern Extraction,re.findall,-1.0,0,re.findall:0.082|re.findall:0.081|re.findall:0.077
+606,Pattern Extraction,re.findall,-1.0,0,re.findall:0.090|re.findall:0.088|re.findall:0.084
+607,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.090|re.findall:0.088
+608,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.100|re.findall:0.090
+609,Pattern Extraction,re.findall,-1.0,0,re.findall:0.088|re.findall:0.084|re.findall:0.084
+610,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.088|re.findall:0.084
+611,Pattern Extraction,re.findall,-1.0,0,re.findall:0.091|re.findall:0.090|re.findall:0.085
+612,Pattern Extraction,re.findall,-1.0,0,re.findall:0.103|re.findall:0.097|re.findall:0.094
+613,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.100|re.findall:0.097
+614,Pattern Extraction,re.findall,-1.0,0,re.findall:0.104|re.findall:0.097|re.findall:0.093
+615,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.097
+616,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+617,Pattern Extraction,none,1.0,1,re.findall:0.104|re.findall:0.100|re.findall:0.100
+618,Pattern Extraction,re.findall,-1.0,0,re.findall:0.088|re.findall:0.082|re.findall:0.078
+619,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.089|re.findall:0.087
+620,Pattern Extraction,re.findall,-1.0,0,re.findall:0.096|re.findall:0.096|re.findall:0.094
+621,Pattern Extraction,re.findall,-1.0,0,re.findall:0.106|re.findall:0.104|re.findall:0.101
+622,Pattern Extraction,re.findall,-1.0,0,re.findall:0.119|re.findall:0.111|re.findall:0.107
+623,Pattern Extraction,none,1.0,1,re.findall:0.119|re.findall:0.111|re.findall:0.107
+624,Pattern Extraction,re.findall,-1.0,0,re.findall:0.127|re.findall:0.104|re.findall:0.100
+625,Pattern Extraction,re.findall,-1.0,0,re.findall:0.144|re.findall:0.108|re.findall:0.106
+626,Pattern Extraction,none,1.0,1,re.findall:0.144|re.findall:0.108|re.findall:0.106
+627,Pattern Extraction,re.findall,-1.0,0,re.findall:0.140|re.findall:0.112|re.findall:0.099
+628,Pattern Extraction,re.findall,-1.0,0,re.findall:0.146|re.findall:0.129|re.findall:0.107
+629,Pattern Extraction,re.findall,-1.0,0,re.findall:0.151|re.findall:0.144|re.findall:0.124
+630,Pattern Extraction,re.findall,-1.0,0,re.findall:0.156|re.findall:0.148|re.findall:0.145
+631,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.148|re.findall:0.145
+632,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.148|re.findall:0.145
+633,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.148|re.findall:0.145
+634,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.148|re.findall:0.145
+635,Pattern Extraction,none,1.0,1,re.findall:0.156|re.findall:0.148|re.findall:0.145
+636,Pattern Extraction,re.findall,-1.0,0,re.findall:0.109|re.findall:0.106|re.findall:0.091
+637,Pattern Extraction,re.findall,-1.0,0,re.findall:0.118|re.findall:0.101|re.findall:0.087
+638,Pattern Extraction,re.findall,-1.0,0,re.findall:0.125|re.findall:0.105|re.findall:0.092
+639,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.105|re.findall:0.100
+640,Pattern Extraction,re.findall,-1.0,0,re.findall:0.116|re.findall:0.115|re.findall:0.094
+641,Pattern Extraction,none,1.0,1,re.findall:0.116|re.findall:0.115|re.findall:0.100
+642,Pattern Extraction,re.findall,-1.0,0,re.findall:0.123|re.findall:0.102|re.findall:0.097
+643,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.102|re.findall:0.100
+644,Pattern Extraction,none,1.0,1,re.findall:0.123|re.findall:0.102|re.findall:0.100
+645,Pattern Extraction,re.findall,-1.0,0,re.findall:0.119|re.findall:0.088|re.findall:0.086
+646,Pattern Extraction,none,1.0,1,re.findall:0.119|re.findall:0.100|re.findall:0.088
+647,Pattern Extraction,none,1.0,1,re.findall:0.119|re.findall:0.100|re.findall:0.100
+648,Pattern Extraction,re.findall,-1.0,0,re.findall:0.113|re.findall:0.086|re.findall:0.086
+649,Pattern Extraction,re.findall,-1.0,0,re.findall:0.125|re.findall:0.102|re.findall:0.099
+650,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.102|re.findall:0.100
+651,Pattern Extraction,none,1.0,1,re.findall:0.125|re.findall:0.102|re.findall:0.100
+652,Pattern Extraction,re.findall,-1.0,0,re.findall:0.112|re.findall:0.099|re.findall:0.093
+653,Pattern Extraction,re.findall,-1.0,0,re.findall:0.121|re.findall:0.107|re.findall:0.098
+654,Pattern Extraction,none,1.0,1,re.findall:0.121|re.findall:0.107|re.findall:0.100
+655,Pattern Extraction,re.findall,-1.0,0,re.findall:0.116|re.findall:0.109|re.findall:0.100
+656,Pattern Extraction,re.findall,-1.0,0,re.findall:0.135|re.findall:0.113|re.findall:0.104
+657,Pattern Extraction,none,1.0,1,re.findall:0.135|re.findall:0.113|re.findall:0.104
+658,Pattern Extraction,none,1.0,1,re.findall:0.135|re.findall:0.113|re.findall:0.104
+659,Pattern Extraction,none,1.0,1,re.findall:0.135|re.findall:0.113|re.findall:0.104
+660,Pattern Extraction,re.findall,-1.0,0,re.findall:0.123|re.findall:0.093|re.findall:0.080
+661,Pattern Extraction,re.findall,-1.0,0,re.findall:0.141|re.findall:0.101|re.findall:0.094
+662,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.101|re.findall:0.100
+663,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.101|re.findall:0.100
+664,Pattern Extraction,re.findall,-1.0,0,re.findall:0.123|re.findall:0.096|re.findall:0.089
+665,Pattern Extraction,re.findall,-1.0,0,re.findall:0.117|re.findall:0.113|re.findall:0.101
+666,Pattern Extraction,none,1.0,1,re.findall:0.117|re.findall:0.113|re.findall:0.101
+667,Pattern Extraction,none,1.0,1,re.findall:0.117|re.findall:0.113|re.findall:0.101
+668,Pattern Extraction,re.findall,-1.0,0,re.findall:0.103|re.findall:0.103|re.findall:0.092
+669,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.103|re.findall:0.100
+670,Pattern Extraction,none,1.0,1,re.findall:0.103|re.findall:0.103|re.findall:0.100
+671,Pattern Extraction,re.findall,-1.0,0,re.findall:0.098|re.findall:0.091|re.findall:0.086
+672,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.098|re.findall:0.091
+673,Pattern Extraction,re.findall,-1.0,0,re.findall:0.093|re.findall:0.091|re.findall:0.090
+674,Pattern Extraction,re.findall,-1.0,0,re.findall:0.108|re.findall:0.101|re.findall:0.090
+675,Pattern Extraction,re.findall,-1.0,0,re.findall:0.123|re.findall:0.109|re.findall:0.088
+676,Pattern Extraction,re.findall,-1.0,0,re.findall:0.141|re.findall:0.120|re.findall:0.088
+677,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+678,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+679,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+680,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+681,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+682,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+683,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+684,Pattern Extraction,none,1.0,1,re.findall:0.141|re.findall:0.120|re.findall:0.100
+685,Pattern Extraction,re.findall,-1.0,0,re.findall:0.085|re.findall:0.073|re.findall:0.058
+686,Pattern Extraction,none,1.0,1,re.findall:0.100|re.findall:0.085|re.findall:0.073
+687,Linguistic Analysis,none,1.0,1,re.findall:0.100|textblob.TextBlob:0.100|re.findall:0.085
+688,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.087|re.findall:0.071|re.findall:0.066
+689,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.100|re.findall:0.067|re.findall:0.067
+690,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.111|re.findall:0.079|re.findall:0.076
+691,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.112|re.findall:0.093|re.findall:0.088
+692,Linguistic Analysis,none,1.0,1,re.findall:0.112|textblob.TextBlob:0.100|re.findall:0.093
+693,Linguistic Analysis,none,1.0,1,re.findall:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+694,Linguistic Analysis,none,1.0,1,re.findall:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+695,Linguistic Analysis,none,1.0,1,re.findall:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+696,Linguistic Analysis,none,1.0,1,re.findall:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+697,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.077|re.findall:0.075|re.findall:0.072
+698,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|re.findall:0.077|re.findall:0.075
+699,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.083|re.findall:0.075|re.findall:0.073
+700,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|re.findall:0.083|re.findall:0.075
+701,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|re.findall:0.083
+702,Linguistic Analysis,textblob.TextBlob,-1.0,0,re.findall:0.078|textblob.TextBlob:0.076|textblob.TextBlob:0.076
+703,Linguistic Analysis,re.findall,-1.0,0,re.findall:0.083|re.findall:0.080|textblob.TextBlob:0.079
+704,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|re.findall:0.083|re.findall:0.080
+705,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|re.findall:0.083
+706,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+707,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+708,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+709,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+710,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.063|textblob.TextBlob:0.063|textblob.TextBlob:0.063
+711,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.063|textblob.TextBlob:0.063
+712,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.090|textblob.TextBlob:0.064|textblob.TextBlob:0.064
+713,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.101|textblob.TextBlob:0.074|textblob.TextBlob:0.070
+714,Linguistic Analysis,re.findall,-1.0,0,textblob.TextBlob:0.114|textblob.TextBlob:0.088|textblob.TextBlob:0.070
+715,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.088
+716,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+717,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.097|textblob.TextBlob:0.089|textblob.TextBlob:0.083
+718,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.097|textblob.TextBlob:0.089
+719,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.086|textblob.TextBlob:0.085
+720,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.093|textblob.TextBlob:0.086
+721,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.093
+722,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+723,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.080|textblob.TextBlob:0.079|textblob.TextBlob:0.077
+724,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.080|textblob.TextBlob:0.079
+725,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.085|textblob.TextBlob:0.080|textblob.TextBlob:0.076
+726,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.100|textblob.TextBlob:0.083|textblob.TextBlob:0.082
+727,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.083
+728,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.096|textblob.TextBlob:0.088|textblob.TextBlob:0.083
+729,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.096|textblob.TextBlob:0.088
+730,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.091|textblob.TextBlob:0.089|textblob.TextBlob:0.080
+731,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.091|textblob.TextBlob:0.089
+732,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.091
+733,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+734,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+735,Linguistic Analysis,re.findall,-1.0,0,textblob.TextBlob:0.072|textblob.TextBlob:0.071|textblob.TextBlob:0.071
+736,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.078|textblob.TextBlob:0.076|textblob.TextBlob:0.075
+737,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.078|textblob.TextBlob:0.076
+738,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.079|textblob.TextBlob:0.075
+739,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.107|textblob.TextBlob:0.080|textblob.TextBlob:0.079
+740,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.107|textblob.TextBlob:0.100|textblob.TextBlob:0.080
+741,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.107|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+742,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.107|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+743,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.107|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+744,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.085|textblob.TextBlob:0.073|textblob.TextBlob:0.073
+745,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.085|textblob.TextBlob:0.073
+746,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.085
+747,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+748,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+749,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.072|textblob.TextBlob:0.072|textblob.TextBlob:0.068
+750,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.072|textblob.TextBlob:0.072
+751,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.072
+752,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.083|textblob.TextBlob:0.078|textblob.TextBlob:0.067
+753,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.091|textblob.TextBlob:0.075|textblob.TextBlob:0.074
+754,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.091|textblob.TextBlob:0.075
+755,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.091
+756,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+757,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+758,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+759,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.070|textblob.TextBlob:0.066|textblob.TextBlob:0.066
+760,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.070|textblob.TextBlob:0.066
+761,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.089|textblob.TextBlob:0.070|textblob.TextBlob:0.066
+762,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.097|textblob.TextBlob:0.077|textblob.TextBlob:0.074
+763,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.112|textblob.TextBlob:0.083|textblob.TextBlob:0.081
+764,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.083
+765,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+766,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+767,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+768,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+769,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+770,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+771,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.112|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+772,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.071|textblob.TextBlob:0.055|textblob.TextBlob:0.055
+773,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.078|textblob.TextBlob:0.059|textblob.TextBlob:0.059
+774,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.081|textblob.TextBlob:0.064|textblob.TextBlob:0.064
+775,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.086|textblob.TextBlob:0.069|textblob.TextBlob:0.068
+776,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.091|textblob.TextBlob:0.074|textblob.TextBlob:0.070
+777,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.091|textblob.TextBlob:0.074
+778,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.091
+779,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.083|textblob.TextBlob:0.080|textblob.TextBlob:0.079
+780,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.083|textblob.TextBlob:0.080
+781,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.083
+782,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+783,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+784,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+785,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.067|textblob.TextBlob:0.067|textblob.TextBlob:0.066
+786,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.067|textblob.TextBlob:0.067
+787,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.067
+788,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.077|textblob.TextBlob:0.077|textblob.TextBlob:0.062
+789,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.077|textblob.TextBlob:0.077
+790,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.085|textblob.TextBlob:0.069|textblob.TextBlob:0.069
+791,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.085|textblob.TextBlob:0.074|textblob.TextBlob:0.069
+792,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.089|textblob.TextBlob:0.083|textblob.TextBlob:0.071
+793,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.089|textblob.TextBlob:0.083
+794,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.090|textblob.TextBlob:0.086|textblob.TextBlob:0.083
+795,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.090|textblob.TextBlob:0.086
+796,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.090|textblob.TextBlob:0.088|textblob.TextBlob:0.086
+797,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.104|textblob.TextBlob:0.098|textblob.TextBlob:0.086
+798,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.104|textblob.TextBlob:0.100|textblob.TextBlob:0.098
+799,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.103|textblob.TextBlob:0.095|textblob.TextBlob:0.088
+800,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.103|textblob.TextBlob:0.100|textblob.TextBlob:0.095
+801,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.095|textblob.TextBlob:0.093|textblob.TextBlob:0.089
+802,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.106|textblob.TextBlob:0.102|textblob.TextBlob:0.087
+803,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.106|textblob.TextBlob:0.102|textblob.TextBlob:0.100
+804,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.109|textblob.TextBlob:0.101|textblob.TextBlob:0.096
+805,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.109|textblob.TextBlob:0.101|textblob.TextBlob:0.100
+806,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.109|textblob.TextBlob:0.101|textblob.TextBlob:0.100
+807,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.109|textblob.TextBlob:0.101|textblob.TextBlob:0.100
+808,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.109|textblob.TextBlob:0.101|textblob.TextBlob:0.100
+809,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.088|textblob.TextBlob:0.080|textblob.TextBlob:0.074
+810,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.088|textblob.TextBlob:0.080
+811,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.087|textblob.TextBlob:0.085
+812,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.105|textblob.TextBlob:0.092|textblob.TextBlob:0.092
+813,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.100|textblob.TextBlob:0.092
+814,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+815,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.098|textblob.TextBlob:0.090|textblob.TextBlob:0.084
+816,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.098|textblob.TextBlob:0.090
+817,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.098
+818,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+819,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+820,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.076|textblob.TextBlob:0.074|textblob.TextBlob:0.071
+821,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.076|textblob.TextBlob:0.074
+822,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.084|textblob.TextBlob:0.074|textblob.TextBlob:0.072
+823,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.084|textblob.TextBlob:0.083|textblob.TextBlob:0.081
+824,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.100|textblob.TextBlob:0.089|textblob.TextBlob:0.083
+825,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.089
+826,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+827,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+828,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.077|textblob.TextBlob:0.077
+829,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.109|textblob.TextBlob:0.086|textblob.TextBlob:0.086
+830,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.109|textblob.TextBlob:0.100|textblob.TextBlob:0.086
+831,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.114|textblob.TextBlob:0.092|textblob.TextBlob:0.087
+832,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.092
+833,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+834,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+835,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.114|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+836,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.090|textblob.TextBlob:0.075|textblob.TextBlob:0.072
+837,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.090|textblob.TextBlob:0.075
+838,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.090
+839,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.083|textblob.TextBlob:0.079|textblob.TextBlob:0.076
+840,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.083|textblob.TextBlob:0.079
+841,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.089|textblob.TextBlob:0.083|textblob.TextBlob:0.073
+842,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.092|textblob.TextBlob:0.090|textblob.TextBlob:0.074
+843,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.097|textblob.TextBlob:0.093|textblob.TextBlob:0.077
+844,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.097|textblob.TextBlob:0.093
+845,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.097
+846,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+847,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.079|textblob.TextBlob:0.079|textblob.TextBlob:0.076
+848,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.079|textblob.TextBlob:0.079
+849,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.079
+850,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+851,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+852,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.073|textblob.TextBlob:0.072|textblob.TextBlob:0.070
+853,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.082|textblob.TextBlob:0.076|textblob.TextBlob:0.074
+854,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.090|textblob.TextBlob:0.086|textblob.TextBlob:0.080
+855,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.100|textblob.TextBlob:0.087|textblob.TextBlob:0.086
+856,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.087
+857,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+858,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+859,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+860,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.077|textblob.TextBlob:0.073|textblob.TextBlob:0.071
+861,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.080|textblob.TextBlob:0.080|textblob.TextBlob:0.074
+862,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.080|textblob.TextBlob:0.080
+863,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.088|textblob.TextBlob:0.077|textblob.TextBlob:0.074
+864,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.082|textblob.TextBlob:0.080
+865,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.093|textblob.TextBlob:0.082
+866,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.094|textblob.TextBlob:0.093|textblob.TextBlob:0.082
+867,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.105|textblob.TextBlob:0.103|textblob.TextBlob:0.090
+868,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.103|textblob.TextBlob:0.100
+869,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.103|textblob.TextBlob:0.100
+870,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.103|textblob.TextBlob:0.100
+871,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.088|textblob.TextBlob:0.086|textblob.TextBlob:0.080
+872,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.088|textblob.TextBlob:0.086
+873,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.088
+874,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.086|textblob.TextBlob:0.083|textblob.TextBlob:0.081
+875,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.086|textblob.TextBlob:0.083
+876,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.086
+877,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.085|textblob.TextBlob:0.084|textblob.TextBlob:0.076
+878,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.085|textblob.TextBlob:0.084
+879,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.092|textblob.TextBlob:0.081|textblob.TextBlob:0.079
+880,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.092|textblob.TextBlob:0.081
+881,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.089|textblob.TextBlob:0.077
+882,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.098|textblob.TextBlob:0.095|textblob.TextBlob:0.085
+883,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.098|textblob.TextBlob:0.095
+884,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.098
+885,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.087|textblob.TextBlob:0.086|textblob.TextBlob:0.083
+886,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.087|textblob.TextBlob:0.086
+887,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.087
+888,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.086|textblob.TextBlob:0.081|textblob.TextBlob:0.081
+889,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.093|textblob.TextBlob:0.093|textblob.TextBlob:0.086
+890,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.108|textblob.TextBlob:0.098|textblob.TextBlob:0.089
+891,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.108|textblob.TextBlob:0.100|textblob.TextBlob:0.098
+892,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.112|textblob.TextBlob:0.097|textblob.TextBlob:0.094
+893,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.125|textblob.TextBlob:0.106|textblob.TextBlob:0.100
+894,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.125|textblob.TextBlob:0.106|textblob.TextBlob:0.100
+895,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.125|textblob.TextBlob:0.106|textblob.TextBlob:0.100
+896,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.125|textblob.TextBlob:0.106|textblob.TextBlob:0.100
+897,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.102|textblob.TextBlob:0.095|textblob.TextBlob:0.081
+898,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.104|textblob.TextBlob:0.103|textblob.TextBlob:0.095
+899,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.104|textblob.TextBlob:0.103|textblob.TextBlob:0.100
+900,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.105|textblob.TextBlob:0.098|textblob.TextBlob:0.095
+901,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.125|textblob.TextBlob:0.113|textblob.TextBlob:0.100
+902,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.125|textblob.TextBlob:0.113|textblob.TextBlob:0.100
+903,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.125|textblob.TextBlob:0.113|textblob.TextBlob:0.100
+904,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.124|textblob.TextBlob:0.107|textblob.TextBlob:0.089
+905,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.138|textblob.TextBlob:0.119|textblob.TextBlob:0.100
+906,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.143|textblob.TextBlob:0.126|textblob.TextBlob:0.115
+907,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.143|textblob.TextBlob:0.126|textblob.TextBlob:0.115
+908,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.127|textblob.TextBlob:0.120|textblob.TextBlob:0.118
+909,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.134|textblob.TextBlob:0.124|textblob.TextBlob:0.118
+910,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.134|textblob.TextBlob:0.124|textblob.TextBlob:0.118
+911,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.138|textblob.TextBlob:0.117|textblob.TextBlob:0.108
+912,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.148|textblob.TextBlob:0.126|textblob.TextBlob:0.112
+913,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.151|textblob.TextBlob:0.134|textblob.TextBlob:0.125
+914,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.151|textblob.TextBlob:0.134|textblob.TextBlob:0.125
+915,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.151|textblob.TextBlob:0.134|textblob.TextBlob:0.125
+916,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.151|textblob.TextBlob:0.134|textblob.TextBlob:0.125
+917,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.118|textblob.TextBlob:0.106|textblob.TextBlob:0.100
+918,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.111|textblob.TextBlob:0.108|textblob.TextBlob:0.107
+919,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.111|textblob.TextBlob:0.108|textblob.TextBlob:0.107
+920,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.129|textblob.TextBlob:0.096|textblob.TextBlob:0.095
+921,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.165|textblob.TextBlob:0.107|textblob.TextBlob:0.094
+922,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.199|textblob.TextBlob:0.122|textblob.TextBlob:0.099
+923,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.217|textblob.TextBlob:0.140|textblob.TextBlob:0.102
+924,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+925,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+926,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+927,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+928,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+929,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.231|textblob.TextBlob:0.159|textblob.TextBlob:0.107
+930,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.153|textblob.TextBlob:0.114|textblob.TextBlob:0.074
+931,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.147|textblob.TextBlob:0.113|textblob.TextBlob:0.092
+932,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.147|textblob.TextBlob:0.113|textblob.TextBlob:0.100
+933,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.126|textblob.TextBlob:0.103|textblob.TextBlob:0.100
+934,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.123|textblob.TextBlob:0.120|textblob.TextBlob:0.116
+935,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.147|textblob.TextBlob:0.138|textblob.TextBlob:0.099
+936,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.147|textblob.TextBlob:0.138|textblob.TextBlob:0.100
+937,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.147|textblob.TextBlob:0.138|textblob.TextBlob:0.100
+938,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.138|textblob.TextBlob:0.128|textblob.TextBlob:0.091
+939,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.138|textblob.TextBlob:0.128|textblob.TextBlob:0.100
+940,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.128|textblob.TextBlob:0.128|textblob.TextBlob:0.098
+941,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.138|textblob.TextBlob:0.126|textblob.TextBlob:0.118
+942,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.138|textblob.TextBlob:0.126|textblob.TextBlob:0.118
+943,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.132|textblob.TextBlob:0.131|textblob.TextBlob:0.108
+944,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.159|textblob.TextBlob:0.131|textblob.TextBlob:0.110
+945,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+946,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+947,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+948,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+949,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+950,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+951,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+952,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+953,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.189|textblob.TextBlob:0.129|textblob.TextBlob:0.125
+954,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.116|textblob.TextBlob:0.074|textblob.TextBlob:0.068
+955,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.111|textblob.TextBlob:0.074|textblob.TextBlob:0.069
+956,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.111|textblob.TextBlob:0.100|textblob.TextBlob:0.074
+957,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.111|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+958,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.111|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+959,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.079|textblob.TextBlob:0.079|textblob.TextBlob:0.075
+960,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.079|textblob.TextBlob:0.079
+961,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.100|textblob.TextBlob:0.079
+962,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.082|textblob.TextBlob:0.082|textblob.TextBlob:0.072
+963,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.087|textblob.TextBlob:0.084|textblob.TextBlob:0.079
+964,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.100|textblob.TextBlob:0.087|textblob.TextBlob:0.084
+965,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.087|textblob.TextBlob:0.087|textblob.TextBlob:0.080
+966,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.098|textblob.TextBlob:0.086|textblob.TextBlob:0.085
+967,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.104|textblob.TextBlob:0.099|textblob.TextBlob:0.091
+968,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.104|textblob.TextBlob:0.100|textblob.TextBlob:0.099
+969,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.104|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+970,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.104|textblob.TextBlob:0.100|textblob.TextBlob:0.100
+971,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.089|textblob.TextBlob:0.078|textblob.TextBlob:0.078
+972,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.099|textblob.TextBlob:0.089|textblob.TextBlob:0.088
+973,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.105|textblob.TextBlob:0.105|textblob.TextBlob:0.098
+974,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.105|textblob.TextBlob:0.100
+975,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.105|textblob.TextBlob:0.105|textblob.TextBlob:0.100
+976,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.103|textblob.TextBlob:0.091|textblob.TextBlob:0.089
+977,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.103|textblob.TextBlob:0.100|textblob.TextBlob:0.091
+978,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.107|textblob.TextBlob:0.094|textblob.TextBlob:0.088
+979,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.115|textblob.TextBlob:0.102|textblob.TextBlob:0.094
+980,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.115|textblob.TextBlob:0.102|textblob.TextBlob:0.100
+981,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.110|textblob.TextBlob:0.103|textblob.TextBlob:0.092
+982,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.118|textblob.TextBlob:0.110|textblob.TextBlob:0.104
+983,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.137|textblob.TextBlob:0.120|textblob.TextBlob:0.110
+984,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.137|textblob.TextBlob:0.120|textblob.TextBlob:0.110
+985,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.145|textblob.TextBlob:0.123|textblob.TextBlob:0.099
+986,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.145|textblob.TextBlob:0.123|textblob.TextBlob:0.100
+987,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.149|textblob.TextBlob:0.120|textblob.TextBlob:0.097
+988,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.158|textblob.TextBlob:0.125|textblob.TextBlob:0.118
+989,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.158|textblob.TextBlob:0.125|textblob.TextBlob:0.118
+990,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.158|textblob.TextBlob:0.125|textblob.TextBlob:0.118
+991,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.131|textblob.TextBlob:0.122|textblob.TextBlob:0.109
+992,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.147|textblob.TextBlob:0.124|textblob.TextBlob:0.108
+993,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.147|textblob.TextBlob:0.124|textblob.TextBlob:0.108
+994,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.153|textblob.TextBlob:0.112|textblob.TextBlob:0.106
+995,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.168|textblob.TextBlob:0.127|textblob.TextBlob:0.113
+996,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.168|textblob.TextBlob:0.127|textblob.TextBlob:0.113
+997,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.168|textblob.TextBlob:0.127|textblob.TextBlob:0.113
+998,Linguistic Analysis,textblob.TextBlob,-1.0,0,textblob.TextBlob:0.143|textblob.TextBlob:0.115|textblob.TextBlob:0.110
+999,Linguistic Analysis,none,1.0,1,textblob.TextBlob:0.143|textblob.TextBlob:0.115|textblob.TextBlob:0.110

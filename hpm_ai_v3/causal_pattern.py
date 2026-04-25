@@ -8,7 +8,7 @@ from pyro.optim import Adam
 import networkx as nx
 from typing import Dict, Any, List, Optional
 import numpy as np
-from pattern import HPMPattern
+from .pattern import HPMPattern
 
 class CausalPattern(HPMPattern):
     def __init__(self, input_dim: int, z1_dim: int = 16, z2_dim: int = 4, pattern_id: Optional[str] = None):

@@ -124,7 +124,7 @@ class AugmentedHPMAgent:
                 except:
                     pass
         
-        # 2. Prediction from population
+        # 2. Prediction from .population
         top_p = self.population.get_top_patterns(k=1)
         if top_p:
             pred = top_p[0].sample(working_context)

@@ -174,3 +174,10 @@ class CharClassAdapter:
         if class_id < 0 or class_id >= len(self.CLASS_NAMES):
             raise ValueError(f"class_id {class_id} out of range [0, 4]")
         return self.CLASS_NAMES[class_id]
+
+    def encode_char(self, ch: str) -> int:
+        """Map a raw character to a class ID 0-4."""
+        if ch == '\n':
+            return 4
+        char_id = ord(ch) - 32
+        return self.encode(char_id)

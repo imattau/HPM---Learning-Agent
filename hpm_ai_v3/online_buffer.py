@@ -61,9 +61,14 @@ class OnlineLearningBuffer:
         """Fetch summary from Wikipedia API based on keywords."""
         if not keywords: return None
         
-        title = "_".join(keywords).capitalize()
-        # Fallback to just the first keyword if joined fails
-        titles_to_try = [title, keywords[0].capitalize()]
+        # Build list of potential titles to try
+        titles_to_try = []
+        
+        # 1. All keywords joined
+        titles_to_try.append("_".join([k.capitalize() for k in keywords]))
+        # 2. Each keyword individually
+        for k in keywords:
+            titles_to_try.append(k.capitalize())
         
         for t in titles_to_try:
             url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(t)}"
@@ -76,8 +81,10 @@ class OnlineLearningBuffer:
                     if extract and len(extract) > 100:
                         print(f"  [OnlineBuffer] Fetched Wikipedia: {t}")
                         return extract
+            except urllib.error.HTTPError as e:
+                if e.code == 404: continue # Try next title
+                break # Other error, stop
             except Exception as e:
-                # print(f"  [OnlineBuffer] Fetch error for {t}: {e}")
                 continue
         return None
 

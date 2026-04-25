@@ -3,11 +3,11 @@ import numpy as np
 import torch
 import multiprocessing as mp
 from typing import List, Dict, Any, Optional
-from population import PatternPopulation
-from pattern import HPMPattern
-from evaluators import EvaluatorManager
+from .population import PatternPopulation
+from .pattern import HPMPattern
+from .evaluators import EvaluatorManager
 from compiler import SubstrateCompiler
-from device_utils import get_parallel_context
+from .device_utils import get_parallel_context
 from collections import deque
 
 class HPMAgent:

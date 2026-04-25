@@ -141,6 +141,56 @@ def clear_vector_collection(collection: str = "default") -> Dict[str, str]:
     return {"status": "cleared", "collection": collection}
 
 
+def save_vector_collection(collection: str, path: str):
+    """Save a vector collection to disk."""
+    if collection not in _vector_indexes:
+        return {"status": "error", "message": f"Collection '{collection}' not found"}
+    
+    index, meta_list = _vector_indexes[collection], _vector_metadata[collection]
+    os.makedirs(path, exist_ok=True)
+    
+    if FAISS_AVAILABLE:
+        faiss.write_index(index, os.path.join(path, f"{collection}.index"))
+    else:
+        # Fallback: save numpy arrays
+        np.save(os.path.join(path, f"{collection}_vectors.npy"), np.array(index["vectors"]))
+        np.save(os.path.join(path, f"{collection}_metadata.npy"), np.array(index["metadata"], dtype=object))
+    
+    with open(os.path.join(path, f"{collection}_meta.json"), "w") as f:
+        json.dump(meta_list, f)
+    return {"status": "saved", "collection": collection, "path": path}
+
+
+def load_vector_collection(collection: str, path: str):
+    """Load a vector collection from disk."""
+    index_path = os.path.join(path, f"{collection}.index")
+    meta_path = os.path.join(path, f"{collection}_meta.json")
+    
+    # Check for fallback files if index_path doesn't exist
+    fallback_vectors = os.path.join(path, f"{collection}_vectors.npy")
+    fallback_metadata = os.path.join(path, f"{collection}_metadata.npy")
+
+    if not os.path.exists(index_path) and not os.path.exists(fallback_vectors):
+        return {"status": "error", "message": f"Collection '{collection}' not found at {path}"}
+    if not os.path.exists(meta_path):
+        return {"status": "error", "message": f"Metadata '{collection}' not found at {path}"}
+    
+    if FAISS_AVAILABLE and os.path.exists(index_path):
+        index = faiss.read_index(index_path)
+    else:
+        # Fallback: load numpy arrays
+        vectors = np.load(fallback_vectors)
+        metadata_arr = np.load(fallback_metadata, allow_pickle=True)
+        index = {"vectors": vectors.tolist(), "metadata": metadata_arr.tolist()}
+    
+    with open(meta_path, "r") as f:
+        meta_list = json.load(f)
+    
+    _vector_indexes[collection] = index
+    _vector_metadata[collection] = meta_list
+    return {"status": "loaded", "collection": collection, "count": len(meta_list)}
+
+
 # ----------------------------------------------------------------------
 # Key-Value Store (JSON file)
 # ----------------------------------------------------------------------
@@ -234,6 +284,17 @@ def episodic_clear(buffer_name: str = "default") -> Dict[str, str]:
     return {"status": "cleared", "buffer": buffer_name}
 
 
+def episodic_dump(buffer_name: str, path: str):
+    """Dump episodic buffer contents to a JSON file."""
+    if buffer_name not in _episodic_buffers:
+        return {"status": "error", "message": f"Buffer '{buffer_name}' not found"}
+    events = list(_episodic_buffers[buffer_name])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(events, f)
+    return {"status": "dumped", "count": len(events), "path": path}
+
+
 # ----------------------------------------------------------------------
 # Register Tools
 # ----------------------------------------------------------------------
@@ -258,6 +319,24 @@ def register_memory_tools(persistence_path: Optional[str] = None):
         output_key="search_results",
         cost=0.03,
         description="Search for similar vectors in a collection."
+    )
+
+    ToolRegistry.register(
+        name="save_vector_collection",
+        tool_fn=save_vector_collection,
+        input_keys=["collection", "path"],
+        output_key="result",
+        cost=0.05,
+        description="Save a vector collection to disk."
+    )
+
+    ToolRegistry.register(
+        name="load_vector_collection",
+        tool_fn=load_vector_collection,
+        input_keys=["collection", "path"],
+        output_key="result",
+        cost=0.05,
+        description="Load a vector collection from disk."
     )
     
     ToolRegistry.register(
@@ -297,12 +376,30 @@ def register_memory_tools(persistence_path: Optional[str] = None):
     )
     
     ToolRegistry.register(
-        name="episodic_recent",
+        name="episodic_get_recent",
         tool_fn=episodic_get_recent,
         input_keys=["n", "buffer_name"],
         output_key="recent_events",
         cost=0.005,
         description="Retrieve recent events from episodic buffer."
+    )
+
+    ToolRegistry.register(
+        name="episodic_clear",
+        tool_fn=episodic_clear,
+        input_keys=["buffer_name"],
+        output_key="result",
+        cost=0.005,
+        description="Clear an episodic memory buffer."
+    )
+
+    ToolRegistry.register(
+        name="episodic_dump",
+        tool_fn=episodic_dump,
+        input_keys=["buffer_name", "path"],
+        output_key="result",
+        cost=0.01,
+        description="Dump episodic buffer contents to a JSON file."
     )
     
     print(f"[MemoryTools] Registered {len(ToolRegistry.list_tools())} total tools.")

@@ -6,7 +6,7 @@ import uuid
 import time
 import networkx as nx
 
-from device_utils import get_device, get_optimal_dtype
+from .device_utils import get_device, get_optimal_dtype
 
 class HPMPattern(ABC):
     """Abstract base for all HPM patterns."""

@@ -1,4 +1,4 @@
-from pattern import HPMPattern
+from .pattern import HPMPattern
 import torch
 import networkx as nx
 import inspect
@@ -37,6 +37,11 @@ class SymbolicPattern(HPMPattern):
         """Compute log prob assuming Gaussian observation noise."""
         observations = {k: (v.to(self._device) if isinstance(v, torch.Tensor) else v) for k, v in observations.items()}
         x_pred = self.forward_fn(observations)
+        
+        # UNBOX discovery tool results
+        if isinstance(x_pred, dict) and "result" in x_pred:
+            x_pred = x_pred["result"]
+
         if not isinstance(x_pred, torch.Tensor):
             try:
                 if isinstance(x_pred, (int, float, list, np.ndarray)):
@@ -45,6 +50,8 @@ class SymbolicPattern(HPMPattern):
                     return torch.tensor(0.0, device=self._device) # Non-numeric output
             except (ValueError, TypeError):
                 return torch.tensor(0.0, device=self._device)
+        
+        # ... (rest of log_prob unchanged)
         
         if self.output_key not in observations:
             return torch.tensor(-1.0, device=self._device)
@@ -92,9 +99,29 @@ class SymbolicPattern(HPMPattern):
         """
         with torch.no_grad():
             x_pred = self.forward_fn(observations)
+            # UNBOX discovery tool results
+            if isinstance(x_pred, dict) and "result" in x_pred:
+                x_pred = x_pred["result"]
+
             if not isinstance(x_pred, torch.Tensor):
-                x_pred = torch.tensor(x_pred)
-            loss = torch.mean((observations["x"] - x_pred) ** 2).item()
+                try:
+                    if isinstance(x_pred, (int, float, list, np.ndarray)):
+                        x_pred = torch.tensor(x_pred, dtype=torch.float32, device=self._device)
+                    else:
+                        return # Cannot compute numeric loss
+                except (ValueError, TypeError):
+                    return
+            
+            # If observations doesn't have the output key, we can't update loss
+            if self.output_key not in observations:
+                return
+
+            x_true = observations[self.output_key]
+            if x_true.shape != x_pred.shape:
+                # Shape mismatch? Skip for now
+                return
+
+            loss = torch.mean((x_true - x_pred) ** 2).item()
             
         if self.loss_ema is None:
             self.loss_ema = loss

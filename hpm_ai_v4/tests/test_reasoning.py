@@ -178,13 +178,15 @@ class TestExplain:
         assert str(hier_pattern.id) in result
 
     def test_flat_pattern_returns_string(self, reasoner):
-        flat = HierarchicalPattern.flat(id=200, obs_dim=2)
+        from hpm_ai_v4.pattern import FlatPattern
+        flat = FlatPattern.flat(id=200, obs_dim=2)
         result = reasoner.explain(flat)
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_flat_pattern_mentions_probability(self, reasoner):
-        flat = HierarchicalPattern.flat(id=201, obs_dim=2)
+        from hpm_ai_v4.pattern import FlatPattern
+        flat = FlatPattern.flat(id=201, obs_dim=2)
         result = reasoner.explain(flat)
         assert "probability" in result.lower() or "predict" in result.lower()
 

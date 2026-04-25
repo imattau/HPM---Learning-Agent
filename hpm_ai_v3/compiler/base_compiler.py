@@ -26,8 +26,15 @@ class SubstrateCompiler:
         
     def should_compile(self, pattern: HPMPattern) -> bool:
         """Decision rule: high compression and stable accuracy."""
-        if pattern.substrate_type in ["symbolic", "symbolic_pipeline", "symbolic_agent_pipeline"]:
+        if pattern.substrate_type in ["symbolic", "symbolic_pipeline", "symbolic_agent_pipeline", "symbolic_action"]:
             return False
+            
+        # FUNCTIONAL ACTION GRADUATION (Graduation of discovery patterns)
+        if pattern.substrate_type == "functional_action":
+            # Check for high weight and compression
+            comp = pattern.compression_score() if hasattr(pattern, 'compression_score') else 0.0
+            return (pattern.weight > 0.15 and comp > 0.7 and pattern.accuracy > 0.8)
+
         if hasattr(pattern, 'substrate_type') and pattern.substrate_type in ["composite_tool", "composite_agent"]:
             # Compile composite if it has high weight and low loss
             return (pattern.weight > 0.15 and 
@@ -231,10 +238,83 @@ class SubstrateCompiler:
         sym_pat.accuracy = motor_pattern.accuracy
         return sym_pat
         
+    def compile_action_to_symbolic(self, pattern: Any) -> Optional[SymbolicPattern]:
+        """
+        Compile an ActionPattern into a direct Python tool call.
+        """
+        from hpm_ai_v3.agents.base_discovery import ActionPattern
+        if not isinstance(pattern, ActionPattern): return None
+        
+        mod = pattern.module
+        func = pattern.function
+        bindings = pattern.bindings
+        is_pos = pattern.is_positional
+        
+        # Build the wrapper function
+        lines = ["def compiled_action(context):"]
+        lines.append(f"    # Compiled from Mastered ActionPattern: {mod}.{func}")
+        
+        # Build the args list based on learned bindings
+        arg_lines = []
+        for p_name, binding in bindings.items():
+            if isinstance(binding, str) and binding.startswith("pool_idx:"):
+                idx = int(binding.split(":")[1])
+                # ROBUST LOOKUP: Check inputs first, then pool
+                arg_lines.append(f"    inputs_list = context.get('inputs', [])")
+                arg_lines.append(f"    pool_list = context.get('pool', [])")
+                arg_lines.append(f"    if {idx} < len(inputs_list):")
+                arg_lines.append(f"        {p_name} = inputs_list[{idx}]")
+                arg_lines.append(f"    elif {idx} < len(pool_list):")
+                arg_lines.append(f"        {p_name} = pool_list[{idx}]")
+                arg_lines.append(f"    else:")
+                arg_lines.append(f"        {p_name} = pool_list[0] if pool_list else None")
+            elif binding == "task_text":
+                arg_lines.append(f"    {p_name} = context.get('text', '')")
+            else:
+                # Literal binding
+                val = f"'{binding}'" if isinstance(binding, str) else binding
+                arg_lines.append(f"    {p_name} = {val}")
+        
+        lines.extend(arg_lines)
+        
+        # Call the tool
+        if is_pos:
+            args_list = ", ".join(bindings.keys())
+            lines.append(f"    return ToolRegistry.call('python_call', module='{mod}', function='{func}', args=[{args_list}])")
+        else:
+            args_dict = ", ".join([f"'{k}': {k}" for k in bindings.keys()])
+            lines.append(f"    return ToolRegistry.call('python_call', module='{mod}', function='{func}', args={{{args_dict}}})")
+            
+        func_code = "\n".join(lines)
+        
+        # Compile
+        namespace = {"ToolRegistry": ToolRegistry}
+        try:
+            exec(func_code, namespace)
+            action_fn = namespace["compiled_action"]
+        except Exception as e:
+            print(f"[Compiler] Failed to compile action: {e}")
+            return None
+            
+        sym_p = SymbolicPattern(
+            forward_fn=action_fn,
+            required_keys=["text", "inputs"],
+            pattern_id=f"mastered_{mod}_{func}",
+            output_key="result"
+        )
+        sym_p.substrate_type = "symbolic_action"
+        sym_p.accuracy = pattern.accuracy
+        sym_p.is_symbolic = True
+        return sym_p
+
     def compile_to_symbolic(self, pattern: HPMPattern) -> Optional[SymbolicPattern]:
         """
         Route to appropriate compilation method based on pattern type.
         """
+        # FUNCTIONAL ACTION GRADUATION
+        if pattern.substrate_type == "functional_action":
+            return self.compile_action_to_symbolic(pattern)
+
         if isinstance(pattern, CompositeToolPattern):
             return self.compile_composite_to_symbolic(pattern)
             

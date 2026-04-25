@@ -3,108 +3,96 @@ import copy
 from hpm_ai_v4.pattern import HierarchicalPattern
 
 def compute_conflict_matrix(patterns):
-    """k_ij = 1 - cosine similarity between parameter vectors (structural incompatibility)."""
+    """k_ij = 1 - cosine similarity between parameter vectors (Vectorized)."""
     K = len(patterns)
-    mat = np.zeros((K, K))
-    for i, p in enumerate(patterns):
-        for j, q in enumerate(patterns):
-            if i == j:
-                mat[i, j] = 0.0
-            else:
-                # Extract parameter vector for similarity check
-                def get_params(pat):
-                    if pat.complexity >= 2:
-                        return np.concatenate([
-                            pat.A3.flatten(), pat.A32.flatten(), 
-                            pat.A21.flatten(), pat.B.flatten()
-                        ])
-                    else:
-                        return np.array([getattr(pat, 'theta', 0.5)])
-                
-                params_i = get_params(p)
-                params_j = get_params(q)
-                
-                # Align lengths if different (e.g., flat vs hierarchical)
-                if len(params_i) != len(params_j):
-                    # For comparison, zero-pad the shorter one or use a proxy
-                    max_len = max(len(params_i), len(params_j))
-                    p_i = np.zeros(max_len)
-                    p_j = np.zeros(max_len)
-                    p_i[:len(params_i)] = params_i
-                    p_j[:len(params_j)] = params_j
-                else:
-                    p_i, p_j = params_i, params_j
-                    
-                cos_sim = np.dot(p_i, p_j) / (np.linalg.norm(p_i)*np.linalg.norm(p_j) + 1e-12)
-                mat[i, j] = 1 - max(0, cos_sim)
-    return mat
+    if K == 0:
+        return np.array([[]])
+    
+    # 1. Extract and flatten parameters for all patterns
+    def get_params(pat):
+        if pat.complexity >= 2 or pat.latent_dim > 1:
+            return np.concatenate([
+                pat.A.flatten(), pat.B.flatten(), pat.pi.flatten()
+            ])
+        else:
+            return pat.B.flatten()
+
+    param_list = [get_params(p) for p in patterns]
+    max_len = max(len(p) for p in param_list)
+    
+    params = np.zeros((K, max_len), dtype=np.float32)
+    for i, p in enumerate(param_list):
+        params[i, :len(p)] = p
+        
+    # 2. Compute Cosine Similarity Matrix
+    norms = np.linalg.norm(params, axis=1) # (K,)
+    dot_products = params @ params.T # (K, K)
+    
+    norm_outer = np.outer(norms, norms) + 1e-12
+    cos_sim = dot_products / norm_outer
+    
+    k_mat = 1.0 - np.maximum(0, cos_sim)
+    np.fill_diagonal(k_mat, 0.0)
+    return k_mat
 
 def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, decay=0.01):
     """
-    Update pattern weights using replicator dynamics with inhibition and decay.
-    As defined in HPM Framework Appendix D.
+    Update pattern weights using replicator dynamics with inhibition and decay (Vectorized).
     """
-    weights = np.array([p.weight for p in patterns])
-    total_vec = np.array([totals[p.id] for p in patterns])
+    if not patterns: return
     
-    # Average population utility
+    weights = np.array([p.weight for p in patterns], dtype=np.float32)
+    total_vec = np.array([totals.get(p.id, 0.0) for p in patterns], dtype=np.float32)
+    
     avg_total = np.sum(weights * total_vec) / (np.sum(weights) + 1e-12)
-
-    # Apply forgetting / decay
-    weights = weights * (1 - decay)
-
-    new_weights = weights.copy()
-    for i, p in enumerate(patterns):
-        # Replication term (based on individual vs average utility)
-        rep = eta * (total_vec[i] - avg_total) * weights[i]
+    rep = eta * (total_vec - avg_total) * weights
+    
+    inhib = np.zeros_like(weights)
+    if k_matrix is not None and k_matrix.shape == (len(patterns), len(patterns)):
+        inhib = beta_c * weights * (k_matrix @ weights)
         
-        # Inhibition term (based on structural conflict)
-        inhib = 0.0
-        if k_matrix is not None:
-            for j, q in enumerate(patterns):
-                if i != j:
-                    inhib += beta_c * k_matrix[i, j] * weights[i] * weights[j]
-                    
-        new_weights[i] = weights[i] + rep - inhib
-        new_weights[i] = max(new_weights[i], 0.0)
+    new_weights = weights * (1 - decay) + rep - inhib
+    new_weights = np.maximum(new_weights, 0.0)
 
-    # Normalize weights to sum to 1
     total_w = np.sum(new_weights) + 1e-12
     new_weights = new_weights / total_w
     
     for i, p in enumerate(patterns):
-        p.weight = new_weights[i]
+        p.weight = float(new_weights[i])
 
 def recombine(parent_a, parent_b, constraints=None):
     """
     Create a new pattern by structural crossover of parent matrices.
     """
-    if parent_a.complexity >= 2 and parent_b.complexity >= 2:
-        def crossover_mat(m1, m2):
-            mask = np.random.rand(*m1.shape) < 0.5
-            new = np.where(mask, m1, m2)
-            # Row normalization (must be a valid transition matrix)
-            row_sums = new.sum(axis=1, keepdims=True)
-            return new / (row_sums + 1e-12)
+    def crossover_mat(m1, m2):
+        mask = np.random.rand(*m1.shape) < 0.5
+        new = np.where(mask, m1, m2)
+        row_sums = new.sum(axis=1, keepdims=True)
+        return (new / (row_sums + 1e-12)).astype(np.float32)
 
-        child = HierarchicalPattern(pattern_id=None, obs_dim=parent_a.obs_dim)
-        child.A3 = crossover_mat(parent_a.A3, parent_b.A3)
-        child.A32 = crossover_mat(parent_a.A32, parent_b.A32)
-        child.A21 = crossover_mat(parent_a.A21, parent_b.A21)
-        child.B = crossover_mat(parent_a.B, parent_b.B)
+    def crossover_vec(v1, v2):
+        mask = np.random.rand(*v1.shape) < 0.5
+        new = np.where(mask, v1, v2)
+        return (new / (new.sum() + 1e-12)).astype(np.float32)
+
+    if (parent_a.complexity >= 2 or parent_a.latent_dim > 1) and \
+       (parent_b.complexity >= 2 or parent_b.latent_dim > 1):
         
-        # Initial distributions
-        child.pi3 = (parent_a.pi3 + parent_b.pi3) / 2
-        child.pi3 /= child.pi3.sum()
+        child = HierarchicalPattern(pattern_id=None, latent_dim=parent_a.latent_dim, obs_dim=parent_a.obs_dim)
+        child.A = crossover_mat(parent_a.A, parent_b.A)
+        child.B = crossover_mat(parent_a.B, parent_b.B)
+        child.pi = crossover_vec(parent_a.pi, parent_b.pi)
     else:
-        # If one is flat, promote to hierarchical with a mix of random and inherited
-        child = HierarchicalPattern(pattern_id=None, obs_dim=parent_a.obs_dim)
-        if parent_a.complexity == 1:
-            # Inherit emission distribution from flat parent
+        # Promotion logic
+        child = HierarchicalPattern(pattern_id=None, latent_dim=parent_a.latent_dim, obs_dim=parent_a.obs_dim)
+        if parent_a.latent_dim == 1:
             child.B[0] = parent_a.B[0]
-            child.B[1] = parent_a.B[0] # Duplicate for both initial states
+            if child.latent_dim > 1:
+                for k in range(1, child.latent_dim):
+                    child.B[k] = parent_a.B[0]
 
     if constraints is not None and not constraints(child):
         return None
         
+    child._refresh_log_cache()
     return child

@@ -1,4 +1,4 @@
-from pattern import HPMPattern
+from .pattern import HPMPattern
 import torch
 import numpy as np
 from typing import Dict, Any, Optional, Tuple

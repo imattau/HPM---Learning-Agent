@@ -80,7 +80,16 @@ class ClassificationPattern(HPMPattern):
         return poutine.trace(conditioned).get_trace().log_prob_sum()
 
     def sample(self, context: Dict[str, Any], num_samples: int = 1) -> Dict[str, torch.Tensor]:
-        x = context["input"].unsqueeze(0) if context["input"].dim() == 1 else context["input"]
+        if "input" not in context:
+            # Return neutral distribution if no input
+            probs = torch.ones(1, self.num_classes, device=self._device) / self.num_classes
+            logits = torch.zeros(1, self.num_classes, device=self._device)
+            y = torch.zeros(num_samples, dtype=torch.long, device=self._device)
+            return {"y": y.squeeze(0), "logits": logits, "probs": probs}
+            
+        x = context["input"]
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
         x = x.to(self._device)
         with torch.no_grad():
             guide_trace = poutine.trace(self.guide).get_trace({"input": x})
