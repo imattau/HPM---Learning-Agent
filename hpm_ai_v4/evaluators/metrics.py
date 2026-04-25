@@ -6,7 +6,7 @@ def epistemic_score(pattern):
 
 def affective_score(pattern, obs_seq, target_entropy=0.5):
     """Goldilocks curiosity + compression bonus (non-epistemic)"""
-    if pattern.complexity >= 2:
+    if pattern.latent_dim > 1:
         # target loss ~0.5 means intermediate predictability (Goldilocks zone)
         recent_loss = pattern.running_loss
         curiosity = 1.0 - min(1.0, abs(recent_loss - 0.5)/0.5)
@@ -30,7 +30,7 @@ def pattern_density(pattern, obs_seq, evaluator_values, field_amplification=0.0)
     D(h) = alpha * C(h) + beta * sum(e_k(h)) + gamma * F(h)
     with C(h) = (1/n) * sum(w_ij) (structural connectivity).
     """
-    if pattern.complexity >= 2 or pattern.latent_dim > 1:
+    if pattern.latent_dim > 1:
         # Structural connectivity: normalised number of parameters in the hierarchy
         # (1 transition matrix + 1 emission matrix + 1 initial distribution)
         n_params = (pattern.latent_dim**2) + (pattern.latent_dim * pattern.obs_dim) + pattern.latent_dim

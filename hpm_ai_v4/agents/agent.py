@@ -104,9 +104,13 @@ class HPMAgent:
 
     def perceive_and_learn(self, obs: int):
         """Update patterns based on a new observation."""
+        context_before = list(self.obs_buffer[-20:])
         self.obs_buffer.append(obs)
         if len(self.obs_buffer) > 100:
             self.obs_buffer = self.obs_buffer[-100:]
+
+        # Reasoning feedback: update per-pattern loss based on prediction error
+        self.reasoner.observe_outcome(obs, context_before)
 
         # 1. Update Social Context (Pattern Field) - Move up for workers
         field_freq = self.field.update(self.patterns)
@@ -148,7 +152,7 @@ class HPMAgent:
         self.patterns = [p for p in self.patterns if p.weight > 1e-4]
 
         # 6. Recombination / Innovation
-        if self.step_counter > 0 and self.step_counter % 20 == 0 and len(self.patterns) >= 2:
+        if self.step_counter > 0 and self.step_counter % 100 == 0 and len(self.patterns) >= 2:
             weights = np.array([p.weight for p in self.patterns])
             if np.sum(weights) > 0:
                 probs = weights / np.sum(weights)

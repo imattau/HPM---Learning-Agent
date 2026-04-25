@@ -7,6 +7,8 @@ from typing import Iterator, List, Optional, Dict, Any
 import numpy as np
 
 from hpm_ai_v4.agents.agent import HPMAgent
+from hpm_ai_v4.io.adapters import CharClassAdapter
+from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.serializer import PatternSerializer
 
@@ -146,13 +148,25 @@ def run_simulation(
     """Run the full HPM AI simulation. Returns metric history."""
 
     dictionary = NLTKWordList() if use_dict else None
+    adapter = CharClassAdapter()  # maps 95 chars → 5 classes (obs_dim=5)
 
     agent = HPMAgent(
-        obs_dim=95,
-        num_initial_patterns=6,
+        obs_dim=5,
+        num_initial_patterns=4,
         num_workers=num_workers,
         dictionary=dictionary,
     )
+
+    # Equal initial weights: hier patterns compete fairly against flat baseline
+    agent.patterns = []
+    for i in range(4):
+        p = HierarchicalPattern(i, latent_dim=2, obs_dim=5)
+        p.weight = 0.15
+        agent.patterns.append(p)
+    for i in range(4, 6):
+        p = FlatPattern(i, obs_dim=5)
+        p.weight = 0.1
+        agent.patterns.append(p)
 
     if library_path and os.path.exists(library_path):
         n = agent.load_library(library_path, reset_weights=True)
@@ -169,7 +183,8 @@ def run_simulation(
           f"workers={num_workers} dict={use_dict}")
 
     for step in range(total_steps):
-        char_id = next(stream_iter)
+        raw_id = next(stream_iter)
+        char_id = adapter.encode(raw_id)  # 0–94 → 0–4 char class
         accuracy_buffer.append(char_id)
         if len(accuracy_buffer) > log_every + 21:
             accuracy_buffer = accuracy_buffer[-(log_every + 21):]
