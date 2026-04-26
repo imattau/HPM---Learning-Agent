@@ -4,6 +4,22 @@ def epistemic_score(pattern):
     """Ai(t) = - Li(t)  (running loss, negative)"""
     return -pattern.running_loss
 
+
+def compression_gate(pattern, target_loss=0.9, slope=4.0):
+    """Only reward compression when the pattern is epistemically competitive."""
+    if pattern.latent_dim <= 1:
+        return 0.0
+    # Smooth gate in [0,1]. Near or below target_loss means the pattern is
+    # plausible enough to deserve structural credit; very high-loss patterns do not.
+    return float(1.0 / (1.0 + np.exp(slope * (pattern.running_loss - target_loss))))
+
+
+def hierarchical_compression_score(pattern, beta_comp=0.35):
+    """HPM-style hierarchical utility term: beta_comp * gate * compression."""
+    if pattern.latent_dim <= 1:
+        return 0.0
+    return float(beta_comp * compression_gate(pattern) * pattern.compression())
+
 def affective_score(pattern, obs_seq, target_entropy=0.5):
     """Goldilocks curiosity + compression bonus (non-epistemic)"""
     if pattern.latent_dim > 1:
@@ -48,10 +64,12 @@ def pattern_density(pattern, obs_seq, evaluator_values, field_amplification=0.0)
     return alpha * C + beta * E + gamma * F
 
 def total_score(pattern, obs_seq, field_freq, beta_aff=0.4, gamma_soc=0.3,
-                gamma_field=0.2, density_weight=0.1, external_soc=0.5):
+                gamma_field=0.2, density_weight=0.1, external_soc=0.5,
+                beta_comp=0.35):
     """Combines all evaluators and density into a final utility score."""
     ep = epistemic_score(pattern)
     aff = affective_score(pattern, obs_seq)
+    comp = hierarchical_compression_score(pattern, beta_comp=beta_comp)
     soc_local = social_score(pattern, field_freq)
     
     # Blended social score: mix of local field frequency and external reliability
@@ -64,10 +82,10 @@ def total_score(pattern, obs_seq, field_freq, beta_aff=0.4, gamma_soc=0.3,
     field_infl = gamma_field * field_freq.get(pattern.id, 0.0)
     
     # Base utility = epistemic + non-epistemic + field
-    total = ep + J + field_infl
-    
+    total = ep + comp + J + field_infl
+
     # Add density after computing (density uses non-epistemic evaluators)
     density = pattern_density(pattern, obs_seq, [aff, soc], field_amplification=field_infl)
     total += density_weight * density
-    
+
     return total

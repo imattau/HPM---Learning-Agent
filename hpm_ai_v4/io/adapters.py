@@ -1,6 +1,7 @@
+import json
 import numpy as np
 from PIL import Image
-from typing import List, Any, Union, Optional
+from typing import List, Any, Union, Optional, Sequence, Dict
 import matplotlib.pyplot as plt
 
 class InputAdapter:
@@ -50,6 +51,171 @@ class TextAdapter(InputAdapter):
         # Simple character-level tokenization
         tokens = [self.vocab.get(ch, 0) % 256 for ch in text[:max_length]]
         return tokens
+
+
+class StructuredTextAdapter(InputAdapter):
+    """Canonical JSON adapter for record-like text structures."""
+
+    def __init__(self, obs_dim: int = 256):
+        self._obs_dim = max(2, int(obs_dim))
+        self._text_adapter = TextAdapter()
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_text(self, raw_input: Any) -> str:
+        structured = self._normalize(raw_input)
+        if isinstance(structured, (dict, list)):
+            return json.dumps(structured, sort_keys=True, separators=(",", ":"))
+        return json.dumps({"value": structured}, sort_keys=True, separators=(",", ":"))
+
+    def from_text(self, text: str) -> Any:
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        canonical = self.to_text(raw_input)
+        return self._text_adapter.to_observations(canonical, max_length=max_length)
+
+    def from_observations(self, tokens: Sequence[int]) -> Any:
+        text = "".join(self._text_adapter.reverse_vocab.get(int(tok) % 256, "?") for tok in tokens)
+        return self.from_text(text)
+
+    def act(self, token: int, context: Any = None):
+        if isinstance(context, dict):
+            return self.to_text(context)
+        return self._text_adapter.reverse_vocab.get(int(token) % 256, chr(int(token) % 95 + 32))
+
+    def _normalize(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): self._normalize(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+        if isinstance(value, (list, tuple)):
+            return [self._normalize(v) for v in value]
+        if isinstance(value, np.ndarray):
+            return [self._normalize(v) for v in value.tolist()]
+        if isinstance(value, (np.bool_, bool, np.integer, int, np.floating, float, str)) or value is None:
+            return value
+        return repr(value)
+
+
+class CodeDSLAdapter(InputAdapter):
+    """Canonical adapter for a tiny stack-machine DSL.
+
+    The DSL is intentionally small and exact:
+        PUSH <int>
+        ADD | SUB | MUL | DIV | DUP | SWAP | POP
+        RETURN
+    """
+
+    INSTRUCTIONS = {"PUSH", "ADD", "SUB", "MUL", "DIV", "DUP", "SWAP", "POP", "RETURN"}
+
+    def __init__(self, obs_dim: int = 256):
+        self._obs_dim = max(2, int(obs_dim))
+        self._text_adapter = TextAdapter()
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_text(self, raw_input: Any) -> str:
+        if isinstance(raw_input, str):
+            program = raw_input
+        elif isinstance(raw_input, dict) and "program" in raw_input:
+            program = str(raw_input["program"])
+        else:
+            program = str(raw_input)
+        parsed = self.parse_program(program)
+        if not parsed:
+            return self._canonicalize_fallback(program)
+        return "\n".join(self._format_instruction(op, arg) for op, arg in parsed)
+
+    def from_text(self, text: str) -> List[tuple[str, Optional[int]]]:
+        return self.parse_program(text)
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        canonical = self.to_text(raw_input)
+        return self._text_adapter.to_observations(canonical, max_length=max_length)
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        text = "".join(self._text_adapter.reverse_vocab.get(int(tok) % 256, "?") for tok in tokens)
+        return self.to_text(text)
+
+    def parse_program(self, program: str) -> List[tuple[str, Optional[int]]]:
+        instructions: List[tuple[str, Optional[int]]] = []
+        for raw_line in program.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.replace(",", " ").split()
+            if not parts:
+                continue
+            op = parts[0].upper()
+            if op not in self.INSTRUCTIONS:
+                continue
+            arg: Optional[int] = None
+            if op == "PUSH":
+                if len(parts) < 2:
+                    continue
+                try:
+                    arg = int(parts[1])
+                except Exception:
+                    continue
+            instructions.append((op, arg))
+        return instructions
+
+    def execute(self, program: str) -> Optional[int]:
+        stack: List[int] = []
+        parsed = self.parse_program(program)
+        if not parsed:
+            return None
+        for op, arg in parsed:
+            if op == "PUSH":
+                stack.append(int(arg or 0))
+            elif op == "ADD" and len(stack) >= 2:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(a + b)
+            elif op == "SUB" and len(stack) >= 2:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(a - b)
+            elif op == "MUL" and len(stack) >= 2:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(a * b)
+            elif op == "DIV" and len(stack) >= 2:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(0 if b == 0 else int(a / b))
+            elif op == "DUP" and stack:
+                stack.append(stack[-1])
+            elif op == "SWAP" and len(stack) >= 2:
+                stack[-1], stack[-2] = stack[-2], stack[-1]
+            elif op == "POP" and stack:
+                stack.pop()
+            elif op == "RETURN":
+                break
+        return stack[-1] if stack else None
+
+    def act(self, token: int, context: Any = None):
+        return self._text_adapter.reverse_vocab.get(int(token) % 256, chr(int(token) % 95 + 32))
+
+    def _format_instruction(self, op: str, arg: Optional[int]) -> str:
+        if op == "PUSH":
+            return f"PUSH {int(arg or 0)}"
+        return op
+
+    def _canonicalize_fallback(self, program: str) -> str:
+        lines = []
+        for line in program.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lines.append(line.upper())
+        return "\n".join(lines)
 
 class ContinuousSignalAdapter(InputAdapter):
     """Convert time series data to discrete tokens via binning."""
@@ -181,3 +347,230 @@ class CharClassAdapter:
             return 4
         char_id = ord(ch) - 32
         return self.encode(char_id)
+
+
+class EnvironmentStateAdapter(InputAdapter):
+    """Encode structured environment state into discrete observation tokens."""
+
+    def __init__(self, obs_dim: int = 8, keys: Optional[Sequence[str]] = None):
+        self._obs_dim = max(2, int(obs_dim))
+        self.keys = tuple(keys or ("state", "obs", "observation", "value", "family", "phase", "reward"))
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens: List[int] = []
+        self._append_tokens(tokens, raw_input)
+        if not tokens:
+            tokens = [0]
+        return tokens[:max_length]
+
+    def _append_tokens(self, tokens: List[int], value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, (bool, np.bool_)):
+            tokens.append(int(value) % self._obs_dim)
+            return
+        if isinstance(value, (int, np.integer)):
+            tokens.append(int(value) % self._obs_dim)
+            return
+        if isinstance(value, (float, np.floating)):
+            tokens.append(int(round(float(value))) % self._obs_dim)
+            return
+        if isinstance(value, str):
+            tokens.append(self._string_code(value))
+            return
+        if isinstance(value, dict):
+            ordered = [key for key in self.keys if key in value]
+            ordered.extend(key for key in value.keys() if key not in ordered)
+            for key in ordered:
+                self._append_tokens(tokens, value.get(key))
+            return
+        if isinstance(value, (list, tuple, np.ndarray)):
+            for item in value:
+                self._append_tokens(tokens, item)
+            return
+        tokens.append(self._string_code(repr(value)))
+
+    def _string_code(self, text: str) -> int:
+        text = text.strip()
+        if not text:
+            return 0
+        if text.isdigit():
+            return int(text) % self._obs_dim
+        return sum(ord(ch) for ch in text) % self._obs_dim
+
+
+class ToolActionAdapter(InputAdapter, OutputAdapter):
+    """Round-trip adapter for tool-family names and tool action tokens."""
+
+    def __init__(self, actions: Optional[Sequence[str]] = None):
+        self.actions = list(actions or ("inspect", "shift", "flip", "commit"))
+        self._obs_dim = max(2, len(self.actions))
+        self._name_to_id = {name: idx for idx, name in enumerate(self.actions)}
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens: List[int] = []
+        if isinstance(raw_input, dict):
+            for key in ("action", "tool", "name", "sequence"):
+                if key in raw_input:
+                    self._append(tokens, raw_input[key])
+        else:
+            self._append(tokens, raw_input)
+        if not tokens:
+            tokens = [0]
+        return tokens[:max_length]
+
+    def act(self, token: int, context: Any = None):
+        if not self.actions:
+            return int(token)
+        return self.actions[int(token) % len(self.actions)]
+
+    def _append(self, tokens: List[int], value: Any) -> None:
+        if isinstance(value, (list, tuple, np.ndarray)):
+            for item in value:
+                self._append(tokens, item)
+            return
+        if isinstance(value, (int, np.integer)):
+            tokens.append(int(value) % self._obs_dim)
+            return
+        if isinstance(value, str):
+            if value in self._name_to_id:
+                tokens.append(self._name_to_id[value])
+            else:
+                tokens.append(sum(ord(ch) for ch in value) % self._obs_dim)
+            return
+        if value is not None:
+            tokens.append(sum(ord(ch) for ch in repr(value)) % self._obs_dim)
+
+
+class CurriculumAdapter(InputAdapter, OutputAdapter):
+    """Adapter for task-family and curriculum metadata."""
+
+    def __init__(self, families: Optional[Sequence[str]] = None, obs_dim: int = 16):
+        self.families = list(families or [])
+        self._obs_dim = max(2, int(obs_dim))
+        self._family_to_id = {name: idx for idx, name in enumerate(self.families)}
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens: List[int] = []
+        if isinstance(raw_input, dict):
+            for key in ("family", "phase", "stage", "task_family", "difficulty"):
+                if key in raw_input:
+                    self._append(tokens, raw_input[key])
+        else:
+            self._append(tokens, raw_input)
+        if not tokens:
+            tokens = [0]
+        return tokens[:max_length]
+
+    def act(self, token: int, context: Any = None):
+        if self.families:
+            return self.families[int(token) % len(self.families)]
+        return f"family_{int(token) % self._obs_dim}"
+
+    def _append(self, tokens: List[int], value: Any) -> None:
+        if isinstance(value, (list, tuple, np.ndarray)):
+            for item in value:
+                self._append(tokens, item)
+            return
+        if isinstance(value, (int, np.integer)):
+            tokens.append(int(value) % self._obs_dim)
+            return
+        if isinstance(value, str):
+            if value in self._family_to_id:
+                tokens.append(self._family_to_id[value])
+            else:
+                tokens.append(sum(ord(ch) for ch in value) % self._obs_dim)
+            return
+        if isinstance(value, (float, np.floating)):
+            tokens.append(int(round(float(value))) % self._obs_dim)
+            return
+        if value is not None:
+            tokens.append(sum(ord(ch) for ch in repr(value)) % self._obs_dim)
+
+
+class EpisodeBundleAdapter(InputAdapter, OutputAdapter):
+    """Encode bundle descriptors and reload metadata into discrete tokens."""
+
+    def __init__(self, obs_dim: int = 32):
+        self._obs_dim = max(2, int(obs_dim))
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens: List[int] = []
+        self._append(tokens, raw_input)
+        if not tokens:
+            tokens = [0]
+        return tokens[:max_length]
+
+    def act(self, token: int, context: Any = None):
+        return self.decode_token(token)
+
+    def encode_bundle(self, descriptor: Dict[str, Any]) -> List[int]:
+        return self.to_observations(descriptor)
+
+    def decode_bundle(self, tokens: Sequence[int]) -> Dict[str, Any]:
+        tokens = [int(t) % self._obs_dim for t in tokens]
+        return {
+            "kind": self.decode_token(tokens[0]) if tokens else "bundle",
+            "phase": self.decode_token(tokens[1]) if len(tokens) > 1 else "unknown",
+            "obs_dim": int(tokens[2]) if len(tokens) > 2 else self._obs_dim,
+            "count": int(tokens[3]) if len(tokens) > 3 else len(tokens),
+        }
+
+    def decode_token(self, token: int) -> str:
+        token = int(token) % self._obs_dim
+        if token == 0:
+            return "bundle"
+        if token == 1:
+            return "save"
+        if token == 2:
+            return "load"
+        if token == 3:
+            return "train"
+        if token == 4:
+            return "validation"
+        return f"bundle_{token}"
+
+    def _append(self, tokens: List[int], value: Any) -> None:
+        if isinstance(value, dict):
+            for key in ("kind", "phase", "level", "state", "mode"):
+                if key in value:
+                    self._append(tokens, value[key])
+            for key in sorted(value.keys()):
+                if key not in {"kind", "phase", "level", "state", "mode"}:
+                    self._append(tokens, value[key])
+            return
+        if isinstance(value, (list, tuple, np.ndarray)):
+            for item in value:
+                self._append(tokens, item)
+            return
+        if isinstance(value, (int, np.integer)):
+            tokens.append(int(value) % self._obs_dim)
+            return
+        if isinstance(value, (float, np.floating)):
+            tokens.append(int(round(float(value))) % self._obs_dim)
+            return
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in {"bundle", "save", "load", "train", "validation"}:
+                tokens.append({"bundle": 0, "save": 1, "load": 2, "train": 3, "validation": 4}[lowered])
+            else:
+                tokens.append(sum(ord(ch) for ch in value) % self._obs_dim)
+            return
+        if value is not None:
+            tokens.append(sum(ord(ch) for ch in repr(value)) % self._obs_dim)

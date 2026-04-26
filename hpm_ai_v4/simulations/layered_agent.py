@@ -1,21 +1,27 @@
-"""LayeredAgent: L1 (char classes, obs_dim=5) + L2 (raw chars, obs_dim=95)."""
-from typing import List, Tuple, Dict, Any
+"""LayeredAgent: stacked L1 -> L2 -> L3 hierarchy over character streams."""
+from collections import Counter
+import json
+import os
+import re
+from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 
 from hpm_ai_v4.agents.agent import HPMAgent
+from hpm_ai_v4.agents.decoders import CharDecoder, ConstrainedDecoder, ExplanationDecoder, TargetDecoder, WordDecoder
+from hpm_ai_v4.agents.meta_decoder_policy import DecoderSpec, MetaDecoderPolicy
 from hpm_ai_v4.io.adapters import CharClassAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
+from hpm_ai_v4.tools.dictionary import DictionaryValidator
+from hpm_ai_v4.tools.grammar import GrammarValidator
 
 
 def _init_equal_weights(agent: HPMAgent, hier_k: int, obs_dim: int) -> None:
     """Replace agent.patterns with equal-weight hier+flat population."""
     agent.patterns = []
-    # 4 Hierarchical patterns
     for i in range(4):
         p = HierarchicalPattern(i, latent_dim=hier_k, obs_dim=obs_dim)
         p.weight = 0.15
         agent.patterns.append(p)
-    # 2 Flat patterns
     for i in range(4, 6):
         p = FlatPattern.flat(i, obs_dim=obs_dim)
         p.weight = 0.10
@@ -23,39 +29,766 @@ def _init_equal_weights(agent: HPMAgent, hier_k: int, obs_dim: int) -> None:
 
 
 class LayeredAgent:
-    """Two-level HPM agent: L1 learns char-class structure, L2 learns actual chars."""
+    """Three-level HPM stack where each level consumes the lower level's latent state."""
 
-    def __init__(self, num_workers: int = 1):
+    def __init__(self, num_workers: int = 1,
+                 dictionary: Optional[DictionaryValidator] = None,
+                 grammar: Optional[GrammarValidator] = None):
         self._adapter = CharClassAdapter()
-        self.l1 = HPMAgent(obs_dim=5, num_initial_patterns=4, num_workers=num_workers)
-        self.l2 = HPMAgent(obs_dim=95, num_initial_patterns=4, num_workers=num_workers)
+        self.dictionary = dictionary
+        self.grammar = grammar
+        self.l1 = HPMAgent(obs_dim=5, num_initial_patterns=4, num_workers=num_workers,
+                           dictionary=dictionary, grammar=grammar)
+        self.l2 = HPMAgent(obs_dim=2, num_initial_patterns=4, num_workers=num_workers,
+                           dictionary=dictionary, grammar=grammar)
+        self.l3 = HPMAgent(obs_dim=2, num_initial_patterns=4, num_workers=num_workers,
+                           dictionary=dictionary, grammar=grammar)
+        self.l4 = HPMAgent(obs_dim=32, num_initial_patterns=4, num_workers=num_workers,
+                           dictionary=dictionary, grammar=grammar)
         _init_equal_weights(self.l1, hier_k=2, obs_dim=5)
-        _init_equal_weights(self.l2, hier_k=4, obs_dim=95)
+        _init_equal_weights(self.l2, hier_k=2, obs_dim=2)
+        _init_equal_weights(self.l3, hier_k=2, obs_dim=2)
+        _init_equal_weights(self.l4, hier_k=2, obs_dim=32)
+        self._raw_history: List[int] = []
+        self._l1_state_history: List[int] = []
+        self._l2_state_history: List[int] = []
+        self._class_char_counts = {i: Counter() for i in range(5)}
+        self._char_counts = Counter()
+        self._transition_counts = Counter()
+        self._last_decoder_choice = "word"
+        self._last_decoder_mode = "decode"
+        self._last_decoder_stats: Dict[str, float] = {
+            "token_agreement": 0.0,
+            "plausibility": 0.0,
+            "structural_score": 0.0,
+        }
+        self.decoder_policy = MetaDecoderPolicy(num_workers=num_workers)
+        self.l5 = self.decoder_policy.agent
+        self.decoders = {
+            "char": CharDecoder(),
+            "word": WordDecoder(),
+            "target": TargetDecoder(),
+            "constrained": ConstrainedDecoder(),
+            "explain": ExplanationDecoder(),
+        }
 
-    def perceive(self, raw_char_id: int) -> None:
-        """Feed one character to both levels."""
+    def perceive(self, raw_char_id: int, feedback: Optional[Dict[str, Any]] = None) -> None:
+        """Feed one character through the hierarchy."""
         class_id = self._adapter.encode(raw_char_id)
-        self.l1.perceive_and_learn(class_id)
-        self.l2.perceive_and_learn(raw_char_id)
+        self._raw_history.append(raw_char_id)
+        ch = chr(raw_char_id + 32)
+        self._class_char_counts[class_id][ch] += 1
+        self._char_counts[ch] += 1
+        if len(self._raw_history) > 1:
+            prev_ch = chr(self._raw_history[-2] + 32)
+            self._transition_counts[(prev_ch, ch)] += 1
+        self.l1.perceive_and_learn(class_id, feedback=feedback)
 
-    def generate(self, steps: int = 80) -> str:
-        """Sample from L2 and decode to printable characters."""
-        future = self.l2.reasoner.simulate_future(steps=steps, top_k=3)
-        return "".join(chr(v + 32) for v in future if 0 <= v <= 94)
+        l1_state = self.l1_top_state()
+        self._l1_state_history.append(l1_state)
+        self.l2.perceive_and_learn(l1_state, feedback=feedback)
+
+        l2_state = self.l2_soft_state()
+        self._l2_state_history.append(l2_state)
+        self.l3.perceive_and_learn(l2_state, feedback=feedback)
+
+    def _top_state(self, agent: HPMAgent) -> int:
+        if not agent.patterns:
+            return 0
+        best = max(agent.patterns, key=lambda p: p.weight)
+        return int(best.get_top_state(agent.obs_buffer[-20:]))
+
+    def l1_top_state(self) -> int:
+        return self._top_state(self.l1)
+
+    def l2_top_state(self) -> int:
+        return self._top_state(self.l2)
+
+    def l2_state_distribution(self) -> np.ndarray:
+        """Soft summary of L2 over the current population."""
+        if not self.l2.patterns:
+            return np.array([0.5, 0.5], dtype=np.float32)
+
+        obs_seq = list(self.l2.obs_buffer[-20:]) if self.l2.obs_buffer else []
+        dist = np.zeros(self.l2.obs_dim, dtype=np.float32)
+        total_w = 0.0
+        for p in self.l2.patterns:
+            w = float(max(0.0, p.weight))
+            if w <= 0.0:
+                continue
+            dist += w * p.predict_next_distribution(obs_seq)
+            total_w += w
+        if total_w <= 0.0:
+            return np.array([0.5, 0.5], dtype=np.float32)
+        dist /= total_w
+        dist /= dist.sum() + 1e-12
+        return dist.astype(np.float32)
+
+    def l2_soft_state(self) -> int:
+        """Softly summarise L2 into a compact state for L3."""
+        dist = self.l2_state_distribution()
+        entropy = float(-np.sum(dist * np.log(dist + 1e-12)))
+        if entropy > 0.62:
+            return 1
+        return int(np.argmax(dist))
+
+    def generate(self, steps: int = 20) -> str:
+        """Generate a readable sequence of level-3 state labels."""
+        return self.decoders["explain"].decode(self, steps=steps)
+
+    def _decoder_policy_features(
+        self,
+        target_text: str | None = None,
+        requested_mode: str = "decode",
+    ) -> Dict[str, Any]:
+        l1 = self.l1_metrics()
+        l2 = self.l2_metrics(list(self._l1_state_history[-200:]))
+        l3 = self.l3_metrics(list(self._l2_state_history[-200:]))
+        l4 = self.l4_metrics()
+        l5 = self.l5_metrics()
+        control = self.l1.reasoner.control_context(self._raw_history)
+        structural_score = float((l1["mi"] + l2["mi"] + l3["mi"]) / 3.0)
+        selection_counts = self.decoder_policy.state_dict().get("selection_counts", {})
+        selection_total = sum(int(v) for v in selection_counts.values())
+        selection_entropy = 0.0
+        if selection_total > 0:
+            probs = np.array([float(v) / float(selection_total) for v in selection_counts.values()], dtype=np.float32)
+            selection_entropy = float(-np.sum(probs * np.log(probs + 1e-12)))
+        reasoner_memory = int(self.l1.reasoner.memory_size + self.l2.reasoner.memory_size + self.l3.reasoner.memory_size)
+        return {
+            "recent_agreement": self._last_decoder_stats.get("token_agreement", 0.0),
+            "recent_plausibility": self._last_decoder_stats.get("plausibility", 0.0),
+            "structural_score": structural_score,
+            "meta_structural_score": float((l4["mi"] + l5["mi"]) / 2.0),
+            "policy_age": self.decoder_policy._age,
+            "policy_entropy": selection_entropy,
+            "reasoner_memory": reasoner_memory,
+            "control_family_prior": control.get("family_prior", {}),
+            "control_mode_prior": control.get("mode_prior", {}),
+            "control_stage_prior": control.get("stage_prior", {}),
+            "control_strength": float(control.get("community_strength", 0.0)),
+            "control_dominant_family": control.get("dominant_family"),
+            "control_dominant_mode": control.get("dominant_mode"),
+            "control_dominant_stage": control.get("dominant_stage"),
+            "control_top_community": control.get("top_community"),
+            "control_summary_count": int(control.get("summary_count", 0)),
+            "stage_idx": self._stack_stage_index(),
+            "validators_present": bool(self.dictionary or self.grammar),
+            "target_present": bool(target_text),
+            "requested_mode": requested_mode,
+        }
+
+    def _stack_stage_index(self) -> int:
+        stage = self.l1.development.level if hasattr(self.l1, "development") else "surface"
+        return {
+            "surface": 0,
+            "local": 1,
+            "relational": 2,
+            "abstract": 3,
+            "generative": 4,
+        }.get(stage, 0)
+
+    def _learn_decoder_policy(
+        self,
+        decoder_spec: DecoderSpec,
+        generated_text: str,
+        target_text: str | None = None,
+    ) -> Dict[str, float]:
+        if target_text:
+            stats = self.evaluate_generated_text(generated_text, target_text)
+        else:
+            stats = {
+                "token_agreement": 0.0,
+                "plausibility": self._text_plausibility(generated_text),
+            }
+        stats["structural_score"] = float((self.l1_metrics()["mi"] + self.l2_metrics(list(self._l1_state_history[-200:]))["mi"] + self.l3_metrics(list(self._l2_state_history[-200:]))["mi"]) / 3.0)
+        self._last_decoder_choice = decoder_spec.family
+        self._last_decoder_mode = decoder_spec.mode
+        self._last_decoder_stats = dict(stats)
+        self._update_meta_levels(decoder_spec, stats, target_text)
+        self.decoder_policy.observe(self._decoder_policy_features(target_text), decoder_spec, stats)
+        return stats
+
+    def _update_meta_levels(
+        self,
+        decoder_spec: DecoderSpec,
+        stats: Dict[str, float],
+        target_text: str | None,
+    ) -> None:
+        family_code = {
+            "word": 0,
+            "char": 1,
+            "target": 2,
+            "constrained": 3,
+        }.get(decoder_spec.family, 4)
+        mode_code = {
+            "decode": 0,
+            "hybrid": 1,
+            "target": 2,
+        }.get(decoder_spec.mode, 3)
+        agreement = float(stats.get("token_agreement", 0.0))
+        plausibility = float(stats.get("plausibility", 0.0))
+        structural = float(stats.get("structural_score", 0.0))
+        stage_idx = self._stack_stage_index()
+        requested_target = 1 if target_text else 0
+        validators = 1 if (self.dictionary or self.grammar) else 0
+
+        quality_code = 16 + min(3, int(agreement * 4))
+        plausibility_code = 20 + min(3, int(plausibility * 4))
+        structural_code = 24 + min(3, int(structural * 4))
+        stage_code = 28 + min(3, stage_idx)
+        target_code = 31 if requested_target else 30
+        validator_code = 29 if validators else 28
+
+        for obs in [
+            family_code + 4 * mode_code,
+            quality_code,
+            plausibility_code,
+            structural_code,
+            stage_code,
+            target_code,
+            validator_code,
+        ]:
+            self.l4.perceive_and_learn(int(obs % self.l4.obs_dim))
+
+    def _choose_decoder_spec(
+        self,
+        candidates: List[DecoderSpec],
+        target_text: str | None = None,
+        requested_mode: str = "decode",
+        learn_policy: bool = True,
+    ) -> DecoderSpec:
+        if not candidates:
+            raise ValueError("No decoder candidates available")
+        return self.decoder_policy.select(
+            self._decoder_policy_features(target_text, requested_mode=requested_mode),
+            candidates,
+            learn=learn_policy,
+        )
+
+    def generate_text(
+        self,
+        steps: int = 80,
+        seed_text: str | None = None,
+        target_text: str | None = None,
+        mode: str = "decode",
+        include_seed: bool = True,
+        feedback: bool = False,
+        update_policy: bool = True,
+    ) -> str:
+        """Generate readable text using a learned decoder policy."""
+        if target_text and mode == "target":
+            candidates = [DecoderSpec("target", "target", False)]
+            if self.dictionary or self.grammar:
+                candidates.append(DecoderSpec("constrained", "target", False))
+        else:
+            candidates = [
+                DecoderSpec("word", "decode", include_seed),
+                DecoderSpec("word", "hybrid", include_seed),
+                DecoderSpec("char", "decode", include_seed),
+                DecoderSpec("char", "hybrid", include_seed),
+            ]
+            if target_text:
+                candidates.append(DecoderSpec("target", "target", False))
+                candidates.append(DecoderSpec("word", "target", include_seed))
+        chosen = self._choose_decoder_spec(
+            candidates,
+            target_text=target_text,
+            requested_mode=mode,
+            learn_policy=update_policy,
+        )
+        decoder = self.decoders[chosen.family]
+        if chosen.family == "target":
+            text = decoder.decode(
+                self,
+                target_text=target_text or "",
+                seed_text=seed_text,
+                horizon=max(steps, len(target_text) if target_text else steps),
+                strategy="beam",
+                lookback=self.l1.reasoner.context_window,
+            )
+        else:
+            text = decoder.decode(
+                self,
+                steps=steps,
+                seed_text=seed_text,
+                target_text=target_text,
+                mode=chosen.mode,
+                include_seed=chosen.include_seed,
+                feedback=feedback,
+            )
+        if update_policy:
+            self._learn_decoder_policy(chosen, text, target_text=target_text)
+        return text
+
+    def generate_chars(
+        self,
+        steps: int = 80,
+        seed_text: str | None = None,
+        target_text: str | None = None,
+        mode: str = "decode",
+        include_seed: bool = True,
+        feedback: bool = False,
+        update_policy: bool = True,
+    ) -> str:
+        """Generate printable character continuation through a learned policy."""
+        candidates = [
+            DecoderSpec("char", "decode", include_seed),
+            DecoderSpec("char", "hybrid", include_seed),
+        ]
+        if target_text:
+            candidates.append(DecoderSpec("char", "target", include_seed))
+        chosen = self._choose_decoder_spec(
+            candidates,
+            target_text=target_text,
+            requested_mode=mode,
+            learn_policy=update_policy,
+        )
+        text = self.decoders["char"].decode(
+            self,
+            steps=steps,
+            seed_text=seed_text,
+            target_text=target_text,
+            mode=chosen.mode,
+            include_seed=chosen.include_seed,
+            feedback=feedback,
+        )
+        if update_policy:
+            self._learn_decoder_policy(chosen, text, target_text=target_text)
+        return text
+
+    def l4_metrics(self) -> Dict[str, Any]:
+        top3 = sorted(self.l4.patterns, key=lambda p: -p.weight)[:3]
+        total_w = sum(p.weight for p in top3) + 1e-12
+        mi = float(sum(p.weight * p.compression() for p in top3) / total_w) if top3 else 0.0
+        return {
+            'pop_size': len(self.l4.patterns),
+            'mi': mi,
+            'stage': self.l4.development.level,
+            'best_weight': max(p.weight for p in self.l4.patterns) if self.l4.patterns else 0.0,
+        }
+
+    def l5_metrics(self) -> Dict[str, Any]:
+        top3 = sorted(self.l5.patterns, key=lambda p: -p.weight)[:3]
+        total_w = sum(p.weight for p in top3) + 1e-12
+        mi = float(sum(p.weight * p.compression() for p in top3) / total_w) if top3 else 0.0
+        return {
+            'pop_size': len(self.l5.patterns),
+            'mi': mi,
+            'stage': self.l5.development.level,
+            'best_weight': max(p.weight for p in self.l5.patterns) if self.l5.patterns else 0.0,
+        }
+
+    def save_bundle(self, base_path: str) -> None:
+        from hpm_ai_v4.tools.serializer import PatternSerializer
+        PatternSerializer.save(self.l1.patterns, base_path + ".l1.pkl")
+        PatternSerializer.save(self.l2.patterns, base_path + ".l2.pkl")
+        PatternSerializer.save(self.l3.patterns, base_path + ".l3.pkl")
+        PatternSerializer.save(self.l4.patterns, base_path + ".l4.pkl")
+        PatternSerializer.save(self.l5.patterns, base_path + ".l5.pkl")
+        self._save_reasoner_state(base_path, "l1", self.l1.reasoner)
+        self._save_reasoner_state(base_path, "l2", self.l2.reasoner)
+        self._save_reasoner_state(base_path, "l3", self.l3.reasoner)
+        self._save_reasoner_state(base_path, "l4", self.l4.reasoner)
+        self._save_reasoner_state(base_path, "l5", self.l5.reasoner)
+        with open(base_path + ".policy.json", "w", encoding="utf-8") as f:
+            json.dump(self.decoder_policy.state_dict(), f)
+
+    def load_bundle(self, base_path: str) -> int:
+        from hpm_ai_v4.tools.serializer import PatternSerializer
+        loaded = 0
+        if os.path.exists(base_path + ".l1.pkl"):
+            self.l1.patterns = PatternSerializer.load(base_path + ".l1.pkl")
+            loaded += 1
+        if os.path.exists(base_path + ".l2.pkl"):
+            self.l2.patterns = PatternSerializer.load(base_path + ".l2.pkl")
+            loaded += 1
+        if os.path.exists(base_path + ".l3.pkl"):
+            self.l3.patterns = PatternSerializer.load(base_path + ".l3.pkl")
+            loaded += 1
+        if os.path.exists(base_path + ".l4.pkl"):
+            self.l4.patterns = PatternSerializer.load(base_path + ".l4.pkl")
+            loaded += 1
+        if os.path.exists(base_path + ".l5.pkl"):
+            self.l5.patterns = PatternSerializer.load(base_path + ".l5.pkl")
+            loaded += 1
+        loaded += self._load_reasoner_state(base_path, "l1", self.l1.reasoner)
+        loaded += self._load_reasoner_state(base_path, "l2", self.l2.reasoner)
+        loaded += self._load_reasoner_state(base_path, "l3", self.l3.reasoner)
+        loaded += self._load_reasoner_state(base_path, "l4", self.l4.reasoner)
+        loaded += self._load_reasoner_state(base_path, "l5", self.l5.reasoner)
+        policy_path = base_path + ".policy.json"
+        if os.path.exists(policy_path):
+            with open(policy_path, "r", encoding="utf-8") as f:
+                self.decoder_policy.load_state_dict(json.load(f))
+        return loaded
+
+    def _save_reasoner_state(self, base_path: str, level: str, reasoner) -> None:
+        path = f"{base_path}.reasoner.{level}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(reasoner.state_dict(), f)
+
+    def _load_reasoner_state(self, base_path: str, level: str, reasoner) -> int:
+        path = f"{base_path}.reasoner.{level}.json"
+        if not os.path.exists(path):
+            return 0
+        with open(path, "r", encoding="utf-8") as f:
+            reasoner.load_state_dict(json.load(f))
+        return 1
+
+    def plan_text_continuation(
+        self,
+        target_text: str,
+        seed_text: str | None = None,
+        horizon: Optional[int] = None,
+        strategy: str = "beam",
+        lookback: Optional[int] = None,
+    ) -> str:
+        """Plan a printable continuation directly through the reasoner."""
+        return self.decoders["target"].decode(
+            self,
+            target_text=target_text,
+            seed_text=seed_text,
+            horizon=horizon,
+            strategy=strategy,
+            lookback=lookback,
+        )
+
+    def generate_constrained_text(
+        self,
+        steps: int = 80,
+        seed_text: str | None = None,
+        target_text: str | None = None,
+        mode: str = "decode",
+        include_seed: bool = True,
+        feedback: bool = False,
+        allowed_words: Optional[set[str]] = None,
+        strict_dictionary: bool = True,
+        strict_grammar: bool = True,
+        update_policy: bool = True,
+    ) -> str:
+        """Generate text with additional lexical constraints."""
+        candidates = [
+            DecoderSpec("constrained", "decode", include_seed),
+            DecoderSpec("constrained", "hybrid", include_seed),
+        ]
+        if target_text:
+            candidates.append(DecoderSpec("constrained", "target", include_seed))
+        chosen = self._choose_decoder_spec(
+            candidates,
+            target_text=target_text,
+            requested_mode=mode,
+            learn_policy=update_policy,
+        )
+        text = self.decoders["constrained"].decode(
+            self,
+            steps=steps,
+            seed_text=seed_text,
+            target_text=target_text,
+            mode=chosen.mode,
+            include_seed=chosen.include_seed,
+            feedback=feedback,
+            allowed_words=allowed_words,
+            strict_dictionary=strict_dictionary,
+            strict_grammar=strict_grammar,
+        )
+        if update_policy:
+            self._learn_decoder_policy(chosen, text, target_text=target_text)
+        return text
+
+    def repair_text(
+        self,
+        corrupted_text: str,
+        target_text: str,
+        steps: Optional[int] = None,
+        use_constraints: Optional[bool] = None,
+        mode: str = "target",
+        update_policy: bool = True,
+    ) -> str:
+        """Repair a noisy fragment by target-conditioned continuation.
+
+        This is a thin convenience wrapper over the existing target-aware
+        generation paths. It keeps the core learning loop unchanged while
+        making the text-repair use case explicit.
+        """
+        if steps is None:
+            steps = max(8, min(80, len(target_text) // 2 if target_text else 20))
+        if use_constraints is None:
+            use_constraints = bool(self.dictionary or self.grammar)
+
+        if use_constraints:
+            return self.generate_constrained_text(
+                steps=steps,
+                seed_text=corrupted_text,
+                target_text=target_text,
+                mode=mode,
+                include_seed=False,
+                allowed_words=set(self.dictionary.words) if self.dictionary else None,
+                strict_dictionary=True,
+                strict_grammar=True,
+                update_policy=update_policy,
+            )
+
+        return self.generate_text(
+            steps=steps,
+            seed_text=corrupted_text,
+            target_text=target_text,
+            mode=mode,
+            include_seed=False,
+            update_policy=update_policy,
+        )
+
+    def observe_text(
+        self,
+        text: str,
+        feedback_mode: str = "target",
+        generated_text: str | None = None,
+        self_feedback_weight: float = 0.05,
+        feedback_signal: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Train on external text and optionally apply a small self-feedback pass.
+
+        feedback_mode:
+            target  - only the supplied text is learned
+            self    - only generated_text is fed back (if provided)
+            hybrid  - learn target text and optionally add a gated self-feedback pass
+        """
+        if feedback_mode not in {"target", "self", "hybrid"}:
+            raise ValueError(f"Unsupported feedback_mode: {feedback_mode!r}")
+
+        stats: Dict[str, Any] = {
+            "target_chars": 0,
+            "self_chars": 0,
+            "token_agreement": 0.0,
+            "plausibility": 0.0,
+        }
+
+        if text:
+            for raw_id in self._text_to_raw_ids(text):
+                self.perceive(raw_id, feedback=feedback_signal)
+                stats["target_chars"] += 1
+
+        if feedback_mode in {"self", "hybrid"} and generated_text:
+            stats["token_agreement"] = self._text_agreement(generated_text, text)
+            stats["plausibility"] = self._text_plausibility(generated_text)
+
+            should_feedback = feedback_mode == "self"
+            if feedback_mode == "hybrid":
+                should_feedback = (
+                    stats["token_agreement"] >= 0.25 and
+                    stats["plausibility"] >= 0.35
+                )
+
+            if should_feedback and self_feedback_weight > 0:
+                sampled = self._sample_feedback_text(generated_text, self_feedback_weight)
+                stats["self_chars"] = len(sampled)
+                self._feed_text_back(sampled, feedback=feedback_signal)
+
+        return stats
+
+    def observe_code_dsl(
+        self,
+        target_program: str,
+        generated_program: str | None = None,
+        adapter: Any = None,
+        feedback_mode: str = "target",
+        self_feedback_weight: float = 0.05,
+    ) -> Dict[str, Any]:
+        """Observe a code/DSL program and feed execution feedback back into the stack."""
+        from hpm_ai_v4.io.adapters import CodeDSLAdapter
+
+        adapter = adapter or CodeDSLAdapter()
+        target_value = adapter.execute(target_program)
+        generated_value = adapter.execute(generated_program) if generated_program else None
+        feedback_signal = {
+            "kind": "code_dsl",
+            "parseable": bool(adapter.from_text(target_program)),
+            "canonical_match": bool(generated_program) and adapter.to_text(generated_program) == adapter.to_text(target_program),
+            "target_value": target_value,
+        }
+        if generated_program is not None:
+            feedback_signal["generated_parseable"] = bool(adapter.from_text(generated_program))
+            feedback_signal["execution_match"] = generated_value == target_value and generated_value is not None
+            feedback_signal["semantic_mismatch"] = generated_value is not None and generated_value != target_value
+
+        stats = self.observe_text(
+            target_program,
+            feedback_mode=feedback_mode,
+            generated_text=generated_program,
+            self_feedback_weight=self_feedback_weight,
+            feedback_signal=feedback_signal,
+        )
+        if generated_program is not None:
+            stats.update(feedback_signal)
+            self._learn_decoder_policy(
+                DecoderSpec(self._last_decoder_choice, self._last_decoder_mode, True),
+                generated_program,
+                target_text=target_program,
+            )
+        return stats
+
+    def evaluate_generated_text(self, generated_text: str, target_text: str) -> Dict[str, float]:
+        """Compare generated text against a target for reporting and gating."""
+        generated_tokens = self._tokenize_words(generated_text.lower())
+        target_tokens = self._tokenize_words(target_text.lower())
+        if not target_tokens:
+            return {"token_agreement": 0.0, "plausibility": self._text_plausibility(generated_text)}
+
+        matches = sum(1 for a, b in zip(generated_tokens, target_tokens) if a == b)
+        agreement = matches / len(target_tokens)
+        return {
+            "token_agreement": agreement,
+            "plausibility": self._text_plausibility(generated_text),
+        }
 
     def predict_next_chars(self, context_raw: List[int], top_k: int = 5) -> List[Tuple[str, float]]:
-        """Top-k next character predictions from L2."""
-        relevant = self.l2.reasoner.get_relevant_patterns(context_raw, top_k=top_k)
+        """Top-k next char-class predictions from L1."""
+        context_cls = [self._adapter.encode(v) for v in context_raw]
+        relevant = self.l1.reasoner.get_relevant_patterns(context_cls, top_k=top_k)
         if not relevant:
             return []
-        dist = self.l2.reasoner.compose_predictions(relevant, context_raw)
+        dist = self.l1.reasoner.compose_predictions(relevant, context_cls)
         top = np.argsort(dist)[::-1][:top_k]
-        return [(chr(i + 32), float(dist[i])) for i in top]
+        return [(self._adapter.decode_class(int(i)), float(dist[i])) for i in top]
+
+    def _class_name_to_id(self, class_name: str) -> int:
+        for i in range(self._adapter.obs_dim):
+            if self._adapter.decode_class(i) == class_name:
+                return i
+        return 3
+
+    def _tokenize_words(self, text: str) -> List[str]:
+        return re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?|[0-9]+|[^\w\s]", text)
+
+    def _text_to_raw_ids(self, text: str) -> List[int]:
+        raw_ids: List[int] = []
+        for ch in text:
+            if ch == '\n':
+                raw_ids.append(94)
+            elif 32 <= ord(ch) <= 126:
+                raw_ids.append(ord(ch) - 32)
+        return raw_ids
+
+    def _text_agreement(self, generated_text: str, target_text: str) -> float:
+        generated_tokens = self._tokenize_words(generated_text.lower())
+        target_tokens = self._tokenize_words(target_text.lower())
+        if not target_tokens:
+            return 0.0
+        matches = sum(1 for a, b in zip(generated_tokens, target_tokens) if a == b)
+        return matches / len(target_tokens)
+
+    def _text_plausibility(self, text: str) -> float:
+        tokens = [tok.lower() for tok in self._tokenize_words(text) if tok.strip()]
+        if not tokens:
+            return 0.0
+
+        scores: List[float] = []
+        word_tokens = [tok for tok in tokens if tok.isalpha()]
+        if self.dictionary:
+            for tok in word_tokens:
+                scores.append(self.dictionary.score_word(tok))
+        if self.grammar and word_tokens:
+            prev = None
+            for tok in word_tokens:
+                if prev is not None:
+                    scores.append(1.0 if self.grammar.is_valid_transition(prev, tok) else 0.0)
+                prev = tok
+
+        if not scores:
+            return 0.0
+        return float(sum(scores) / len(scores))
+
+    def _sample_feedback_text(self, text: str, weight: float) -> str:
+        if weight >= 1.0:
+            return text
+        if weight <= 0.0:
+            return ""
+        stride = max(1, int(round(1.0 / weight)))
+        sampled = [ch for idx, ch in enumerate(text) if idx % stride == 0]
+        return "".join(sampled)
+
+    def _token_class_name(self, token: str) -> str:
+        if token.isdigit():
+            return 'digit'
+        if token.isalpha():
+            return 'letter'
+        if token == '\n':
+            return 'newline'
+        if token == ' ':
+            return 'space'
+        return 'punctuation'
+
+    def _detokenize_words(self, tokens: List[str]) -> str:
+        pieces: List[str] = []
+        for tok in tokens:
+            if not pieces:
+                pieces.append(tok)
+                continue
+            if tok in {'.', ',', ';', ':', '!', '?', ')', ']', '}'}:
+                pieces[-1] = pieces[-1].rstrip() + tok
+            elif pieces[-1] in {'(', '[', '{'}:
+                pieces.append(tok)
+            else:
+                pieces.append(' ' + tok)
+        return ''.join(pieces)
+
+    def _feed_text_back(self, text: str, feedback: Optional[Dict[str, Any]] = None) -> None:
+        """Optionally close the loop by letting generated text update the stack."""
+        for ch in text:
+            if ch == '\n':
+                raw_id = 94
+            elif 32 <= ord(ch) <= 126:
+                raw_id = ord(ch) - 32
+            else:
+                continue
+            self.perceive(raw_id, feedback=feedback)
+
+    def _fallback_chars_for_class(self, class_id: int) -> List[str]:
+        chars = []
+        for raw_id in range(95):
+            if self._adapter.encode(raw_id) == class_id:
+                chars.append(chr(raw_id + 32))
+        return chars
+
+    def _choose_char_for_class(
+        self,
+        class_id: int,
+        prev_char: str | None,
+        preferred_char: str | None = None,
+    ) -> str:
+        candidates = self._class_char_counts.get(class_id)
+        if not candidates:
+            candidates = Counter()
+        if not candidates:
+            for ch in self._fallback_chars_for_class(class_id):
+                candidates[ch] += 1
+
+        if preferred_char is not None:
+            preferred_class = self._adapter.encode_char(preferred_char)
+            if preferred_class == class_id:
+                candidates = Counter(candidates)
+                candidates[preferred_char] += max(1, sum(candidates.values()))
+
+        best_ch = None
+        best_score = -np.inf
+        total = sum(candidates.values()) + 1e-12
+        for ch, count in candidates.items():
+            score = np.log(count / total)
+            score += 0.3 * np.log((self._char_counts[ch] + 1.0) / (sum(self._char_counts.values()) + 1.0))
+            if prev_char is not None:
+                score += 0.8 * np.log((self._transition_counts[(prev_char, ch)] + 1.0) /
+                                       (self._char_counts[prev_char] + len(candidates) + 1.0))
+            if preferred_char is not None and ch == preferred_char:
+                score += 1.0
+            if score > best_score:
+                best_score = score
+                best_ch = ch
+        return best_ch if best_ch is not None else ' '
 
     def l1_metrics(self) -> Dict[str, Any]:
-        """Summary metrics for L1 population."""
         top3 = sorted(self.l1.patterns, key=lambda p: -p.weight)[:3]
-        mi = float(np.mean([p.compression() for p in top3])) if top3 else 0.0
+        total_w = sum(p.weight for p in top3) + 1e-12
+        mi = float(sum(p.weight * p.compression() for p in top3) / total_w) if top3 else 0.0
         return {
             'pop_size': len(self.l1.patterns),
             'mi': mi,
@@ -63,19 +796,42 @@ class LayeredAgent:
             'best_weight': max(p.weight for p in self.l1.patterns) if self.l1.patterns else 0.0,
         }
 
-    def l2_metrics(self, recent_raw: List[int]) -> Dict[str, Any]:
-        """Prediction accuracy of L2 over recent char buffer."""
+    def l2_metrics(self, recent_l1_states: List[int]) -> Dict[str, Any]:
         correct = 0
-        total = max(1, len(recent_raw) - 1)
-        for i in range(len(recent_raw) - 1):
-            ctx = recent_raw[max(0, i - 20):i]
-            actual = recent_raw[i + 1]
+        total = max(1, len(recent_l1_states) - 1)
+        for i in range(len(recent_l1_states) - 1):
+            ctx = recent_l1_states[max(0, i - 20):i]
+            actual = recent_l1_states[i + 1]
             relevant = self.l2.reasoner.get_relevant_patterns(ctx, top_k=3)
             if relevant:
                 dist = self.l2.reasoner.compose_predictions(relevant, ctx)
                 if int(np.argmax(dist)) == actual:
                     correct += 1
+        top3 = sorted(self.l2.patterns, key=lambda p: -p.weight)[:3]
+        total_w = sum(p.weight for p in top3) + 1e-12
+        mi = float(sum(p.weight * p.compression() for p in top3) / total_w) if top3 else 0.0
         return {
             'accuracy': correct / total,
             'pop_size': len(self.l2.patterns),
+            'mi': mi,
+        }
+
+    def l3_metrics(self, recent_l2_states: List[int]) -> Dict[str, Any]:
+        correct = 0
+        total = max(1, len(recent_l2_states) - 1)
+        for i in range(len(recent_l2_states) - 1):
+            ctx = recent_l2_states[max(0, i - 20):i]
+            actual = recent_l2_states[i + 1]
+            relevant = self.l3.reasoner.get_relevant_patterns(ctx, top_k=3)
+            if relevant:
+                dist = self.l3.reasoner.compose_predictions(relevant, ctx)
+                if int(np.argmax(dist)) == actual:
+                    correct += 1
+        top3 = sorted(self.l3.patterns, key=lambda p: -p.weight)[:3]
+        total_w = sum(p.weight for p in top3) + 1e-12
+        mi = float(sum(p.weight * p.compression() for p in top3) / total_w) if top3 else 0.0
+        return {
+            'accuracy': correct / total,
+            'pop_size': len(self.l3.patterns),
+            'mi': mi,
         }

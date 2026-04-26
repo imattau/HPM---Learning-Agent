@@ -102,7 +102,7 @@ class HPMAgent:
             new_p.weight = 0.05
             self.patterns.append(new_p)
 
-    def perceive_and_learn(self, obs: int):
+    def perceive_and_learn(self, obs: int, feedback: Optional[Dict[str, Any]] = None):
         """Update patterns based on a new observation."""
         context_before = list(self.obs_buffer[-20:])
         self.obs_buffer.append(obs)
@@ -110,7 +110,7 @@ class HPMAgent:
             self.obs_buffer = self.obs_buffer[-100:]
 
         # Reasoning feedback: update per-pattern loss based on prediction error
-        self.reasoner.observe_outcome(obs, context_before)
+        self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
 
         # 1. Update Social Context (Pattern Field) - Move up for workers
         field_freq = self.field.update(self.patterns)

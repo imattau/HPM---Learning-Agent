@@ -54,9 +54,15 @@ def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, d
     new_weights = weights * (1 - decay) + rep - inhib
     new_weights = np.maximum(new_weights, 0.0)
 
+    # Enforce minimum weight for HierarchicalPatterns (latent_dim > 1) so
+    # FlatPatterns cannot crowd them out entirely before structure can emerge.
+    for i, p in enumerate(patterns):
+        if p.latent_dim > 1:
+            new_weights[i] = max(new_weights[i], 0.02)
+
     total_w = np.sum(new_weights) + 1e-12
     new_weights = new_weights / total_w
-    
+
     for i, p in enumerate(patterns):
         p.weight = float(new_weights[i])
 

@@ -1,0 +1,80 @@
+[
+  {
+    "created_at": "",
+    "density_max": 0.058548808097839355,
+    "density_mean": 0.02849438041448593,
+    "density_min": 0.003881514072418213,
+    "domain": "code",
+    "name": "code_dsl_seed",
+    "notes": "auto-registered from code/DSL simulation",
+    "path": "library_bootstrap/code_dsl_library.l1.pkl",
+    "pattern_count": 4,
+    "source": "stack-machine-dsl",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "curriculum",
+    "name": "hpm_curriculum_library",
+    "notes": "auto-registered from curriculum simulation",
+    "path": "library_bootstrap/hpm_curriculum_library.pkl",
+    "pattern_count": 1,
+    "source": "curriculum-policy",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "environment",
+    "name": "hpm_environment_library",
+    "notes": "validation_action_accuracy=0.05 transfer_gain=0.05; held-out gain positive but small",
+    "path": "library_bootstrap/hpm_environment_library.pkl",
+    "pattern_count": 1,
+    "source": "family:unknown",
+    "status": "validated"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.056758761405944824,
+    "density_mean": 0.03821566700935364,
+    "density_min": 0.0011294782161712646,
+    "domain": "structured_text",
+    "name": "structured_text_seed",
+    "notes": "auto-registered from structured text simulation",
+    "path": "library_bootstrap/structured_text_library.l1.pkl",
+    "pattern_count": 3,
+    "source": "canonical-json",
+    "status": "seed"
+  },
+  {
+    "created_at": "2026-04-25T23:55:19.902983+00:00",
+    "density_max": 0.2519034743309021,
+    "density_mean": 0.2519034743309021,
+    "density_min": 0.2519034743309021,
+    "domain": "text",
+    "name": "text_seed",
+    "notes": "",
+    "path": "library_bootstrap/text_seed.pkl",
+    "pattern_count": 1,
+    "source": "/home/mattthomson/workspace/HPM---Learning-Agent/hpm_ai_v4/simulations/data/wiki_sample.txt",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "tool",
+    "name": "hpm_tool_library",
+    "notes": "auto-registered from tool simulation",
+    "path": "library_bootstrap/hpm_tool_library.pkl",
+    "pattern_count": 1,
+    "source": "tool-action",
+    "status": "seed"
+  }
+]

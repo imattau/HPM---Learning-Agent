@@ -55,6 +55,7 @@ def test_metrics_snapshot_returns_dict():
     assert 'dev_stage' in snap
     assert 'best_loss' in snap
     assert 'l2_accuracy' in snap
+    assert 'l3_accuracy' in snap
 
 def test_metrics_snapshot_accuracy_range():
     agent = _make_agent()
@@ -62,6 +63,7 @@ def test_metrics_snapshot_accuracy_range():
     snap = _metrics_snapshot(agent, recent, step=100)
     assert 0.0 <= snap['accuracy'] <= 1.0
     assert 0.0 <= snap['l2_accuracy'] <= 1.0
+    assert 0.0 <= snap['l3_accuracy'] <= 1.0
 
 def test_metrics_snapshot_no_dict():
     agent = _make_agent()
@@ -132,9 +134,10 @@ def test_run_simulation_saves_checkpoint(tmp_path):
         library_path=None,
         checkpoint_dir=str(tmp_path),
     )
-    # Should save final_library.l1.pkl + .l2.pkl
+    # Should save final_library.l1.pkl + .l2.pkl + .l3.pkl
     assert (tmp_path / "final_library.l1.pkl").exists()
     assert (tmp_path / "final_library.l2.pkl").exists()
+    assert (tmp_path / "final_library.l3.pkl").exists()
 
 def test_run_simulation_has_l2_accuracy(tmp_path):
     corpus = tmp_path / "corpus.txt"
@@ -149,3 +152,4 @@ def test_run_simulation_has_l2_accuracy(tmp_path):
         checkpoint_dir=str(tmp_path),
     )
     assert 'l2_accuracy' in history[-1]
+    assert 'l3_accuracy' in history[-1]

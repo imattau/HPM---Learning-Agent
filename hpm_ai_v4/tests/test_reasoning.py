@@ -129,6 +129,25 @@ class TestPlan:
         assert isinstance(r0, list)
         assert isinstance(r1, list)
 
+    def test_beam_strategy_returns_list(self, reasoner):
+        result = reasoner.plan(goal_state=1, horizon=4, strategy="beam", beam_width=4, candidate_top_k=3)
+        assert isinstance(result, list)
+        assert len(result) <= 4
+
+    def test_plan_sequence_prefers_target(self, reasoner, monkeypatch):
+        monkeypatch.setattr(
+            reasoner,
+            "get_relevant_patterns",
+            lambda context_obs, top_k=5, lookback=None: reasoner.agent.patterns[:1],
+        )
+        monkeypatch.setattr(
+            reasoner,
+            "compose_predictions",
+            lambda patterns, obs_seq: np.array([0.9, 0.1], dtype=np.float32),
+        )
+        result = reasoner.plan_sequence([1], horizon=1, strategy="beam", beam_width=2, candidate_top_k=2)
+        assert result == [1]
+
 
 # ---------------------------------------------------------------------------
 # 4. counterfactual
@@ -209,9 +228,152 @@ class TestGetRelevantPatterns:
         result = reasoner.get_relevant_patterns(agent.obs_buffer, top_k=1)
         assert len(result) == 1
 
+    def test_lookback_parameter_respected(self, reasoner, agent):
+        result = reasoner.get_relevant_patterns(agent.obs_buffer, top_k=2, lookback=10)
+        assert len(result) <= 2
+
 
 # ---------------------------------------------------------------------------
-# 7. HPMAgent.act()
+# 7. memory
+# ---------------------------------------------------------------------------
+
+class TestMemory:
+    def test_retrieve_memory_prefers_matching_context(self, reasoner):
+        reasoner.memory = []
+        reasoner.record_episode([0, 1, 0, 1], action=1, reward=1.0, tag="train")
+        reasoner.record_episode([1, 1, 1, 1], action=0, reward=1.0, tag="train")
+
+        hits = reasoner.retrieve_memory([0, 1, 0, 1], top_k=1)
+        assert hits
+        assert hits[0].action == 1
+
+    def test_multi_polygraph_prefers_control_resonance(self, reasoner):
+        reasoner.memory = []
+        reasoner.agent.development.level_idx = 1
+        reasoner.agent._last_decoder_choice = "word"
+        reasoner.record_episode(
+            [0, 1, 0, 1],
+            action=1,
+            reward=0.35,
+            tag="train",
+            metadata={"stage": "local", "policy": "word", "plausibility": 0.2},
+        )
+        reasoner.record_episode(
+            [0, 1, 0, 0],
+            action=0,
+            reward=1.0,
+            tag="train",
+            metadata={"stage": "generative", "policy": "char", "plausibility": 0.9},
+        )
+
+        hits = reasoner.retrieve_memory([0, 1, 0, 1], top_k=1)
+        assert hits
+        assert hits[0].action == 1
+        assert hits[0].stage == "local"
+        assert hits[0].policy == "word"
+
+    def test_projection_summary_reports_multiple_graphs(self, reasoner):
+        reasoner.memory = []
+        reasoner.record_episode(
+            [0, 1, 0, 1],
+            action=1,
+            reward=0.9,
+            tag="train",
+            metadata={"stage": "local", "policy": "word", "plausibility": 0.7},
+        )
+        reasoner.record_episode(
+            [0, 1, 0, 0],
+            action=0,
+            reward=0.8,
+            tag="train",
+            metadata={"stage": "generative", "policy": "char", "plausibility": 0.6},
+        )
+
+        summary = reasoner.polygraph.projection_summary(
+            [0, 1, 0, 1],
+            query_action=1,
+            query_stage="local",
+            query_policy="word",
+        )
+
+        assert summary["candidate_count"] >= 1
+        assert summary["graph_counts"]["context"] >= 1
+        assert summary["graph_counts"]["action"] >= 1
+        assert summary["graph_counts"]["stage"] >= 1
+        assert summary["graph_counts"]["policy"] >= 1
+        assert summary["graph_counts"]["outcome"] >= 1
+
+    def test_consolidation_emits_summary_records(self, reasoner):
+        reasoner.memory = []
+        reasoner.agent.development.level_idx = 1
+        for _ in range(3):
+            reasoner.record_episode(
+                [0, 1, 0, 1],
+                action=1,
+                reward=0.8,
+                tag="train",
+                metadata={"stage": "local", "policy": "word", "plausibility": 0.7},
+            )
+
+        hits = reasoner.retrieve_memory([0, 1, 0, 1], top_k=3)
+        assert any(rec.is_summary for rec in hits)
+        summary = next(rec for rec in hits if rec.is_summary)
+        assert summary.tag == "summary"
+        assert summary.community != "unknown"
+
+    def test_memory_guides_planning(self, reasoner, agent, monkeypatch):
+        reasoner.memory = []
+        context = [0, 1, 0, 1]
+        reasoner.record_episode(context, action=1, reward=1.0, tag="train")
+        agent.obs_buffer = list(context)
+
+        monkeypatch.setattr(
+            reasoner,
+            "get_relevant_patterns",
+            lambda context_obs, top_k=5, lookback=None: agent.patterns[:1],
+        )
+        monkeypatch.setattr(
+            reasoner,
+            "compose_predictions",
+            lambda patterns, obs_seq: np.array([0.5, 0.5], dtype=np.float32),
+        )
+
+        result = reasoner.plan(goal_state=None, horizon=1, strategy="beam", beam_width=2, candidate_top_k=2)
+        assert result == [1]
+
+    def test_state_dict_roundtrip_restores_memory(self, reasoner, agent):
+        reasoner.memory = []
+        reasoner.record_episode([2, 3, 4, 5], action=1, reward=0.75, tag="observe", metadata={"source": "unit"})
+
+        clone = Reasoner(agent)
+        clone.load_state_dict(reasoner.state_dict())
+
+        assert clone.context_window == reasoner.context_window
+        assert clone.beam_width == reasoner.beam_width
+        assert clone.memory_size == 1
+        assert clone.memory[0].context == [2, 3, 4, 5]
+        assert clone.memory[0].action == 1
+        assert clone.memory[0].reward == pytest.approx(0.75)
+        assert clone.memory[0].metadata == {"source": "unit"}
+        assert clone.memory[0].community != "unknown"
+
+    def test_control_context_includes_graph_summary(self, reasoner):
+        reasoner.memory = []
+        reasoner.record_episode(
+            [1, 0, 1, 0],
+            action=1,
+            reward=0.9,
+            tag="train",
+            metadata={"stage": "local", "policy": "word", "plausibility": 0.8},
+        )
+
+        control = reasoner.control_context([1, 0, 1, 0])
+        assert "graph_summary" in control
+        assert control["graph_summary"]["candidate_count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 8. HPMAgent.act()
 # ---------------------------------------------------------------------------
 
 class TestHPMAgentAct:

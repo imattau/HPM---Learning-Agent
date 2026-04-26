@@ -1,6 +1,9 @@
 # hpm_ai_v4/tests/test_layered_agent.py
 import numpy as np
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.agents.meta_decoder_policy import DecoderSpec
+from hpm_ai_v4.tools.dictionary import NLTKWordList
+from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
 
 def test_layered_agent_perceive_runs():
     agent = LayeredAgent(num_workers=1)
@@ -10,13 +13,16 @@ def test_layered_agent_perceive_runs():
 def test_layered_agent_obs_dims():
     agent = LayeredAgent(num_workers=1)
     assert agent.l1.obs_dim == 5
-    assert agent.l2.obs_dim == 95
+    assert agent.l2.obs_dim == 2
+    assert agent.l3.obs_dim == 2
 
 def test_layered_agent_equal_weights():
     agent = LayeredAgent(num_workers=1)
     # Check that initial weights are as expected (not 1.0)
     assert max(p.weight for p in agent.l1.patterns) < 0.2
     assert max(p.weight for p in agent.l2.patterns) < 0.2
+    assert set(agent.decoders.keys()) == {"char", "word", "target", "constrained", "explain"}
+    assert agent.decoder_policy is not None
 
 def test_layered_agent_generate_returns_string():
     agent = LayeredAgent(num_workers=1)
@@ -24,14 +30,69 @@ def test_layered_agent_generate_returns_string():
         agent.perceive(i % 95)
     result = agent.generate(steps=20)
     assert isinstance(result, str)
-    assert len(result) <= 20
+    assert len(result) > 0
+    assert 'L3:' in result
 
 def test_layered_agent_generate_printable():
     agent = LayeredAgent(num_workers=1)
     for i in range(50):
         agent.perceive(i % 95)
     result = agent.generate(steps=20)
-    # 0-94 range corresponds to 32-126 ASCII
+    # Generation is a readable label sequence.
+    assert all(32 <= ord(ch) <= 126 for ch in result)
+
+
+def test_layered_agent_generate_text_returns_readable_text():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(200):
+        agent.perceive(i % 95)
+    result = agent.generate_text(steps=40)
+    assert isinstance(result, str)
+    assert len(result) > 0
+    assert 'L3:' not in result
+    assert any(ch.isalpha() for ch in result)
+
+
+def test_generate_text_uses_meta_policy(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    for i in range(50):
+        agent.perceive(i % 95)
+
+    seen = {}
+
+    def select(features, candidates, learn=True):
+        seen["features"] = features
+        seen["candidates"] = candidates
+        return DecoderSpec("word", "decode", True)
+
+    monkeypatch.setattr(agent.decoder_policy, "select", select)
+    result = agent.generate_text(steps=10, seed_text="the ")
+    assert isinstance(result, str)
+    assert "features" in seen
+    assert "candidates" in seen
+    assert agent._last_decoder_choice == "word"
+
+
+def test_generate_text_can_skip_policy_learning():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(80):
+        agent.perceive(i % 95)
+
+    before_age = agent.decoder_policy._age
+    before_counts = dict(agent.decoder_policy._selection_counts)
+    result = agent.generate_text(steps=8, seed_text="the ", target_text="quick brown fox", update_policy=False)
+    assert isinstance(result, str)
+    assert agent.decoder_policy._age == before_age
+    assert dict(agent.decoder_policy._selection_counts) == before_counts
+
+
+def test_layered_agent_generate_chars_returns_printable_text():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(200):
+        agent.perceive(i % 95)
+    result = agent.generate_chars(steps=20, seed_text="abc", mode="target", target_text="def", include_seed=False)
+    assert isinstance(result, str)
+    assert len(result) > 0
     assert all(32 <= ord(ch) <= 126 for ch in result)
 
 def test_predict_next_chars_returns_list():
@@ -43,3 +104,151 @@ def test_predict_next_chars_returns_list():
     preds = agent.predict_next_chars(context, top_k=5)
     assert len(preds) <= 5
     assert all(isinstance(ch, str) and isinstance(prob, (float, np.float32, np.float64)) for ch, prob in preds)
+
+
+def test_generate_text_with_validators_and_feedback():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    for i in range(200):
+        agent.perceive(i % 95)
+    text = agent.generate_text(steps=20, seed_text="the ")
+    assert isinstance(text, str)
+    assert len(text) > 0
+    assert 'L3:' not in text
+    assert agent.l1.reasoner.dictionary is dictionary
+    assert agent.l1.reasoner.grammar is grammar
+
+
+def test_observe_text_hybrid_feedback_and_evaluation():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    generated = "the quick brown fox"
+    target = "the quick brown fox jumps"
+    eval_stats = agent.evaluate_generated_text(generated, target)
+    assert 0.0 <= eval_stats["token_agreement"] <= 1.0
+    assert 0.0 <= eval_stats["plausibility"] <= 1.0
+
+    stats = agent.observe_text(
+        target,
+        feedback_mode="hybrid",
+        generated_text=generated,
+        self_feedback_weight=0.02,
+    )
+    assert stats["target_chars"] > 0
+    assert stats["self_chars"] >= 0
+    assert 0.0 <= stats["token_agreement"] <= 1.0
+
+
+def test_target_conditioned_generation_improves_agreement():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    corpus = "the quick brown fox jumps over the lazy dog. " * 8
+    for ch in corpus:
+        if ch == '\n':
+            raw = 94
+        else:
+            raw = ord(ch) - 32
+        agent.perceive(raw)
+
+    seed = "the quick brown fox "
+    target = "jumps over the lazy dog."
+    decode = agent.generate_text(steps=8, seed_text=seed, mode="decode", include_seed=False)
+    target_gen = agent.generate_text(
+        steps=8,
+        seed_text=seed,
+        target_text=target,
+        mode="target",
+        include_seed=False,
+    )
+
+    decode_score = agent.evaluate_generated_text(decode, target)["token_agreement"]
+    target_score = agent.evaluate_generated_text(target_gen, target)["token_agreement"]
+    assert target_score >= decode_score
+
+
+def test_l2_soft_state_returns_valid_symbol():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(120):
+        agent.perceive(i % 95)
+    soft_state = agent.l2_soft_state()
+    assert soft_state in (0, 1)
+    dist = agent.l2_state_distribution()
+    assert len(dist) == agent.l2.obs_dim
+
+
+def test_plan_text_continuation_returns_printable_text():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    corpus = "the quick brown fox jumps over the lazy dog. " * 6
+    for ch in corpus:
+        raw = 94 if ch == '\n' else ord(ch) - 32
+        agent.perceive(raw)
+    planned = agent.plan_text_continuation(
+        target_text="jumps over the lazy dog.",
+        seed_text="the quick brown fox ",
+        horizon=8,
+        strategy="beam",
+    )
+    assert isinstance(planned, str)
+    assert len(planned) > 0
+    assert all(32 <= ord(ch) <= 126 for ch in planned)
+    assert agent.evaluate_generated_text(planned, "jumps over the lazy dog.")["token_agreement"] > 0.0
+
+
+def test_generate_constrained_text_returns_readable_text():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    for i in range(200):
+        agent.perceive(i % 95)
+    text = agent.generate_constrained_text(
+        steps=20,
+        seed_text="the ",
+        allowed_words={"the", "quick", "brown", "fox"},
+    )
+    assert isinstance(text, str)
+    assert len(text) > 0
+    assert all(32 <= ord(ch) <= 126 for ch in text)
+
+
+def test_generate_constrained_text_with_target_mode():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    for i in range(200):
+        agent.perceive(i % 95)
+    text = agent.generate_constrained_text(
+        steps=12,
+        seed_text="the ",
+        target_text="quick brown fox",
+        mode="target",
+        include_seed=False,
+        allowed_words={"the", "quick", "brown", "fox"},
+    )
+    assert isinstance(text, str)
+    assert len(text) > 0
+
+
+def test_layered_agent_bundle_persists_reasoner_memory(tmp_path):
+    agent = LayeredAgent(num_workers=1)
+
+    agent.l1.reasoner.record_episode([0, 1, 0, 1], action=1, reward=0.9, tag="train")
+    agent.l2.reasoner.record_episode([1, 0, 1], action=0, reward=0.7, tag="train")
+
+    base = tmp_path / "bundle"
+    agent.save_bundle(str(base))
+
+    assert (tmp_path / "bundle.reasoner.l1.json").exists()
+    assert (tmp_path / "bundle.reasoner.l2.json").exists()
+
+    loaded = LayeredAgent(num_workers=1)
+    loaded.load_bundle(str(base))
+
+    assert loaded.l1.reasoner.memory_size == 1
+    assert loaded.l1.reasoner.memory[0].action == 1
+    assert loaded.l2.reasoner.memory_size == 1
+    assert loaded.l2.reasoner.memory[0].action == 0
