@@ -64,36 +64,46 @@ def pattern_worker(state_dict: dict, obs_buffer: list,
     )
 
     p = dict_to_pattern(state_dict)
+    result = update_pattern_resident(p, obs_buffer, field_freq, params)
+    state = pattern_to_dict(p)
+    state.update(result)
+    return state
 
-    # --- per-step update ---
+
+def update_pattern_resident(pattern, obs_buffer: list,
+                            field_freq: dict, params: dict) -> dict:
+    """Update a resident pattern object in place and return its scores."""
+    from hpm_ai_v4.evaluators.metrics import (
+        epistemic_score, affective_score, social_score, total_score,
+    )
+
+    ll = None
     if obs_buffer:
-        # Simplified HMM uses windowed update_parameters_online
-        if p.complexity >= 2 or p.latent_dim > 1:
-            p.update_parameters_online(obs_buffer, window_size=params.get('adapt_window', 100))
-        else:
-            # FlatPattern uses observe
-            p.observe(obs_buffer[-1], learning_rate=params['learning_rate'])
+        if params.get('do_param_update', True):
+            if pattern.complexity >= 2 or pattern.latent_dim > 1:
+                ll = pattern.update_parameters_online(obs_buffer, window_size=params.get('adapt_window', 100))
+            else:
+                pattern.observe(obs_buffer[-1], learning_rate=params['learning_rate'])
+        if ll is None:
+            ll = pattern.log_likelihood(obs_buffer[-30:])
+        pattern.update_running_loss(obs_buffer, ll=ll)
 
-        p.update_running_loss(obs_buffer)
-
-    # --- evaluator scores ---
-    ep  = epistemic_score(p)
-    aff = affective_score(p, obs_buffer)
-    soc = social_score(p, field_freq)
+    ep = epistemic_score(pattern)
+    aff = affective_score(pattern, obs_buffer)
+    soc = social_score(pattern, field_freq)
     tot = total_score(
-        p, obs_buffer, field_freq,
+        pattern, obs_buffer, field_freq,
         beta_aff=params['beta_aff'],
         gamma_soc=params['gamma_soc'],
         external_soc=params.get('external_soc', 0.5),
     )
 
-    # --- return updated state + scores ---
-    result = pattern_to_dict(p)
-    result['ep_score']    = float(ep)
-    result['aff_score']   = float(aff)
-    result['soc_score']   = float(soc)
-    result['total_score'] = float(tot)
-    return result
+    return {
+        'ep_score': float(ep),
+        'aff_score': float(aff),
+        'soc_score': float(soc),
+        'total_score': float(tot),
+    }
 
 
 # ---------------------------------------------------------------------------

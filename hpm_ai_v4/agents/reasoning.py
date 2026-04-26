@@ -506,8 +506,8 @@ class Reasoner:
         self.dictionary = dictionary
         self.grammar = grammar
         self.context_window = 40
-        self.beam_width = 6
-        self.candidate_top_k = 5
+        self.beam_width = 3
+        self.candidate_top_k = 3
         self.memory_window = 24
         self.memory_capacity = 256
         self.memory_top_k = 6

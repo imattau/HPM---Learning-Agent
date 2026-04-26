@@ -3,7 +3,7 @@ import copy
 from typing import List, Dict, Any, Optional
 
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
-from hpm_ai_v4.operators.parallel import ParallelPatternPool
+from hpm_ai_v4.operators.parallel import ParallelPatternPool, update_pattern_resident
 from hpm_ai_v4.evaluators.metrics import total_score
 from hpm_ai_v4.operators.dynamics import compute_conflict_matrix, meta_pattern_update, recombine
 from hpm_ai_v4.field import PatternField, InstitutionalField
@@ -123,11 +123,28 @@ class HPMAgent:
             'beta_aff': self.beta_aff,
             'gamma_soc': self.gamma_soc,
             'external_soc_map': self.external_social_scores,
+            'do_param_update': (self.step_counter % 5 == 0),
         }
 
-        results = self._pool.map_patterns(
-            self.patterns, self.obs_buffer, field_freq, worker_params
-        )
+        if self._pool.num_workers == 1:
+            results = []
+            for p in self.patterns:
+                result = update_pattern_resident(p, self.obs_buffer, field_freq, worker_params)
+                result['pattern_id'] = p.id
+                result['complexity'] = p.complexity
+                result['latent_dim'] = p.latent_dim
+                result['obs_dim'] = p.obs_dim
+                result['B'] = p.B.copy()
+                result['running_loss'] = float(p.running_loss)
+                result['weight'] = float(p.weight)
+                if p.complexity >= 2 or p.latent_dim > 1:
+                    result['A'] = p.A.copy()
+                    result['pi'] = p.pi.copy()
+                results.append(result)
+        else:
+            results = self._pool.map_patterns(
+                self.patterns, self.obs_buffer, field_freq, worker_params
+            )
 
         # 3. Write updated state back into pattern objects and collect totals
         result_by_id = {r['pattern_id']: r for r in results}

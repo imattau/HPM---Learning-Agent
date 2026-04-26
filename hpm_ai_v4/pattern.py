@@ -25,26 +25,52 @@ class HierarchicalPattern:
         self.weight = 1.0
         self.creation_step = 0
 
+        self._compression_cache: float | None = None
+        self._forward_cache_key: tuple[int, ...] | None = None
+        self._forward_cache_alpha: np.ndarray | None = None
+        self._forward_cache_scales: np.ndarray | None = None
         self._refresh_log_cache()
 
     def _refresh_log_cache(self):
         self.logA = np.log(self.A + 1e-12).astype(np.float32)
         self.logB = np.log(self.B + 1e-12).astype(np.float32)
+        self._compression_cache = None
+        self._forward_cache_key = None
+        self._forward_cache_alpha = None
+        self._forward_cache_scales = None
+
+    def _obs_key(self, obs_seq):
+        return tuple(int(o) % self.obs_dim for o in obs_seq)
 
     def _forward(self, obs_seq):
         """Scaled forward pass. Returns alpha (T, K) and scales (T,)."""
-        T, K = len(obs_seq), self.latent_dim
+        if len(obs_seq) == 0:
+            return np.zeros((0, self.latent_dim), dtype=np.float32), np.zeros(0, dtype=np.float32)
+
+        key = self._obs_key(obs_seq)
+        if key == self._forward_cache_key and self._forward_cache_alpha is not None and self._forward_cache_scales is not None:
+            return self._forward_cache_alpha, self._forward_cache_scales
+
+        obs = np.asarray(key, dtype=np.int32)
+        T, K = len(obs), self.latent_dim
         alpha = np.zeros((T, K), dtype=np.float32)
-        alpha[0] = self.pi * self.B[:, int(obs_seq[0]) % self.obs_dim]
+        A = self.A
+        B = self.B
+        alpha[0] = self.pi * B[:, obs[0]]
         s = alpha[0].sum()
         alpha[0] /= s + 1e-12
-        scales = [s]
+        scales = np.empty(T, dtype=np.float32)
+        scales[0] = s
         for t in range(1, T):
-            alpha[t] = (alpha[t - 1] @ self.A) * self.B[:, int(obs_seq[t]) % self.obs_dim]
+            alpha[t] = (alpha[t - 1] @ A) * B[:, obs[t]]
             s = alpha[t].sum()
             alpha[t] /= s + 1e-12
-            scales.append(s)
-        return alpha, np.array(scales, dtype=np.float32)
+            scales[t] = s
+
+        self._forward_cache_key = key
+        self._forward_cache_alpha = alpha
+        self._forward_cache_scales = scales
+        return alpha, scales
 
     def _forward_backward(self, obs_seq):
         """Standard Baum-Welch. Returns gamma (T, K) and xi (T-1, K, K)."""
@@ -78,7 +104,7 @@ class HierarchicalPattern:
     def update_parameters_online(self, obs_seq, window_size=100):
         """Windowed Baum-Welch EM update with exponential smoothing."""
         if len(obs_seq) < 5:
-            return
+            return 0.0
         window = list(obs_seq[-window_size:])
         gamma, xi = self._forward_backward(window)
         K = self.latent_dim
@@ -106,11 +132,13 @@ class HierarchicalPattern:
         self.pi /= self.pi.sum() + 1e-12
 
         self._refresh_log_cache()
+        return self.log_likelihood(window)
 
-    def update_running_loss(self, obs_seq, lambda_l=0.1):
+    def update_running_loss(self, obs_seq, lambda_l=0.1, ll: float | None = None):
         if len(obs_seq) == 0:
             return
-        ll = self.log_likelihood(obs_seq[-30:])
+        if ll is None:
+            ll = self.log_likelihood(obs_seq[-30:])
         loss = -ll / max(1, len(obs_seq[-30:]))
         self.running_loss = (1 - lambda_l) * self.running_loss + lambda_l * loss
 
@@ -142,6 +170,9 @@ class HierarchicalPattern:
         Measures how much the transition structure compresses state uncertainty.
         No obs_seq argument — computed analytically from A.
         """
+        if self._compression_cache is not None:
+            return self._compression_cache
+
         eigvals, eigvecs = np.linalg.eig(self.A.T)
         idx = np.where(np.isclose(np.real(eigvals), 1.0))[0]
         if len(idx) == 0:
@@ -155,7 +186,8 @@ class HierarchicalPattern:
             stat[i] * (-np.sum(self.A[i] * np.log(self.A[i] + 1e-12)))
             for i in range(self.latent_dim)
         ))
-        return max(0.0, H_state - H_cond)
+        self._compression_cache = max(0.0, H_state - H_cond)
+        return self._compression_cache
 
     def predictive_entropy(self, obs_seq):
         """Entropy of the predictive distribution over the next observation."""
@@ -181,8 +213,9 @@ class FlatPattern(HierarchicalPattern):
         log_probs = [np.log(self.B[0, int(o) % self.obs_dim] + 1e-12) for o in obs_seq]
         return float(np.sum(log_probs))
 
-    def update_running_loss(self, obs_seq, lambda_l=0.1):
-        ll = self.log_likelihood(obs_seq)
+    def update_running_loss(self, obs_seq, lambda_l=0.1, ll: float | None = None):
+        if ll is None:
+            ll = self.log_likelihood(obs_seq)
         avg_loss = -ll / max(1, len(obs_seq))
         self.running_loss = (1 - lambda_l) * self.running_loss + lambda_l * avg_loss
 

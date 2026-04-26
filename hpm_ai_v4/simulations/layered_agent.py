@@ -512,7 +512,7 @@ class LayeredAgent:
         making the text-repair use case explicit.
         """
         if steps is None:
-            steps = max(8, min(80, len(target_text) // 2 if target_text else 20))
+            steps = max(8, min(20, len(target_text) // 2 if target_text else 20))
         if use_constraints is None:
             use_constraints = bool(self.dictionary or self.grammar)
 
