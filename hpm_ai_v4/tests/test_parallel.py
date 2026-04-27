@@ -109,6 +109,30 @@ def test_pool_result_ids_match_input_order():
         assert p.id == r['pattern_id']
     pool.close()
 
+
+def test_pool_map_truncates_obs_buffer(monkeypatch):
+    import hpm_ai_v4.operators.parallel as parallel_module
+
+    np.random.seed(4)
+    patterns = make_pattern_population(n=3)
+    obs_buffer = list(np.random.randint(0, 2, size=120))
+    field_freq = {}
+    params = {'learning_rate': 0.02, 'lambda_l': 0.1, 'adapt_window': 15,
+              'beta_aff': 0.4, 'gamma_soc': 0.3}
+    seen = {}
+    original_worker = parallel_module.pattern_worker
+
+    def fake_pattern_worker(state_dict, obs_buffer_arg, field_freq_arg, params_arg):
+        seen["len"] = len(obs_buffer_arg)
+        return original_worker(state_dict, obs_buffer_arg, field_freq_arg, params_arg)
+
+    monkeypatch.setattr(parallel_module, "pattern_worker", fake_pattern_worker)
+    pool = ParallelPatternPool(num_workers=1)
+    results = pool.map_patterns(patterns, obs_buffer, field_freq, params)
+    assert len(results) == 3
+    assert seen["len"] == 30
+    pool.close()
+
 from hpm_ai_v4.agents.agent import HPMAgent
 
 def test_agent_parallel_no_error():

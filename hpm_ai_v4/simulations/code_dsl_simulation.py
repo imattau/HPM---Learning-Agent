@@ -8,6 +8,7 @@ from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
+from hpm_ai_v4.tools.text_signals import TextSignalExtractor
 
 
 def _corrupt_program(program: str) -> str:
@@ -52,6 +53,7 @@ def run_code_dsl_simulation(
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
     layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    text_signals = TextSignalExtractor()
 
     programs = [
         "push 2\npush 3\nadd\npush 4\nmul\nreturn",
@@ -92,11 +94,21 @@ def run_code_dsl_simulation(
         repair_stats["target_value"] = target_value
         repair_stats["repaired_value"] = repaired_value
         repair_stats["execution_match"] = repaired_value == target_value and repaired_value is not None
+        signal_pack = text_signals.analyze(
+            repaired_text,
+            context_texts=[corrupted_text, target_text],
+            target_text=target_text,
+            dictionary=layered.dictionary,
+            grammar=layered.grammar,
+        )
+        repair_stats.update(signal_pack.to_dict())
+        repair_stats["text_signal_score"] = signal_pack.combined_score()
         layered.observe_code_dsl(
             target_text,
             generated_program=repaired_text,
             feedback_mode="hybrid",
             self_feedback_weight=0.02,
+            feedback_signal=signal_pack.to_dict(),
         )
         history.append(repair_stats)
 

@@ -10,11 +10,47 @@ def test_layered_agent_perceive_runs():
     for i in range(20):
         agent.perceive(i % 95)
 
+def test_layered_agent_perceive_injects_meta_feedback(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    captured = {}
+
+    def fake_control_context(context_obs, top_k=None, feature_pack=None):
+        return {
+            "mode_prior": {"continue": 0.7, "repair": 0.3},
+            "family_prior": {"word": 0.8},
+            "stage_prior": {"surface": 1.0},
+            "community_strength": 0.6,
+            "dominant_mode": "continue",
+            "dominant_family": "word",
+            "dominant_stage": "surface",
+            "summary_count": 2,
+        }
+
+    def capture_l1(obs, feedback=None):
+        captured["l1"] = dict(feedback or {})
+
+    def capture_l2(obs, feedback=None):
+        captured["l2"] = dict(feedback or {})
+
+    def capture_l3(obs, feedback=None):
+        captured["l3"] = dict(feedback or {})
+
+    monkeypatch.setattr(agent.l1.reasoner, "control_context", fake_control_context)
+    monkeypatch.setattr(agent.l1, "perceive_and_learn", capture_l1)
+    monkeypatch.setattr(agent.l2, "perceive_and_learn", capture_l2)
+    monkeypatch.setattr(agent.l3, "perceive_and_learn", capture_l3)
+
+    agent.perceive(ord("a") - 32)
+
+    assert captured["l1"]["control_dominant_mode"] == "continue"
+    assert captured["l2"]["control_strength"] == 0.6
+    assert "meta_structural_score" in captured["l3"]
+
 def test_layered_agent_obs_dims():
     agent = LayeredAgent(num_workers=1)
     assert agent.l1.obs_dim == 5
-    assert agent.l2.obs_dim == 2
-    assert agent.l3.obs_dim == 2
+    assert agent.l2.obs_dim == 10
+    assert agent.l3.obs_dim == 10
 
 def test_layered_agent_equal_weights():
     agent = LayeredAgent(num_workers=1)
@@ -174,9 +210,19 @@ def test_l2_soft_state_returns_valid_symbol():
     for i in range(120):
         agent.perceive(i % 95)
     soft_state = agent.l2_soft_state()
-    assert soft_state in (0, 1)
+    assert 0 <= soft_state < agent.l2.obs_dim
     dist = agent.l2_state_distribution()
     assert len(dist) == agent.l2.obs_dim
+
+
+def test_l1_state_distribution_preserves_latent_uncertainty():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(80):
+        agent.perceive(i % 95)
+    dist = agent.l1_state_distribution()
+    assert len(dist) == 2
+    assert abs(dist.sum() - 1.0) < 1e-6
+    assert 0 <= agent.l1_soft_state() < agent.l2.obs_dim
 
 
 def test_plan_text_continuation_returns_printable_text():
@@ -197,6 +243,29 @@ def test_plan_text_continuation_returns_printable_text():
     assert len(planned) > 0
     assert all(32 <= ord(ch) <= 126 for ch in planned)
     assert agent.evaluate_generated_text(planned, "jumps over the lazy dog.")["token_agreement"] > 0.0
+
+
+def test_plan_text_continuation_passes_feature_pack(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    captured = {}
+
+    def fake_plan_sequence(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return [1, 1, 1]
+
+    monkeypatch.setattr(agent.l1.reasoner, "plan_sequence", fake_plan_sequence)
+    monkeypatch.setattr(agent, "_choose_char_for_class", lambda class_id, prev_char, preferred_char=None: "a")
+
+    planned = agent.plan_text_continuation(
+        target_text="abc",
+        seed_text="seed",
+        horizon=3,
+        strategy="beam",
+        feature_pack={"mode_prior": {"continue": 1.0}},
+    )
+
+    assert isinstance(planned, str)
+    assert captured["kwargs"]["feature_pack"] == {"mode_prior": {"continue": 1.0}}
 
 
 def test_generate_constrained_text_returns_readable_text():
@@ -231,6 +300,28 @@ def test_generate_constrained_text_with_target_mode():
     )
     assert isinstance(text, str)
     assert len(text) > 0
+
+
+def test_repair_text_without_constraints_preserves_word_spacing():
+    dictionary = NLTKWordList(download=False)
+    grammar = HeuristicGrammarLibrary()
+    agent = LayeredAgent(num_workers=1, dictionary=dictionary, grammar=grammar)
+    corpus = "the quick brown fox jumps over the lazy dog. " * 6
+    for ch in corpus:
+        raw = 94 if ch == '\n' else ord(ch) - 32
+        agent.perceive(raw)
+
+    repaired = agent.repair_text(
+        corrupted_text="the quickbrown fox jumps over the lazy dog.",
+        target_text="the quick brown fox jumps over the lazy dog.",
+        use_constraints=False,
+        update_policy=False,
+    )
+
+    assert isinstance(repaired, str)
+    assert len(repaired) > 0
+    assert " " in repaired
+    assert "quickbrown" not in repaired.lower()
 
 
 def test_layered_agent_bundle_persists_reasoner_memory(tmp_path):

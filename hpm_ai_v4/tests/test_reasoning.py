@@ -148,6 +148,23 @@ class TestPlan:
         result = reasoner.plan_sequence([1], horizon=1, strategy="beam", beam_width=2, candidate_top_k=2)
         assert result == [1]
 
+    def test_plan_hypotheses_ranks_generic_modes(self, reasoner, monkeypatch):
+        monkeypatch.setattr(reasoner, "plan", lambda *args, **kwargs: [1])
+
+        frames = reasoner.plan_hypotheses(
+            goal_state=1,
+            horizon=1,
+            strategy="beam",
+            beam_width=2,
+            candidate_top_k=2,
+            feature_pack={"mode_prior": {"repair": 1.0}},
+        )
+
+        assert frames
+        assert frames[0].mode == "repair"
+        assert frames[0].sequence == [1]
+        assert frames[0].score >= frames[-1].score
+
 
 # ---------------------------------------------------------------------------
 # 4. counterfactual
@@ -247,6 +264,20 @@ class TestMemory:
         assert hits
         assert hits[0].action == 1
 
+    def test_observe_outcome_preserves_raw_out_of_range_observation(self, reasoner):
+        reasoner.memory = []
+        reasoner.observe_outcome(
+            actual_obs=17,
+            context_obs=[0, 1, 0],
+            metadata={"mode": "continue"},
+        )
+
+        assert reasoner.memory
+        latest = reasoner.memory[-1]
+        assert latest.metadata["actual_obs_raw"] == 17
+        assert latest.metadata["actual_obs_out_of_range"] is True
+        assert latest.metadata["actual_obs_index"] == reasoner.agent.obs_dim - 1
+
     def test_multi_polygraph_prefers_control_resonance(self, reasoner):
         reasoner.memory = []
         reasoner.agent.development.level_idx = 1
@@ -320,6 +351,9 @@ class TestMemory:
         summary = next(rec for rec in hits if rec.is_summary)
         assert summary.tag == "summary"
         assert summary.community != "unknown"
+        assert reasoner.polygraph.summary_community_keys
+        projection = reasoner.polygraph.projection_summary([0, 1, 0, 1], query_action=1, query_stage="local", query_policy="word")
+        assert projection["summary_count"] == len(reasoner.polygraph.summary_community_keys)
 
     def test_memory_guides_planning(self, reasoner, agent, monkeypatch):
         reasoner.memory = []
@@ -397,6 +431,30 @@ class TestHPMAgentAct:
     def test_reasoner_is_attached(self, agent):
         assert hasattr(agent, 'reasoner')
         assert isinstance(agent.reasoner, Reasoner)
+
+    def test_feedback_adjusts_worker_params(self, agent):
+        base = {
+            "learning_rate": 0.02,
+            "lambda_l": 0.1,
+            "adapt_window": 20,
+            "beta_aff": agent.beta_aff,
+            "gamma_soc": agent.gamma_soc,
+            "external_soc_map": {},
+            "do_param_update": False,
+        }
+        feedback = {
+            "control_strength": 0.9,
+            "meta_structural_score": 0.85,
+            "mode": "repair",
+            "mode_prior": {"repair": 1.0},
+        }
+        adjusted = agent._feedback_worker_params(base, feedback)
+
+        assert adjusted["learning_rate"] > base["learning_rate"]
+        assert adjusted["lambda_l"] > 0.0
+        assert adjusted["beta_aff"] >= base["beta_aff"]
+        assert adjusted["gamma_soc"] <= base["gamma_soc"]
+        assert adjusted["do_param_update"] is True
 
 
 # ---------------------------------------------------------------------------

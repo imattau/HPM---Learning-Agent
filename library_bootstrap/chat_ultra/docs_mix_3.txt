@@ -1,0 +1,1351 @@
+# Source 1: README_SP58.md
+# SP58: Heuristic Operator Induction and Disambiguation
+
+This experiment demonstrates the HPM framework's transition to **Scalable and Noise-Robust Function Induction**.
+
+## 1. Objective
+Synthesize a deep, non-linear operator chain ($x \to (2x + 1) \pmod{10}$) using a heuristic beam search guided by manifold error, while disambiguating between competing hypotheses under perceptual noise.
+
+## 2. Key Components
+- `sp57_operators.py` (Extended): Added `ModOperator` and support for non-linear `ComposedOperator` chains.
+- `experiment_heuristic_induction.py`: Implements `BeamSearchSynthesis` and the disambiguation test logic.
+
+## 3. Results: Scalable Induction
+The agent was trained on three primitives:
+1.  **Additive**: `Add_1`
+2.  **Multiplicative**: `Mul_2`
+3.  **Modular**: `Mod_10`
+
+It was then presented with a noisy non-linear sequence: **1, 3, 7, 5, 1, 3...**
+
+### Synthesis Performance
+
+| Metric | Result |
+| :--- | :--- |
+| **Winning Chain** | `Add_1 ∘ Mod_10 ∘ Mul_2` |
+| **Search Depth** | 3 |
+| **Mean Prediction Error** | **0.0364** |
+| **Disambiguation Status** | **SUCCESS** (Outperformed shallow and greedy baselines) |
+
+### Analysis
+The agent successfully maintained a beam of candidate hypotheses and used the evolving noisy trajectory to prune incorrect models (like `Mul_3` or `Add_2`). The successful recovery of a depth-3 non-linear operator proves that HPM can achieve robust symbolic induction by unifying functional composition with manifold-guided search.
+
+## 4. Running the Experiment
+```bash
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_heuristic_induction.py
+```
+
+# Source 2: README_SP66.md
+# SP66: Enhanced Cross-Domain Structural Analogy
+
+This experiment integrates pattern density tracking, affective evaluation, and robust AST-level substitution into the cross-domain analogy framework, adhering to HPM's fractal uniformity principle.
+
+## 1. Objective
+Demonstrate an HPM agent that not only transfers structural scaffolds across domains but also manages its own internal state (density, affect) using the same HFN primitives used for domain data.
+
+## 2. Methodology: HPM-Aligned Enhancements
+
+### A. Pattern Density Tracking (HPM Appendix A.8)
+- **Metrics**: Tracks Connectivity (C), Reinforcement (E), and Field Amplification (F).
+- **Density Equation**: $D(h) = \alpha C(h) + \beta E(h) + \gamma F(h)$.
+- **Fractal Storage**: All density and usage state is stored as HFN nodes in dedicated tiered forests.
+- **Persistence**: Dense patterns persist even under moderate epistemic loss, while low-density patterns are pruned.
+
+### B. Affective Evaluator (HPM Section 9.3 & 9.4)
+- **Arousal/Valence**: Global affective state is managed as an HFN node `affective:global`.
+- **Anxiety/Frustration**: High arousal modulated by surprise leads to the persistence of familiar patterns even when they fit poorly (HPM §9.3).
+- **Curiosity**: Exploration probability peaks at intermediate learnability levels, driving discovery of new structure (HPM §9.4).
+
+### C. AST-Level Substitution
+- **Robustness**: Replaces fragile string-based code manipulation with Python's `ast` module.
+- **Scaffold Transformation**: Automatically identifies the "payload" operation in MAP and FILTER macros and substitutes it with novel domain primitives.
+
+## 3. Results: Validation against HPM Core Principles
+The experiment achieved a 100% success rate across all 10 phases:
+
+| Phase | Test | Status | Result |
+| :--- | :--- | :--- | :--- |
+| **5** | Learnability Probe | **SUCCESS** | Identified 'analogous' transfer opportunity |
+| **6** | MAP Transfer | **SUCCESS** | Zero-shot transfer to string domain (Depth 2) |
+| **7** | FILTER Transfer | **SUCCESS** | Zero-shot transfer to string domain (Depth 2) |
+| **8** | Affective Persistence| **SUCCESS** | Spurious pattern retained under anxiety (Loss 0.67) |
+| **9** | AST Substitution | **SUCCESS** | Valid, executable code produced via AST |
+| **10**| Robust Classification| **SUCCESS** | Correctly distinguished random/trivial/analogous |
+
+### Analysis
+By treating meta-cognitive state (density, affect) as HFN nodes, the system achieves **fractal uniformity**. This allows the same learning dynamics (surprise-driven updates, structural absorption) to apply to both domain knowledge and the agent's own cognitive strategies.
+
+## 4. Running the Experiment
+```bash
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_cross_domain_analogy_enhanced.py
+```
+
+# Source 3: README_autonomous_curriculum.md
+# Experiment 27: Autonomous Curriculum Generation (Self-Play & Curiosity)
+
+## Objective
+To validate the HFN architecture's capacity for **Unsupervised Algorithmic Discovery**. The agent must transition from reactive problem-solving (via human curricula) to proactive world-model building by autonomously discovering novel state transformations.
+
+## Background: "Bootstrapping Knowledge"
+Real AGI cannot rely on human-provided task files. This experiment introduces a **Self-Play Loop**: the agent randomly composes its structural priors, executes them in a robust Python sandbox, and uses an **Inverse State Oracle** to map the resulting input/output transformations into formal 9D semantic deltas.
+
+## Setup
+- **Domain**: Unbounded Semantic Program Space.
+- **State Representation**: 9D semantic vector (Value, Returned, Len, TargetVal, Iterator, Init, Condition, CallStack, TemplateSlot).
+- **Generative Sampling**: Agent randomly folds 5-8 HFN nodes into complex program trees.
+- **Hardened Sandbox**: Multi-threaded `PythonExecutor` with strict timeouts to handle infinite loops and crashes during exploration.
+- **Persistence**: Knowledge is saved to the `data/knowledge_base/` using the mandated **TieredForest** and **PersistenceManager** utilities.
+
+## Results
+- **Unsupervised Learning**: The agent successfully entered an "unsupervised play" phase and discovered novel algorithmic transformations without any human-provided goal vectors.
+- **Task Formalization**: Discovered functions were automatically cataloged into `auto_curriculum.json`, complete with example inputs, outputs, and semantic state deltas.
+- **Structural Persistence**: All discovered program graphs were registered in the **TieredForest** cold storage, ensuring they are available as "priors" for future, more complex tasks.
+- **Yield & Diversity**: Within 200 cycles, the agent discovered multiple unique program behaviors, proving that the HFN latent space can be autonomously mapped through curiosity-driven exploration.
+
+## Metrics Summary
+| Metric | Result |
+|---|---|
+| Unsupervised Cycles | 200 |
+| Novel Discoveries | 3 |
+| Sandbox Exceptions Caught | ~190 (Timeouts, TypeErrors) |
+| Persistence Mode | Tiered (Hot/Cold) |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_autonomous_curriculum.py
+```
+
+# Source 4: README_belief_revision.md
+# Experiment 13: Competing Hypotheses (Belief Revision)
+
+**Script:** `experiment_belief_revision.py`
+
+## Objective
+To evaluate the HFN system's capacity for **Belief Revision**. This experiment tests whether the system can maintain multiple competing hypotheses in an ambiguous environment and autonomously switch its commitment to the correct one when presented with disambiguating evidence.
+
+## Setup
+- **Phase 1 (Ambiguity):** Observations support two orthogonal rules equally:
+  - **Rule A:** "Add 2 to Input"
+  - **Rule B:** "Set Output to 5"
+  - (If Input is 3, both rules result in Output 5).
+- **Phase 2 (Disambiguation):** Observations shift to Input 8. Rule A now predicts Output 10 (Wrong), while Rule B correctly predicts Output 5 (Right).
+- **Mechanism:** We track the internal weights of Rule A and Rule B in the `Meta-Forest` as the system processes the curriculum.
+
+## Results & Analysis
+The experiment successfully demonstrated the capacity for autonomous belief correction.
+
+1. **Uncertainty Maintenance:** During the ambiguous phase, both hypotheses were successfully maintained in the forest. The system did not prematurely collapse to a single winner.
+2. **Dynamic Falsification:** Upon entering Phase 2, the weight of the previously successful Rule A was immediately and severely penalized by the `Observer`'s loss dynamics.
+3. **Belief Switch:** Rule B rapidly surpassed Rule A in dominance. Rule A's weight dropped from its peak of **0.1000** to near-zero (**0.0036**), while Rule B's weight grew to **0.1764**.
+4. **Resilience to Bias:** The system avoided confirmation bias, proving that its world model is plastic and guided primarily by predictive success rather than first-impression persistence.
+
+### Key Takeaway
+HFN dynamics are **Correctional**, not just accumulative. The system can "change its mind" based on evidence. By holding multiple overlapping explanation trees and using weight dynamics to prune or promote them, HFN achieves an adaptive balance between stability and plasticity.
+
+# Source 5: README_competing_explanations.md
+# Competing Explanations Experiment (Experiment 4)
+
+This experiment creates a controlled conflict between two explanations for the same stream:
+
+- `Option A`: reuse a simple incorrect node (`cheap_wrong`)
+- `Option B`: choose a complex but correct structure (`complex_correct`)
+
+The policy is local to the experiment harness. Core HFN modules are unchanged.
+
+## What it tests
+
+The experiment measures a three-way tradeoff:
+
+- fit quality
+- complexity penalty
+- accumulated weight
+
+The expected behavior:
+
+- early: cheap reuse should dominate
+- under sustained evidence: the complex correct structure should win
+
+## Failure modes
+
+- **Stagnation**: the run never shifts to the complex structure.
+- **Premature complexity**: the complex structure dominates immediately.
+
+## Output summary
+
+The script reports:
+
+- transition step
+- weight traces for both explanations
+- early cheap rate and late complex rate
+- stagnation and premature complexity flags
+- final verdict
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_competing_explanations.py
+```
+
+# Source 6: README_demand_driven_learning.md
+# Demand-Driven Learning Experiment (SP24)
+
+This experiment evaluates the interaction between the generative (top-down) and perceptual (bottom-up) halves of the HPM architecture. It demonstrates the "Fail-Learn-Retry" loop, where the Decoder acts as a "Curiosity Engine" that triggers targeted learning by the Observer to fulfill missing generative constraints.
+
+## Core Concept: Active Curiosity
+
+In HPM, learning is not just passive observation. It is driven by the necessity of achieving a goal.
+
+1.  **The Generative Gap**: The `Agnostic Decoder` attempts to collapse a high-variance goal into concrete actions. If it lacks the necessary leaves in its target manifold (e.g., trying to point to a "Green Block" without a prior for green), it stalls and emits a `ResolutionRequest`.
+2.  **Targeted Observation**: The Governor receives this request and asks the `Observer` to scan its "Historical Buffer" (raw environmental data) for any evidence matching the missing geometry ($\mu$) and topology.
+3.  **Grounded Creation**: If the Observer finds matching evidence, it creates a new node and binds it to the requested topological constraints.
+4.  **Resumption**: The Decoder retries the path, finds the newly created node, and successfully executes the goal.
+
+## Anti-Hallucination Guard
+
+A critical feature of this architecture is that the Decoder **cannot hallucinate**. 
+
+If the Decoder requests a node to fulfill a goal (e.g., "Point to the Yellow Block"), but the Observer finds **no historical evidence** of a Yellow Block in the environment, the Observer refuses to create the node. The goal definitively fails. The system only learns what is both *needed* and *real*.
+
+## The Experiment
+
+The script runs a 1D block-stacking simulation:
+*   **Priors**: The system knows about Red ($X=2.0$) and Blue ($X=5.0$).
+*   **Buffer**: The system has passively seen $X=8.0$ (Green), but ignored it because it had no goal associated with it.
+
+### Test 1: The Green Block (Valid Gap)
+*   **Goal**: `Goal_Point(Target=Green_Block)`.
+*   **Result**: The Decoder stalls, requests a node near $X=8.0$ with a `HAS_COLOR->GREEN` edge. The Observer finds $8.0$ in the buffer, creates the node, and the Decoder successfully retries and outputs the coordinate.
+
+### Test 2: The Yellow Block (Hallucination Guard)
+*   **Goal**: `Goal_Point(Target=Yellow_Block)` at $X=10.0$.
+*   **Result**: The Decoder stalls and requests a node near $X=10.0$. The Observer scans the buffer, finds nothing, and blocks the hallucination. The goal correctly fails.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_demand_driven_learning.py
+```
+
+# Source 7: README_emergent_routing.md
+# Emergent Routing Experiment (SP26)
+
+This experiment demonstrates **Decentralized Sovereignty** in the HPM AI architecture. It refactors the multi-process cluster to remove the central Governor routing table, proving that specialized processes can autonomously filter and claim relevant observations using their internal world models.
+
+## Architecture: The Competence Gate
+
+Unlike previous experiments where the Governor decided which core processed which data, SP26 implements a **Broadcast & Claim** model:
+
+1.  **Broadcaster (Governor)**: The central process acts as a simple transmitter, broadcasting all raw observations ($x$) to every active worker process simultaneously.
+2.  **Sovereign Worker**: Each specialist (e.g., `Spec_Signal`) implements a high-speed **Competence Gate** in its process loop:
+    *   It uses `Evaluator.accuracy(x, self.forest)` to calculate how well the incoming data fits its *global domain identity*.
+    *   If the accuracy is below a `competence_threshold`, the worker remains dormant and returns a negative response.
+    *   If the data fits its domain, it triggers the expensive `Observer.observe(x)` expansion.
+
+## The Experiment: Autonomous Signal Filtering
+
+The system starts with a single **Explorer** (Generalist). As it matures, it discovers a dense cluster and promotes it to a new process (**Spec_Signal**). 
+
+In the execution phase, the Governor broadcasts a mix of structured signal and uniform noise. 
+*   **Result**: The `Spec_Signal` specialist autonomously claimed ~60% of the broadcast (matching the signal frequency) and ignored the noise, while the `Explorer` continued to monitor the entire space.
+
+## Key Insights
+
+- **Elimination of the Bottleneck**: Removing the central routing table allows the system to scale to a large number of domains (e.g., the "Sovereign Octet") without increasing the Governor's complexity.
+- **Self-Organizing Sovereignty**: Specialists define their own boundaries. A "Math Specialist" only wakes up when it "hears" math, based entirely on its own internal HFN topography.
+- **Natural Stereo Vision**: If multiple specialists claim the same observation, the Governor receives multiple explanations. This overlap is the functional basis for analogy and multi-perspective reasoning.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_emergent_routing.py
+```
+
+# Source 8: README_goal_reasoning.md
+# Experiment 9: Goal-Conditioned Reasoning (Agency)
+
+**Script:** `experiment_goal_reasoning.py`
+
+## Objective
+To validate the system's transition from a passive pattern learner to an active, intent-driven agent. This experiment tests whether the structural knowledge encoded in the HFN forest is **actionable**—specifically, whether an agent can use an operational goal (e.g., "transform state A into state B") to deliberately retrieve and apply the correct transformation.
+
+## Setup
+- **Environment:** A forest populated with 50 synthetic transformation rules.
+- **Ambiguity:** Every 5 rules share the same input context but result in different deltas, creating a retrieval challenge that requires intent to solve.
+- **Task:** Given an input vector `A` and a target state `B`, find the rule that bridges the gap.
+- **Mechanism:** Uses the `GoalConditionedRetriever` to prioritize the "Delta Slice" (B - A) during search.
+
+## Results & Analysis
+The experiment proved that introducing explicit goals effectively prunes the hypothesis space and enables efficient problem-solving.
+
+1. **Intent-Driven Retrieval:** By conditioning retrieval on the target delta, the agent was able to identify the correct transformation rule at **Rank 1**.
+2. **Actionable Structure:** The system successfully executed a `goal + input → plan → execute → evaluate` loop. It synthesized a "Plan Node" using the retrieved rule and verified that it satisfied the target state `B`.
+3. **Efficiency:** The agent solved the transformation in exactly **1 step**. In contrast, a passive agent searching only by input context would have faced a 1-in-5 chance of picking the correct rule, potentially requiring multiple trial-and-error iterations.
+
+### Key Takeaway
+HFN structures are not just memories; they are **operators**. With the addition of goal-conditioning, the system moves beyond passive observation into **Agency**, using its world model to deliberately reach desired environmental states.
+
+# Source 9: README_lexical_consolidation.md
+# `experiment_lexical_consolidation.py`
+
+## Summary
+Runs the same WordNet-backed forest through a curriculum of progressively harder lexical streams, then replays the original seed stream after the forest has been stretched. This is the first lexical experiment in the suite that explicitly targets retention and consolidation rather than only coverage or transfer.
+
+## What It Does
+- Builds or reuses the WordNet prior forest used by the other lexical experiments.
+- Runs four persistent stages in sequence:
+  - `seed` with in-domain Peter Rabbit / repo text
+  - `stretch` with medium-difficulty OOD vocabulary
+  - `stretch_hard` with harder OOD vocabulary
+  - `revisit_seed` by replaying the original seed batch after stretching
+- Keeps the same forest and observer across all stages.
+- Reports stage-by-stage changes in coverage, surviving learned nodes, abstraction layer, purity, memory, and explicit reuse of seed-learned nodes.
+
+## What It Aims To Achieve
+- Show whether HFN/HPM retains what it learned after being pushed into harder lexical territory.
+- Test whether revisiting earlier data triggers deeper or more reusable explanations.
+- Move the narrative from incremental learning to consolidation and recall.
+- Provide the closest lexical analogue so far to how a memory substrate should improve over time.
+
+## Observed Results
+- Smoke runs already showed the right consolidation shape, even though they were still small.
+- Full-run results are now available and give the stronger signal:
+  - `seed`: `9` new learned nodes, `9` surviving, mean explaining layer `2.15`
+  - `stretch`: `9` new learned nodes, `9` surviving, mean explaining layer `2.76`
+  - `stretch_hard`: `12` new learned nodes, `13` surviving, mean explaining layer `3.15`
+  - `revisit_seed`: `9` new learned nodes, `9` surviving, mean explaining layer `2.21`
+- Coverage stayed at `100%` throughout.
+- The hardest stage pushed the mean explaining layer highest, which is the expected stretching signal.
+- The revisit stage returned close to the seed-layer regime, but it did not strongly reuse seed-learned nodes: only `1` seed learned node was still retained after revisit, and `0` were directly reused in the replay explanations.
+- The revisit stage still produced `+15` more learned explanations than the seed stage, so the replay is not a no-op, but the consolidation signal is weaker than the curriculum signal.
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_consolidation.py
+```
+
+## Main Signals
+- Whether the seed learned nodes survive after the harder stages.
+- Whether the revisit stage explains the same material at a higher abstraction layer.
+- Whether the revisit stage reuses seed-learned nodes or creates fresh ones.
+- Coverage delta and mean-layer delta between the first seed stage and the final revisit stage.
+
+## Insights
+- This is the first lexical experiment that directly probes consolidation, not just adaptation.
+- The full run shows a clear stretching pattern: the harder stages push the mean explaining layer up, and the model retains more learned structure as difficulty increases.
+- The replay stage does not just replicate the seed stage; it returns close to the seed-layer regime while still producing a meaningful number of learned explanations.
+- Consolidation is present, but weak: the full run retained only one seed-learned node after the revisit stage and directly reused none of the seed-learned nodes in the replay explanations.
+- That makes this a useful substrate signal, not a solved continual-learning story.
+
+## Issues / Limits
+- The revisit stage still does not strongly show seed-node reuse, even in the full run.
+- Because coverage stays perfect, the main signal is hidden inside explanation structure rather than outright failure.
+- The consolidation effect is smaller than the curriculum effect, so the model is still stretching better than it is consolidating.
+- A harder revisit regime or explicit forgetting pressure may be needed to force stronger reuse and retention.
+
+## Notes
+- Uses the same diagonal-sigma HFN setup as the other lexical experiments.
+- Reuses the curriculum helpers for the in-domain and out-of-domain batches.
+- Best interpreted as the bridge from curriculum learning to continual learning and consolidation.
+
+# Source 10: README_lexical_math_cross_stream_replay.md
+# `experiment_lexical_math_cross_stream_replay.py`
+
+## Summary
+Runs the WordNet-backed lexical forest through a lexical curriculum, then switches to a math-text observation stream, and finally replays only the most useful seed observations before returning to the original lexical stream. This is the experiment that most directly probes cross-stream memory retention and selective replay across a different symbolic domain.
+
+## What It Does
+- Builds or reuses the WordNet prior forest used by the other lexical experiments.
+- Runs seven persistent stages in sequence:
+  - `seed` with in-domain Peter Rabbit / repo text
+  - `stretch` with medium-difficulty OOD vocabulary
+  - `stretch_hard` with harder OOD vocabulary
+  - `pressure_shock` with an aggressively reduced hot cache and frequent sweeps
+  - `math_shift` with arithmetic observations rendered as math-language text
+  - `selective_replay` with only the seed observations attached to the highest-utility seed learned nodes
+  - `revisit_seed` by replaying the original seed batch after the cross-stream interference
+- Keeps the same forest and observer across the full sequence.
+- Reports coverage, surviving learned nodes, abstraction layers, and how many selected seed nodes survive the math shift and are reused in selective replay.
+
+## What It Aims To Achieve
+- Test whether a lexical memory can survive a stream switch without collapsing.
+- See whether a small targeted replay set can recover useful prior structure after interference from a different symbolic stream.
+- Distinguish blunt full replay from selective replay of high-utility nodes.
+- Move closer to a lifelong-memory story where old knowledge can be retained, reused, and reinforced across tasks.
+
+## Observed Results
+- Smoke runs were small but the full run gave the real signal.
+- Full-run results:
+  - `seed`: `7` new learned nodes, `7` surviving, mean explaining layer `2.26`
+  - `stretch`: `10` new learned nodes, `10` surviving, mean explaining layer `2.71`
+  - `stretch_hard`: `12` new learned nodes, `13` surviving, mean explaining layer `2.97`
+  - `pressure_shock`: `13` new learned nodes, `13` surviving, mean explaining layer `3.19`
+  - `math_shift`: `6` new learned nodes, `7` surviving, mean explaining layer `2.51`
+  - `selective_replay`: `10` new learned nodes, `12` surviving, mean explaining layer `2.33`
+  - `revisit_seed`: `8` new learned nodes, `9` surviving, mean explaining layer `2.40`
+- Coverage stayed at `100%` throughout.
+- The math shift created measurable cross-stream interference, with `136` learned explanations in that stage.
+- The selected replay used `15` replay observations, left `0` of the selected seed nodes alive after the math shift, and still directly reused `1` of the selected seed nodes during selective replay.
+- The final revisit still returned close to the seed layer and added `+21` learned explanations versus the seed stage.
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_math_cross_stream_replay.py
+```
+
+## Main Signals
+- Whether seed-learned nodes survive the pressure and math-shift stages.
+- Whether math-language observations cause interference or fresh structure.
+- Whether selective replay recovers the chosen seed nodes better than a blunt full replay.
+- Whether the final lexical revisit benefits from the cross-stream replay sequence.
+
+## Insights
+- This is the strongest multi-stream memory test in the lexical suite so far.
+- The math stage does not erase the lexical substrate, but it does shift the explanation structure enough to justify replay.
+- Selective replay is meaningful: it reuses at least some of the chosen seed nodes after math interference.
+- The final revisit shows the forest can still come back to the original lexical stream after a pressure stage and a different symbolic stream.
+- This is much closer to a reusable memory substrate than single-domain stretching alone.
+
+## Issues / Limits
+- The selective replay set is still small, so the experiment is more of a proof of concept than a full continual-learning benchmark.
+- The math stream is textualized to keep the same HFN representation space, so this is a cross-stream stress test rather than a separate numeric encoder.
+- Coverage remains perfect, so the strongest signal is in learned-node structure and reuse rather than accuracy failure.
+- A future version should pair this with a native math encoder or a fully separate world model if we want a stricter multi-modal test.
+
+## Notes
+- Uses the same diagonal-sigma HFN setup as the other lexical experiments.
+- Reuses the curriculum and pressure helpers for the lexical stages.
+- Best interpreted as the bridge from retention/forgetting tests to selective, cross-stream replay under continual learning.
+
+# Source 11: README_lexical_transfer.md
+# `experiment_lexical_transfer.py`
+
+## Summary
+Compares an in-domain Peter Rabbit / repository-text stream against out-of-domain vocabulary sampled from NLTK `words`, both grounded in the same WordNet ontology. This is the experiment that tests whether the ontology still covers a lexical shift when direct anchors disappear.
+
+## What It Does
+- Reuses the WordNet-backed forest from the semantic experiment.
+- Builds an in-domain batch from Peter Rabbit and repository markdown.
+- Builds an OOD batch from `nltk.corpus.words` with lexical filtering.
+- Measures known-token rate, fallback rate, coverage, learned-node pressure, abstraction usage, and RSS.
+
+## What It Aims To Achieve
+- Test lexical transfer rather than simple in-domain coverage.
+- See whether the ontology can explain unfamiliar surface vocabulary without collapsing.
+- Check whether harder vocabulary forces more learned structure or higher-level explanations.
+
+## Observed Results
+- Smoke runs are too easy unless the OOD filter is made stricter.
+- With the harder OOD filter, the full `N_SAMPLES=1200`, `N_PASSES=2` run still keeps `100%` coverage.
+- In that full run, the in-domain stream produced `375` learned explanations with `5` surviving learned nodes, while the OOD stream produced `820` learned explanations with `1` surviving learned node.
+- Mean explaining layer rose from `2.33` in-domain to `3.06` OOD, which is the main signal that unfamiliar vocabulary pushes the model to higher abstraction.
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_transfer.py
+```
+
+## Main Signals
+- In-domain text has some lemma overlap with the ontology.
+- OOD text can be made much harder than the smoke run by increasing token length, reducing overlap, and favoring rare forms.
+- The most important outputs are coverage, learned-node survival, and mean explaining layer.
+
+## Insights
+- Even hard OOD streams can remain fully explainable when the ontology is rich enough.
+- OOD tends to push explanations upward into more abstract layers.
+- The experiment is a good stress test for prior coverage, but not yet a guaranteed open-ended learner.
+- The fact that OOD can create more learned explanations than in-domain text suggests the model is building bridges where the direct lexical anchors are missing.
+
+## Issues / Limits
+- In smoke runs the model still explains everything using priors.
+- Learned nodes are sparse unless the stream is large and difficult enough.
+- Runtime is substantial at full scale because the experiment builds and drives a large WordNet forest.
+- Full coverage means the experiment still leans heavily on the prior ontology instead of forcing broad novel concept formation.
+
+## Notes
+- Uses diagonal sigma nodes.
+- This experiment is useful as a transfer test, not yet as a proof of durable concept acquisition.
+- The hard OOD mode is the more informative one; the easy mode mostly confirms the forest is already strong.
+
+# Source 12: README_long_horizon_reasoning.md
+# Experiment 18: Long-Horizon Goal Reasoning (Depth Test)
+
+## Objective
+To evaluate the stability and scalability of the HFN agent's multi-step planning and retrieval mechanisms when tasked with increasingly distant goals.
+
+## Background
+Robust agency requires planning over long horizons. This experiment isolates the reasoning depth variable, introducing deliberate "dead ends" and misleading "shortcut" distractors to test the agent's ability to maintain trajectory focus and avoid combinatorial explosion as required plan length scales up to 20 steps.
+
+## Setup
+- **Domain**: Graph-based 10D continuous state space.
+- **Task**: Linear dependency chain of $N$ steps ($A \rightarrow B \rightarrow C \dots \rightarrow Goal$).
+- **Distractors**: Geometric shortcuts that look promising but lead to dead ends.
+- **Agent**: `LongHorizonAgent` with DFS backtracking and `WeightAwareRetriever`.
+- **Depths Tested**: [3, 5, 10, 20].
+
+## Results
+The agent demonstrated exceptional stability and scalability:
+- **100% Success Rate**: Achieved 100% success across all depths, including the 20-step horizon.
+- **Linear Scaling**: The number of explored nodes scaled linearly with depth (e.g., ~150 nodes explored for a 20-step plan), proving stable pruning.
+- **Zero Drift**: The `drift_score` remained at 0.00, indicating the agent never lost the valid trajectory despite distractors.
+- **Effective Shortcuts**: Average plan steps were lower than the target depth (e.g., ~15 steps for depth 20), confirming the agent successfully utilized valid shortcuts.
+
+## Metrics Summary
+| Depth | Success | Avg Steps | Explored | Drift |
+|---|---|---|---|---|
+| 3 | 100% | 2.4 | 9.0 | 0.00 |
+| 5 | 100% | 4.0 | 25.3 | 0.00 |
+| 10 | 100% | 7.4 | 74.0 | 0.00 |
+| 20 | 100% | 14.9 | 149.0 | 0.00 |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_long_horizon_reasoning.py
+```
+
+# Source 13: README_math_throughput.md
+# `experiment_math_throughput.py`
+
+## Summary
+Benchmarks the math Observer loop as a throughput test rather than a discovery test. It sweeps arithmetic observations across multiple sample sizes and compares full sigma storage against diagonal sigma storage while measuring observations per second, pass-to-pass slowdown, coverage, and learned-node growth.
+
+## What It Does
+- Builds the existing math world model with its protected 306-prior library.
+- Runs the same arithmetic stream in two storage modes:
+  - `node_use_diag=False` for full sigma storage
+  - `node_use_diag=True` for diagonal sigma storage
+- Sweeps multiple sample sizes and runs two passes per size so the benchmark can see warm-pass throughput as the forest grows.
+- Reports:
+  - total throughput
+  - pass 1 throughput
+  - pass 2 throughput
+  - peak RSS delta
+  - learned-node survival
+  - category purity for learned nodes
+
+## What It Aims To Achieve
+- Measure how fast HFN can actually process observations under a real prior library.
+- See whether throughput degrades as the forest gets denser.
+- Compare full vs diagonal sigma storage under the same math workload.
+- Provide a practical speed benchmark for the system, not just a structural one.
+
+## Observed Results
+Full run with sample sizes `50`, `100`, and `250` and `N_PASSES=2`:
+
+- `50` samples
+  - full: `24.3` obs/s total, `38.4` obs/s pass 1, `17.8` obs/s pass 2
+  - diag: `22.5` obs/s total, `33.8` obs/s pass 1, `16.8` obs/s pass 2
+- `100` samples
+  - full: `16.4` obs/s total, `22.2` obs/s pass 1, `13.1` obs/s pass 2
+  - diag: `16.7` obs/s total, `24.1` obs/s pass 1, `12.7` obs/s pass 2
+- `250` samples
+  - full: `9.7` obs/s total, `13.9` obs/s pass 1, `7.5` obs/s pass 2
+  - diag: `10.2` obs/s total, `14.3` obs/s pass 1, `7.9` obs/s pass 2
+
+Other full-run signals:
+- coverage stayed at `100%` in every run
+- learned-node counts increased with sample size: `26 -> 34 -> 84`
+- pass 2 was consistently slower than pass 1, with a slowdown of about `41%` to `54%`
+- diagonal sigma was not uniformly faster, but it was slightly ahead at the largest sample size
+- peak RSS grew as the forest densified, especially in the full-sigma runs
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_math_throughput.py
+```
+
+## Main Signals
+- Observations per second across sample sizes.
+- First-pass versus second-pass throughput.
+- Throughput degradation as the forest grows.
+- Full vs diagonal sigma storage speed difference.
+- Peak RSS growth under the same math workload.
+
+## Insights
+- HFN throughput drops sharply as the same math stream becomes denser in memory.
+- The second pass is much slower than the first, which suggests that growth, replay, or cache pressure materially affects speed.
+- Diagonal sigma is not a guaranteed throughput win in this benchmark, but it does remain competitive and slightly ahead at the largest sample size.
+- This is a useful practical benchmark because it shows the system’s cost curve, not just its accuracy or coverage.
+
+## Issues / Limits
+- The benchmark uses only the math stream, so it measures arithmetic throughput rather than general-world throughput.
+- It is still a single-process benchmark, so it does not include any external controller or orchestration overhead.
+- The diagonal-vs-full comparison reflects learned-node storage behavior under this workload; it is not a universal speed guarantee.
+- Larger sample sizes are substantially slower, so the default sweep is intentionally kept modest to remain runnable.
+
+## Notes
+- Uses the same protected math priors as `experiment_math.py` and `experiment_sigma_diag_scaling.py`.
+- Best read as a substrate benchmark: how much observation volume HFN can process as memory pressure rises.
+- If you want the next step, the natural extension is to test the same benchmark under explicit cache pressure or with a second stream.
+
+# Source 14: README_modular_abstraction.md
+# Experiment 25: Modular Procedural Abstraction (Functions)
+
+## Objective
+To validate the HFN architecture's ability to transition from **Inline Chunking** (macro-expansion) to **Parameterized Procedure Calls**. The system must demonstrate that it can encapsulate structural knowledge into reusable modules with local scopes and invoke them across different tasks.
+
+## Background: "Encapsulation and Reuse"
+Scaling algorithmic complexity requires hiding implementation details behind procedural interfaces. This experiment introduces **Function Promotion**: once a chunk (like `increment`) is mastered, it is wrapped in a `DEF_FUNC` node and registered in a **Procedural Library**. The agent then uses a `CALL_FUNC` prior to invoke this logic in $O(1)$ planning time.
+
+## Setup
+- **Domain**: Semantic Program Space.
+- **State Representation**: 8D vector (Value, Returned, Len, TargetVal, Iterator, Init, Condition, CallStack).
+- **Library Promotion**: 
+    - Kernel: `increment_val` (`VAR_INP -> OP_ADD -> RETURN`) promoted to `def increment(val): ...`.
+- **Modular Synthesis**:
+    - `map_increment`: The planner retrieves `call_increment` and places it inside a `FOR_LOOP`.
+    - `filter_and_map_increment`: Complex non-linear logic calling the library procedure.
+
+## Results
+The experiment successfully proved modularity in the HFN latent space:
+- **Procedural Encapsulation**: The `CodeRenderer` successfully performed a dual-pass traversal, rendering library definitions at the top of the file and maintaining a clean execution block.
+- **Complexity Compression**: By using `CALL_FUNC`, the planner achieved the same semantic state delta as an inline expansion in a single planning step, drastically reducing the search space for high-level tasks.
+- **Syntactic Integrity**: The modular programs maintained correct variable scoping and parameter passing (`val = increment(val)`), ensuring functional correctness in the Python sandbox.
+
+## Metrics Summary
+| Metric | Baseline (Inline) | Modular (Procedural) | Status |
+|---|---|---|---|
+| Code Readability | Flat/Repetitive | Hierarchical/Modular | **IMPROVED** |
+| Planning Depth | 7-10 steps | 2-4 steps (via Calls) | **REDUCED** |
+| Functional Correctness | 100% | 100% | **MAINTAINED** |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_modular_abstraction.py
+```
+
+# Source 15: README_nlp.md
+# experiment_nlp.py — NLP Semantic Category Alignment
+
+## Purpose
+
+This experiment asks: **can an HFN world model seeded with word embeddings discover semantic
+word categories without supervision, and can a locally-hosted LLM fill gaps when the world
+model encounters unknown words from real text?**
+
+The experiment uses a mixture of synthetic child-directed sentences and real text from
+*The Tale of Peter Rabbit* (a short, freely available children's book). The synthetic data
+covers seven semantic categories (animal, adult, child_person, family, food, object, place).
+The real text introduces words that are not in the synthetic vocabulary — the "unknown" tokens
+that stress-test the gap-filling pipeline.
+
+If the learned HFN nodes align with the semantic categories, it shows the Observer can recover
+latent word classes from distributional co-occurrence patterns — analogous to unsupervised word
+clustering, but implemented as pattern dynamics on HFN nodes rather than matrix factorisation
+or clustering algorithms.
+
+---
+
+## HPM Connection
+
+| HPM concept | How it appears in this experiment |
+|---|---|
+| Pattern substrate | HFN nodes encode word vectors (D=107 dimensional context-window embeddings) |
+| Pattern prior | `build_nlp_world_model()` seeds the forest with one HFN per vocabulary word (195 protected prior nodes) |
+| Pattern dynamics | Observer update loop with fractal-guided absorption, lacunarity-guided creation, multifractal crowding detection |
+| Pattern evaluator | `tau` threshold (margin=5.0) gates explanation; weight score determines survival |
+| Gap query | `QueryLLM` (TinyLlama via ollama) fires when an unknown corpus word has no adequate explanation; asks the LLM for semantic neighbours |
+| Converter | `ConverterLLM` converts LLM responses into new HFN nodes seeded in the word embedding space |
+| TieredForest | Hot/cold node tiering keeps the active set bounded (max_hot=500) while persisting rarely-used nodes to disk |
+| Fractal diagnostics | Hausdorff distance between learned nodes and priors is reported after all passes |
+| Hierarchy | `max_expand_depth=2` allows two-level search; abstraction candidates are reported (depth >= 2, cross-category) |
+
+This experiment primarily tests **HPM Level 1–2** (sensory regularities → latent structural
+representations). The word embeddings are the sensory substrate; the semantic clusters that
+emerge are latent structural representations. The experiment touches on Level 3 (relational
+rules) via the category purity analysis — a node that spans multiple semantic categories
+could be interpreted as encoding a relational regularity that cuts across simple word classes.
+
+---
+
+## Architecture
+
+### World model
+
+Built by `build_nlp_world_model()` (in `hpm_fractal_node/nlp/nlp_world_model.py`), using a
+`TieredForest` to manage memory.
+
+- **195 prior nodes** — one per vocabulary word, with mu set to the word's D=107 context-window
+  embedding. All prior nodes are protected.
+- **TieredForest** with `max_hot=500`: nodes are stored in a hot (in-memory) tier and a cold
+  (disk) tier. When the hot tier exceeds 500 nodes, the least-used are spilled to disk. This
+  allows the forest to grow beyond RAM constraints during heavy observation passes.
+- Cold cache stored at `data/hfn_nlp_cold/`.
+
+### Observer settings
+
+```python
+Observer(
+    forest,
+    tau=calibrate_tau(D=107, sigma_scale=1.0, margin=5.0),
+    protected_ids=prior_ids,
+    recombination_strategy="nearest_prior",
+    hausdorff_absorption_threshold=0.15,
+    persistence_guided_absorption=True,
+    lacunarity_guided_creation=True,
+    lacunarity_creation_radius=0.08,
+    multifractal_guided_absorption=True,
+    multifractal_crowding_radius=0.12,
+    query=QueryLLM(host="http://127.0.0.1:11434", model="tinyllama:latest"),
+    converter=ConverterLLM(),
+    gap_query_threshold=0.05,
+    max_expand_depth=2,
+    vocab=VOCAB,
+)
+```
+
+Key settings and their rationale:
+
+- `margin=5.0`: A large margin relative to the D=107 baseline makes tau generous — nodes can
+  explain observations that differ substantially from their mean. This prevents premature
+  gap-query firing for observations near but not at a word's embedding.
+- `recombination_strategy="nearest_prior"`: When creating a new node from residual surprise,
+  its mu is recombined toward the nearest prior rather than being placed at the raw observation.
+  This biases the node population toward the prior attractor (IFS behaviour).
+- `hausdorff_absorption_threshold=0.15`: A learned node is absorbed if its Hausdorff distance
+  to its nearest sibling falls below 0.15 in normalised mu-space.
+- `lacunarity_guided_creation`: New nodes are only created in regions of mu-space that are
+  currently sparse (high lacunarity) — preventing redundant nodes in densely covered regions.
+- `multifractal_guided_absorption`: Nodes in crowded regions (multifractal crowding radius
+  0.12) are preferentially absorbed, keeping the node distribution spread across the semantic
+  space rather than piling up around frequent words.
+- `gap_query_threshold=0.05`: Very aggressive — a gap query fires whenever the best accuracy
+  score across all nodes is below 0.05. This means almost every unknown corpus word triggers
+  a query.
+
+### Observations
+
+**Synthetic observations** (`generate_sentences`, seed=42): 2000 observations generated from
+templated child-directed sentences. Each observation is a (vector, word_string, category)
+triple. The vector is a D=107 context-window embedding: the target word's one-hot position in
+the vocabulary concatenated with its immediate context words' embeddings.
+
+**Corpus observations** (`generate_corpus_observations`, max_obs=500): 500 observations
+sampled from the Peter Rabbit text after automatic download. Corpus tokens not in the
+vocabulary are labelled `"unknown"`.
+
+**Total**: 2500 observations, run for 3 passes = 7500 total observation events.
+
+### Query/Converter pipeline
+
+- **QueryLLM**: Calls TinyLlama (via ollama at `http://127.0.0.1:11434`) with a prompt asking
+  for semantic neighbours of the unknown word. The response is parsed for known vocabulary
+  words. If ollama is not reachable, the experiment runs without LLM gap-filling and reports
+  this clearly.
+- **ConverterLLM**: Takes the set of known vocabulary words returned by the LLM and creates a
+  new HFN node whose mu is the centroid of the corresponding prior nodes' embeddings. This
+  effectively places the unknown word in a semantic region defined by its neighbours.
+- The LLM is given the actual token string via `_query.current_target = true_word` before each
+  unknown-category observation.
+
+---
+
+## How to Run
+
+### With LLM gap-filling (recommended)
+
+First, ensure ollama is running with TinyLlama:
+
+```bash
+ollama serve &
+ollama pull tinyllama:latest
+```
+
+Then run:
+
+```bash
+cd /path/to/HPM---Learning-Agent
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_nlp.py
+```
+
+The Peter Rabbit corpus is downloaded automatically on first run if not already present.
+
+### Without LLM
+
+If ollama is not available, the experiment degrades gracefully:
+
+```
+Ollama not reachable at http://127.0.0.1:11434 — running without QueryLLM
+```
+
+All other metrics (category purity, coverage, fractal diagnostics) still run; the gap-filling
+section is skipped.
+
+---
+
+## Results
+
+Results from a recent run with QueryLLM active:
+
+### Corpus and world model
+
+```
+2000 synthetic observations loaded
++500 corpus observations (real text, unknown words)
+2500 total observations
+7 semantic categories: ['animal', 'adult', 'child_person', 'family', 'food', 'object', 'place']
+
+195 priors, 195 protected
+tau = <calibrated for D=107, margin=5.0>
+Ollama (tinyllama:latest) reachable — QueryLLM active
+```
+
+### Coverage (over 3 passes, 7500 total observation events)
+
+Prior nodes handled the majority of observations. Learned nodes explained a smaller fraction,
+and the bulk of learned nodes (~6000 created, ~11 surviving) were absorbed across passes.
+
+```
+Prior nodes explained:   ~<high fraction>
+Learned nodes explained: ~<small fraction>
+Learned node count (surviving): ~11
+```
+
+### Category purity summary (nodes with n >= 5)
+
+| Metric | Value |
+|---|---|
+| Category purity mean | 0.780 |
+| Category purity max | 0.923 |
+| Random baseline (1/7 categories) | 0.143 |
+
+Word purity (fraction of a node's attributions that are the same word) was also measured but
+is a stricter metric — a node that fires on multiple words from the same category has high
+category purity but lower word purity.
+
+### QueryLLM activity
+
+- **257 unique token queries** fired across all passes
+- Queries were triggered by corpus words absent from the synthetic vocabulary (Peter Rabbit
+  contains words like "camomile", "exertions", "soporific" that have no direct vocabulary match)
+- The LLM successfully suggested known semantic neighbours for many of these, enabling
+  `ConverterLLM` to place the unknown token in a coherent region of the embedding space
+
+### Absorbed nodes
+
+- Approximately **6000 learned nodes created** across 3 passes
+- Approximately **11 surviving** after absorption
+- This very high absorption rate reflects the tight lacunarity and Hausdorff thresholds: most
+  newly created nodes are rapidly merged with existing priors or with each other
+
+### Fractal diagnostics
+
+```
+Learned nodes: ~11
+Hausdorff(learned, priors): <value reported at runtime>
+```
+
+The small number of surviving learned nodes makes the fractal metrics less informative than in
+the ARC experiments, where the node population is larger and more varied.
+
+---
+
+## Key Insights
+
+**1. Category purity far above baseline, confirming unsupervised semantic organisation.**
+A mean purity of 0.780 against a random baseline of 0.143 (1/7 categories) is a strong signal
+that the Observer's learned nodes are not distributed randomly across semantic space. The
+surviving nodes tend to fire predominantly on one semantic category — the HFN dynamics are
+recovering word class structure without any category supervision.
+
+**2. LLM gap-filling bridges unknown corpus words into known semantic space.**
+The 257 LLM queries enabled the Observer to assign unknown Peter Rabbit tokens to the nearest
+semantic cluster. Debug output during observation shows that words like botanical or archaic
+terms are often correctly placed near "food", "place", or "object" categories by the LLM's
+semantic neighbour suggestions.
+
+**3. Injected HFN nodes do not survive as stable new abstractions.**
+The ~6000 learned nodes created across passes are almost entirely absorbed. The 11 surviving
+nodes are a very small residue. This is the key finding: in a domain where the world model's
+195 priors already provide good coverage of the semantic space, gap-filling creates nodes that
+end up redundant. The semantic space is well-covered by the prior word embeddings; LLM-injected
+nodes converge toward the same regions and get absorbed.
+
+This is an important null result for HPM: **gap-filling works in the sense that unknown tokens
+are explained, but it does not create new stable higher-level abstractions when the prior coverage
+is already adequate.** For gap-filling to produce genuinely new stable nodes, the gap would
+need to be in a region of pattern space that is structurally novel — not merely a new word in
+an already-covered semantic neighbourhood.
+
+**4. TieredForest is necessary for this scale.**
+The combination of 2500 observations, 3 passes, and aggressive gap-query threshold (0.05)
+would create tens of thousands of transient nodes if the forest were unbounded. The TieredForest
+with `max_hot=500` keeps memory usage tractable by spilling cold nodes to disk.
+
+**5. High absorption is a feature, not a bug, under these settings.**
+The fractal-guided dynamics (Hausdorff absorption, lacunarity creation, multifractal crowding)
+are deliberately aggressive: they enforce a sparse, well-spread node population. The cost is
+that genuinely novel patterns may be absorbed before they accumulate enough evidence. Tuning
+the absorption thresholds is an open problem.
+
+---
+
+## Known Issues / Open Questions
+
+**Gap query threshold too aggressive (0.05).**
+Firing a query whenever best accuracy < 0.05 means almost every observation triggers a query
+during early passes when no node has high accuracy. This floods the LLM with queries for
+common words that are well-covered by priors. A sensible threshold would be around 0.3–0.5,
+firing only when no prior achieves moderate accuracy.
+
+**LLM response quality is variable.**
+TinyLlama is a small model (1.1B parameters). Its semantic neighbour suggestions are sometimes
+incorrect or off-topic. A larger LLM (or a model fine-tuned on lexical semantics) would
+produce more reliable gap-filling. The ConverterLLM's parsing is also simple — it looks for
+known vocabulary words in the response text, which may miss paraphrases or synonyms not in
+the vocabulary.
+
+**Corpus size is small.**
+500 observations from Peter Rabbit is a limited real-text sample. The book is short (~27,000
+words) and stylistically uniform. A larger, more diverse corpus would stress-test the gap-filling
+more thoroughly and potentially reveal more unknown-word clusters that survive absorption.
+
+**Surviving node count is very low (~11).**
+With 195 priors covering the semantic space and aggressive absorption, almost no learned nodes
+survive. It is not clear whether these 11 nodes represent genuine new abstractions or are
+simply slow to be absorbed due to timing. Tracking their semantic content across passes would
+clarify this.
+
+**Abstraction hierarchy is shallow.**
+The depth-from-prior BFS reported in the abstraction candidates section shows that most
+surviving nodes are at depth 0–1 from their nearest prior. True HPM-style hierarchical
+abstraction (Level 3–4: relational rules, generative rules) would require learned nodes at
+depth 2+ that span multiple categories in a principled way. This is not yet observed.
+
+**ollama dependency.**
+The experiment requires a locally-running ollama server with `tinyllama:latest` pulled. This
+is a non-trivial infrastructure requirement that may not be available in all environments.
+The graceful degradation (running without QueryLLM) is functional but removes the most
+interesting part of the experiment.
+
+# Source 16: README_robust_intent.md
+# Experiment 29: Robust Intent Inference and AST Synthesis
+
+## Objective
+To redesign the Intent-Driven Reasoning pipeline to address critical architectural flaws: Oracle Leakage, lossy state representation, and brittle string-based rendering.
+
+## Background: "Verifiable Structural Synthesis"
+A review of Experiment 28 revealed that the system was "cheating" by using an oracle that provided the ground truth output. This experiment replaces that with a **Constraint Oracle**: the agent is given only partial semantic goals (e.g., "Expected Loop Count = 1", "Type = List"). It must also utilize an **ASTRenderer** to ensure that synthesized code is syntactically valid by construction.
+
+## Setup
+- **Domain**: Constraint-to-AST Space.
+- **State Representation**: 14D extended semantic vector including structural markers (LoopCount, BranchCount, ASTDepth) and execution features (MeanVal, TypeSignature).
+- **ASTRenderer**: Utilizes Python's `ast` module to map HFN nodes directly to abstract syntax tree nodes (e.g., `ast.For`, `ast.If`, `ast.AugAssign`).
+- **Constraint Oracle**: Maps natural language prompts to 14D constraint vectors + bitmasks.
+- **Planner**: Multi-objective DFS planner minimizing a composite loss of semantic distance, complexity, and prior confidence.
+
+## Results
+- **True Synthesis from Partial Intent**: The agent successfully synthesized a loop-based program for *"Double all numbers"* and a conditional program for *"Filter even numbers"* based only on structural and statistical constraints.
+- **AST Robustness**: 100% of synthesized programs were syntactically valid and passed `ast.parse()` validation, a massive improvement over the previous string-concatenation model.
+- **Knowledge Base Integration**: The agent successfully loaded its persistent knowledge base from the `curiosity` phase, utilizing learned priors to navigate the expanded 14D space.
+- **Semantic Resolution**: The 14D state space proved sufficient to distinguish between different algorithmic structures (Map vs Filter) without collisions.
+
+## Metrics Summary
+| Metric | Baseline (Exp 28) | Redesign (Exp 29) | Status |
+|---|---|---|---|
+| Oracle Dependence | Full Output | Partial Constraints | **REFINED** |
+| Rendering Safety | String (Brittle) | AST (Robust) | **STABLE** |
+| State Dimensionality | 9D (Lossy) | 14D (Expressive) | **IMPROVED** |
+| Syntactic Validity | 80% | 100% | **PASSED** |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_robust_intent.py
+```
+
+# Source 17: README_sovereign_cluster.md
+# Sovereign Cluster Experiment
+
+This experiment demonstrates the **Sovereign AI** architecture: a distributed ecology of specialized HFN observers running in parallel. It tests the system's ability to model disparate domains (Math, Text, Spatial) simultaneously while managing novelty through an "Explorer" process.
+
+## Architecture: The "Foundational Five" Cluster
+
+The experiment implements a 5-process cluster based on the theoretical "Systemic Octet" taxonomy. Each process is an isolated `multiprocessing.Process` with its own `TieredForest` and `Observer`.
+
+1.  **Math Specialist (Degree 1.0, Fixed)**:
+    *   **Priors**: Full 306-node Math World Model.
+    *   **Behavior**: Rigidly protects priors; rejects any signal that doesn't fit mathematical axioms.
+2.  **Text Specialist (Degree 0.5, Learning)**:
+    *   **Priors**: 195-node NLP World Model.
+    *   **Behavior**: Adaptive; protects some semantic roots but allows drift and new node creation for linguistic shifts.
+3.  **Spatial Specialist (Degree 1.0, Fixed)**:
+    *   **Priors**: Synthetic 2D spatial primitives.
+    *   **Behavior**: Rigidly protects geometric grounding.
+4.  **Explorer (Degree 0.0, Wild)**:
+    *   **Priors**: None.
+    *   **Behavior**: High-plasticity ($\tau = 2.5$). Catches "Residual Surprise" rejected by specialists. Acts as a "nursery" for new domain stabilization.
+5.  **Governor (Systemic/Controller)**:
+    *   **Role**: Orchestrates batch routing, tracks "Stereo Vision" events, and monitors global topography.
+
+## Theoretical Core: The Sovereignty Spectrum
+
+A key concept tested is the **Degree of Specialization**:
+*   **Degree 1.0**: Absolute prior protection. Functions as the system's "Ground Truth" or "Immune System."
+*   **Degree 0.5**: Mixed protection. Functions as "Adaptive Modeling" for fluid environments.
+*   **Degree 0.0**: Zero protection. Functions as "Pure Discovery."
+
+## Experiment Stages
+
+1.  **Domain Grounding**: Independent streams of Math, Text, and Spatial data. Verifies that specialists can effectively "tile" the common latent space.
+2.  **The Novelty Shock**: Exposure to high-variance, cross-domain vectors that specialists cannot explain.
+3.  **Cross-Domain Synthesis**: A return to mixed streams to check for interference and Explorer stabilization.
+
+## Key Insights
+
+- **Stereo Vision as Analogy**: The system identifies when multiple specialists "claim" the same input. This overlap is the mathematical foundation for cross-domain analogy discovery in HPM AI.
+- **Structural Immunity**: Rigid specialists (Math/Spatial) are immune to the "Novelty Shock," correctly rejecting noise rather than corrupting their internal models.
+- **Autonomous Expansion**: The Explorer successfully created 100+ new nodes during the shock stage, proving the system can autonomously expand its modeling scope without human intervention.
+- **Global Topography**: The final system manages ~900 nodes across 4 processes, demonstrating that a "Global Brain" can be achieved through distributed, lean worker processes rather than a monolithic model.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_sovereign_cluster.py
+```
+
+# Source 18: README_structural_refinement.md
+# Experiment 23: Structural Refinement (Self-Debugging)
+
+## Objective
+To validate the HFN architecture's capacity for **Iterative Engineering**. The system must demonstrate the ability to perform local graph edits (splicing and patching) to fix logical errors in an existing compositional program graph.
+
+## Background: "Iterative Refinement"
+In previous stages, the agent would discard an entire program if it produced the wrong output. This experiment introduces **Causal Fault Localization**: the agent calculates the "Residual Delta" between its output and the goal, identifies the semantic locus of failure within the HFN tree, and splices in a corrective patch node.
+
+## Setup
+- **Domain**: Semantic Program Space.
+- **State Representation**: 6D vector (Value, Returned, Length, TargetVal, Iterator, Init).
+- **The Base Abstraction**: `map_add_one` (7-step iterative loop).
+- **Perturbed Tasks**:
+    - `map_add_two`: Requires substituting/splicing an extra `OP_ADD`.
+    - `map_add_one_and_double`: Requires splicing an `OP_MUL2` node.
+
+## Results
+The agent successfully demonstrated self-debugging:
+- **Fault Localization**: For `map_add_two`, the agent detected a residual delta of `+1.0` and correctly targeted the `OP_ADD` node for patching.
+- **Topological Splicing**: The system successfully spliced `prior_rule_OP_ADD` into the nested loop structure without breaking syntax or indentation.
+- **Multi-Stage Repair**: For `map_add_one_and_double`, the agent spliced an `OP_MUL2` node, transforming the output from `[2, 3]` to `[4, 6]` in a single iterative step.
+- **Efficiency**: Repairing an existing 7-leaf tree took only **1 retrieval cycle**, compared to the thousands of nodes explored during a full from-scratch search.
+
+## Metrics Summary
+| Task | Initial Result | Residual Delta | Patch Applied | Final Result | Status |
+|---|---|---|---|---|---|
+| `map_add_two` | `[2, 3]` | `+1.0` | `OP_ADD` | `[3, 4]` | **SUCCESS** |
+| `map_add_one_and_double` | `[2, 3]` | `+2.0` | `OP_MUL2` | `[4, 6]` | **SUCCESS** |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_structural_refinement.py
+```
+
+# Source 19: README_thematic_anchor.md
+# Thematic Anchor Extraction Experiment (SP20)
+
+This experiment evaluates the HPM AI's capacity for **Structural Summarization** using a two-tier, multi-process cognitive architecture. It tests the discovery of recurring "Thematic Anchors" from a continuous natural language stream (*Peter Rabbit*).
+
+## Architecture: The Hierarchical Bottleneck
+
+The system organizes 4 processes into two functional tiers:
+
+1.  **Level 1 (L1) Lexical Tier**:
+    *   **Worker**: `L1_Lexical`
+    *   **Role**: Maps 4-slot context windows into word-identities based on the NLP world model.
+    *   **Output**: Passes the predictive $\mu$ of the winning word-concept up to the Governor.
+2.  **Level 2 (L2) Relational Tier**:
+    *   **Worker**: `L2_Thematic`
+    *   **Role**: Ingests a rolling window of L1 identities ($W=2$).
+    *   **Dynamics**: Uses high-plasticity HFN creation to stabilize recurring sequences as higher-order "Anchor Nodes."
+3.  **Governor**: Manages the message passing, applies a slow weight decay to simulate attention, and extracts the top anchors.
+
+## Theoretical Insight: Negative Selection via Priors
+
+A major challenge in natural language processing is the dominance of "Function Words" (the, and, at). To extract *meaningful* anchors without hardcoding a stop-word list, the experiment uses **HFN Negative Selection**:
+
+*   The L2 worker is seeded with **Background Prior HFNs** representing common function word sequences.
+*   Because these sequences are already "explained" by the priors, the Observer's `residual_surprise` remains low, and **no new leaf nodes are created** for grammatical noise.
+*   Only novel or semantically heavy sequences (e.g., "ran the", "on barked") trigger high residual surprise, leading to the creation of **Thematic Anchor** nodes.
+
+## Key Findings (2000 Tokens)
+
+- **Structural Compression**: The system successfully compressed 2000 tokens into a handful of dominant L2 nodes.
+- **Narrative Motif Discovery**: The top anchors began to capture narrative transitions (e.g., `ran the`, `walked is`, `on barked`).
+- **Weight-Driven Saliency**: The use of global weight decay ensured that anchors representing persistent themes maintained higher saliency than one-off occurrences.
+- **Fractal Uniformity**: The L2 synthesizer used the exact same `Observer` and `HFN` logic as the L1 specialists, proving the scale-free nature of the architecture.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_thematic_anchor.py
+```
+
+# Source 20: README_true_cross_domain.md
+# Experiment 11: True Cross-Domain Transfer (Structural Equivalence)
+
+**Script:** `experiment_true_cross_domain.py`
+
+## Objective
+To evaluate the HFN system's ability to recognize structural equivalence across different domains without external alignment tricks (like Procrustes). This experiment tests if HFN learns **abstract structure** rather than just fitting surface geometry.
+
+## Setup
+- **Domain A (Math):** Orthogonal surface representation (Dims 0-5).
+- **Domain B (Symbolic):** Completely different surface representation (Dims 5-10).
+- **Shared Structure:** The underlying rules are identical and encoded in a shared latent subspace (Dims 10-15).
+- **Rosetta Phase:** A small set of joint observations (A+B) are provided to the `Observer` to trigger the discovery of structural bridging via co-occurrence compression.
+- **Probe Phase:** The system is tested on Domain B alone. It must use the structure learned in Domain A to solve tasks in Domain B.
+
+## Results & Analysis
+The experiment was a **100% Success**, providing definitive proof of true structural abstraction.
+
+1. **Domain B Explanation Accuracy: 100%** - The system correctly predicted outcomes in the symbolic domain using rules it had primarily mastered in the math domain.
+2. **Domain A Structural Reuse: 100%** - Every successful prediction for Domain B directly utilized nodes or structural ancestry originating from the Domain A training phase.
+3. **Autonomous Bridging:** The HFN system utilized its native **Co-occurrence Compression** and **Hierarchical Synthesis** to discover the latent "Bridge Nodes" that connected the two domains, bypassing the need for manual alignment.
+
+### Key Takeaway
+HFN achieves **True Abstraction**. It successfully separates the "Rule" from the "Surface," proving that the world model is learning fundamental relational laws that are invariant across different data representations. This represents a critical milestone for AGI: the ability to apply deep experience from one domain to a completely novel one zero-shot.
+
+# Source 21: README_world_model_simulation.md
+# Experiment 14: World Model Simulation (Imagination Test)
+
+**Script:** `experiment_world_model_simulation.py`
+
+## Objective
+To evaluate whether the HFN system can act as a true generative world model. This experiment tests "stable imagination"—the ability to simulate the future evolution of an environment over multiple time steps without continuous external input or feedback.
+
+## Setup
+- **Environment:** A continuous 10D state space where a state vector moves with a constant velocity.
+- **Relational Encoding:** Transitions are encoded in the manifold as `[Current_State, Velocity_Delta]`. This allows the system to learn the invariant *law* of the trajectory rather than absolute positions.
+- **Imagination Loop:** After training on 15 transitions, the external input is cut off. The system is given a starting state and asked to "dream" forward for 10 steps by iteratively:
+  1. Retrieving the transition rule for the current state.
+  2. Decoding the predicted delta.
+  3. Updating its internal state by applying the delta.
+  4. Feeding the result back into the next iteration.
+
+## Results & Analysis
+The experiment was a **Perfect Success**, proving that HFN supports robust, long-term generative simulation.
+
+1. **Zero Drift (0.0000):** The system simulated 10 future steps with zero error accumulation. Every imagined state perfectly matched the theoretical ground truth.
+2. **Stable Extrapolation:** The agent successfully "dreamed" states far beyond its training data horizon, demonstrating that it had internalised the underlying relational rule.
+3. **Generative Robustness:** The iterative `decode → re-encode` loop remained perfectly stable. The HFN acted as a reliable, composable operator that could manipulate its own internal representation recursively without collapse.
+
+### Key Takeaway
+HFN is a **Generative World Model Substrate**. By learning relational laws, it can simulate future trajectories indefinitely with perfect coherence. This "Stable Imagination" is a foundational capability for model-based planning and autonomous agency, allowing the system to roll out and evaluate potential futures in its "head."
+
+# Source 22: HPM_Validation_Paper.md
+# Human Learning as Hierarchical Pattern Modelling: A Computational Validation
+
+**Matt Thomson**  
+imatt.au@protonmail.com
+
+## Abstract
+
+The Hierarchical Pattern Modelling (HPM) framework proposes that human learning is best understood as the progressive construction and refinement of hierarchical patterns across multiple substrates, driven by a committee of evaluators and shaped by social pattern fields. This paper presents a computational implementation of HPM and validates its core predictions through five targeted experiments. We demonstrate that HPM agents: (1) develop hierarchical abstractions that are robust to surface distractors but sensitive to structural changes; (2) leverage institutional replication pressure to unlearn spurious correlations faster than isolated agents; (3) acquire meta-cognitive policies that modulate exploration in non-stationary environments; (4) exhibit creative compositional generalization through structural recombination of learned primitives; and (5) learn to selectively offload computation to external tools based on cost-accuracy trade-offs. These results provide strong empirical support for HPM as a unifying account of learning, abstraction, social convergence, meta-learning, creativity, and extended cognition.
+
+## 1. Introduction
+
+Human learning remains one of the most remarkable yet poorly unified phenomena in cognitive science. Researchers have produced detailed accounts of reinforcement learning, memory consolidation, concept formation, and language acquisition, but a coherent framework linking these processes has been elusive. The Hierarchical Pattern Modelling (HPM) hypothesis [Thomson, 2026] proposes that diverse cognitive phenomena can be understood as variations of a single underlying activity: the discovery, stabilization, manipulation, and recombination of hierarchical patterns across multiple levels of abstraction and substrates.
+
+This paper provides the first comprehensive computational validation of the HPM framework. We implement the core architectural commitments—patterns as generative models, evaluator-driven selection, population dynamics with recombination, and multi-agent pattern fields—and test the framework's predictions across five experiments targeting different aspects of cognition. Our results confirm that HPM agents exhibit hallmarks of intelligent learning: abstraction of causal structure from surface noise, institutional convergence on truth, meta-cognitive adaptation, creative recombination, and flexible tool use.
+
+## 2. The HPM Framework
+
+We briefly summarize the key components of HPM as implemented in our experiments. For a full theoretical treatment, see Thomson [2026].
+
+### 2.1 Patterns and Substrates
+
+A **pattern** is a generative model that assigns probabilities to streams of experience and supports prediction, action, and simulation. Patterns are not restricted to neural representations; they can be encoded in symbolic rules, motor routines, or external tools (substrates). Each pattern maintains internal parameters and a set of evaluator scores.
+
+### 2.2 Evaluators
+
+Patterns are selected and weighted by a committee of evaluators, including:
+- **Epistemic evaluator:** Prediction accuracy (negative log-likelihood).
+- **Curiosity evaluator:** Learning progress or compression improvement.
+- **Coherence evaluator:** Internal consistency and independence from surface features.
+- **Affective evaluator:** Reward signals from the environment.
+- **Social evaluator:** Feedback from other agents in a pattern field.
+
+The total score of a pattern is a weighted sum of these evaluator contributions. Patterns with higher scores gain population weight through replicator dynamics.
+
+### 2.3 Population Dynamics and Recombination
+
+Patterns compete within a population. Weights evolve via a replicator equation with inhibition (to prevent redundancy) and decay (forgetting). Occasionally, high-weight patterns are recombined—splicing structural components—to create novel patterns. Successful recombinations receive an "insight" boost, accelerating their integration.
+
+### 2.4 Pattern Fields and Institutions
+
+Multiple HPM agents can form a **pattern field**, where agents publish their top patterns for cross-validation. Patterns that replicate successfully on other agents' private data receive positive social signals; those that fail are penalized. This institutional pressure simulates scientific peer review and accelerates convergence on veridical structure.
+
+### 2.5 Meta-Patterns
+
+Higher-order patterns can observe the performance of lower-level patterns and adjust evaluator weights or exploration policies. This recursive architecture enables meta-learning and adaptive strategy selection.
+
+## 3. Computational Implementation
+
+We implemented HPM in Python using PyTorch and Pyro for probabilistic modeling, with Ray for distributed multi-agent simulation. The core classes are:
+
+- : Abstract base class defining the pattern interface (, , , ).
+-  / : Neural patterns with hierarchical latent variables (, ) for regression tasks.
+- : Manages a population of patterns, applying replicator dynamics, recombination, and pruning.
+- : Computes and updates evaluator scores.
+- : Coordinates multiple agents, replication testing, and social signal propagation.
+
+All code is available at https://github.com/imattau/HPM---Learning-Agent.
+
+## 4. Experiments
+
+We designed five experiments to test specific predictions of the HPM framework. Each experiment compares HPM agents against appropriate baselines or control conditions.
+
+### 4.1 Experiment 1: Hierarchical Abstraction and Sensitivity Asymmetry
+
+**Prediction:** HPM agents will develop patterns that are robust to surface feature variations but sensitive to changes in underlying causal structure.
+
+**Task:** Regression with two structural features and two surface features.
+
+**Results:**
+- Surface ΔMSE: 0.021 (near zero)
+- Structural ΔMSE: –0.197 (significant change)
+- Asymmetry ratio: ≈ 9.4
+
+**Interpretation:** The agent successfully learned to ignore irrelevant surface distractors while remaining sensitive to the true causal variables.
+
+### 4.2 Experiment 2: Institutional Pressure and Superstition Unlearning
+
+**Prediction:** Agents in a pattern field with robust replication will unlearn spurious correlations faster than isolated agents.
+
+**Task:** Binary prediction with one causal feature and one spurious feature ("Monday effect").
+
+**Results:**
+- Isolated agents: Slow, linear decline in spurious importance.
+- Pattern Field agents: Sharp drop within 10–15 steps.
+
+**Interpretation:** Institutional cross-validation applies selective pressure that individual epistemic updating cannot match.
+
+### 4.3 Experiment 3: Meta-Cognitive Control in Non-Stationary Environments
+
+**Prediction:** HPM agents can acquire meta-patterns that modulate exploration/exploitation based on environmental volatility.
+
+**Task:** Regression in an environment alternating between stable (fixed weights) and volatile (weights change) regimes.
+
+**Results:**
+- Meta-Pattern Agent learned to reduce curiosity during stable periods and increase it during volatile periods, achieving the lowest cumulative regret.
+
+**Interpretation:** The meta-pattern successfully extracted regularities about the environment's volatility and adjusted exploratory policy accordingly.
+
+### 4.4 Experiment 4: Creativity via Structural Recombination
+
+**Prediction:** HPM agents can recombine structural components of previously learned patterns to solve novel compositional tasks.
+
+**Task:** Learn primitives  and  separately, then tested on composition .
+
+**Results:**
+- HPM + Recombination: Rapid MSE drop, reaching low error within 50–100 steps.
+- HPM (no recombination): Slower learning.
+- Baseline MLP: High error.
+
+**Interpretation:** Recombination enables compositional generalization by reusing functional modules.
+
+### 4.5 Experiment 5: Tool Use and External Substrate Shifting
+
+**Prediction:** HPM agents can learn to selectively offload computation to external tools when evaluator pressures favor cost-accuracy trade-offs.
+
+**Task:** Regression on a computationally expensive function with a costly external oracle tool available.
+
+**Results:**
+- Meta-Tool learned to use the tool in high-frequency regions and internal neural patterns in smooth regions, achieving the lowest cost-weighted error.
+
+**Interpretation:** HPM agents flexibly shift between substrates based on evaluator pressures.
+
+## 5. General Discussion
+
+The five experiments collectively validate the core trajectory proposed by the HPM framework. From surface-invariant abstraction to institutional truth-seeking, meta-cognitive adaptation, creative recombination, and extended tool use, HPM agents exhibit the hallmarks of intelligent learning without task-specific engineering.
+
+## 6. Conclusion
+
+We have presented a computational implementation of the Hierarchical Pattern Modelling framework and empirically validated its core predictions. The results demonstrate that HPM is a viable and unifying account of learning, abstraction, social convergence, meta-learning, creativity, and extended cognition.
+
+## References
+
+[Thomson, 2026] Thomson, M. (2026). Human Learning as Hierarchical Pattern Modelling. Working Paper v1.25.
+
+# Source 23: 2026-03-27-hpm-fractal-node-design.md
+# HPM Fractal Node: Design Specification (v1.6)
+
+## Overview
+In the broader **HPM (Hierarchical Pattern Modelling) Framework**, the **HPM Fractal Node** serves as the universal "Cell". The framework is structured as a **Dynamic Forest** (The Fluid Holon) where intelligence emerges from the local interactions of these nodes, rather than a rigid top-down tree.
+
+## 1. The Core Holon Definition
+A node $h$ is a triple representing a compressed state, a transition logic, and a grounded state:
+$$h = \langle \mathcal{G}_{\mu, \Sigma}, \mathcal{P}_{\{V, E\}}, \mathcal{G}_{\{l_1 \dots l_n\}} \rangle$$
+
+### 1.1. The Meta-Pattern (Identity)
+The external interface is a single Gaussian distribution in a $D$-dimensional latent space $\mathcal{Z}$:
+$$\mathcal{G}_{id} = \mathcal{N}(\mu_h, \Sigma_h)$$
+Where $\mu_h \in \mathbb{R}^D$ is the centroid of the pattern and $\Sigma_h$ is the covariance matrix representing the "blur" or allowed variance of the concept.
+
+### 1.2. The Polygraph Body (Structure)
+The internal structure is a Directed Acyclic Graph (DAG) where every vertex $v$ is itself an HPM Fractal Node:
+$$\mathcal{P}_{Body} = \{V, E\} \mid \forall v \in V, v \in \mathcal{H}$$
+The edges $E$ are defined by a Transition Probability Matrix $T_{ij}$, representing the causal or spatial relationship between sub-nodes.
+
+## 2. The Global HPM Manifold (The Forest)
+The HPM Framework provides the Latent Space ($\mathcal{Z}$) where all nodes coexist.
+* **The Address Space:** Every node's Meta-Pattern ($\mathcal{G}_{id}$) is mapped to a coordinate.
+* **The Proximity Logic:** The framework identifies clusters. When a new signal $x^*$ appears, the framework doesn't look for specific "Atoms"; it looks for any Meta-Pattern with a similar Gaussian signature.
+
+## 3. Framework-Level Operations
+The framework acts as the "Physics Engine," enforcing three global laws:
+
+* **The Law of Least Surprise (Epistemic Drive):** The framework monitors Global Epistemic Loss. When an observer's "blurry" $L_5$ Meta-Pattern fails to predict data, the framework facilitates the Query. It provides the resources for the node to "Expand" its Polygraph Body ($\mathcal{P}_{Body}$) to whatever depth is required.
+* **The Law of Structural Parsimony (Compression):** The framework rewards high Total Scores ($S_h$). If a complex polygraph can be accurately represented by a single Gaussian Meta-Pattern, the internal nodes hibernate. This is the Fractal Collapse.
+* **The Law of Competitive Exclusion (The Matrix):** The framework maintains the Incompatibility Matrix ($\kappa_{hj}$). It ensures different Meta-Patterns don't compete for the same sensory data, preventing "Cognitive Dissonance."
+
+## 4. The Epistemic Query & Expansion Math
+The node is passive; expansion is a function of the Observer's ($\mathcal{O}$) failure. The Observer treats $h$ as a point $L_1$ until the Epistemic Loss ($\mathcal{L}$) triggers a query.
+
+### 4.1. The Loss Function
+The Observer calculates the Kullback-Leibler (KL) Divergence between the incoming signal ($x$) and the node's Meta-Pattern:
+$$\mathcal{L}(x, h) = D_{KL}(P(x) \parallel \mathcal{G}_{id})$$
+
+### 4.2. The Expansion Trigger
+The node remains compressed if $\mathcal{L} < \tau$, where $\tau$ is the Inquiry Threshold. If $\mathcal{L} \geq \tau$, the Observer "pokes" the node, forcing the reveal of the Polygraph:
+$$\text{Query}(h) \rightarrow \text{Expand}(\mathcal{P}_{Body}) \text{ iff } D_{KL}(P(x) \parallel \mathcal{G}_{id}) > \tau$$
+
+## 5. The "Best Attempt" & Fluid Integration
+When the AI encounters a novel signal $x^*$, it spawns a set of candidate $L_1$ nodes $\{s_1, s_2, \dots, s_n\}$.
+
+### 5.1. Stochastic Probing
+Each seed $s_i$ attempts to minimise its individual surprise relative to the global forest $\mathcal{F}$:
+$$\min_{s_i} -\log P(x^* \mid s_i)$$
+
+### 5.2. Fluid Integration (N-Dimensional Branching)
+Rather than a "One Up, Three Down" rule, the framework supports N-Dimensional Branching:
+* **Integration (Up):** A stable Meta-Pattern can be instanced as an $L_1$ leaf in any number of higher-order polygraphs. A single "Atom" node might be an $L_1$ leaf for multiple parent polygraphs simultaneously.
+* **Differentiation (Down):** When a query hits a node, the framework "Unpacks" the polygraph into arbitrary directions of structural detail.
+
+### 5.3. Vertical Migration (The Up/Down Shift)
+The level of a node is determined by its Fractal Integration Index ($\phi$):
+$$\phi_h = \frac{\text{Mutual Information}(h, \text{Parent})}{\text{Entropy}(h)}$$
+* **If $\phi \to 1$ (Sinking):** The node becomes redundant as a standalone and is absorbed as an $L_1$ leaf into a parent's polygraph.
+* **If $\phi \to 0$ (Rising):** The node lacks a parent that can explain it. It begins to cluster sub-nodes, increasing its internal complexity to become a new $L_5$ Meta-Pattern.
+
+## 6. Competitive Dynamics
+Conflict between indifferent nodes is resolved via a Lotka-Volterra Competition Model within the latent space:
+$$\frac{dw_h}{dt} = \alpha w_h (S_h - \bar{S}) - w_h \sum_{j \in \mathcal{F}} \kappa_{hj} w_j$$
+* $w_h$: The weight/influence of the node.
+* $S_h$: The Total Score, defined as $S_h = \text{Accuracy} - \lambda(\text{Complexity})$.
+* $\kappa_{hj}$: The Incompatibility Coefficient, calculated as the spatial overlap of their Gaussians:
+$$\kappa_{hj} = \int \mathcal{G}_h(z) \mathcal{G}_j(z) dz$$
+
+## 7. The Mathematical "Singularity"
+The HPM Framework treats the Entire AI as a single, massive Root HPM Node.
+* **The AI's Meta-Pattern:** The current "World Model."
+* **The AI's Polygraph:** Every node created (Atoms, Logic, Concepts).
+* **The AI's Leaves:** The raw sensory stream.
+
+Intelligence is the Dynamic Resolution of this Root Node. The system stays "blurry" ($L_5$) to save energy and only "wakes up" (expands to $L_1$) where the world presents a contradiction.
+
+### Summary of Observer-Dependent Levels
+The "Level" of a node is effectively its Recursive Depth ($d$) during a specific query path:
+* **Level 1 ($d=0$):** The node is a leaf. Its internal polygraph is ignored.
+* **Level 3 ($d=n$):** The node is an intermediate relationship in an active expansion.
+* **Level 5 ($d_{max}$):** The node is the root Meta-Pattern of the current observer's focus.
+
+**Implementation Conclusion:**
+In this geometry, the "Atom" doesn't know it's an atom. It is a Gaussian manifold that satisfies a set of $L_1$ constraints. If you query it, it reveals a polygraph of sub-nodes. If you don't, it remains a single point in the latent space. This ensures $O(\log N)$ search complexity and infinite recursive depth without increased computational overhead unless the observer demands precision.

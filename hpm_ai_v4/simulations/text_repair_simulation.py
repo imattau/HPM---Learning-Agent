@@ -8,6 +8,7 @@ from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.simulations.text_full_simulation import _ids_to_text, _text_metrics_snapshot
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
+from hpm_ai_v4.tools.text_signals import TextSignalExtractor
 
 
 def _corrupt_text(text: str) -> str:
@@ -99,6 +100,7 @@ def run_text_repair_simulation(
         layered.observe_text(warmup_text, feedback_mode="target")
 
     history: List[Dict[str, Any]] = []
+    text_signals = TextSignalExtractor()
     print(
         f"Starting text repair simulation: steps={total_steps} chunk={chunk_size} warmup={warmup_chars} "
         f"workers={num_workers} dict={use_dict}"
@@ -123,6 +125,15 @@ def run_text_repair_simulation(
         repair_stats["repair_improvement"] = repair_stats["token_agreement"] - corruption_stats["token_agreement"]
         repair_stats["corruption_agreement"] = corruption_stats["token_agreement"]
         repair_stats["corrupted_text"] = corrupted_text
+        repair_signal = text_signals.analyze(
+            repaired_text,
+            context_texts=[corrupted_text, target_text],
+            target_text=target_text,
+            dictionary=layered.dictionary,
+            grammar=layered.grammar,
+        )
+        repair_stats.update(repair_signal.to_dict())
+        repair_stats["text_signal_score"] = repair_signal.combined_score()
 
         repair_stats.update(
             layered.observe_text(
@@ -130,6 +141,7 @@ def run_text_repair_simulation(
                 feedback_mode="hybrid",
                 generated_text=repaired_text,
                 self_feedback_weight=0.02,
+                feedback_signal=repair_signal.to_dict(),
             )
         )
 

@@ -102,6 +102,7 @@ def build_library(
     output: str = "",
     steps: int = 100_000,
     min_density: float = 0.3,
+    num_initial_patterns: int = 20,
     registry_path: Optional[str] = None,
     name: Optional[str] = None,
     domain: str = "text",
@@ -125,7 +126,7 @@ def build_library(
         print("[error] Empty corpus after encoding")
         return 1
 
-    agent = HPMAgent(num_initial_patterns=20, obs_dim=5)
+    agent = HPMAgent(num_initial_patterns=num_initial_patterns, obs_dim=5)
     print(f"[init] {len(agent.patterns)} patterns, running {steps} steps")
 
     for step in range(steps):
@@ -204,6 +205,7 @@ def main():
     parser.add_argument('--output', required=True, help='Output .pkl path')
     parser.add_argument('--steps', type=int, default=100_000)
     parser.add_argument('--min-density', type=float, default=0.3)
+    parser.add_argument('--num-initial-patterns', type=int, default=20)
     parser.add_argument('--registry', help='Optional JSON registry path for curated libraries')
     parser.add_argument('--name', help='Registry entry name')
     parser.add_argument('--domain', default='text', help='Registry domain label')
@@ -218,6 +220,7 @@ def main():
             output=args.output,
             steps=args.steps,
             min_density=args.min_density,
+            num_initial_patterns=args.num_initial_patterns,
             registry_path=args.registry,
             name=args.name,
             domain=args.domain,

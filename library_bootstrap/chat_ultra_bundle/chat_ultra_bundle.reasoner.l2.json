@@ -1,0 +1,1 @@
+{"context_window": 40, "beam_width": 3, "candidate_top_k": 3, "memory_window": 24, "memory_capacity": 256, "memory_top_k": 6, "memory_weight": 0.25, "memory": [], "polygraph": {"capacity": 256, "window": 24, "step": 0, "records": [], "communities": {}, "summary_threshold": 3, "summary_interval": 2}}

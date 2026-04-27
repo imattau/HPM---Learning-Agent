@@ -67,3 +67,20 @@ def test_adaptive_vs_static_performance():
     print(f"  Static LL: {static_ll:.2f}")
     
     assert adaptive_ll > static_ll, "Adaptive agent should outperform static agent"
+
+
+def test_pattern_update_recovers_from_nan_parameters():
+    p = HierarchicalPattern(pattern_id=99, latent_dim=2, obs_dim=2)
+    p.A[:] = np.nan
+    p.B[:] = np.nan
+    p.pi[:] = np.nan
+
+    ll = p.update_parameters_online([0, 1, 0, 1, 0, 1])
+    dist = p.predict_next_distribution([0, 1, 0, 1])
+
+    assert np.isfinite(ll)
+    assert np.all(np.isfinite(p.A))
+    assert np.all(np.isfinite(p.B))
+    assert np.all(np.isfinite(p.pi))
+    assert np.all(np.isfinite(dist))
+    assert abs(dist.sum() - 1.0) < 1e-6

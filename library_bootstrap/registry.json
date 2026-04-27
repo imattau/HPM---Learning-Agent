@@ -1,6 +1,58 @@
 [
   {
     "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "chat",
+    "name": "chat_super_seed",
+    "notes": "merged dialogue-focused seeds",
+    "path": "library_bootstrap/chat_ultra/chat_ultra_library.pkl",
+    "pattern_count": 606,
+    "source": "library_bootstrap/chat_super/chat_super_library.pkl;library_bootstrap/chat_mixed/conversational_chat_library.pkl;library_bootstrap/code_dsl_library.l1.pkl;library_bootstrap/code_dsl_library.l2.pkl;library_bootstrap/code_dsl_library.l3.pkl;library_bootstrap/code_dsl_library.l4.pkl;library_bootstrap/code_dsl_library.l5.pkl;library_bootstrap/structured_text_library.l1.pkl;library_bootstrap/structured_text_library.l2.pkl;library_bootstrap/structured_text_library.l3.pkl;library_bootstrap/structured_text_library.l4.pkl;library_bootstrap/structured_text_library.l5.pkl;library_bootstrap/text_seed.pkl;library_bootstrap/hpm_environment_library.pkl;library_bootstrap/hpm_tool_library.pkl;library_bootstrap/hpm_curriculum_library.pkl;library_bootstrap/chat_super/chat_super_library.pkl;library_bootstrap/chat_mixed/conversational_chat_library.pkl;library_bootstrap/code_dsl_library.l1.pkl;library_bootstrap/code_dsl_library.l2.pkl;library_bootstrap/code_dsl_library.l3.pkl;library_bootstrap/code_dsl_library.l4.pkl;library_bootstrap/code_dsl_library.l5.pkl;library_bootstrap/structured_text_library.l1.pkl;library_bootstrap/structured_text_library.l2.pkl;library_bootstrap/structured_text_library.l3.pkl;library_bootstrap/structured_text_library.l4.pkl;library_bootstrap/structured_text_library.l5.pkl;library_bootstrap/text_seed.pkl;library_bootstrap/hpm_environment_library.pkl;library_bootstrap/hpm_tool_library.pkl;library_bootstrap/hpm_curriculum_library.pkl",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "chat",
+    "name": "chat_ultra_bundle_seed",
+    "notes": "coherent level-partitioned bundle derived from the ultra chat library",
+    "path": "library_bootstrap/chat_ultra_bundle/chat_ultra_bundle",
+    "pattern_count": 604,
+    "source": "library_bootstrap/chat_ultra/chat_ultra_library.pkl",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
+    "density_max": 0.0,
+    "density_mean": 0.0,
+    "density_min": 0.0,
+    "domain": "chat",
+    "name": "chat_ultra_seed",
+    "notes": "fast-merged ultra chat seed library",
+    "path": "library_bootstrap/chat_ultra/chat_ultra_library.pkl",
+    "pattern_count": 606,
+    "source": "library_bootstrap/chat_super/chat_super_library.pkl;library_bootstrap/chat_mixed/conversational_chat_library.pkl;library_bootstrap/code_dsl_library.l1.pkl;library_bootstrap/code_dsl_library.l2.pkl;library_bootstrap/code_dsl_library.l3.pkl;library_bootstrap/code_dsl_library.l4.pkl;library_bootstrap/code_dsl_library.l5.pkl;library_bootstrap/structured_text_library.l1.pkl;library_bootstrap/structured_text_library.l2.pkl;library_bootstrap/structured_text_library.l3.pkl;library_bootstrap/structured_text_library.l4.pkl;library_bootstrap/structured_text_library.l5.pkl;library_bootstrap/text_seed.pkl;library_bootstrap/hpm_environment_library.pkl;library_bootstrap/hpm_tool_library.pkl;library_bootstrap/hpm_curriculum_library.pkl;library_bootstrap/chat_super/chat_super_library.pkl;library_bootstrap/chat_mixed/conversational_chat_library.pkl;library_bootstrap/code_dsl_library.l1.pkl;library_bootstrap/code_dsl_library.l2.pkl;library_bootstrap/code_dsl_library.l3.pkl;library_bootstrap/code_dsl_library.l4.pkl;library_bootstrap/code_dsl_library.l5.pkl;library_bootstrap/structured_text_library.l1.pkl;library_bootstrap/structured_text_library.l2.pkl;library_bootstrap/structured_text_library.l3.pkl;library_bootstrap/structured_text_library.l4.pkl;library_bootstrap/structured_text_library.l5.pkl;library_bootstrap/text_seed.pkl;library_bootstrap/hpm_environment_library.pkl;library_bootstrap/hpm_tool_library.pkl;library_bootstrap/hpm_curriculum_library.pkl",
+    "status": "seed"
+  },
+  {
+    "created_at": "2026-04-26T10:31:49.224810+00:00",
+    "density_max": 0.2431990519912668,
+    "density_mean": 0.21250049299717846,
+    "density_min": 0.16710704261741471,
+    "domain": "chat",
+    "name": "conversational_chat_seed",
+    "notes": "",
+    "path": "library_bootstrap/chat_mixed/conversational_chat_library.pkl",
+    "pattern_count": 92,
+    "source": "library_bootstrap/chat_mixed/conversational_chat_corpus.txt",
+    "status": "seed"
+  },
+  {
+    "created_at": "",
     "density_max": 0.058548808097839355,
     "density_mean": 0.02849438041448593,
     "density_min": 0.003881514072418213,

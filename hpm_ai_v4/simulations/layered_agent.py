@@ -13,6 +13,7 @@ from hpm_ai_v4.io.adapters import CharClassAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
+from hpm_ai_v4.tools.text_signals import TextSignalExtractor
 
 
 def _init_equal_weights(agent: HPMAgent, hier_k: int, obs_dim: int) -> None:
@@ -31,6 +32,9 @@ def _init_equal_weights(agent: HPMAgent, hier_k: int, obs_dim: int) -> None:
 class LayeredAgent:
     """Three-level HPM stack where each level consumes the lower level's latent state."""
 
+    SOFT_STATE_BINS = 5
+    SOFT_STATE_OBS_DIM = 10
+
     def __init__(self, num_workers: int = 1,
                  dictionary: Optional[DictionaryValidator] = None,
                  grammar: Optional[GrammarValidator] = None):
@@ -39,15 +43,15 @@ class LayeredAgent:
         self.grammar = grammar
         self.l1 = HPMAgent(obs_dim=5, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
-        self.l2 = HPMAgent(obs_dim=2, num_initial_patterns=4, num_workers=num_workers,
+        self.l2 = HPMAgent(obs_dim=self.SOFT_STATE_OBS_DIM, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
-        self.l3 = HPMAgent(obs_dim=2, num_initial_patterns=4, num_workers=num_workers,
+        self.l3 = HPMAgent(obs_dim=self.SOFT_STATE_OBS_DIM, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
         self.l4 = HPMAgent(obs_dim=32, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
         _init_equal_weights(self.l1, hier_k=2, obs_dim=5)
-        _init_equal_weights(self.l2, hier_k=2, obs_dim=2)
-        _init_equal_weights(self.l3, hier_k=2, obs_dim=2)
+        _init_equal_weights(self.l2, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
+        _init_equal_weights(self.l3, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
         _init_equal_weights(self.l4, hier_k=2, obs_dim=32)
         self._raw_history: List[int] = []
         self._l1_state_history: List[int] = []
@@ -62,6 +66,7 @@ class LayeredAgent:
             "plausibility": 0.0,
             "structural_score": 0.0,
         }
+        self.text_signals = TextSignalExtractor(use_spacy=False)
         self.decoder_policy = MetaDecoderPolicy(num_workers=num_workers)
         self.l5 = self.decoder_policy.agent
         self.decoders = {
@@ -82,15 +87,16 @@ class LayeredAgent:
         if len(self._raw_history) > 1:
             prev_ch = chr(self._raw_history[-2] + 32)
             self._transition_counts[(prev_ch, ch)] += 1
-        self.l1.perceive_and_learn(class_id, feedback=feedback)
+        stacked_feedback = self._stack_feedback_signal(feedback)
+        self.l1.perceive_and_learn(class_id, feedback=stacked_feedback)
 
         l1_state = self.l1_top_state()
         self._l1_state_history.append(l1_state)
-        self.l2.perceive_and_learn(l1_state, feedback=feedback)
+        self.l2.perceive_and_learn(l1_state, feedback=stacked_feedback)
 
         l2_state = self.l2_soft_state()
         self._l2_state_history.append(l2_state)
-        self.l3.perceive_and_learn(l2_state, feedback=feedback)
+        self.l3.perceive_and_learn(l2_state, feedback=stacked_feedback)
 
     def _top_state(self, agent: HPMAgent) -> int:
         if not agent.patterns:
@@ -104,10 +110,52 @@ class LayeredAgent:
     def l2_top_state(self) -> int:
         return self._top_state(self.l2)
 
+    def _best_pattern_posterior(self, agent: HPMAgent, obs_seq: Optional[List[int]] = None) -> np.ndarray:
+        if not agent.patterns:
+            return np.array([0.5, 0.5], dtype=np.float32)
+
+        context = list(obs_seq or agent.obs_buffer[-20:])
+        best = max(agent.patterns, key=lambda p: p.weight)
+        if best.latent_dim <= 1:
+            return np.ones(1, dtype=np.float32)
+        alpha, _ = best._forward(context)
+        if alpha.size == 0:
+            return np.ones(best.latent_dim, dtype=np.float32) / float(best.latent_dim)
+        posterior = alpha[-1].astype(np.float32)
+        posterior = np.nan_to_num(
+            posterior,
+            nan=1.0 / max(1, best.latent_dim),
+            posinf=1.0 / max(1, best.latent_dim),
+            neginf=1.0 / max(1, best.latent_dim),
+        )
+        posterior /= posterior.sum() + 1e-12
+        return posterior
+
+    def _soft_state_code(self, posterior: np.ndarray) -> int:
+        if posterior.size == 0:
+            return 0
+        if posterior.size == 1:
+            return self.SOFT_STATE_BINS - 1
+        top = int(np.argmax(posterior))
+        confidence = float(posterior[top])
+        confidence_bucket = min(
+            self.SOFT_STATE_BINS - 1,
+            max(0, int(round(confidence * (self.SOFT_STATE_BINS - 1)))),
+        )
+        return int(top * self.SOFT_STATE_BINS + confidence_bucket)
+
+    def l1_state_distribution(self) -> np.ndarray:
+        """Posterior over the best L1 latent state, preserved as a distribution."""
+        return self._best_pattern_posterior(self.l1)
+
+    def l1_soft_state(self) -> int:
+        """Encode L1 posterior state + confidence into a discrete symbol for L2."""
+        return self._soft_state_code(self.l1_state_distribution())
+
     def l2_state_distribution(self) -> np.ndarray:
         """Soft summary of L2 over the current population."""
         if not self.l2.patterns:
-            return np.array([0.5, 0.5], dtype=np.float32)
+            return np.ones(self.l2.obs_dim, dtype=np.float32) / float(self.l2.obs_dim)
 
         obs_seq = list(self.l2.obs_buffer[-20:]) if self.l2.obs_buffer else []
         dist = np.zeros(self.l2.obs_dim, dtype=np.float32)
@@ -119,18 +167,15 @@ class LayeredAgent:
             dist += w * p.predict_next_distribution(obs_seq)
             total_w += w
         if total_w <= 0.0:
-            return np.array([0.5, 0.5], dtype=np.float32)
+            return np.ones(self.l2.obs_dim, dtype=np.float32) / float(self.l2.obs_dim)
         dist /= total_w
         dist /= dist.sum() + 1e-12
         return dist.astype(np.float32)
 
     def l2_soft_state(self) -> int:
-        """Softly summarise L2 into a compact state for L3."""
-        dist = self.l2_state_distribution()
-        entropy = float(-np.sum(dist * np.log(dist + 1e-12)))
-        if entropy > 0.62:
-            return 1
-        return int(np.argmax(dist))
+        """Encode L2 posterior state + confidence into a discrete symbol for L3."""
+        posterior = self._best_pattern_posterior(self.l2)
+        return self._soft_state_code(posterior)
 
     def generate(self, steps: int = 20) -> str:
         """Generate a readable sequence of level-3 state labels."""
@@ -140,6 +185,7 @@ class LayeredAgent:
         self,
         target_text: str | None = None,
         requested_mode: str = "decode",
+        context_features: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         l1 = self.l1_metrics()
         l2 = self.l2_metrics(list(self._l1_state_history[-200:]))
@@ -155,7 +201,7 @@ class LayeredAgent:
             probs = np.array([float(v) / float(selection_total) for v in selection_counts.values()], dtype=np.float32)
             selection_entropy = float(-np.sum(probs * np.log(probs + 1e-12)))
         reasoner_memory = int(self.l1.reasoner.memory_size + self.l2.reasoner.memory_size + self.l3.reasoner.memory_size)
-        return {
+        features = {
             "recent_agreement": self._last_decoder_stats.get("token_agreement", 0.0),
             "recent_plausibility": self._last_decoder_stats.get("plausibility", 0.0),
             "structural_score": structural_score,
@@ -177,6 +223,26 @@ class LayeredAgent:
             "target_present": bool(target_text),
             "requested_mode": requested_mode,
         }
+        if context_features:
+            features.update({str(k): v for k, v in context_features.items()})
+        return features
+
+    def _stack_feedback_signal(self, feedback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Blend external feedback with current meta-state for lower-level learning."""
+        signal = dict(feedback or {})
+        control = self.l1.reasoner.control_context(self._raw_history, feature_pack=signal)
+        signal.setdefault("control_mode_prior", control.get("mode_prior", {}))
+        signal.setdefault("control_family_prior", control.get("family_prior", {}))
+        signal.setdefault("control_stage_prior", control.get("stage_prior", {}))
+        signal.setdefault("control_strength", float(control.get("community_strength", 0.0)))
+        signal.setdefault("control_dominant_mode", control.get("dominant_mode"))
+        signal.setdefault("control_dominant_family", control.get("dominant_family"))
+        signal.setdefault("control_dominant_stage", control.get("dominant_stage"))
+        signal.setdefault("control_summary_count", int(control.get("summary_count", 0)))
+        signal.setdefault("meta_structural_score", float((self.l4_metrics()["mi"] + self.l5_metrics()["mi"]) / 2.0))
+        if signal.get("mode") is None and signal.get("desired_mode") is None:
+            signal.setdefault("mode", control.get("dominant_mode"))
+        return signal
 
     def _stack_stage_index(self) -> int:
         stage = self.l1.development.level if hasattr(self.l1, "development") else "surface"
@@ -256,12 +322,17 @@ class LayeredAgent:
         candidates: List[DecoderSpec],
         target_text: str | None = None,
         requested_mode: str = "decode",
+        context_features: Optional[Dict[str, Any]] = None,
         learn_policy: bool = True,
     ) -> DecoderSpec:
         if not candidates:
             raise ValueError("No decoder candidates available")
         return self.decoder_policy.select(
-            self._decoder_policy_features(target_text, requested_mode=requested_mode),
+            self._decoder_policy_features(
+                target_text,
+                requested_mode=requested_mode,
+                context_features=context_features,
+            ),
             candidates,
             learn=learn_policy,
         )
@@ -275,6 +346,7 @@ class LayeredAgent:
         include_seed: bool = True,
         feedback: bool = False,
         update_policy: bool = True,
+        context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate readable text using a learned decoder policy."""
         if target_text and mode == "target":
@@ -282,19 +354,27 @@ class LayeredAgent:
             if self.dictionary or self.grammar:
                 candidates.append(DecoderSpec("constrained", "target", False))
         else:
+            task_family = str((context_features or {}).get("task_family", ""))
+            allow_char = task_family not in {"repair"}
             candidates = [
                 DecoderSpec("word", "decode", include_seed),
                 DecoderSpec("word", "hybrid", include_seed),
-                DecoderSpec("char", "decode", include_seed),
-                DecoderSpec("char", "hybrid", include_seed),
             ]
+            if allow_char:
+                candidates.extend([
+                    DecoderSpec("char", "decode", include_seed),
+                    DecoderSpec("char", "hybrid", include_seed),
+                ])
             if target_text:
                 candidates.append(DecoderSpec("target", "target", False))
+                candidates.append(DecoderSpec("word", "target", include_seed))
+            if task_family == "repair":
                 candidates.append(DecoderSpec("word", "target", include_seed))
         chosen = self._choose_decoder_spec(
             candidates,
             target_text=target_text,
             requested_mode=mode,
+            context_features=context_features,
             learn_policy=update_policy,
         )
         decoder = self.decoders[chosen.family]
@@ -330,6 +410,7 @@ class LayeredAgent:
         include_seed: bool = True,
         feedback: bool = False,
         update_policy: bool = True,
+        context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate printable character continuation through a learned policy."""
         candidates = [
@@ -342,6 +423,7 @@ class LayeredAgent:
             candidates,
             target_text=target_text,
             requested_mode=mode,
+            context_features=context_features,
             learn_policy=update_policy,
         )
         text = self.decoders["char"].decode(
@@ -443,6 +525,7 @@ class LayeredAgent:
         horizon: Optional[int] = None,
         strategy: str = "beam",
         lookback: Optional[int] = None,
+        feature_pack: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Plan a printable continuation directly through the reasoner."""
         return self.decoders["target"].decode(
@@ -452,6 +535,7 @@ class LayeredAgent:
             horizon=horizon,
             strategy=strategy,
             lookback=lookback,
+            feature_pack=feature_pack,
         )
 
     def generate_constrained_text(
@@ -466,6 +550,7 @@ class LayeredAgent:
         strict_dictionary: bool = True,
         strict_grammar: bool = True,
         update_policy: bool = True,
+        context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate text with additional lexical constraints."""
         candidates = [
@@ -478,6 +563,7 @@ class LayeredAgent:
             candidates,
             target_text=target_text,
             requested_mode=mode,
+            context_features=context_features,
             learn_policy=update_policy,
         )
         text = self.decoders["constrained"].decode(
@@ -536,6 +622,7 @@ class LayeredAgent:
             mode=mode,
             include_seed=False,
             update_policy=update_policy,
+            context_features={"task_family": "repair", "repair_mode": True},
         )
 
     def observe_text(
@@ -593,6 +680,7 @@ class LayeredAgent:
         adapter: Any = None,
         feedback_mode: str = "target",
         self_feedback_weight: float = 0.05,
+        feedback_signal: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Observe a code/DSL program and feed execution feedback back into the stack."""
         from hpm_ai_v4.io.adapters import CodeDSLAdapter
@@ -600,26 +688,37 @@ class LayeredAgent:
         adapter = adapter or CodeDSLAdapter()
         target_value = adapter.execute(target_program)
         generated_value = adapter.execute(generated_program) if generated_program else None
-        feedback_signal = {
+        code_signal = {
             "kind": "code_dsl",
             "parseable": bool(adapter.from_text(target_program)),
             "canonical_match": bool(generated_program) and adapter.to_text(generated_program) == adapter.to_text(target_program),
             "target_value": target_value,
         }
         if generated_program is not None:
-            feedback_signal["generated_parseable"] = bool(adapter.from_text(generated_program))
-            feedback_signal["execution_match"] = generated_value == target_value and generated_value is not None
-            feedback_signal["semantic_mismatch"] = generated_value is not None and generated_value != target_value
+            code_signal["generated_parseable"] = bool(adapter.from_text(generated_program))
+            code_signal["execution_match"] = generated_value == target_value and generated_value is not None
+            code_signal["semantic_mismatch"] = generated_value is not None and generated_value != target_value
+            code_text_signal = self.text_signals.analyze(
+                generated_program,
+                context_texts=[target_program],
+                target_text=target_program,
+                dictionary=self.dictionary,
+                grammar=self.grammar,
+            )
+            code_signal.update(code_text_signal.to_dict())
+            code_signal["text_signal_score"] = code_text_signal.combined_score()
+        if feedback_signal:
+            code_signal.update(feedback_signal)
 
         stats = self.observe_text(
             target_program,
             feedback_mode=feedback_mode,
             generated_text=generated_program,
             self_feedback_weight=self_feedback_weight,
-            feedback_signal=feedback_signal,
+            feedback_signal=code_signal,
         )
         if generated_program is not None:
-            stats.update(feedback_signal)
+            stats.update(code_signal)
             self._learn_decoder_policy(
                 DecoderSpec(self._last_decoder_choice, self._last_decoder_mode, True),
                 generated_program,

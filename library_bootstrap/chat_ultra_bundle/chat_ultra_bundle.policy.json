@@ -1,0 +1,1 @@
+{"age": 0, "spec_codes": {}, "selection_counts": {}, "reward_ema": {}, "obs_buffer": [], "next_spec_code": 16, "bootstrap_half_life": 48.0, "bootstrap_floor": 0.0, "bootstrap_warmup": 64, "exploration_weight": 0.03}

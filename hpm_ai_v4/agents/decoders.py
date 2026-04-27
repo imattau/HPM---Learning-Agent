@@ -202,6 +202,7 @@ class TargetDecoder:
         horizon: Optional[int] = None,
         strategy: str = "beam",
         lookback: Optional[int] = None,
+        feature_pack: Optional[dict] = None,
     ) -> str:
         target_classes = [agent._adapter.encode(ord(ch) - 32) for ch in target_text if 32 <= ord(ch) <= 126]
         if not target_classes:
@@ -213,6 +214,7 @@ class TargetDecoder:
             strategy=strategy,
             lookback=lookback,
             target_weight=2.5,
+            feature_pack=feature_pack,
         )
 
         target_chars = [ch for ch in target_text if 32 <= ord(ch) <= 126]

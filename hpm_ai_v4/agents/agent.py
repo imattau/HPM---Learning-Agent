@@ -102,12 +102,56 @@ class HPMAgent:
             new_p.weight = 0.05
             self.patterns.append(new_p)
 
+    def _feedback_worker_params(self, base_params: Dict[str, Any], feedback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Adjust low-level learning pressure from higher-level feedback.
+
+        The feedback channel is intentionally soft: it nudges update cadence and
+        evaluator weights rather than overriding the core learner.
+        """
+        params = dict(base_params)
+        if not feedback:
+            return params
+
+        meta = dict(feedback)
+        control_strength = float(meta.get("control_strength", meta.get("meta_structural_score", 0.0)))
+        mode_prior = meta.get("control_mode_prior") or meta.get("mode_prior") or {}
+        dominant_mode = str(meta.get("control_dominant_mode") or meta.get("mode") or meta.get("desired_mode") or "")
+        reward_hint = float(meta.get("reward", meta.get("quality", 0.0)))
+        structure_hint = float(meta.get("meta_structural_score", meta.get("structural_score", 0.0)))
+        certainty = max(control_strength, structure_hint, reward_hint)
+        prefer_repair = dominant_mode == "repair" or float(mode_prior.get("repair", 0.0)) >= 0.5
+
+        # The lower stack should update more eagerly when higher-level control is confident.
+        params["learning_rate"] = float(params.get("learning_rate", 0.02)) * (0.85 + 0.25 * min(1.0, certainty))
+        params["lambda_l"] = float(params.get("lambda_l", 0.1)) * (0.90 + 0.20 * min(1.0, control_strength))
+        params["adapt_window"] = int(round(float(params.get("adapt_window", 20)) * (1.0 + 0.25 * max(0.0, structure_hint - 0.5))))
+
+        beta_aff = float(params.get("beta_aff", self.beta_aff))
+        gamma_soc = float(params.get("gamma_soc", self.gamma_soc))
+        if prefer_repair:
+            beta_aff += 0.08 * min(1.0, certainty + 0.2)
+            gamma_soc -= 0.03 * min(1.0, certainty)
+        else:
+            beta_aff += 0.03 * max(0.0, structure_hint - 0.5)
+            gamma_soc += 0.02 * max(0.0, control_strength - 0.3)
+        params["beta_aff"] = float(np.clip(beta_aff, 0.05, 0.95))
+        params["gamma_soc"] = float(np.clip(gamma_soc, 0.05, 0.95))
+
+        # Strong high-level confidence should encourage actual parameter updates.
+        if certainty > 0.8:
+            params["do_param_update"] = True
+        elif certainty < 0.2 and "do_param_update" in params:
+            params["do_param_update"] = bool(params["do_param_update"])
+
+        return params
+
     def perceive_and_learn(self, obs: int, feedback: Optional[Dict[str, Any]] = None):
         """Update patterns based on a new observation."""
         context_before = list(self.obs_buffer[-20:])
         self.obs_buffer.append(obs)
-        if len(self.obs_buffer) > 100:
-            self.obs_buffer = self.obs_buffer[-100:]
+        cap = self.reasoner.context_window
+        if len(self.obs_buffer) > cap:
+            self.obs_buffer = self.obs_buffer[-cap:]
 
         # Reasoning feedback: update per-pattern loss based on prediction error
         self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
@@ -125,6 +169,7 @@ class HPMAgent:
             'external_soc_map': self.external_social_scores,
             'do_param_update': (self.step_counter % 5 == 0),
         }
+        worker_params = self._feedback_worker_params(worker_params, feedback)
 
         if self._pool.num_workers == 1:
             results = []

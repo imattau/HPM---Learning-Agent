@@ -133,6 +133,7 @@ class MetaDecoderPolicy:
         bonus = 0.0
         target_present = bool(features.get("target_present", False))
         requested_mode = str(features.get("requested_mode", "decode"))
+        dialogue_act = str(features.get("dialogue_act", "default"))
         validators_present = bool(features.get("validators_present", False))
         recent_plausibility = float(features.get("recent_plausibility", 0.0))
         recent_agreement = float(features.get("recent_agreement", 0.0))
@@ -157,6 +158,28 @@ class MetaDecoderPolicy:
             bonus += 0.02
         if stage_idx >= 3 and spec.mode == "target":
             bonus += 0.02
+
+        if dialogue_act in {"greeting", "closing"}:
+            if spec.family == "word" and spec.mode == "decode":
+                bonus += 0.10
+            if spec.family == "constrained":
+                bonus += 0.04
+            if spec.family == "char":
+                bonus -= 0.03
+        elif dialogue_act in {"question", "request"}:
+            if spec.family == "word":
+                bonus += 0.08
+            if spec.family == "target":
+                bonus += 0.04
+            if spec.family == "constrained":
+                bonus += 0.03
+            if spec.family == "char":
+                bonus -= 0.02
+        elif dialogue_act == "clarification":
+            if spec.family in {"word", "target", "constrained"}:
+                bonus += 0.05
+            if spec.family == "char":
+                bonus -= 0.02
         return bonus
 
     def _control_bonus(self, features: Dict[str, Any], spec: DecoderSpec) -> float:

@@ -1,0 +1,2391 @@
+# Source 1: README_SP56.md
+# Experiment 46 (Final): Fractal Compositional Abstraction (SP56)
+
+## 1. Objective
+This experiment provides the **definitive empirical validation** of the HPM framework's core thesis: **Generative Compositional Abstraction**. It demonstrates that an agent can invent novel higher-order meta-patterns zero-shot by mathematically combining multiple lower-order relational rules.
+
+---
+
+## 2. Methodology: The Fractal Manifold
+The experiment uses a 90D manifold where the hierarchical slices are geometrically compatible:
+- **Level 1 (Content)**: The observable state.
+- **Level 2 (Relation)**: The first-order derivative (change in state).
+- **Level 3 (Meta-Relation)**: The second-order derivative (change in the rule).
+
+**Generative Composition**: Because the manifold is additive and fractal, Level 3 trajectories can be constructed by combining existing patterns from any level. The agent can synthesize a novel dynamic (e.g., "Accelerate by +2") by adding two known primitives (e.g., "Add 1" + "Add 1").
+
+---
+
+## 3. Experimental Curriculum
+
+### Phase 1: Relation Stabilization (L2)
+Trains basic numeric relational operators (e.g., `num_add_1`). The agent only knows how to increment by 1.
+
+### Phase 2: Meta-Pattern Discovery (L3)
+Trains the agent on prolonged sequences of **Constant** and **Oscillator** trajectories. 
+**CRITICAL**: Accumulator sequences are strictly excluded from training. The agent has no pre-existing knowledge of acceleration.
+
+### Phase 3: Zero-Shot Generative Composition (The "Aha!" Moment)
+The agent is presented with a **Numeric Accumulator sequence** that accelerates by **+2** each step ($0, 2, 6, 12, 20 \dots$).
+1.  **Noisy Priming**: The agent observes $t=0 \dots 3$ with perceptual noise.
+2.  **Inferred L3**: The agent infers its noisy L3 trajectory (approx. +2).
+3.  **Synthesis**: The agent searches its **Long-Term Memory** and discovers that no single node matches the +2 trajectory. It then evaluates combinations of nodes.
+4.  **Invention**: It discovers that adding the `num_add_1` rule to itself (or another instance of it) perfectly constructs the +2 meta-pattern.
+
+---
+
+## 4. Results: Strict Empirical Validation
+
+| Test Condition | Mean L1 Prediction Error (t=4..9) | Result |
+| :--- | :--- | :--- |
+| **L2-Only Baseline** | **1.8763** | **FAIL (Assumes Constant Rule)** |
+| **Single Best Prior** | **0.6305** | **FAIL (Incomplete Approximation)** |
+| **Compositional HPM** | **0.3091** | **SUCCESS (Generative Synthesis)** |
+
+### Analysis:
+- **Beyond Retrieval**: The "Single Best Prior" baseline (which tried to reuse `Add_1` as an L3 dynamic) failed because the acceleration was +2.
+- **True Composition**: Only the Compositional HPM condition achieved low error by dynamically synthesizing the `+2` meta-pattern from multiple `+1` primitives.
+- **Geometric Wisdom**: This confirms that HPM agents can "compute" new abstractions by combining existing structural wisdom, achieving true universal induction.
+
+---
+
+## 5. Conclusion: Wisdom as a Generative Fractal
+SP56 (Final) proves that HPM agents do not just retrieve wisdom; they **synthesize** it. By recognizing that complex meta-patterns are often the sum of simpler relational rules, the agent achieves a level of creative induction that allows it to master novel structural dynamics with zero prior exposure.
+
+# Source 2: README_SP59.md
+# SP59: Manifold-Guided Operator Induction
+
+This experiment provides **definitive proof** that the HPM framework can unify **Geometric Latent Representations** with **Symbolic Executable Reasoning** through manifold-guided induction.
+
+## 1. Objective
+Synthesize a deep, non-linear operator chain ($x \to (2x + 1) \pmod{10}$) by using the HFN manifold to heuristically guide a beam search. The agent must use residual error vectors to query the forest for relevant operators, rather than brute-forcing all possible combinations.
+
+## 2. Methodology: The Guidance Loop
+The experiment uses a 90D manifold factorized into three 30D slices:
+- **`[0:30]` Content**: The input state.
+- **`[30:60]` Relational**: The resulting delta produced by an operator.
+- **`[60:90]` Parameters**: The functional parameters of the operator (Weight, Bias, Modulus).
+
+**The Manifold Query**:
+1. For a partial chain $f(x)$, calculate the current prediction $\hat{x}_{t+1} = f(x_t)$.
+2. Calculate the residual error: $\Delta = x_{t+1} - \hat{x}_{t+1}$.
+3. Query the HFN forest with the pair `[Current State, Residual Delta]`.
+4. The forest returns operators whose geometric signatures match the required correction.
+5. The beam expands *only* with these retrieved operators.
+
+## 3. Results: Success through Geometry
+The agent was trained on three primitives (`Add_1`, `Mul_2`, `Mod_10`) stored across multiple input values. It was then presented with a noisy non-linear sequence: **1, 3, 7, 5, 1, 3...**
+
+### Synthesis Performance
+
+| Metric | Result |
+| :--- | :--- |
+| **Winning Chain** | `Add_1 ∘ Mod_10 ∘ Mul_2` |
+| **Search Depth** | 3 |
+| **Mean Prediction Error** | **0.0364** |
+| **Guidance Status** | **SUCCESS** (Forest retrieval directed the synthesis) |
+
+### Analysis
+By focusing the retrieval on the functional axes (Input and Delta), the agent successfully "saw through" the perceptual noise and identified the clean structural primitives in its memory. The successful construction of a depth-3 non-linear operator proves that HPM does not just store patterns; it uses the geometry of those patterns to **drive creative induction**.
+
+## 4. Running the Experiment
+```bash
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_manifold_induction.py
+```
+
+# Source 3: README_adversarial_belief_revision.md
+# Experiment 19: Adversarial Belief Revision (Truth Under Conflict)
+
+## Objective
+To test the HFN's ability to unlearn entrenched, high-confidence but incorrect structural knowledge when faced with conflicting evidence.
+
+## Background
+Robust intelligence requires overcoming deeply ingrained "truths" that are later falsified. This experiment creates an "adversarial bias" by exposing the agent to a misleading environment (Phase 1) before switching to the true environment (Phase 2). It validates the Observer's ability to penalize falsified beliefs while promoting new evidence without catastrophic forgetting or oscillation.
+
+## Setup
+- **Domain**: Simple sequence environment ($A \rightarrow B \rightarrow X$).
+- **Phase 1 (Adversarial)**: $B \rightarrow C$ (repeated 50 times to build high weight).
+- **Phase 2 (Truth)**: $B \rightarrow D$ (contradicts Phase 1).
+- **Agent**: `BeliefRevisionAgent` with explicit falsification on surprise.
+
+## Results
+The agent successfully demonstrated belief revision under conflict:
+- **Entrenchment**: Belief C reached a weight of **0.6211** in Phase 1.
+- **Rapid Shift**: Upon entering Phase 2, the true belief D surpassed the entrenched belief C in only **3 steps**.
+- **Smooth Decay**: The incorrect belief C weight decayed exponentially (via multiplicative penalty) until it dropped below the **0.01** threshold at step **11**.
+- **Minimal Conflict**: Residual conflict (both beliefs > 0.05) lasted only **2 steps**.
+- **No Failure Modes**: No confirmation bias or oscillation was detected.
+
+## Metrics Summary
+| Metric | Result | Status |
+|---|---|---|
+| Belief Shift Time | 3 steps | SUCCESS |
+| Residual Conflict | 2 steps | SUCCESS |
+| Final C Weight | 0.004852 | SUCCESS (Suppressed) |
+| Final D Weight | 0.203767 | SUCCESS (Dominant) |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_adversarial_belief_revision.py
+```
+
+# Source 4: README_autonomous_op_discovery.md
+# SP65: Experiment 49 — Autonomous Op Discovery (General HPM AI L1)
+
+## Overview
+
+Removes the last hand-seeded assumption: the L1 op vocabulary.
+
+SP54–SP64 all call `_seed_perceptual_ops()`, which hard-codes `+1`, `-1`, `*2`, etc. SP65 replaces this with **autonomous discovery**: given only raw I/O example pairs, the agent detects element type, generates a candidate op library, tests each candidate for empirical consistency, and registers consistent ops as L1 HFN nodes. The schema pipeline (BFS + oracle) runs unchanged on top of the discovered ops.
+
+The key insight: `discover()` returns all candidates consistent with the provided examples (union mode by default). The schema BFS + oracle acts as the evaluator/gatekeeper — it filters out spurious L1 candidates that survive single examples but fail on task verification.
+
+## Success Conditions (all six pass)
+
+| Condition | Criterion |
+|-----------|-----------|
+| Phase 1: Integer bootstrap | ≥ 3 ops discovered from 3 seed examples |
+| Phase 2: Schema acquisition | MAP and FILTER schemas built on discovered ops |
+| Phase 3: String bootstrap | str_upper and str_cond_a discovered from string examples |
+| Phase 4: Cross-domain transfer | MAP_upper and FILTER_starts_a transferred (depth ≤ 2, 0 domain-B training examples) |
+| Phase 5: Float bootstrap | Float ops discovered (duck-typed from int library) |
+| Phase 6: Ambiguity resolution | 2 candidates from sparse example; second example resolves to `val *= 2` |
+
+All six → `[SUCCESS] SP65 Autonomous Op Discovery — General HPM AI L1 Achieved!`
+
+## Curriculum
+
+### Phase 1: Integer Domain Bootstrap
+
+Three seed examples are provided (one per primitive task: add_1, mul_2, filter_pos). `OpDiscoverer.discover()` runs in union mode: each example is processed independently and ops consistent with any example are collected.
+
+From three seed examples the agent discovers ≥3 distinct ops (`val += 1`, `val *= 2`, `val > 0`, and others), all registered as `discovered_A_N` L1 HFN nodes.
+
+**Success**: ≥ 3 ops discovered.
+
+### Phase 2: Schema Acquisition Using Discovered Ops
+
+The full BFS + oracle pipeline runs on the discovered ops exactly as in SP63/SP64. MAP+1, MAP*2, and FILTER_pos schemas are acquired and registered as macro nodes. No hand-seeded ops are used.
+
+**Success**: MAP and FILTER macros built on discovered ops.
+
+### Phase 3: String Domain Bootstrap
+
+String seed examples are provided. `OpDiscoverer.detect_element_type()` identifies `str` elements; the `CandidateOpLibrary` returns the string op templates. `discover()` finds ops consistent with the examples, including `val = item.upper()` and `val.startswith('a')`.
+
+**Success**: str_upper and str_cond_a discovered.
+
+### Phase 4: Cross-Domain Transfer with Discovered String Ops
+
+The discovered string ops are registered as domain-B ops via `bootstrap_ops(domain="B")`. `DomainTransferBridge` substitutes them into the integer MAP/FILTER scaffolds as in SP64.
+
+**Success**: MAP_upper and FILTER_starts_a transferred at depth ≤ 2, 0 domain-B training examples.
+
+### Phase 5: Float Domain Bootstrap
+
+Float seed examples are provided (e.g. `[1.0, 2.0] → [2.0, 4.0]`). `detect_element_type()` returns `"float"`, which duck-types to the int op library. Float-compatible ops (`val *= 2`, `val += 1`, etc.) are discovered and registered.
+
+**Success**: float ops discovered from the int library via duck typing.
+
+### Phase 6: Ambiguity Resolution
+
+A sparse single example admits multiple consistent candidates (e.g. both `val *= 2` and `val += N` are consistent with `[3] → [6]`). A second example is provided; `discover()` is called in `intersect=True` mode, which requires consistency across all examples. The intersection narrows to `val *= 2`.
+
+**Success**: ambiguous candidates reduced to the correct unique op by the second example.
+
+## Architecture
+
+### CandidateOpLibrary
+
+Provides finite candidate op templates per element type and op kind:
+
+| Element type | `map` ops | `filter` (cond) ops |
+|-------------|-----------|---------------------|
+| `int` / `float` | `val += 1`, `val += 2`, `val *= 2`, `val *= 3`, `val //= 2`, `val = val**2`, `val = abs(val)`, `val = -val`, `val = val`, … | `val > 0`, `val < 0`, `val >= 0`, `val % 2 == 0`, `val % 2 != 0`, `val > 1`, `val > 5` |
+| `str` | `val = val.upper()`, `val = val.lower()`, `val = val[0]`, `val = val[-1]`, `val = val + val`, `val = val[::-1]`, `val = str(len(val))` | `val.startswith('a')`, `val.startswith('b')`, `val[0].isupper()`, `len(val) > 3`, `len(val) > 5` |
+
+Float elements duck-type to int ops.
+
+### OpDiscoverer
+
+Tests candidate ops against I/O examples and returns those that are empirically consistent.
+
+- **`detect_element_type(examples)`** — infers `"int"`, `"float"`, or `"str"` from the first non-empty input
+- **`detect_task_kind(examples)`** — infers `"map"` (length-preserving) or `"filter"` (length-reducing)
+- **`discover(examples, max_ops, intersect)`** — main entry point:
+  - **Union mode** (`intersect=False`, default): an op is returned if consistent with ANY example. Suitable for mixed-task seed sets where different examples demonstrate different ops.
+  - **Intersection mode** (`intersect=True`): an op must be consistent with ALL examples. Suitable for ambiguity resolution when multiple examples narrow a single unknown op.
+  - Deduplicates by `render_hint`.
+
+The key design: `discover()` returns **all** consistent ops without selecting among them. The downstream schema BFS + oracle acts as the evaluator/gatekeeper, rejecting ops that produce wrong outputs on actual tasks.
+
+### BootstrappingAgent
+
+Extends `AnalogicalAgent` (SP64) by replacing `_seed_perceptual_ops()` with autonomous discovery.
+
+1. **`_seed_perceptual_ops()`** — overridden as a no-op; the hard-coded op vocabulary is entirely removed
+2. **`bootstrap_ops(seed_examples, domain)`** — calls `OpDiscoverer.discover()` and registers each returned op as a `discovered_{domain}_{i}` L1 HFN node; domain-B ops are also added to `domain_ops_b` for `DomainTransferBridge`
+3. **`_register_op(node_id, op_dict)`** — registers op as an HFN node with `grounded_op` relation type; stores `render_hint` and `callable` for bridge substitution
+4. **`get_discovered_ops(domain)`** — returns op dicts for a given domain prefix
+5. **`_try_analogy(inputs, outputs)`** — extended version that uses `op_registry` kind info to correctly distinguish filter ops from map ops when selecting scaffold substitution strategy
+
+## HPM Alignment
+
+| HPM Component | Implementation |
+|---------------|----------------|
+| Pattern substrate | L1 HFN nodes registered from discovered ops; same forest as schema pipeline |
+| Pattern dynamics | Op candidates tested empirically; consistent ones registered as nodes; schema BFS builds L2+ on top |
+| Pattern evaluator/gatekeeper | Schema BFS + oracle filters spurious L1 candidates; intersection mode resolves ambiguity |
+| Pattern fields | Element type detection activates the correct candidate library; domain prefix tracks op provenance |
+| L1: Sensory regularities | Discovered from empirical I/O testing — no hard-coding |
+| L2: Schemas | Built on discovered L1 ops; pipeline unchanged from SP63/SP64 |
+| L3–L5 | Inherited unchanged from SP64 |
+| Innate priors | `CandidateOpLibrary` provides structured inductive bias (the "candidate space") without specifying which ops will be useful |
+| Blank slate refusal | HPM explicitly rejects blank-slate learning; the candidate library is the innate prior that individual learning (discovery) refines |
+
+## Running
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_autonomous_op_discovery.py
+```
+
+Expected output includes:
+```
+[SUCCESS P1] Integer domain: N ops discovered
+[SUCCESS P2] Schema acquisition on discovered ops
+[SUCCESS P3] String domain: str_upper and str_cond_a discovered
+[SUCCESS P4] Cross-domain transfer with discovered string ops
+[SUCCESS P5] Float domain: ops duck-typed from int library
+[SUCCESS P6] Ambiguity resolved to val *= 2
+[SUCCESS] SP65 Autonomous Op Discovery — General HPM AI L1 Achieved!
+```
+
+## Dependencies
+
+- `hpm_fractal_node/experiments/experiment_cross_domain_analogy.py` — provides `AnalogicalAgent`, `DomainTransferBridge`, `LearnabilityProbe`, `_replace_map_body`, `_replace_filter_condition` (SP64)
+- `hpm_fractal_node/experiments/experiment_meta_strategy_controller.py` — provides `MetaAwareAgent`, `MetaStrategyController`, `CountingOracle`, `SolveRecord` (SP63)
+- `hpm_fractal_node/experiments/experiment_unified_perception_action.py` — provides `ASTRenderer`, `EmpiricalOracle`, `PythonExecutor`, constants
+- `hfn/hfn.py`, `hfn/forest.py`, `hfn/observer.py`, `hfn/retriever.py`, `hfn/evaluator.py`
+
+# Source 5: README_closed_loop.md
+# Experiment 7: Closed-Loop Learning (World Model Refinement)
+
+**Script:** `experiment_closed_loop.py`
+
+## Objective
+To validate the fundamental HPM cycle: `observe → explain → fail → create → re-observe`. This experiment tests the system's ability to refine its world model over time without explicit supervision or task-specific reasoning scaffolds, tracking residual surprise and structural complexity over continuous observation epochs.
+
+## Setup
+- **Curriculum:** A sequence of 5 distinct, sharp Gaussian patterns (100D vectors with a strong localized signal).
+- **Environment:** A single `Observer` processing the curriculum over 10 epochs.
+- **Configurations:** 
+  - `tau=1.0` (Surprise threshold)
+  - `residual_surprise_threshold=1.5`
+  - `adaptive_compression=True`
+  - `compression_cooccurrence_threshold=2`
+
+## Results & Analysis
+The experiment successfully demonstrated the classic "S-curve" of learning and autonomous model refinement:
+
+1. **Discovery Phase (Epochs 1-6):** The system encountered novel patterns, yielding high residual surprise. It rapidly expanded its hypothesis space, creating new nodes (Forest size grew from 5 to 80 nodes).
+2. **Breakthrough (Epoch 7):** The structural search finally synthesized an arrangement of nodes that perfectly explained the curriculum. Residual surprise collapsed to **0.000000**.
+3. **Refinement & Compression (Epochs 8-10):** With the patterns fully explained, the system's adaptive compression dynamics engaged. Redundant, overlapping, and obsolete nodes were pruned and absorbed. The forest size shrank from a peak of 136 nodes down to a stable 106 nodes, while maintaining zero surprise.
+
+### Key Takeaway
+The HFN system actively improves its own world model. It creates structure to minimize surprise, and then compresses that structure to maximize efficiency, proving the core HPM tenet: learning is structural self-organization under pressure.
+
+# Source 6: README_compression_vs_memorisation.md
+# Compression vs Memorisation (Experiment 1)
+
+This experiment checks whether HFN naturally discovers compositional structure from a repeated sequence.
+
+## Setup
+
+Phase 1 stream:
+
+```
+A B A B A B ...
+```
+
+Phase 2 stream:
+
+```
+A B C A B C ...
+```
+
+The experiment feeds composite observations using a sliding window so that A and B (and later A, B, C) co-occur in the same explanation pass, enabling co-occurrence compression.
+
+## Expected progression
+
+- Create and reinforce leaves `A`, `B`, `C`
+- Compress repeated co-occurrence into `AB`
+- Reuse `AB` in later explanations
+- Compress `AB` with `C` into `ABC` (directly or via AB + C)
+
+## What we measure
+
+- node count over time
+- first step when `AB` appears
+- first step when `ABC` appears
+- reuse rate of `AB` and `ABC` in explanation trees
+
+## Failure modes
+
+- **No compression**: leaves dominate, composites never appear
+- **Over-compression**: composite appears too early and dominates with little reuse stability
+- **Instability**: repeated create/compress cycles cause oscillating node counts
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_compression_vs_memorisation.py
+```
+
+# Source 7: README_developmental_cognitive_system.md
+# Experiment 20: Developmental Cognitive System (HFN)
+
+## Objective
+Validate the integration of structured knowledge accumulation over an evolving curriculum. The experiment tests if the HFN agent can build **true compositional program graphs** (nested trees) in semantic space and render them into executable code.
+
+## Background: "Code is Rendered from Structure"
+This experiment implements the core HPM philosophy: **intelligence lies in building nested structure, not generating strings.** 
+1. **HFN**: Acts as a "compiler front-end" that constructs a **nested binary tree** of semantic operations via hierarchical folding.
+2. **CodeRenderer**: A recursive tree-walker that translates structural concepts into valid Python syntax sequentially.
+3. **Chunking**: Successfully executed plans are bundled into new, permanent composite nodes. These "chunks" become reusable priors, turning multi-step reasoning into single-step retrieval.
+
+## Setup
+- **Domain**: Semantic Program Space.
+- **State Representation**: 2D vector `[AccumulatorValue, ReturnedFlag]`.
+- **Action Space**: Structural primitives (`CONST_1`, `CONST_5`, `VAR_INP`, `OP_ADD`, `RETURN`).
+- **Curriculum**: 
+    - `return_constant_1`: Master base constants.
+    - `return_constant_5`: Generalize constants.
+    - `return_input`: Master variables.
+    - `return_2`: Master composition (`CONST_1` + `OP_ADD` + `RETURN`).
+
+## Results
+The agent successfully demonstrated hierarchical developmental growth:
+- **Hierarchical Folding**: Transitioned from flat sequences to nested trees (e.g., `((CONST_1 -> OP_ADD) -> RETURN)`).
+- **Abstraction Discovery**: Created 4+ reusable "Chunks" (composite nodes) during the curriculum.
+- **Mastery**: Achieved 100% success across the curriculum, including multi-step composition.
+- **Persistence**: Built a stable, expanding prior library that reduced planning depth for future tasks.
+
+## Metrics Summary
+| Step | Task | Success | Abstraction Discovered |
+|---|---|---|---|
+| 1 | `return_constant_1` | True | `compose(CONST_1+RETURN)` |
+| 10 | `return_2` | True | (Compositional Mastery) |
+| 14 | `return_input` | True | `compose(VAR_INP+RETURN)` |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_developmental_cognitive_system.py
+```
+
+# Source 8: README_generative_forward_model.md
+# SP62: Experiment 46 — Generative Forward Model
+
+## Overview
+
+Demonstrates **HPM Level 4: Generative Rules / Mental Simulation**.
+
+The HPM framework defines L4 as the ability to manipulate higher-level patterns in loosely decoupled ways — running simulated scenarios, evaluating options, and updating beliefs without immediate dependence on external feedback.
+
+SP61 (Experiment 45) demonstrated L1-L3, but every planning step called `PythonExecutor` — the agent was fully externally-grounded. SP62 adds L4 by building a `StateTransitionModel`: a learned forward model that predicts 20D oracle state vectors from node sequences **without executing any code**. Planning (Phase 5) navigates over predicted states; the oracle is called only at the end to verify.
+
+The key result: **0 oracle calls during BFS navigation** for the held-out MAP*2 task. The agent imagines the effect of each candidate plan and selects the one predicted to match the goal state, then verifies once.
+
+## Success Conditions (all three pass)
+
+| Condition | Criterion | Result |
+|-----------|-----------|--------|
+| Phase 5: L4 Mental Simulation | oracle_calls_during_search == 0 AND solution correct | PASS |
+| Phase 6: Forward model accuracy | MAE < 0.15 on STRUCT_DIMS | PASS (MAE = 0.000) |
+| Overall | Both Phase 5 and Phase 6 pass | PASS: "[SUCCESS] SP62 Generative Forward Model — HPM L4 Achieved!" |
+
+## Curriculum
+
+### Phases 1-4: Primitive and Schema Acquisition (with Transition Recording)
+
+Phases 1-4 are identical in task structure to SP61, but each solved path additionally records per-step state transitions that populate the `StateTransitionModel`.
+
+#### Phase 1: Primitive Acquisition
+Three scalar tasks solved by direct enumeration over perceptual ops. Each solution is registered as a macro AND its step-by-step oracle states are recorded as per-node deltas.
+
+- `add_1`: `x += 1` (VAR_INP + percept_op_0)
+- `mul_2`: `x *= 2` (VAR_INP + prior_rule_OP_MUL2)
+- `sub_1`: `x += -1` (VAR_INP + percept_op_2)
+
+#### Phase 2: MAP Schema Discovery (MAP+1)
+BFS over scaffold-restricted candidates discovers the 6-step MAP+1 program:
+```
+VAR_INP → LIST_INIT → FOR_LOOP → ITEM_ACCESS → percept_op_0(+1) → LIST_APPEND
+```
+Registered as `macro(MAP_plus1)` with 6 constituent nodes. Transitions recorded.
+
+#### Phase 3: MAP Transfer via Decomposition (MAP*2)
+`_macro_decompose_search()` substitutes `percept_op_0` (+1) with `prior_rule_OP_MUL2` (*2) to yield MAP*2 at depth 2. Registered as `macro(MAP_mul2)`. Transitions recorded.
+
+#### Phase 4: FILTER Schema Discovery
+Substituting `percept_op_0` with `prior_rule_COND_IS_POSITIVE` produces a FILTER program. Registered as `macro(FILTER_pos)`. Transitions recorded.
+
+After Phase 4, the forward model knows per-node deltas for all distinct nodes across the training paths.
+
+### Phase 5: Imaginative Planning (L4 Demonstration)
+
+**Task**: MAP*2 on held-out unseen inputs `[[2,4,6],[1,3,5]]` → `[[4,8,12],[2,6,10]]`.
+
+The agent already has `macro(MAP_mul2)` from Phase 3. The goal state is computed from that macro's rendered code on the held-out inputs (one pre-BFS oracle call for goal setup — not a search call).
+
+**Imaginative BFS** then navigates:
+1. Starts from the baseline state (`pass`)
+2. At each step, calls `forward_model.predict(state, op)` — no oracle, no code execution
+3. Distances are computed over `STRUCT_DIMS` only (structural flags, not data-dependent content)
+4. All paths predicted within the distance threshold are collected as candidates
+5. After BFS completes, candidates are verified in order by calling the oracle once per candidate
+
+**Phase 5 result**:
+- BFS finds two candidates within threshold: `macro(MAP_plus1)` and `macro(MAP_mul2)`
+- Verification tries MAP_plus1 first → fails oracle check
+- Verification tries MAP_mul2 → succeeds
+- Oracle calls during BFS navigation: **0**
+- Oracle calls for verification: **2** (one failed, one success)
+
+### Phase 6: Forward Model Accuracy Report
+
+Evaluates mean absolute error (MAE) between forward model predictions and true oracle states, restricted to `STRUCT_DIMS`.
+
+**Phase 6 result**: MAE = **0.000** across all training paths on structural dimensions.
+
+## Architecture
+
+### StateTransitionModel
+
+A delta-based forward model that learns from observed execution paths.
+
+**Training** (`record_path`): For each solved path of length k, the oracle is called at every prefix (k+1 calls total). The per-step delta `state[i+1] - state[i]` is stored per `node_id`. Multiple deltas for the same node are averaged at prediction time.
+
+**Prediction** (`predict`): Returns `current_state + mean_delta` for the given node. For macro nodes, prediction is **recursive** — the model steps through each constituent node in sequence, composing their deltas.
+
+**Accuracy** (`prediction_error`): Mean absolute error of `predict_path(start, path)` vs the true final oracle state.
+
+### ImaginativePlanner
+
+Extends `InducedSchemaAgent` (SP61) with:
+
+1. **`_record_transitions(path, inputs)`** — Step-executes a solved path to collect per-node state transitions for the forward model. Called automatically after each macro registration during Phases 1-4.
+
+2. **`_imaginative_bfs(inputs, outputs, goal_state)`** — BFS over forward-model-predicted states. No oracle calls inside the search loop. Returns all candidate paths predicted within the structural distance threshold, sorted by predicted distance.
+
+3. **`imagine_and_verify(inputs, outputs, goal_state)`** — Calls `_imaginative_bfs`, then verifies each candidate in order with oracle calls only at verification. Returns the first candidate whose execution output matches the expected outputs.
+
+### Structural Dimensions (STRUCT_DIMS)
+
+```python
+STRUCT_DIMS = [0] + list(range(10, 17))
+```
+
+The 20D oracle state vector mixes code-structure flags with data-dependent content statistics. Only structural dims are used for BFS navigation and accuracy evaluation:
+
+| Dims | Description | Predictable? |
+|------|-------------|-------------|
+| 0 | valid (execution succeeded) | Yes — structural |
+| 1-9 | is_list, avg_length, content stats (mean/min/max/first/last), has_mutation, is_const | No — data-dependent |
+| 10-16 | for_loop, list_append, list_init, item_access, var_inp, list_type_match, op_mul2 | Yes — code-structure flags |
+| 17-19 | (additional dims) | Excluded |
+
+Content statistics (dims 1-9) vary with input values and produce noise when trained across both scalar and list paths (0.5 averaging). Code-structure flags (dims 10-16) transition exactly once when the corresponding op is applied, making them reliably predictable regardless of input type.
+
+## Key Design Decisions
+
+**STRUCT_DIMS excludes data-dependent dims**: Content statistics depend on the actual values in the input lists, not just the program structure. A forward model trained on multiple tasks cannot predict them reliably. Restricting distance computation to structural flags ensures that BFS navigation is grounded in what the model actually knows.
+
+**Dedup by path identity, not predicted state**: The BFS de-duplicates by the tuple of node IDs in the path, not by the predicted state vector. This ensures that macros with structurally similar predicted states (e.g., MAP_plus1 and MAP_mul2 both predict `for_loop=1, list_append=1`) are all evaluated as candidates rather than the first one shadowing the rest.
+
+**imagine_and_verify returns all threshold candidates**: The method collects every path predicted within the distance threshold, sorts by distance, and verifies each in turn. This tolerates forward model imprecision: if the closest predicted match fails verification, the next candidate is tried.
+
+**Macro prediction is recursive through constituents**: When the forward model encounters a macro node, it does not use a stored delta for the macro as a whole. Instead it recurses through the macro's constituent nodes, composing their individual deltas. This means macro-level prediction accuracy comes for free from the per-primitive delta learning done in Phases 1-4.
+
+**Goal state from macro's own rendered code**: The goal state for Phase 5 is computed by running the actual ASTRenderer-generated MAP*2 code (from `macro(MAP_mul2).inputs`) on the held-out inputs. This ensures structural flags (dims 10-16) match exactly what the forward model was trained on, so that the predicted state and goal state are on the same representational footing.
+
+## HPM Principles Demonstrated
+
+| HPM Component | Implementation |
+|---------------|----------------|
+| Pattern substrate | HFN macro nodes in Forest (Polygraph); StateTransitionModel delta table |
+| Pattern dynamics | Delta accumulation per node from training paths; recursive macro prediction |
+| Pattern evaluator/gatekeeper | Structural distance threshold in imaginative BFS; oracle verification |
+| Pattern fields | Curriculum phases; STRUCT_DIMS restriction; held-out inputs for generalization |
+| L1: Sensory regularities | Grounded perceptual ops (+1, *2, -1) learned from scalar execution |
+| L2: Latent structural representations | MAP/FILTER macro schemas from Phases 2-4 |
+| L3: Relational rules | meta_list_iteration prefix (common structure across MAP and FILTER) |
+| L4: Generative rules | Forward model predicts state from node sequences; BFS plans without oracle |
+| Transfer | Macro reuse from training tasks to held-out inputs; 0 oracle calls during navigation |
+
+## Running
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_generative_forward_model.py
+```
+
+Expected output includes:
+```
+[SUCCESS P5] L4 Mental Simulation demonstrated — 0 oracle calls during search
+[SUCCESS P6] Forward model quantitatively accurate
+[SUCCESS] SP62 Generative Forward Model — HPM L4 Achieved!
+```
+
+## Dependencies
+
+- `hpm_fractal_node/experiments/experiment_induced_schema_library.py` — provides `InducedSchemaAgent` (SP61)
+- `hpm_fractal_node/experiments/experiment_unified_perception_action.py` — provides `ASTRenderer`, `EmpiricalOracle`, `PythonExecutor`, `SchemaTransferAgent`, constants
+- `hfn/hfn.py`, `hfn/forest.py`, `hfn/observer.py`, `hfn/retriever.py`, `hfn/evaluator.py`
+
+# Source 9: README_hierarchical_abstraction.md
+# Experiment 15: Hierarchical Abstraction Discovery
+
+**Script:** `experiment_hierarchical_abstraction.py`
+
+## Objective
+To validate the core claim of the Hierarchical Pattern Modelling (HPM) framework: that learning involves discovering structure across multiple levels of abstraction. This experiment tests whether the system autonomously builds a multi-layered Directed Acyclic Graph (DAG) and reuses lower-level concepts (compositional generalization) instead of memorizing patterns in flat clusters.
+
+## Setup
+- **Curriculum (Nested Structure):** 
+  - A synthetic dataset simulating linguistic composition:
+    - **L1 (Letters):** 10 base concepts.
+    - **L2 (Words):** 10 composite concepts, each being an average of two "letters".
+    - **L3 (Sentences):** 10 composite concepts, each being an average of two "words".
+- **Mechanism:** The `Observer` is fed the curriculum sequentially. We rely on its native **Co-occurrence Compression** dynamics to recognize recurring combinations and collapse them into parent nodes. 
+- **Analysis:** After processing, we analyze the topology of the resulting HFN `Forest`, checking for maximum depth and node reuse.
+
+## Results & Analysis
+The experiment was a **Success**, demonstrating autonomous hierarchical construction.
+
+1. **Layer Emergence:** The system correctly structured the 30 concepts into a tree with a **Maximum DAG Depth of 3 layers** (Letters $\rightarrow$ Words $\rightarrow$ Sentences).
+2. **Compositional Generalization:** Rather than memorizing 30 distinct flat clusters, the system connected the layers via parent-child edges. 
+3. **Node Reuse:** The average reuse rate was **1.35 parents per node**, with **12 highly reused nodes**. This proves that the system successfully reused the shared L1 (Letter) and L2 (Word) nodes to explain multiple different L3 (Sentence) observations, exactly matching the structure of the synthetic generator.
+
+### Key Takeaway
+The HFN system does not just cluster; it **composes**. By autonomously discovering hierarchies and reusing sub-components, the system achieves exponential efficiency in representation, satisfying the fundamental premise of the HPM theory.
+
+# Source 10: README_lexical_cross_domain_replay.md
+# `experiment_lexical_cross_domain_replay.py`
+
+## Summary
+Runs the WordNet-backed lexical forest through a lexical curriculum, then switches to code-like observations, and finally replays only the most useful seed observations before returning to the original lexical stream. This is the experiment that most directly probes cross-domain memory retention with selective replay.
+
+## What It Does
+- Builds or reuses the WordNet prior forest used by the other lexical experiments.
+- Runs seven persistent stages in sequence:
+  - `seed` with in-domain Peter Rabbit / repo text
+  - `stretch` with medium-difficulty OOD vocabulary
+  - `stretch_hard` with harder OOD vocabulary
+  - `pressure_shock` with an aggressively reduced hot cache and frequent sweeps
+  - `code_shift` with code-like observations derived from Python token categories
+  - `selective_replay` with only the seed observations attached to the highest-utility seed learned nodes
+  - `revisit_seed` by replaying the original seed batch after the cross-domain interference
+- Keeps the same forest and observer across the full sequence.
+- Reports coverage, surviving learned nodes, abstraction layers, and how many selected seed nodes survive the code shift and are reused in selective replay.
+
+## What It Aims To Achieve
+- Test whether a lexical memory can survive a domain switch without collapsing.
+- See whether a small targeted replay set can recover useful prior structure after interference.
+- Distinguish blunt full replay from selective replay of high-utility nodes.
+- Move closer to a lifelong-memory story where old knowledge can be retained, reused, and reinforced across tasks.
+
+## Observed Results
+- Smoke runs were small but the full run gave the real signal.
+- Full-run results:
+  - `seed`: `8` new learned nodes, `8` surviving, mean explaining layer `2.30`
+  - `stretch`: `9` new learned nodes, `9` surviving, mean explaining layer `2.79`
+  - `stretch_hard`: `12` new learned nodes, `12` surviving, mean explaining layer `2.92`
+  - `pressure_shock`: `7` new learned nodes, `7` surviving, mean explaining layer `3.19`
+  - `code_shift`: `11` new learned nodes, `11` surviving, mean explaining layer `2.68`
+  - `selective_replay`: `11` new learned nodes, `12` surviving, mean explaining layer `2.56`
+  - `revisit_seed`: `10` new learned nodes, `12` surviving, mean explaining layer `2.40`
+- Coverage stayed at `100%` throughout.
+- The code shift created measurable cross-domain interference, with `112` learned explanations in that stage.
+- The selected replay used `18` replay observations, kept `1` of the selected seed nodes alive after the code shift, and directly reused `1` of the selected seed nodes.
+- The final revisit still returned close to the seed layer and added `+22` learned explanations versus the seed stage.
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_cross_domain_replay.py
+```
+
+## Main Signals
+- Whether seed-learned nodes survive the pressure and code-shift stages.
+- Whether code-like observations cause interference or fresh structure.
+- Whether selective replay recovers the chosen seed nodes better than a blunt full replay.
+- Whether the final lexical revisit benefits from the cross-domain replay sequence.
+
+## Insights
+- This is the strongest multi-task memory test in the lexical suite so far.
+- The code stage does not erase the lexical substrate, but it does shift the explanation structure enough to justify replay.
+- Selective replay is meaningful: it reuses at least some of the chosen seed nodes after code interference.
+- The final revisit shows the forest can still come back to the original lexical stream after a domain switch and pressure stage.
+- This is much closer to a reusable memory substrate than single-domain stretching alone.
+
+## Issues / Limits
+- The selective replay set is still small, so the experiment is more of a proof of concept than a full continual-learning benchmark.
+- The code-like domain is synthetic and still encoded through the lexical model, so it is a cross-domain stress test rather than a fully separate code encoder.
+- Coverage remains perfect, so the strongest signal is in learned-node structure and reuse rather than accuracy failure.
+- A future version should use a truly different encoder or domain-specific observation pipeline if we want a harder multi-modal test.
+
+## Notes
+- Uses the same diagonal-sigma HFN setup as the other lexical experiments.
+- Reuses the curriculum and pressure helpers for the lexical stages.
+- Best interpreted as the bridge from retention/forgetting tests to selective, cross-domain replay under continual learning.
+
+# Source 11: README_lexical_pressure_revisit.md
+# `experiment_lexical_pressure_revisit.py`
+
+## Summary
+Runs the same WordNet-backed forest through a lexical curriculum, then applies an explicit hot-cache shock before replaying the original seed stream. This is the experiment that most directly tests whether HFN/HPM can survive forgetting pressure and still recover earlier structure.
+
+## What It Does
+- Builds or reuses the WordNet prior forest used by the other lexical experiments.
+- Runs five persistent stages in sequence:
+  - `seed` with in-domain Peter Rabbit / repo text
+  - `stretch` with medium-difficulty OOD vocabulary
+  - `stretch_hard` with harder OOD vocabulary
+  - `pressure_shock` with an aggressively reduced hot cache and frequent sweeps
+  - `revisit_seed` by replaying the original seed batch after the shock
+- Temporarily shrinks the hot cache and increases sweep frequency only for the pressure stage.
+- Reports stage-by-stage changes in coverage, surviving learned nodes, abstraction layer, and the number of seed learned nodes still present after the shock.
+
+## What It Aims To Achieve
+- Force actual forgetting pressure instead of just harder inputs.
+- See whether the revisit stage can still recover earlier concepts after the forest has been squeezed.
+- Test whether learned nodes survive as cold nodes and can be reused after the shock is lifted.
+- Push the lexical story closer to continual learning under memory constraints.
+
+## Observed Results
+- Smoke runs were too small to trigger much retention loss.
+- Full-run results are more informative:
+  - `seed`: `12` new learned nodes, `12` surviving, mean explaining layer `2.25`
+  - `stretch`: `9` new learned nodes, `10` surviving, mean explaining layer `2.75`
+  - `stretch_hard`: `9` new learned nodes, `10` surviving, mean explaining layer `2.94`
+  - `pressure_shock`: `9` new learned nodes, `9` surviving, mean explaining layer `3.11`
+  - `revisit_seed`: `9` new learned nodes, `10` surviving, mean explaining layer `2.41`
+- Coverage stayed at `100%` throughout.
+- The pressure stage reduced the retained seed-learned nodes to `2` before replay.
+- The replay reused `2` of those seed-learned nodes and still produced `+27` more learned explanations than the seed stage.
+- The replay’s mean explaining layer rose by `+0.16` versus seed, so the revisit was not a blind reset.
+
+## How To Run
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_lexical_pressure_revisit.py
+```
+
+## Main Signals
+- How many seed-learned nodes survive the pressure stage.
+- Whether the replay stage reuses cold nodes or rebuilds new structure.
+- Whether the replay maintains coverage while operating under less cached memory.
+- The delta between the seed stage and the final replay stage in learned explanations and abstraction layer.
+
+## Insights
+- This is the first lexical experiment that explicitly adds memory pressure instead of only harder data.
+- The shock stage does create real forgetting pressure: only a small subset of seed-learned nodes survived the full stress run.
+- The replay stage can still recover earlier material and reuse some surviving nodes, which is the behavior you want if HFN is to function as a memory substrate.
+- The model is still better at stretching than consolidating, but this experiment moves the story closer to actual retention under resource pressure.
+
+## Issues / Limits
+- The replay still reuses only a small number of seed-learned nodes, even under pressure.
+- Coverage remains perfect, so the signal is in reuse and layer shifts rather than outright failure.
+- The pressure settings are intentionally blunt and may overfit the experiment to hot-cache churn.
+- A more selective forgetting regime may be needed to distinguish durable semantic memory from accidental retention.
+
+## Notes
+- Uses the same diagonal-sigma HFN setup as the other lexical experiments.
+- Reuses the curriculum helpers for the in-domain and out-of-domain batches.
+- Best interpreted as the bridge from curriculum learning and consolidation to explicit memory-pressure testing.
+
+# Source 12: README_lifecycle.md
+# Multi-Observer Lifecycle Experiment (Multi-Process)
+
+This experiment evaluates the lifecycle and orchestration of multiple HFN observers in a parallelized, multi-process environment. It compares three different architectural strategies for managing cross-domain knowledge (Math and Text) across a staged workload.
+
+## Overview
+
+The experiment uses a **Common Latent Space** (216D) where specific slices are allocated to different domains:
+- **Math Slice**: Dimensions 0–108 (109D)
+- **Text Slice**: Dimensions 109–215 (107D)
+
+By embedding domain-specific observations into this shared space, we can test how a system handles "pure" observations (only one slice active) and "mixed" observations (both slices active, representing a cross-domain task).
+
+## Strategies Compared
+
+1.  **Monolithic (Baseline)**: A single, large HFN observer that attempts to model all domains in one forest. It stays "hot" throughout the entire experiment.
+2.  **Specialists**: Separate dedicated processes for Math and Text. Each models only its slice of the world. In mixed stages, both processes observe the same input, each explaining the part it understands.
+3.  **Specialists + Mixed**: Same as Specialists, but with an additional **on-demand Mixed Worker**. When a mixed stage is detected, a new process is spawned, and its state is initialized by "cloning" the active nodes from the specialists.
+
+## Multi-Process Architecture
+
+To achieve true multi-core utilization for the CPU-bound HFN observation logic, the experiment uses a **Controller-Worker** model:
+
+- **HFNWorker**: Each observer (Math, Text, Mixed) runs in its own dedicated Python process. It maintains its own `TieredForest` (RAM/Disk tiered storage) and `Observer` instance.
+- **MultiProcessController**: Orchestrates the experiment. It routes batches of observations to the relevant workers via `multiprocessing.Queue`.
+- **Batching**: Observations are sent in batches (default size 20) to minimize Inter-Process Communication (IPC) overhead.
+
+## Experiment Stages
+
+The experiment runs through a 6-stage lifecycle:
+1.  `math_seed`: Initial math training.
+2.  `text_seed`: Initial text training.
+3.  `math_text_mix`: First exposure to combined math+text observations.
+4.  `math_revisit`: Return to pure math to check for retention/interference.
+5.  `text_revisit`: Return to pure text.
+6.  `math_text_mix_revisit`: Final test of cross-domain explanation.
+
+## Key Insights
+
+- **True Parallelism**: By using separate processes, the system bypasses the Python Global Interpreter Lock (GIL), allowing each observer to utilize a full CPU core simultaneously during mixed stages.
+- **100% Coverage**: The parallel "Specialists" approach maintains 100% explanation coverage. The system effectively "tiles" the common latent space, with each specialist claiming the dimensions it understands.
+- **Memory Isolation**: Offloading the `TieredForest` to worker processes keeps the main controller process lean (low RSS), allowing for very large total world models (1000+ nodes) distributed across the system.
+- **State Transfer**: The experiment proves that HFN state (nodes and edges) can be successfully transferred between processes to spawn "Mixed" specialists on-demand, enabling dynamic architectural scaling.
+
+## Issues & Bottlenecks
+
+- **IPC Overhead**: The primary performance bottleneck is the cost of serializing (Pickling) 216D vectors and HFN node objects across process boundaries. For small batches, this overhead can make the multi-process version slower than a serial monolithic version.
+- **Mixed Worker Initialization**: Cloning nodes from multiple specialists into a new mixed worker requires a full forest sync, which is a high-latency event.
+- **Coordination Complexity**: Managing the lifecycle (start, stats, stop) of multiple processes adds architectural complexity compared to a single-threaded loop.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_multi_observer_lifecycle.py
+```
+
+# Source 13: README_math.md
+# Math Arithmetic Experiment — Algebraic Rule Discovery
+
+## Overview
+
+Tests whether the HFN Observer can discover mathematical structure — algebraic laws,
+divisibility relationships, number-class properties, and modular arithmetic — purely from
+geometric compression of arithmetic observation vectors. No semantic flags are given to the
+agent. Every rule it finds must emerge from the geometry of the observation stream.
+
+---
+
+## Design
+
+### Observation Encoding
+
+Each observation is a 4-tuple `(left, op, right, result)` encoded as concatenated one-hot
+vectors in **R^109**:
+
+```
+dims  0-9:    left operand   one-hot over 0-9
+dims 10-16:   operator       one-hot over 7 operations
+dims 17-26:   right operand  one-hot over 0-9
+dims 27-108:  result         one-hot over 0-81
+```
+
+**Operations:** `+`, `-`, `*`, `//`, `mod`, `gcd`, `pow`
+
+Constraints:
+- Subtraction: only generated when `left >= right` (non-negative results)
+- Division/mod: `right != 0`
+- Pow: filtered to `result <= 81`
+
+This yields **586 unique valid observations** — all arithmetic facts in the 0-9 digit
+system. The experiment samples from these (with replacement) to generate the training stream.
+
+No property flags, no category labels, no external lookups. The agent sees only raw
+(left, op, right, result) tuples.
+
+### Prior Library (306 priors across 6 levels)
+
+The prior library gives the agent pre-structured knowledge about arithmetic, mirroring HPM's
+claim that learners don't start from a blank slate. Priors are permanent (protected from
+absorption) and each has its mu set to the centroid of the observations it covers.
+
+| Level | Count | What |
+|---|---|---|
+| L1 — Symbols | 33 | digit_0-9, op_*, result_0-9 |
+| L2 — Classes | 47 | number-class properties of operands and results |
+| L3 — Templates | 81 | expression-shape patterns per operator (12 variants × 7 ops) |
+| L4 — Relations | 42 | mathematical relationships between operands/results |
+| L5 — Rules | 57 | algebraic identity and arithmetic law instances |
+| L6 — Structures | 43 | modular groups, fields, lattices, power towers |
+| **Total** | **306** | |
+
+Note: Some filter combinations produce no matching observations (e.g. congruence mod 7 with
+remainder 6 doesn't appear in 0-9 arithmetic) — those priors are silently dropped, giving
+306 rather than the design target of ~500.
+
+### Evaluation
+
+Category labels are assigned **after** observation, purely for measuring purity. The agent
+never sees them. 23 categories:
+
+`identity_add`, `identity_mul`, `absorption_mul`, `identity_pow_zero`, `identity_pow_one`,
+`identity_div_one`, `exact_divisibility`, `gcd_self`, `gcd_with_zero`, `gcd_prime`,
+`carry`, `no_carry`, `sub_self`, `subtraction`, `prime_result`, `perfect_power`,
+`power_general`, `mul_large`, `mul_small`, `floor_div`, `mod_general`, `gcd_general`,
+`general`
+
+**Random baseline: 1/23 ≈ 0.043**
+
+---
+
+## Results (4 passes, 5000 observations/pass)
+
+### Coverage
+
+```
+Prior nodes explained:   15461 (77.3%)
+Learned nodes explained:  4539 (22.7%)
+Total attributed:        20000 (100.0%)
+Learned node count:      2360
+```
+
+100% explanation rate across all 4 passes — the 306 priors cover the complete observation
+space. The prior library has enough density to ensure every arithmetic fact is near at least
+one prior centroid.
+
+### Top Prior Nodes
+
+The highest-coverage prior nodes reveal which regions of arithmetic are most observation-dense:
+
+| Prior | n | Purity | Category |
+|---|---|---|---|
+| `struct_mul_monoid_large` | 1418 | 1.00 | mul_large |
+| `rule_self_div` | 949 | 0.98 | floor_div |
+| `rule_gcd_coprime` | 896 | 1.00 | gcd_general |
+| `struct_add_overflow_09` | 890 | 1.00 | carry |
+| `rule_sub_reduce` | 519 | 1.00 | subtraction |
+| `rule_id_sub_zero` | 317 | 1.00 | subtraction |
+| `rule_self_sub` | 307 | 1.00 | sub_self |
+| `rule_id_div_one` | 289 | 1.00 | identity_div_one |
+| `rule_id_mul_left` | 265 | 1.00 | identity_mul |
+| `rule_id_pow_one` | 237 | 1.00 | identity_pow_one |
+| `struct_field_F7_add` | 234 | 0.93 | no_carry |
+
+Key finding: **all identity and absorption rule priors achieve purity 1.00** — the law
+priors are perfectly specific to their intended mathematical categories.
+
+### Learned Node Purity
+
+```
+Category purity:  mean=0.793   max=1.000
+Random baseline:  0.043        (1/23)
+Nodes > 2x baseline: 14/14    (all stable learned nodes)
+```
+
+**18× above random baseline.** Every stable learned node (those observed ≥5 times) beats
+2× the random baseline.
+
+### Notable Learned Nodes
+
+**`b36cff33` — Perfect power cluster**
+- purity=1.000, op=pow, n=38
+- Nearest prior: `tmpl_pow_both_even` (dist=0.701)
+- The agent discovered a geometric cluster corresponding to `perfect_power` without any label
+
+**`compressed(cong_mod, cong_mod)` — Modular prime region**
+- purity=0.724, op=mod, n=29
+- Nearest prior: `cong_mod7_rem4`
+- Modular remainder patterns that correlate with prime results — found unsupervised
+
+**`compressed(compress, compress)` — Non-divisibility chain**
+- n=28, nearest prior: `not_divides`
+- Compression of mod observations where the remainder is non-zero
+
+**`compressed(tmpl_gcd, tmpl_gcd)` — GCD-zero identity**
+- purity=1.000, op=gcd, n=7
+- Discovered the `gcd(a,0)=a` identity geometrically
+
+**`compressed(struct_p, tmpl_pow)` — Power structure**
+- purity=0.750, op=pow, n=4
+- Bridge between a structural prior and an expression template
+
+### Rule Discovery Summary
+
+Learned nodes attracted observations across **15 of 23 categories**, with the geometrically
+richest regions (where priors don't fully cover) drawing the most learned-node activity:
+
+| Category | Learned-node observations |
+|---|---|
+| floor_div | 740 |
+| prime_result | 676 |
+| no_carry | 464 |
+| mod_general | 452 |
+| subtraction | 338 |
+| gcd_self | 264 |
+| gcd_with_zero | 245 |
+| gcd_general | 229 |
+| absorption_mul | 214 |
+| mul_large | 176 |
+
+The agent is most actively learning around **floor division** and **prime results** — the
+two categories where the prior library has least density relative to the number of matching
+observations.
+
+### Fractal Diagnostics
+
+```
+Active learned nodes:       236
+Absorbed nodes:             19502
+Hausdorff(learned, priors): 0.9992
+```
+
+236 learned nodes survived absorption (from 2360 total created) — the rest were absorbed as
+they fell within the Hausdorff threshold of existing nodes. The Hausdorff distance of ~1.0
+indicates learned nodes are finding gaps in the prior cloud at a consistent scale, not
+clustering tightly around any single prior.
+
+### Abstraction Candidates
+
+```
+depth >= 2:           0
+cross-category (>=2): 11
+stable:               37
+```
+
+11 nodes attracted observations from multiple mathematical categories — these are the most
+interesting candidates for higher-order abstractions. Depth≥2 is 0 because the BFS from
+prior IDs doesn't yet reach the learned compression nodes — this is a measurement artefact,
+not a structural claim.
+
+---
+
+## What This Means for HPM
+
+The math experiment demonstrates three things:
+
+**1. Pure geometry encodes mathematical law.** The prior library has no labels — just
+mu vectors computed from observation centroids. Yet identity, absorption, and modular
+arithmetic laws achieve purity 1.0. The geometry of the one-hot encoding is enough to
+separate mathematical laws cleanly in R^109.
+
+**2. The agent discovers structure not given to it.** The top learned node is a
+`perfect_power` cluster not directly encoded as a prior. The agent formed this by geometric
+compression of repeated pow observations — it found the mathematical structure purely through
+the absorption/compression dynamic.
+
+**3. The prior library shapes the learning frontier.** Learned nodes concentrated in
+`floor_div` and `prime_result` — exactly the categories with the sparsest prior coverage.
+The agent's novelty signal is guided by the gaps in what it already knows, which is the
+HPM prediction for a well-seeded world model.
+
+---
+
+## Running the Experiment
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_math.py
+```
+
+Runtime: ~2-3 minutes (4 passes × 5000 observations, no LLM).
+
+**Configuration** (top of `experiment_math.py`):
+
+```python
+N_SAMPLES = 5000    # observations per pass
+N_PASSES = 4        # number of passes
+SEED = 42
+TAU_SIGMA = 1.0     # tau calibration sigma scale
+TAU_MARGIN = 5.0    # tau calibration margin
+```
+
+**Absorption parameters** (in Observer constructor):
+
+```python
+hausdorff_absorption_threshold = 0.35     # geometric absorption distance
+hausdorff_absorption_weight_floor = 0.4   # only absorb nodes with weight < 0.4
+absorption_miss_threshold = 20            # consecutive misses before absorption
+multifractal_guided_absorption = False    # disabled to allow injected nodes to survive
+```
+
+---
+
+## Files
+
+```
+hpm_fractal_node/math/
+    __init__.py
+    math_loader.py          # encoding, observation generation, category labels
+    math_world_model.py     # 306-prior library across 6 abstraction levels
+
+hpm_fractal_node/experiments/
+    experiment_math.py      # main experiment script
+```
+
+---
+
+## Extending This Experiment
+
+**More digits (0-99):** Expand `D_LEFT`, `D_RIGHT` to 100 dims each and `D_RESULT` to
+cover products up to 9801. D would grow to ~9810 — the sigma-diag optimisation described
+in `hfn/README_priors.md` becomes essential at this scale.
+
+**Adding LLM gap-filling:** Replace `gap_query_threshold=None` with a threshold (e.g. 0.05)
+and wire in a `QueryLLM` instance. The LLM could be asked to name the mathematical property
+of an unknown arithmetic pattern, bridging the agent's geometric gaps with symbolic
+knowledge.
+
+**Algebraic structure discovery:** Run more passes (N_PASSES=10+) and lower
+`hausdorff_absorption_threshold` to allow more learned nodes to stabilise. Look for
+depth≥2 nodes that compress multiple L5 rule priors — these would be candidates for
+L6-level algebraic structure discovery.
+
+**Negative numbers:** Extend subtraction to allow `left < right` by adding a sign bit
+to the encoding. This introduces additive inverses and the full integer group structure,
+which should be discoverable as a set of learned compression nodes bridging `+` and `-`.
+
+# Source 14: README_meta_hfn.md
+# Experiment 8: Meta-HFN Utilisation (Adaptation & Substrate Efficiency)
+
+**Script:** `experiment_meta_hfn.py`
+
+## Objective
+To test if self-representation (the `meta_forest`) accelerates adaptation to concept drift and improves structural self-organization without explicit supervision. The experiment tests learning under pressure to see if an agent that manages its own state can outperform a "dumb" accumulator.
+
+## Setup
+- **Curriculum:** A sequence of 3 structured patterns in Phase A, followed by a sudden shift to 3 completely different patterns in Phase B.
+- **Environment:** Two agents competing under "Resource Pressure" (a strict `budget=2` for expansion).
+- **Configurations:** 
+  - **Agent 1 (Meta-Active):** Full HFN dynamics, tracking hit/miss counts, weight decay, and active pruning/absorption of obsolete nodes.
+  - **Agent 2 (Ablated):** Accumulator only (disabled weight updates, disabled pruning, disabled absorption).
+
+## Results & Analysis
+The experiment yielded a resounding success, proving the critical role of self-representation.
+
+1. **Phase A (Stabilization):** Both agents quickly matched the Phase A patterns. However, the Meta-Active agent continually refined its structure, while the Ablated agent grew indefinitely.
+2. **Phase B (The Shift):** Upon the introduction of completely new patterns, both agents spiked in surprise.
+3. **Recovery & Structural Efficiency:**
+   - **Ablated Agent:** Ended with **211 nodes**. With no mechanism to recognize overlap or obsolescence, it blindly accumulated Phase A and Phase B nodes, becoming slow and bloated.
+   - **Meta-Active Agent:** Ended with **97 nodes**. It pruned redundant Phase A nodes and aggressively absorbed overlapping structures. During the shift, its size grew to accommodate Phase B, then shrank again as it organized the new knowledge.
+4. **Complexity-Error Product:** A combined metric of efficiency (`Avg Surprise * Final Size`). The Meta-Active agent scored **~723**, while the Ablated agent scored **~1574**. The Meta-Active agent was over twice as efficient.
+
+### Key Takeaway
+Self-representation (the `meta_forest`) enables **Dynamic Structural Pruning**. The agent maintains a lean, efficient world model that adapts to change by actively discarding old knowledge that no longer explains the present. The system is structurally sovereign: it manages its own growth and decay based on environmental pressure.
+
+# Source 15: README_multi_agent_social.md
+# Experiment 16: Multi-Agent HFN Interaction (Social Learning)
+
+**Script:** `experiment_multi_agent_social.py`
+
+## Objective
+To evaluate whether the HFN system can support social learning and knowledge transfer between independent agents. This experiment tests if HFN representations are universally decipherable and transmissible, allowing sovereign agents to bootstrap their world models using "dreams" (generated observations) from other agents.
+
+## Setup
+- **Curriculum:** Two distinct pattern concepts:
+  - **Concept 1:** Localized in Dims 0-5.
+  - **Concept 2:** Localized in Dims 10-15.
+- **Agent Roles:**
+  - **Agent A (Solo):** Learns the full curriculum (C1 + C2) from raw data.
+  - **Agent B (Specialist 1):** Learns only Concept 1.
+  - **Agent C (Specialist 2):** Learns only Concept 2.
+- **Social Phase:** Agents B and C interact by broadcasting "dreams"—decoded concrete observations of their highest-weight structural nodes. They then perform **Social Refinement** by re-observing these dreams to integrate the foreign knowledge.
+- **Probe:** Specialists are tested on the domain they only saw via social exchange (e.g., Agent B is probed on Concept 2).
+
+## Results & Analysis
+The experiment was a **Success**, demonstrating effective cross-agent knowledge transfer.
+
+1. **Social Transfer Accuracy:** Both social agents reached a surprise level **< 1.0** on foreign domains (Agent B on C2: 0.94, Agent C on C1: 0.94). This proves they successfully integrated the structure of concepts they never saw in the raw data stream.
+2. **Dream-Driven Bootstrapping:** The use of the `Decoder` to synthesize "dreams" allowed agents to communicate their abstract structural knowledge as perceived data, which the receiving `Observer` could then process using its standard HFN dynamics.
+3. **Refinement Benefit:** Multi-epoch refinement during ingestion was critical for stabilizing social knowledge, allowing the recipient to find optimal co-occurrence and compression for foreign concepts.
+
+### Key Takeaway
+HFN knowledge is **transmissible**. Independent agents can parallelize the discovery of a world model and share their high-level abstractions instantly. This proves that HFN can support decentralized "Sovereign Clusters," where intelligence scales through communication and culture rather than being limited by individual experience.
+
+# Source 16: README_non_linear_synthesis.md
+# Experiment 24: Non-Linear Program Synthesis (Logic Forks)
+
+## Objective
+To validate the HFN architecture's ability to construct and render **non-linear graphs** containing conditional branches (if/else logic). This completes the core suite of structured programming primitives: Sequence, Iteration, and Selection.
+
+## Background: "Selection Logic"
+True programmatic reasoning requires the ability to fork execution based on a predicate. This experiment introduces **Predicate Nodes** (e.g., `COND_IS_EVEN`) and **Alternate Paths** (`BLOCK_ELSE`). The system must learn to nest these branches correctly within existing loop structures.
+
+## Setup
+- **Domain**: Semantic Program Space.
+- **State Representation**: 7D vector (Value, Returned, Length, TargetVal, Iterator, Init, Condition).
+- **The Conditional Primitives**:
+    - `COND_IS_EVEN`: Renders `if val % 2 == 0:` and increments indentation.
+    - `BLOCK_ELSE`: Renders `else:` and manages scope dedent/indent.
+- **The Tasks**:
+    - `filter_even`: `[1, 2, 3, 4] -> [2, 4]`. Requires a conditional filter inside a loop.
+    - `map_even_double_else_keep`: `[1, 2, 3, 4] -> [1, 4, 3, 8]`. Requires a full if/else logic fork.
+
+## Results
+The experiment demonstrated the robustness of the HFN structural decoding:
+- **Turing-Completeness**: By mastering Sequence, Iteration, and Selection, the HFN latent space is now functionally capable of representing any computable algorithm.
+- **Recursive Indentation**: The `CodeRenderer` successfully managed nested indentation levels for conditional blocks inside loops without manual formatting hints.
+- **Semantic Fidelity**: The rendered non-linear structures executed perfectly in the Python sandbox, producing the correct algorithmic behavior for both filtering and conditional mapping.
+
+## Metrics Summary
+| Task | Logical Type | Complexity | Status |
+|---|---|---|---|
+| `filter_even` | Conditional Filter | 7 Primitives | **SUCCESS** |
+| `map_even_double_else_keep` | Logic Fork (If/Else) | 10 Primitives | **SUCCESS** |
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_non_linear_synthesis.py
+```
+
+# Source 17: README_self_curiosity.md
+# Experiment 12: Self-Curiosity (Autonomous Learning)
+
+**Script:** `experiment_self_curiosity.py`
+
+## Objective
+To evaluate the HFN system's capacity for true autonomy by removing all external data streams. This experiment tests whether the system can drive its own learning trajectory through a continuous loop of generative exploration ("dreaming") and self-evaluation.
+
+## Setup
+- **Environment:** No external data stream. Initialized with only 2 orthogonal "Atomic" seed nodes.
+- **Mechanism:** An autonomous loop:
+  1. **Generate (Dream):** Randomly sample an existing node, add exploratory noise, and use the `Decoder` to synthesize a concrete observation.
+  2. **Observe (Perceive):** Feed the self-generated observation back into the `Observer`.
+  3. **Evaluate (Detect Surprise):** Measure the `residual_surprise`. High surprise indicates a structural gap or conflict exposed by the generation.
+  4. **Expand (Refine):** The `Observer` autonomously creates new nodes to account for the surprising new pattern.
+
+## Results & Analysis
+The experiment successfully demonstrated the capacity for **Autonomous Play**.
+
+1. **Self-Driven Growth:** Starting from only 2 nodes, the system autonomously discovered and integrated **36 new structural concepts** over 50 "dreams" without any human supervision.
+2. **Discovery via Surprise:** The system maintained high average self-surprise (32.1), consistently pushing into unexplored regions of its own manifold. Peak surprise events (up to 97.3) represent major structural "Aha!" moments where self-play exposed significant gaps.
+3. **Internal Consistency:** The `Observer` effectively filtered generative noise, retaining only stable structural discoveries. Native **Adaptive Compression** was observed merging redundant concepts even in the absence of external pressure.
+
+### Key Takeaway
+HFN is capable of **True Autonomy**. By combining its known rules in novel ways and evaluating the results, the system can independently map out the logical consequences of its own knowledge base. This "Play" dynamic allows the agent to autonomously broaden its worldview and discover new abstractions entirely from within.
+
+# Source 18: README_sovereign_decoder.md
+# Sovereign Decoder Experiment (SP23)
+
+This experiment evaluates the **Sovereign Decoder**, the generative (top-down) counterpart to the multi-process Sovereign AI architecture. It tests if the system can parallelize "Variance Collapse" across independent specialist processes, achieving **Stereo Action** (mixed-modal synthesis).
+
+## Multi-Process Generative Architecture
+
+The system uses a 3-process cluster coordinated by a Generative Governor:
+
+1. **L2_Narrative (The Planner)**: Operates in the domain of high-level rules and events. It holds abstract goals (high variance) that need resolving.
+2. **L1_Lexical (The Speaker)**: Operates in the domain of vocabulary tokens (Strings). Resolves abstract identity nodes into specific concrete tokens.
+3. **L1_Motor (The Actor)**: Operates in the domain of physical coordinates (1D or 2D). Resolves spatial/action nodes into specific numerical coordinates.
+
+## Task: "Say and Point"
+
+We test the system with a multi-modal goal: `Goal_Identify_Red` (Name the object and point to it).
+The Governor performs the following:
+1. **Unfolds** the goal into two sub-goals: `[SubGoal_Say]` and `[SubGoal_Point]`.
+2. **Dispatches** the sub-goals in parallel to the `L1_Lexical` and `L1_Motor` decoders.
+3. **Constraint Resolution**: Both sub-goals share a topological edge to a central `Concept_Red` node. The L1 decoders must use this topological constraint to filter their candidates, ensuring they both target the correct entity in their respective domains.
+4. **Synchronizes** the results into a mixed-modal execution script.
+
+## Key Insights
+
+- **Stereo Action**: Verified that a single complex goal can be decomposed and executed simultaneously by multiple sovereign domains.
+- **Cross-Domain Constraint Resolution**: Proved that topological edges (`REFERS_TO`, `LOCATED_AT`) can synchronize independent decoders without requiring a monolithic world model. The Lexical process outputs "red", and the Motor process outputs coordinate "2.0".
+- **Parallel Variance Collapse**: The experiment demonstrates that the Agnostic Decoder algorithm (`hfn/decoder.py`) is fully compatible with the multi-process worker architecture, enabling fast, asynchronous generation.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_sovereign_decoder.py
+```
+
+# Source 19: README_study_and_test.md
+# Sovereign Study-and-Test Experiment (SP29)
+
+This experiment evaluates the HPM AI's capacity for **Meta-Transfer Learning**. It tests if structural motifs learned during a "Study Phase" (exposure to a set of tasks) can be reused as ad-hoc priors to assist in a "Test Phase" (solving unseen tasks).
+
+## Architecture: Persistent Meta-Learning
+
+Unlike standard ARC solver experiments that reset between tasks, SP29 implements a persistent cognitive lifecycle across a 4-process cluster:
+
+1.  **Study Phase**: The system is exposed to the training examples of 10 "Study Tasks." It is allowed to learn and stabilize new HFN nodes representing emergent structural patterns from these tasks.
+2.  **Test Phase**: The system is given 10 unseen "Test Tasks." Crucially, the specialists retain all nodes learned during the Study Phase.
+3.  **Governor**: Tracks **Transfer Events**—instances where a node born during the Study Phase is retrieved and used as an "Explanation Winner" for a Test Task.
+
+## Key Insights: Node Genealogy
+
+- **Structural Persistence**: Proved that learned HFN motifs can persist across independent tasks, acting as a growing library of domain-specific experience.
+- **Transfer Detection**: The experiment recorded **15 Transfer Events** in a 10-task test run. This confirms that the system successfully identifies similarities between different ARC puzzles at the HFN level.
+- **Ad-hoc Priors**: By not resetting the forests, the system effectively "promotes" its successful learned nodes to the status of temporary priors, accelerating the induction of rules in the test phase.
+
+## Theoretical Impact
+
+This experiment demonstrates that HPM AI does not just learn *in* a task, it learns *across* tasks. The accumulation of structural motifs in the "Study Phase" creates a richer manifold for the "Test Phase," mirroring how humans build expertise by seeing many variations of a problem.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_study_and_test.py
+```
+
+# Source 20: README_thinking_arc_solver.md
+# Thinking ARC Solver Experiment (SP28)
+
+This experiment upgrades the Sovereign ARC Solver with a **Hypothesis Testing Loop** and expanded **30x30 Grid Support**. It transitions the system from "Pattern Matching" to "Iterative Reasoning."
+
+## Core Mechanism: The "Thinking" Loop
+
+Instead of producing a single guess, the system performs internal simulation:
+
+1.  **Top-K Induction**: The perceptual specialists return their top 3 candidates for each training example.
+2.  **Hypothesis Permutation**: The Governor generates a list of candidate rules based on the intersection of these winners.
+3.  **Internal Simulation**: For each rule, the **Spatial Decoder** attempts to transform a training input grid.
+4.  **Verification**: The Governor compares the simulation result to the actual training output.
+    *   **Match**: The rule is validated and applied to the test case.
+    *   **Mismatch**: The rule is falsified and recorded as "Negative Knowledge."
+
+## 30x30 Sovereign Manifold
+
+To handle the full range of ARC-AGI-2 tasks, the latent space has been expanded to **950 Dimensions**:
+- **Spatial Slice (900D)**: 30x30 pixel transformation delta.
+- **Symbolic Slice (30D)**: Numerical invariants.
+- **Structural Slice (20D)**: Topological features.
+
+## Key Insights: Negative Knowledge
+
+A major focus of SP28 is **Negative Anchoring**. When a hypothesis fails validation, it isn't simply discarded. It is registered as an HFN node in a `Failure_Manifold`. 
+- This allows the system to measure its **Geometric Distance to Solution**.
+- Future iterations can use these negative anchors to prune the search space, avoiding regions of the manifold that have already been proven incorrect.
+
+## Key Findings (20 Tasks)
+
+- **Falsification in Action**: The "Thinking" loop successfully identified and rejected dozens of incorrect hypotheses that would have otherwise resulted in "hallucinated" answers.
+- **Hypothesis Validation**: Several tasks reached the "Validated" state, where a rule perfectly explained the training examples, even if it later failed to generalize to the test case.
+- **Sovereign Scaling**: Verified that the multi-process architecture and the Agnostic Decoder handle 900D vectors efficiently.
+
+## Usage
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_thinking_arc_solver.py
+```
+
+# Source 21: README_unified_cognitive_loop.md
+# Experiment 17: Unified Cognitive Loop (The Core Agent)
+
+## Objective
+Validate the integration of all HFN capabilities into a single autonomous agent loop. The agent must navigate an evolving environment, detect failures caused by environmental shifts, revise its beliefs, explore to discover new rules, and successfully replan to reach its goal.
+
+## Background
+The "Unified Cognitive Loop" represents the culmination of the Sovereign AI experiment series (SP17–SP41). It proves that the HFN architecture can sustain the full lifecycle of agency:
+1. **Curiosity**: Exploring the world to build an initial model.
+2. **Planning**: Sequencing learned rules to reach a distal goal.
+3. **Action**: Executing the plan in the environment.
+4. **Falsification**: Detecting when expectations fail (high surprise).
+5. **Belief Revision**: Penalizing falsified rules and promoting new evidence.
+6. **Adaptation**: Exploring and replanning until the goal is reached.
+
+## Setup
+- **Domain**: 10D continuous state space.
+- **Rules**: Action $i$ increments Dimension $i$ by 1.0.
+- **Agent**: `UnifiedAgent` with `Observer`, `Decoder`, and `WeightAwareRetriever`.
+- **Goal**: Reach state `[2.0, 1.0, 0.0, ...]` from the origin.
+
+## The Environment Shift
+Mid-way through the experiment, the environment changes:
+- **Action 0**: Shifts from `+1.0` to `-1.0` on Dimension 0 (Falsifying the agent's primary path).
+- **Action 9**: Shifts from `+1.0` on Dimension 9 to `+1.0` on Dimension 0 (Providing a new, hidden path to the goal).
+
+## Results
+The agent successfully demonstrated autonomous adaptation:
+- **Initial Success**: Reached the goal using plan `[0, 1, 0]`.
+- **Detection**: Upon the rule shift, the agent perceived high surprise ($S \approx 2.5$) and correctly penalized the OLD Action 0 node (weight dropped to $0.0$).
+- **Multiplicative Penalty**: Using the `WeightAwareRetriever` with scoring `dist / (weight + epsilon)`, the agent successfully suppressed the falsified rule.
+- **Exploration & Discovery**: After failing its first adapted attempt, the agent entered an exploration phase, discovered the new rule for Action 9, and promoted it.
+- **Final Success**: Reached the goal on the second attempt using plan `[1, 9, 9]`.
+
+## Verification Command
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_unified_cognitive_loop.py
+```
+
+# Source 22: README.md
+# HPM Learning Agent
+
+AI learning agents built on the **Hierarchical Pattern Modelling (HPM)** framework — a theory of how humans learn, developed by Matt Thomson. The full working paper is included in this repo.
+
+---
+
+## Repository Overview
+
+- `hpm/` — baseline HPM framework (core agents, field dynamics, hierarchy, benchmarks)
+- `hpm_ai_v1/` — structured multi-agent self-repair and project-manifold reasoning
+- `hpm_fractal_node/` — HFN (Hierarchical Fractal Node) substrate: a new pattern substrate implementing HPM principles as a forest of probabilistic nodes with fractal geometry, Observer dynamics, and an extensive experiment suite
+- `hfn/` — the core HFN library (nodes, forest, observer, async controller, fractal metrics, query/converter pipeline)
+
+## What is HPM?
+
+HPM is a framework for understanding learning as the progressive discovery and refinement of patterns across multiple levels of abstraction. Rather than treating learning as a single process (like gradient descent or reinforcement), HPM proposes that all learning systems — including humans — operate through four structural roles working together:
+
+1. **Pattern substrates** — where patterns are stored (weights, memory, symbolic representations)
+2. **Pattern dynamics** — how patterns are created, updated, stabilised, and lost
+3. **Pattern evaluators** — what determines which patterns are worth keeping (prediction error, reward, coherence)
+4. **Pattern fields** — the shared environment that shapes which patterns compete and survive
+
+Patterns at higher levels of abstraction are built from regularities detected at lower levels. Learning is not just accumulating data — it is the emergence of structure that generalises, predicts, and supports action.
+
+---
+
+## Benchmarks & Superpowers (SP)
+
+The project tracks major architectural breakthroughs as "Superpowers" (SP), validated through rigorous benchmarks.
+
+### Core Framework Benchmarks
+- **Reber Grammar**: Discrete sequence learning (AUROC 0.934).
+- **Structural Immunity**: Noise resilience and rapid recovery (T_rec = 5 steps).
+- **Substrate Efficiency**: Pareto-optimal representation (beats GMM at comparable complexity).
+- **Elegance Recovery**: Identification of specific generative mathematical laws.
+
+### Hierarchical Encoders (SP4–SP16)
+- **SP4–SP6**: Structured ARC and Math (98%+ accuracy via hierarchicalRelational Laws).
+- **SP7–SP8**: Physics Reasoning (PhyRE) hierarchical grounding.
+- **SP10**: Delta Alignment (Procrustes-based cross-domain transfer).
+- **SP11–SP14**: Grounding in DS-1000, Molecular Discovery (Chem-Logic), and Linguistic Register Shifts.
+- **SP16**: Geometric Rosetta (Relational translation between fundamantally different substrates).
+
+### Sovereign Agency & Unified Loops (SP17–SP54)
+The transition from passive pattern matching to autonomous, intent-driven synthesis.
+
+| breakthrough | Evidence |
+|---|---|
+| **Belief Revision** | SP37: Successfully penalizes falsified rules in ambiguous environments |
+| **Unified Cognitive Loop** | SP41: Plan -> Act -> Fail -> Explore -> Re-Plan loop closed |
+| **Long-Horizon Reasoning** | SP42: 100% success on 20-step reasoning chains |
+| **Recursive Scaling** | SP45: Discovered 7-step nested graph for map/loop execution |
+| **Non-Linear Synthesis** | SP48: Rendered if/else blocks for conditional mapping |
+| **Curiosity / Self-Play** | SP51: Autonomously cataloged novel programs via state oracles |
+| **AST Synthesis** | SP53: Robust code generation via partial constraints and AST module |
+| **HPM-Native Planning** | **SP54 SUCCESS**: 100% HPM-native planning via population dynamics, temporal credit assignment, and replicator contrast dynamics. |
+
+---
+
+## HPM Fractal Node (HFN) Experiment Suite
+
+The **HFN** substrate implements HPM principles directly as a forest of probabilistic Gaussian nodes.
+
+| Experiment | Domain | Key Finding |
+|---|---|---|
+| `experiment_math.py` | Arithmetic | Discovers perfect-power clusters and modular prime regions (18× above random). |
+| `experiment_nlp.py` | Language | Semantic category purity 0.780 mean using QueryLLM. |
+| `experiment_unified_cognitive_loop.py` | Core Agent | Capstone: closed-loop belief revision and re-planning. |
+| `experiment_recursive_scaling.py` | Scaling | Discovered deep nested graphs for complex execution. |
+| `experiment_non_linear_synthesis.py` | Logic Forks | Turing-complete if/else branching. |
+| `experiment_modular_abstraction.py` | Functions | Encapsulated procedures and O(1) planning calls. |
+| `experiment_execution_guided_synthesis.py` | SP54 Planning | Replaced beam search with native HPM population dynamics and backpropagated utility. |
+| `experiment_cross_domain_analogy_enhanced.py` | SP66 Analogy | **Improvements**: Pattern Density, Affective Evaluators, and AST-level substitution. |
+| `experiment_schema_transfer.py` | Transfer | **Discovery**: Autonomous emergence of MAP and FILTER schemas via Replicator Contrast Dynamics. |
+
+---
+
+## HPM AI — Sovereign Recursive Intelligence (v3.0)
+
+The **HPM AI** (implemented in `hpm_ai_v1/`) treats the entire HPM codebase as its primary algebraic substrate.
+
+### Core Capabilities
+- **Cascading Dependency Repair**: Automatically identifies and repairs project-wide dependency breaks.
+- **Global Project Manifold**: Understands the relational ecology of the 220+ module repository.
+- **Agentic Negotiation**: L4 Architects and L5 Monitors design and gate ChangeSets through a shared Pattern Field.
+
+---
+
+## Setup
+
+**Requirements:** Python 3.11+
+
+```bash
+# Using uv (fastest)
+uv sync
+
+# Create a virtual environment and install
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Run Benchmarks & Experiments
+
+```bash
+# Run latest SP54 Execution-Guided Synthesis
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_execution_guided_synthesis.py
+
+# Run Schema Transfer Discovery
+PYTHONPATH=. .venv/bin/python hpm_fractal_node/experiments/experiment_schema_transfer.py
+
+# Run traditional benchmarks
+python benchmarks/reber_grammar.py
+python benchmarks/structured_math_l4l5.py
+```
+
+### Run tests
+```bash
+python -m pytest tests/ -v
+```
+
+---
+
+## Background reading
+
+The working paper *Human Learning as Hierarchical Pattern Modelling* (included as a PDF) gives the full theoretical grounding for the framework.
+
+# Source 23: README.md
+# HPM Fractal Node (HFN)
+
+A minimal implementation of the Hierarchical Pattern Modelling (HPM) framework applied to the ARC-AGI-2 benchmark. The core idea: learning is the progressive discovery and stabilisation of hierarchical patterns encoded as Gaussian distributions in a directed acyclic graph.
+
+---
+
+## Core Concepts
+
+### The HFN
+
+Every node in the system is an **HFN (HPM Fractal Node)** — a Gaussian identity fused with a DAG body:
+
+```
+HFN = N(μ, Σ)          ← compressed face: predictive identity
+    + [child₁, child₂, …]  ← structural face: internal composition
+```
+
+**Fractal uniformity**: a Forest (the world model) is itself an HFN. Every level of the hierarchy has the same interface.
+
+**Key properties:**
+- No parent references — the graph is traversed top-down only
+- Same node can be a child of multiple parents simultaneously (shared structure, not copies)
+- No mutation from queries — observation and learning are the Observer's job, not the node's
+
+### The Forest
+
+A collection of active HFN nodes constituting the world model. The Observer adds, removes, and rewires nodes. Priors in the Forest are **protected** — the Observer cannot absorb or remove them.
+
+### The Observer
+
+Holds all dynamic state: weights, co-occurrence counts, absorption history. Takes observations (numpy vectors) and:
+
+1. Finds the best-explaining node (lowest surprise below `tau`)
+2. Updates weights (gain/loss)
+3. Creates new nodes for high-residual observations
+4. Compresses frequently co-occurring nodes via `recombine()`
+5. Absorbs redundant nodes that are dominated by others
+
+---
+
+## The ARC World Model
+
+The world model for ARC-AGI-2 is assembled in `arc_world_model.py` as 7 layers of protected priors plus one cross-layer bridge, all living in the same pixel space (D = rows × cols).
+
+```
+Layer 0  Perception     prior_signal → prior_pixel → prior_pixel_colour ──┐
+                                     → prior_cell_concept                  │ (bridge)
+                                     → prior_spatial_adjacency             │
+                                           → prior_field                   │
+                                                 → prior_grid ←────────────┘
+
+Layer 1  Primitives     primitive_cell_rc (×D), primitive_row_r (×rows),
+                        primitive_col_c (×cols), primitive_region,
+                        primitive_relationship, primitives_hfn
+
+Layer 2  Relationships  relationship_adjacency, relationship_mirror,
+                        relationship_repeat, relationship_cell_colour
+                        + prim_adjacency, prim_mirror, prim_repeat,
+                          prim_cell_colour  (typed compression slots)
+
+Layer 3  Structural     prior_grid, prior_extent, prior_density,
+                        prior_spatial_organisation, prior_structure,
+                        prior_grid_transform, prior_transformation,
+                        + spatial band priors (row/col/diagonal/corners)
+
+Layer 4  Colour         prior_colour_background (v=0), prior_colour_low (v=1-3),
+                        prior_colour_mid (v=4-6), prior_colour_high (v=7-9),
+                        prior_colour_uniform, prior_colour_group
+
+Layer 5  Semantic       object_hfn (shape + colour + count)
+                        scene_hfn (background + objects)
+                        rule_hfn (transform + count-based + colour-map)
+
+Layer 6  Encoder        encoder_hfn — children are structural priors;
+                        encodes HOW to read a grid through its structure
+
+Bridge   prior_pixel_colour — a pixel has both a position AND a colour identity
+                        Children: prior_pixel (Layer 0) + prior_colour_group (Layer 4)
+```
+
+**Node counts (colour encoding, value/9.0):**
+
+| Grid | D | Prior nodes | Notes |
+|------|---|-------------|-------|
+| 3×3  | 9  | 79  | Abstracts dominate |
+| 5×5  | 25 | 101 | +25 cell primitives, +5 row/col |
+| 10×10 | 100 | 184 | +100 cell primitives, +10 row/col |
+
+Primitive nodes grow O(D); all abstract priors (colour, structural, semantic, encoder) are grid-size-independent.
+
+---
+
+## Value Encoding
+
+ARC uses 10 colour values (0–9). Rather than binary {0, 1}:
+
+```python
+vec[i] = cell_value / 9.0   # each cell in [0.0, 1.0]
+```
+
+This preserves colour identity in the observation vector. Distances now reflect both spatial position AND colour similarity. D is unchanged (still rows × cols).
+
+**Why it matters:**
+Binary encoding achieved 42% prior coverage on 10×10 grids. Value encoding achieves 90%, with 0 absorbed priors. The colour priors do real work — `prior_colour_background` alone explains ~23% of 10×10 observations.
+
+---
+
+## Experiments
+
+| Script | What it tests | Key result |
+|--------|---------------|------------|
+| `experiment_arc_colour.py` | 3×3, colour encoding, full world model | **100% coverage**, 0 unexplained, 0 absorbed |
+| `experiment_arc_world_model.py` | 3×3, binary encoding, full world model | 85% coverage, 9% unexplained |
+| `experiment_arc_10x10.py` | 10×10, colour encoding, full world model | **90% coverage**, 5% unexplained, 0 absorbed |
+| `experiment_arc_prior_forest.py` | 3×3, structural priors only | Baseline prior coverage |
+| `experiment_arc_observer.py` | 3×3, no priors, pure observation | What emerges without prior knowledge |
+
+**Run any experiment from the project root:**
+```bash
+python3 -m hpm_fractal_node.experiment_arc_colour
+python3 -m hpm_fractal_node.experiment_arc_10x10
+```
+
+---
+
+## Test Coverage
+
+Tests live in `tests/hpm_fractal_node/`. Run with:
+```bash
+python3 -m pytest tests/hpm_fractal_node/ -v
+```
+
+| Test file | What it covers |
+|-----------|---------------|
+| `test_hfn_structure.py` | HFN identity, DAG operations, recombine, fractal uniformity |
+| `test_forest.py` | Forest registration, deregistration, node lookup |
+| `test_observer.py` | Weight updates, absorption, compression, protected IDs |
+| `test_arc_representation.py` | ARC-specific encoding, prior structure |
+| `test_scaling.py` | Scaling invariants (see below) |
+
+### What the scaling tests reveal
+
+**`test_node_count_scales_with_grid_size`**
+Confirms primitive nodes scale exactly as D (one per cell), while abstract priors are constant. This is the intended asymmetry: the vocabulary grows with the domain, but the concepts don't.
+
+**`test_log_prob_diagonal_fast_path`**
+Every prior node must have `_sigma_diag` cached at construction. If any node is created with a non-diagonal covariance, it will fall back to O(D³) Cholesky and this test will catch it.
+
+**`test_log_prob_throughput_scales_linearly`**
+Verifies the O(D) fast path holds across grid sizes. At D=100, each `log_prob` call takes ~0.0075ms (vs. the O(D³) Cholesky which was the bottleneck causing 10×10 experiments to time out).
+
+**`test_world_model_build_time`**
+Build time limits: 3×3 < 1s, 5×5 < 2s, 10×10 < 5s. Regression guard for accidentally expensive prior construction.
+
+**`test_observer_processes_observations`**
+Verifies that after 20 random observations, no protected prior was absorbed or removed — the protected_ids mechanism holds at every grid size.
+
+**`test_abstract_priors_fire_at_all_scales`**
+Colour and density priors explain uniform-colour observations at every grid size. Confirms structural knowledge transfers across scales.
+
+---
+
+## Key Insights
+
+**1. Prior knowledge is a prerequisite, not an enhancement**
+Without the colour layer, 33% of 10×10 observations were unexplained. Adding `prior_colour_*` nodes dropped unexplained to 5%. This parallels HPM's claim that learners don't start as blank slates — relevant domain priors are necessary for learning to proceed efficiently.
+
+**2. The perceptual chain matters**
+The perception layer (signal → pixel → cell → field) encodes *how* the system perceives before *what* it perceives. Without it, the world model knows about grids but not why grids are coherent. The field concept (adjacent cells with consistent structure form a bounded whole) is the foundation of spatial reasoning.
+
+**3. Pixel vs cell vs colour is not a trivial distinction**
+Three concepts that are easy to conflate:
+- `prior_pixel_colour`: a *raw perceptual measurement* carries both position and colour (Layer 0 — before the grid frame exists)
+- `relationship_cell_colour`: a *cell within a known frame* is bound to a colour value (Layer 2 — structural binding)
+- `prim_cell_colour`: the typed slot the Observer fills with specific (position, colour) instances
+
+Conflating these produced gaps in coverage. Keeping them distinct allows the Observer to form specific bindings via compression without pre-enumerating all (r, c, v) combinations.
+
+**4. Shared DAG nodes are essential**
+`object_shape` references `primitive_region` directly — not a copy. `object_colour` references `prior_pixel_colour`. When the Observer updates `primitive_region`, that change is immediately reflected in `object_hfn` because they share the same node. This is HPM's "no redundant encoding" principle in practice.
+
+**5. The Forest is stable under observation**
+In all experiments, 0 protected priors were absorbed. The world model is invariant — the Observer learns above it, not through it.
+
+---
+
+## Known Issues and Open Questions
+
+**5% unexplained at 10×10**
+These 18 observations have colour patterns specific enough that no broad prior fits below `tau`. They are candidates for `prim_cell_colour` compressions — the Observer needs to see the same (position, colour) co-occurrence multiple times before forming the compression. Increasing passes or reducing `compression_cooccurrence_threshold` should close this gap.
+
+**Tau is fixed across all layers**
+The same `tau = baseline + 5.0` applies to a perception prior (very broad, σ=4) and a specific primitive (σ=1). A prior calibrated for `prior_signal` is far too loose for `primitive_cell_23`. Fractal tau scaling — `tau_layer_n = tau_0 × r^n` — would give each layer an appropriate tolerance. This will matter more as the hierarchy deepens.
+
+**`vec_to_grid` display uses binary threshold**
+The experiment display function (`> 0.5`) was written for binary encoding. With value encoding, most colour values are < 0.5, so grids display as empty even when the node is correctly matching a sparse colour grid. This is a display-only issue — the `log_prob` computation is correct.
+
+**2 registry entries not in forest**
+`full_registry` contains 2 more entries than the Forest has active nodes. These are nodes that are referenced as children (shared DAG) but not registered as top-level Forest members. They are reachable, but not directly visible to the Observer. This is intentional but should be documented explicitly in `arc_world_model.py`.
+
+**Observer timing at D=100**
+Before the O(D³)→O(D) log_prob optimisation, 10×10 experiments timed out at 240s. With the diagonal sigma cache (`__post_init__` in `hfn.py`), `log_prob` runs at ~0.0075ms/call. Full two-pass experiment now completes in ~60–70s. Further speedup would require batching log_prob across all nodes simultaneously (vectorised over node population).
+
+---
+
+## Architecture Diagram
+
+```
+Observation vector x ∈ ℝᴰ  (D = rows × cols, value/9.0 encoding)
+         │
+         ▼
+    ┌─────────────────────────────────┐
+    │         Observer                │
+    │  ┌──────────────────────────┐   │
+    │  │  1. Score all nodes      │   │
+    │  │  2. Update weights       │   │
+    │  │  3. Create if residual   │   │
+    │  │  4. Compress if cooccur  │   │
+    │  │  5. Absorb if dominated  │   │
+    │  └──────────────────────────┘   │
+    │          ↕ reads/writes         │
+    └─────────────────────────────────┘
+         │
+         ▼
+    ┌─────────────────────────────────┐
+    │   Forest (world model)          │
+    │                                 │
+    │  Protected priors (invariant)   │
+    │  ┌──────┐ ┌──────┐ ┌──────┐   │
+    │  │ L0   │ │ L1   │ │ L2   │   │
+    │  │Perc  │ │Prim  │ │Rel   │   │
+    │  └──────┘ └──────┘ └──────┘   │
+    │  ┌──────┐ ┌──────┐ ┌──────┐   │
+    │  │ L3   │ │ L4   │ │ L5   │   │
+    │  │Struc │ │Colour│ │Sem   │   │
+    │  └──────┘ └──────┘ └──────┘   │
+    │  ┌──────┐                      │
+    │  │ L6   │  Encoder             │
+    │  └──────┘                      │
+    │                                 │
+    │  Learned nodes (dynamic)        │
+    │  ┌────┐ ┌────┐ ┌────┐          │
+    │  │new │ │comp│ │ …  │          │
+    │  └────┘ └────┘ └────┘          │
+    └─────────────────────────────────┘
+```
+
+---
+
+## File Reference
+
+| File | Role |
+|------|------|
+| `hfn.py` | HFN dataclass: Gaussian identity + DAG body + O(D) log_prob |
+| `forest.py` | Forest: registration, deregistration, node lookup |
+| `observer.py` | Observer: all dynamic learning state and mechanics |
+| `arc_world_model.py` | Assembly entry point: builds all 7 layers into one Forest |
+| `arc_perception_priors.py` | Layer 0: perceptual chain |
+| `arc_primitives.py` | Layer 1: atomic spatial vocabulary |
+| `arc_relationships.py` | Layer 2: relational vocabulary + prim_* compressions |
+| `arc_prior_forest.py` | Layer 3: structural priors (density, spatial, transform) |
+| `arc_colour_priors.py` | Layer 4: value-identity priors |
+| `arc_object_scene_priors.py` | Layer 5: object, scene, rule priors |
+| `arc_encoder_hfn.py` | Layer 6: encoder as structural prior |
+
+---
+
+## Fractal Convergence Analysis
+
+### IFS Hypothesis
+
+The Observer's `recombine(A, B)` operation creates a node whose `μ = mean(A.μ, B.μ)` — a contracting affine map in pattern space. This is how fractal attractors are constructed via Iterated Function Systems (IFS). If the Observer applies this consistently, the set of learned nodes should converge toward a fractal attractor whose dimension signals structural coherence.
+
+**Tool:** `hfn.fractal.population_dimension(nodes)` — box-counting dimension of the μ-space point cloud.
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 8 passes)
+
+| Pass | World model (learned dim) | No priors (all dim) | WM nodes | NP nodes |
+|------|--------------------------|---------------------|----------|----------|
+| 1 | 0.049 | 0.326 | 22 | 14 |
+| 2 | 0.125 | 0.406 | 23 | 16 |
+| 3 | 0.044 | 0.508 | 23 | 20 |
+| 4 | 0.022 | 0.271 | 19 | 34 |
+| 5 | 0.117 | 0.179 | 20 | 54 |
+| 6 | 0.039 | 0.109 | 25 | 48 |
+| 7 | 0.079 | 0.175 | 21 | 36 |
+| 8 | 0.035 | 0.112 | 17 | 43 |
+
+### Key Findings
+
+**1. Priors pre-seed the IFS attractor**
+Without priors, the Observer initially spreads nodes across observation space (dim 0.33–0.51) then gradually finds clusters (dim drops to ~0.11). Structure eventually emerges but takes many passes and the node population grows unbounded (54 nodes).
+
+With the world model, learned nodes immediately cluster near prior attractors (dim 0.02–0.13) and the population stays bounded (~20 nodes). The priors act as pre-placed contracting maps — the IFS attractor is seeded before any observation.
+
+**2. Dimension tracks world model adequacy**
+Low, stable learned dimension = well-specified world model (Observer filling gaps near known attractors).
+High, unstable dimension = under-specified world model (Observer building structure from scratch).
+
+This gives a quantitative diagnostic: if learned dimension approaches or exceeds prior dimension, the world model is inadequate for the domain.
+
+**3. Prior knowledge reduces learning dimensionality**
+The fractal analysis makes visible what coverage statistics cannot: prior knowledge doesn't just explain more observations — it changes the *structure* of what gets learned. Without priors, learned patterns are high-dimensional and unstable. With priors, learning is low-dimensional and convergent.
+
+This is quantitative evidence for the HPM claim that prior knowledge is a structural prerequisite, not merely an optimisation.
+
+### Run the diagnostic
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_diagnostic
+```
+
+---
+
+## Diagnostic #2: Self-Similarity Score
+
+**Tool:** `hfn.fractal.self_similarity_score(nodes)` — coefficient of variation of log-count differences across box-counting scales. Lower = more self-similar; 0.0 = perfect power-law scaling (IFS attractor).
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 5 passes)
+
+| Pass | WM learned SS | WM all SS | NP all SS | WM nodes | NP nodes |
+|------|--------------|-----------|-----------|----------|----------|
+| 1 | 2.47 | 0.77 | 1.47 | 92 | 17 |
+| 2 | 0.88 | 0.65 | 1.69 | 97 | 16 |
+| 3 | 1.07 | 0.78 | 1.61 | 93 | 19 |
+| 4 | 0.88 | 0.56 | 0.88 | 92 | 18 |
+| 5 | 1.62 | 0.54 | 1.16 | 91 | 15 |
+
+### Key Findings
+
+**1. The prior structure is intrinsically self-similar (WM all SS ~0.54–0.78)**
+The full world-model node population scores consistently lower than the no-priors condition. The 7-layer hierarchy (perception → primitives → relationships → structure → colour → semantic → encoder) creates natural clustering at multiple scales — this is what IFS attractors look like geometrically.
+
+**2. Learned nodes alone are not yet self-similar (WM learned SS ~0.88–2.47)**
+Learned nodes are filling gaps near priors but haven't formed their own self-similar sub-clusters at 5 passes. More passes are needed for convergence.
+
+**3. No-priors is more scattered overall (NP all SS ~0.88–1.69)**
+Even with 15–19 nodes, the no-priors population is less self-similar than the world-model population, confirming that priors encode geometric regularity the Observer would otherwise have to discover from scratch.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_self_similarity
+```
+
+---
+
+## Diagnostic #3: Hausdorff Distance
+
+**Tool:** `hfn.fractal.hausdorff_distance(nodes_a, nodes_b)` — worst-case nearest-neighbour distance between two node populations in μ-space. Tracks how close learned nodes are to the prior attractor, and how stable the no-priors node population is across passes.
+
+### Experiment: World Model vs No Priors (3×3, colour encoding, 8 passes)
+
+| Pass | WM Hausdorff | WM learned N | NP shift | NP nodes |
+|------|-------------|-------------|----------|----------|
+| 1 | 1.476 | 11 | — | 16 |
+| 2 | 1.452 | 16 | 1.032 | 18 |
+| 3 | 1.419 | 13 | 1.113 | 15 |
+| 4 | 1.595 | 15 | 1.087 | 19 |
+| 5 | 1.469 | 9 | 0.863 | 10 |
+| 6 | 1.417 | 17 | 0.944 | 10 |
+| 7 | 1.550 | 12 | 0.818 | 15 |
+| 8 | 1.522 | 17 | 0.777 | 10 |
+
+### Key Findings
+
+**1. WM Hausdorff is stable, not converging (~1.4–1.6)**
+The Hausdorff is dominated by 3 outlier learned nodes (dist=0.34, 0.41, 0.46) near structural priors (`prior_connectivity`, `relationship_repeat`, `relationship_adjacency`) that are too broad to claim those observations. Most learned nodes (14 of 17) are within dist=0.14 of a prior.
+
+**2. Hausdorff identifies gaps in the prior vocabulary**
+The 3 high-distance outliers consistently cluster near the same priors — those priors have covariance too large for their domain. This is a direct diagnostic for which priors need tighter sigma or more specific sub-priors.
+
+**3. No-priors population is volatile (NP shift ~0.78–1.11)**
+The no-priors Observer rebuilds different clusters each pass, with the population shifting ~1.0 unit in μ-space. A slight decrease over passes (1.11 → 0.78) suggests slow stabilisation — but far more volatile than the world-model condition.
+
+**4. Hausdorff as a world-model improvement tool**
+Running the Hausdorff diagnostic after adding new priors to the world model and measuring whether the WM Hausdorff decreases gives a quantitative signal of whether the new priors are filling the right gaps.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_fractal_hausdorff
+```
+
+---
+
+## Diagnostics #4–6: Correlation Dimension, Information Dimension, Intrinsic Dimensionality
+
+Three complementary measures that extend the fractal toolkit beyond box-counting.
+
+### Tools
+
+| Function | What it measures |
+|----------|-----------------|
+| `hfn.fractal.correlation_dimension(nodes)` | Pair-density scaling with radius — more accurate than box-counting for small populations (n < 50) |
+| `hfn.fractal.information_dimension(nodes, weights)` | Weight-adjusted fractal dimension — measures the *active* representation, not just presence |
+| `hfn.fractal.intrinsic_dimensionality(points)` | True degrees of freedom in a point cloud (TwoNN estimator) — independent of ambient dimension |
+
+### Experiment Results (3×3, colour encoding, 3 passes)
+
+```
+Intrinsic dimensionality of ARC 3×3 observations: 6.580  (ambient D=9)
+
+After 3 passes (15 learned nodes, 79 prior nodes):
+  Box-counting dim (all):     0.1820
+  Correlation dim (all):      0.6015
+  Correlation dim (learned):  1.9503
+  Information dim (all):      0.1858
+  Information dim (learned):  0.0501
+  Intrinsic dim (prior μ):    3.963
+  Intrinsic dim (learned μ):  4.272
+```
+
+### Key Findings
+
+**1. ARC 3×3 observations have intrinsic dimensionality ~6.6 (ambient D=9)**
+The patterns genuinely use ~6.6 of the 9 available dimensions. This is not a simple domain — at least 7 independent axes of variation exist. The world model with ~79 priors is appropriately rich for this complexity.
+
+**2. Correlation dimension reveals learned-node geometry (1.95 ≈ 2D surface)**
+Box-counting on the full population (0.18) masks the geometry of learned nodes alone (1.95). The 15 learned nodes span a near-2D surface in μ-space — they are not randomly scattered, nor clustered at a point, but arranged along a plane. This is consistent with the IFS attractor hypothesis: recombine() maps produce planar structure.
+
+**3. Information dimension (learned) = 0.05 — near-degenerate weight distribution**
+Almost all learned weight is concentrated in 1–2 nodes. The majority of learned nodes are low-weight artefacts. The Observer is learning a near-point-mass distribution, not a spread. This confirms the oscillation behaviour seen in earlier diagnostics: most learned nodes are created, fire rarely, and never consolidate.
+
+**4. Prior nodes span ~4 intrinsic dimensions; learned nodes span ~4.3**
+Learned nodes occupy marginally higher-dimensional space than the priors. They are exploring just beyond the prior vocabulary, not duplicating it — consistent with the Observer filling genuine gaps rather than redundantly re-representing known concepts.
+
+**5. Information dimension is the most diagnostic of the three**
+It distinguishes *what exists* from *what is used*. A low information dimension with a higher box-counting dimension means many nodes exist but few dominate — a signal that compression is not consolidating fast enough. Running `information_dimension` before and after changing `compression_cooccurrence_threshold` gives a direct measure of whether the change improves consolidation.
+
+---
+
+## Diagnostics #7–10: Persistence, Recurrence, Lacunarity, Multifractal
+
+Four further fractal tools, all in `hfn/fractal.py`.
+
+### Tools
+
+| Function / Class | What it measures | Observer use |
+|-----------------|-----------------|--------------|
+| `persistence_scores(nodes, weights)` | Per-node structural isolation — distance to nearest higher-weight node | Modulates absorption miss threshold |
+| `RecurrenceTracker(buffer_size, epsilon)` | How repetitive the observation stream is | Dynamically adjusts compression threshold |
+| `lacunarity(nodes, n_scales)` | Gappiness of node distribution at each scale ε — (σ²/μ²) of box counts | Diagnostic only |
+| `multifractal_spectrum(nodes, q_values, n_scales)` | Generalised dimensions D_q — reveals hot/cold spots in prior structure | Diagnostic only |
+
+### Observer integration
+
+```python
+obs = Observer(forest, tau=tau, protected_ids=prior_ids,
+               persistence_guided_absorption=True,   # protect isolated nodes longer
+               adaptive_compression=True,            # lower threshold when stream is repetitive
+               recurrence_epsilon=0.15)
+```
+
+### Experiment: Strategy Comparison (3×3, colour encoding, 5 passes)
+
+| Condition | Coverage | Learned N | Hausdorff | Absorbed |
+|-----------|----------|-----------|-----------|----------|
+| baseline (nearest_prior + hausdorff) | 80.2% | 10 | 1.515 | 1618 |
+| + persistence_guided_absorption | **81.2%** | 12 | **1.478** | 1647 |
+| + adaptive_compression | 80.2% | 10 | 1.515 | 1618 |
+| + both | **81.2%** | 12 | **1.478** | 1647 |
+
+### Key Findings
+
+**1. Persistence-guided absorption improves coverage (+1pp) and Hausdorff**
+High-persistence nodes (structurally isolated, far from any better-weighted node) get a higher effective miss threshold — the Observer protects them longer. Genuinely novel nodes survive rather than being absorbed prematurely, lifting coverage from 80.2% to 81.2% and pulling learned nodes slightly closer to the prior attractor (Hausdorff 1.515 → 1.478).
+
+**2. Adaptive compression has no effect at 5 passes**
+The recurrence rate never builds high enough in 5 passes over 250 observations to shift the compression threshold. This is a slow-burn mechanism — correct in principle but requires 20+ passes for recurrence to accumulate. It would activate in longer-running learning sessions where the same observations recur many times.
+
+**3. The strategies are independent**
+Persistence affects absorption; recurrence affects compression. They operate on separate parts of the Observer pipeline and don't interact — the combined result equals persistence-only.
+
+**4. Current best configuration**
+`recombination_strategy="nearest_prior"` + `hausdorff_absorption_threshold=0.15` + `persistence_guided_absorption=True` achieves 81.2% coverage with 12 learned nodes and Hausdorff 1.478. This is the recommended starting point for new experiments.
+
+**5. Lacunarity and multifractal spectrum are diagnostic-only**
+These reveal structure in the prior/learned node distribution (gappiness and hot spots) but are not yet integrated into Observer decisions. Lacunarity would inform node-creation suppression in dense regions; the multifractal spectrum would identify which prior layers are geometrically dominant.
+
+---
+
+## Full Fractal Strategy Stack: ARC Results
+
+Grid search over lacunarity and multifractal radii (3×3, 5 passes) found the optimal configuration:
+
+```python
+obs = Observer(forest, tau=tau, protected_ids=prior_ids,
+               recombination_strategy="nearest_prior",
+               hausdorff_absorption_threshold=0.15,
+               persistence_guided_absorption=True,
+               lacunarity_guided_creation=True,       # lacunarity_creation_radius=0.08
+               multifractal_guided_absorption=True)   # multifractal_crowding_radius=0.12
+```
+
+### 3×3 ARC (250 observations, 5 passes)
+
+| Condition | Coverage | Hausdorff | Absorbed |
+|-----------|----------|-----------|----------|
+| baseline (nearest_prior + hausdorff) | 80.2% | 1.515 | 1618 |
+| + persistence | 81.2% | 1.478 | 1647 |
+| + lacunarity + multifractal (r=0.3) | 81.0–81.1% | — | — |
+| **+ lacunarity (r=0.08) + multifractal (r=0.12)** | **81.8%** | **1.462** | — |
+
+Full stack with tuned radii beats persistence-only on both coverage (+0.6pp) and Hausdorff proximity.
+
+### 10×10 ARC (392 observations, 2 passes)
+
+| Metric | Baseline (colour encoding) | Full fractal stack |
+|--------|---------------------------|--------------------|
+| Prior coverage | 90% (352/392) | 90% (352/392) |
+| New node coverage | 0% | 6% (22/392) |
+| Unexplained | 5% (18/392) | 5% (18/392) |
+| Absorbed priors | 0 | 0 |
+
+The full fractal stack maintains the 90% prior coverage baseline and adds 6% coverage from new learned nodes — bringing total explained observations from 90% to 96%. The 5% unexplained observations (18 obs with specific colour/position patterns) remain unresolved; they require more passes or lower `compression_cooccurrence_threshold` to consolidate into compressions.
+
+### Key Findings
+
+**1. Lacunarity-guided creation suppresses redundant nodes in dense regions**
+When local node density exceeds `lacunarity_creation_factor` × mean, the Observer skips creating a new node for residual observations. This reduces low-weight artefact creation, freeing absorption budget for genuinely novel patterns.
+
+**2. Multifractal-guided absorption halves the threshold in crowded regions**
+Nodes near hot spots (many non-protected neighbours within `multifractal_crowding_radius`) get their absorption threshold halved — making the Observer more aggressive about merging locally redundant learned nodes. Combined with lacunarity suppression, this keeps the learned population tighter.
+
+**3. 10×10 new node coverage is the signal, not prior coverage**
+At 10×10 the prior vocabulary covers 90% of observations. The fractal strategies' contribution shows in the new node coverage (0% → 6%): the stack creates better-targeted learned nodes that explain observations the priors miss.
+
+---
+
+## dSprites Experiment: Generative Factor Alignment
+
+### What is dSprites?
+
+dSprites is a synthetic dataset of 2D shapes defined by 5 independent generative factors:
+
+| Factor | Values |
+|--------|--------|
+| Shape | 3 (square, ellipse, heart) |
+| Scale | 6 levels |
+| Orientation | 40 angles |
+| Pos X | 32 positions |
+| Pos Y | 32 positions |
+
+Images are 64×64 binary sprites, downsampled to 16×16 for the experiment (D=256). There are no labels — only raw pixel observations and the ground-truth generative factor values used post-hoc to evaluate alignment.
+
+### The dSprites World Model
+
+The world model is assembled in `hpm_fractal_node/dsprites/dsprites_world_model.py` as 37 protected priors across 5 layers:
+
+| Layer | Priors | What they encode |
+|-------|--------|-----------------|
+| Perception | 3 | signal, pixel, cell concept |
+| Spatial cells | 16 | 4×4 spatial grid cells |
+| Shape | 4 | background, blob, compact, extended |
+| Scale | 6 | levels 1–6 (sigma 0.02–0.07) |
+| Position/Orientation | 8 | centre, edge N/S/E/W, corner, rotated |
+
+### Experiment Configuration
+
+```python
+n_samples = 2000       # observations drawn from dSprites
+n_passes  = 3          # passes over the sample
+D         = 256        # 16×16 downsampled images
+tau       = 240.25     # surprise threshold
+```
+
+Run with:
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_dsprites
+```
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Total observations | 6000 (2000 × 3 passes) |
+| Covered by learned nodes | 5999 / 6000 (100%) |
+| Learned nodes created | 101 |
+| Hausdorff(learned, priors) | 10.4208 |
+
+**Factor purity (nodes with n ≥ 5 observations):**
+
+| Factor | Mean purity | Max purity | Random baseline | Above chance |
+|--------|------------|-----------|-----------------|-------------|
+| Shape | 0.546 | 1.000 | 0.333 | +64% |
+| Scale | 0.483 | 1.000 | 0.167 | +189% |
+| Pos X | 0.366 | 0.800 | 0.031 | +1081% |
+
+Factor purity measures how often observations assigned to a learned node share the same ground-truth generative factor value (1.0 = all observations in the node come from one factor level).
+
+### Key Finding
+
+The Observer recovers latent generative structure without supervision. Learned nodes are not random partitions of observation space — they align with the underlying factors that generated the images. Pos X purity is 10× above chance, meaning the Observer is discovering spatial position as a structuring principle purely from pixel statistics.
+
+The high Hausdorff distance (10.42) reflects that the 16×16 pixel space is geometrically large relative to the 37 hand-specified priors — the priors cover conceptual roles (shape, scale, position) but the learned nodes are operating at a finer resolution in the full D=256 space. This is expected: the world model provides structural scaffolding, and the Observer fills in the detail.
+
+```bash
+python3 -m hpm_fractal_node.experiments.experiment_dsprites
+```
+
+---
+
+## NLP Experiment: Semantic Category Alignment
+
+### What the NLP experiment tests
+
+The NLP experiment applies HFN to a language domain: 2000 synthetic subject-verb-object sentences drawn from 7 semantic categories (animal, adult, child_person, family, food, object, place). Each sentence is encoded as a context window of word vectors (D=107, one dimension per vocabulary item), and the Observer learns to explain sentences using the NLP world model.
+
+Unlike ARC (spatial patterns) or dSprites (visual factors), the NLP domain tests whether the Observer recovers **semantic categories** from distributional co-occurrence — without any category labels.
+
+### Priors as relational constraints
+
+The NLP world model (`nlp_world_model.py`) contains 195 protected priors across four layers:
+
+| Layer | Priors | What they encode |
+|-------|--------|-----------------|
+| Atomic word nodes | 107 | One HFN per vocabulary item — the identity of each word as a point in context space |
+| Leaf objects + grammar | ~38 | Typed slots for nouns, verbs, determiners; object groupings (obj_food, obj_animal, obj_noun, …) |
+| Capability priors | ~19 | Entity-action bindings: cap_dog_barks, cap_dog_fetches, cap_cat_meows, cap_person_gives, … |
+| Sentence priors | 20 | Full SVO templates: sent_dad_ate_bread, sent_girl_helped_baby, … |
+
+**Priors are not merely starting points — they are relational constraints.** Each prior's μ encodes a pattern of co-occurrence over the full vocabulary. `obj_food` has a mean that activates food-category words; `cap_dog_barks` has a mean that simultaneously activates the dog word and the barks word. When the Observer scores an incoming observation against `cap_dog_barks`, it is testing whether that sentence contains the relational binding dog→barks, not just whether either word appears.
+
+This is the HPM principle: **patterns are defined by their internal coherence** (do the components co-occur in the expected configuration?) rather than by label or symbol. The prior encodes the expected structure of the relationship.
+
+### Capability priors: entity-specific action bindings
+
+Capability priors encode what entities can do — not as rules, but as Gaussian distributions over context:
+
+- `cap_dog_barks` — μ activates dog + barks simultaneously; fires only when both appear together
+- `cap_dog_fetches` — μ activates dog + fetches; a distinct capability, a distinct prior
+- `cap_cat_meows` — μ activates cat + meows
+- `cap_person_gives` — μ activates person + gives
+
+These priors implement the HPM notion that **capabilities are patterns at a higher abstraction level than individual words**. A sentence with "the dog barked" matches `cap_dog_barks` because the sentence's context vector (a sum over word positions with positional weighting) concentrates probability near the dog+barks region of vocabulary space.
+
+Each capability prior is a child of its entity's object node (`cap_dog_barks` and `cap_dog_fetches` are both children of `obj_animal`) — this is the uniform composition principle: the same node type at every level.
+
+### Uniform composition at every level
+
+Every node in the NLP world model is an HFN: a Gaussian identity in context space with a DAG body. This means:
+
+- A word node (`word_dog`) is an HFN with μ = the word's expected context vector
+- An object category node (`obj_animal`) is an HFN with μ = the centroid of its members' contexts, and children = the word nodes it groups
+- A capability node (`cap_dog_barks`) is an HFN with μ = the expected context when dog+barks co-occur, and its children are the relevant word nodes
+- A sentence template (`sent_dad_ate_bread`) is an HFN with μ = the full SVO context, children = the word nodes for dad, ate, bread
+
+The same Observer mechanics apply at every level: log_prob, weight update, recombine, absorb. There is no special-case logic for "this is a word" vs "this is a sentence template". The fractal uniformity that defines HFN for ARC applies identically to language.
+
+### Results (3-pass, D=107, 2000 observations)
+
+```
+Passes:     3
+Total obs:  6000 (2000 × 3 passes)
+Explained:  6000/6000 (100.0%)
+```
+
+**Coverage breakdown:**
+
+| Source | Observations | % |
+|--------|-------------|---|
+| Prior nodes | 1842 | 30.7% |
+| Learned nodes | 4158 | 69.3% |
+| Total | 6000 | 100.0% |
+
+All three passes achieve 100% coverage — every sentence is explained by either a prior or a learned node.
+
+**Top prior nodes by coverage:**
+
+| Prior | n | Category purity | Dominant category |
+|-------|---|----------------|------------------|
+| obj_family | 271 | 0.86 | adult |
+| sent_grandma_gave_toy | 181 | 0.69 | place |
+| obj_object | 131 | 1.00 | place |
+| sent_girl_helped_baby | 127 | 0.43 | object |
+| sent_dad_ate_bread | 115 | 0.69 | food |
+| obj_food | 96 | 1.00 | food |
+| cap_dog_fetches | 55 | 1.00 | animal |
+| cap_dog_barks | 51 | 1.00 | animal |
+| cap_cat_meows | 50 | 1.00 | animal |
+| cap_person_gives | 48 | 1.00 | family |
+
+Capability priors achieve **100% category purity** — every observation they explain comes from the animal or family category respectively. This confirms that the entity-action binding priors are semantically precise: they fire only on sentences where the specific agent-action relationship is present.
+
+**Learned node category purity (nodes with n ≥ 5):**
+
+| Metric | Value | Random baseline |
+|--------|-------|----------------|
+| Category purity (mean) | 1.000 | 0.143 (1/7) |
+| Category purity (max) | 1.000 | — |
+| Word purity (mean) | 0.667 | — |
+
+Mean category purity of 1.000 vs random baseline of 0.143 — learned nodes are **7× above chance** on semantic category alignment.
+
+**Fractal diagnostics:**
+
+| Metric | Value |
+|--------|-------|
+| Learned nodes (final) | 7 |
+| Hausdorff(learned, priors) | 1.0385 |
+| Absorbed nodes | 5400 |
+
+The Observer creates and absorbs 5400 nodes over 3 passes, converging to 7 stable learned nodes. The low Hausdorff distance (1.04) in D=107 space indicates learned nodes stay close to the prior vocabulary — they are filling gaps near existing priors rather than drifting into unstructured regions.
+
+### Key findings
+
+**1. 100% semantic coverage from structured priors**
+The 195 prior nodes explain all 6000 sentence observations across 3 passes. The NLP world model fully spans the sentence space defined by the vocabulary and grammar. This is a direct consequence of prior design: every word, object category, capability, and sentence template is represented, so the Observer always finds a prior within `tau` of any observation.
+
+**2. Capability priors are the most semantically precise nodes**
+`cap_dog_barks`, `cap_dog_fetches`, `cap_cat_meows`, and `cap_person_gives` all achieve 1.00 category purity. They are more precise than sentence templates (which span multiple categories) and more specific than object nodes (which group heterogeneous members). Capability priors occupy the right level of abstraction for semantic alignment.
+
+**3. Priors as relational constraints enable zero-shot category recovery**
+No category labels are provided to the Observer. Semantic categories emerge from the geometry of the world model: nodes built to encode relational structure (entity + action, entity + object) happen to align with the categories that defined the data. This is HPM's structural claim — coherent patterns at one level of the hierarchy encode information about higher levels.
+
+**4. Convergence: 5400 absorbed → 7 stable learned nodes**
+The Observer's absorption mechanism is highly active in NLP (5400 absorbed across 6000 observations). This reflects that new nodes created for residual observations are quickly dominated by existing priors on subsequent passes. The system converges to a sparse representation where learned nodes supplement, rather than replace, the prior vocabulary.
+
+```bash
+PYTHONPATH=. python3 hpm_fractal_node/experiments/experiment_nlp.py
+```
+
+# Source 24: 2026-03-28-hfn-design-spec.md
+# HPM Fractal Node (HFN) — Design Specification
+
+**Date:** 2026-03-28
+**Status:** Draft for review
+
+---
+
+## 1. Purpose and Context
+
+The HPM Fractal Node (HFN) is a data structure that represents a single pattern in the HPM framework. It is the core unit from which all hierarchical pattern representations are built.
+
+This specification defines the interface, invariants, and dynamics of HFN nodes, together with two supporting components: the **Observer** (which uses nodes to explain an incoming signal) and the **Forest** (which maintains the population of nodes and drives learning through competitive dynamics).
+
+This specification does not define encoder architecture, proximity search data structures, how the attention budget is set, or evaluator signal sources. Those are out of scope.
+
+---
+
+## 2. Core Concept
+
+Every HFN node has two faces:
+
+**Compressed face** — a multivariate Gaussian N(μ, Σ) in a shared D-dimensional latent space Z. This is the node's identity: it represents what the pattern looks like as a probability distribution over signals.
+
+**Structural face** — a DAG of child HFN nodes with typed edges. This is the node's internal composition: how the pattern is built from sub-patterns.
+
+Both faces are always present. The Gaussian is the node's compressed summary. The DAG is its polygraph body. Together they satisfy the three HPM pattern requirements:
+
+- **Internal coherence**: the DAG (polygraph) defines structural coherence among children.
+- **Functional utility**: the Gaussian supports prediction — it can assign probability to signals.
+- **Evaluator reinforcement**: tracked externally by the Observer and Forest, not by the node itself.
+
+---
+
+## 3. Levels Are Observer-Relative
+
+HFN does not have a fixed level number. What counts as "level N" depends on the Observer's current position in the expansion tree. A node is a root from one Observer's perspective and a leaf from another's simultaneously.
+
+This is a design invariant: **no node stores its own level**. The same node can be a child of multiple parent nodes. Hierarchy is a property of a particular traversal, not a property of nodes.
+
+---
+
+## 4. HFN Node Interface
+
+### 4.1 Identity operations
+
+```python
+def log_prob(x: ndarray) -> float
+```
+Returns the log-probability of signal `x` under the node's Gaussian N(μ, Σ). Scalar surprise: higher value means the node finds `x` more probable (less surprising). Used by the Observer to measure how well this node explains the current signal.
+
+```python
+def overlap(other: HFN) -> float
+```
+Returns the Gaussian overlap integral ∫ N(μ_self, Σ_self) · N(μ_other, Σ_other) dz. This is the competition coefficient κ between two nodes. Used by the Forest to determine competitive pressure.
+
+```python
+def description_length() -> float
+```
+Returns the complexity of this node. Used in the scoring function S = accuracy − λ · complexity, where λ is a compression pressure constant set by the Forest. Simpler nodes are preferred when accuracy is equal.
+
+### 4.2 Structure operations (read-only)
+
+```python
+def children() -> list[HFN]
+```
+Returns the immediate child nodes in this node's DAG. Returns an empty list for leaf nodes.
+
+```python
+def edges() -> list[Edge]
+```
+Returns the typed edges between this node's children. Each edge is a triple (source: HFN, target: HFN, relation: str). Edge types are domain-defined strings (e.g. "next", "part-of", "causes").
+
+```python
+def expand(depth: int) -> HFN
+```
+Returns the sub-tree rooted at this node to the given depth. At depth 0, or if the node is a leaf, returns the node itself. This is the fractal property: `expand` has the same return type at every depth, and the returned sub-tree exposes the same interface.
+
+### 4.3 Recombination
+
+```python
+def recombine(other: HFN) -> HFN
+```
+Returns a new HFN node with `self` and `other` as children. The new node's Gaussian is derived from the combined structure (e.g. parameters fit to the union of the children's distributions). No existing node is mutated. The new node starts as a candidate — the Forest decides whether to register it.
+
+---
+
+## 5. HFN Node Invariants
+
+1. **No parent references.** A node has no knowledge of which nodes contain it as a child. Parent structure is maintained solely by the containing nodes.
+
+2. **No mutation from queries.** Calling `log_prob`, `overlap`, `description_length`, `children`, `edges`, or `expand` never alters any node's state.
+
+3. **Shared child references.** The same node object can be a child of multiple parent nodes simultaneously. This is not an error; it is how reuse is expressed.
+
+4. **Fractal uniformity.** Every node exposes the same interface regardless of depth. There is no "leaf interface" or "root interface".
+
+5. **Gaussian required.** Every node, including leaves, has a Gaussian N(μ, Σ). Leaves have no children; their Gaussian is their sole identity.
+
+---
+
+## 6. Observer Interface
+
+The Observer is responsible for explaining a single incoming signal `x`. It is stateless between signals.
+
+### 6.1 State during one explanation pass
+
+- `x`: the current signal in Z (D-dimensional vector)
+- `B`: the attention budget (integer, decremented each time a node is expanded)
+- `frontier`: the set of nodes whose children have not yet been examined
+
+### 6.2 Expansion decision
+
+The Observer expands a frontier node `h` only when **both** conditions hold:
+
+1. **Surprise condition:** D_KL(P(x) ‖ N(μ_h, Σ_h)) ≥ τ
+
+   The node's Gaussian does not adequately explain `x`. τ is the surprise threshold (a scalar constant set externally).
+
+2. **Utility condition:** node `h` has the highest expected surprise reduction Δ(h) among all current frontier nodes.
+
+   Δ(h) estimates how much expanding `h` is likely to reduce residual surprise, based on the distribution of its children's Gaussians.
+
+When a node passes both conditions, the Observer calls `expand(1)` on it, adds the returned children to the frontier, and decrements B by 1.
+
+### 6.3 Expansion loop
+
+```
+initialise frontier with candidate root nodes (provided by Forest)
+while True:
+    compute surprise for all frontier nodes against x
+    if no frontier node exceeds τ: stop (signal is explained)
+    if B == 0: stop (budget exhausted)
+    select h = argmax Δ(h) over frontier nodes exceeding τ
+    new_children = h.expand(1).children()
+    frontier = (frontier \ {h}) ∪ new_children
+    B -= 1
+```
+
+### 6.4 Observer outputs
+
+- **Explanation tree**: the set of nodes and edges visited during expansion. Read-only; the Observer does not modify nodes.
+- **Residual surprise**: the aggregate unexplained surprise remaining after the loop terminates. Passed to the Forest as a signal that new nodes may be needed.
+
+---
+
+## 7. Forest Interface
+
+The Forest maintains the population of all active HFN nodes. It is the component responsible for learning dynamics.
+
+### 7.1 State
+
+- Registry of all active nodes, indexed by Gaussian identity (μ, Σ)
+- Weight w_h ∈ [0, 1] for each node h, representing accumulated predictive success
+- Score S_h for each node h, updated after each query: S_h = accuracy_h − λ · h.description_length()
+
+### 7.2 Responsibilities
+
+**Retrieval.** Given the current signal `x`, the Forest performs a proximity search in Z and returns the k nearest nodes (by Gaussian mean) as candidate roots for the Observer. The Forest reads only Gaussian identities for this purpose; it does not push data into nodes.
+
+**Competitive weight update.** After each Observer query, nodes that appeared in the explanation tree gain weight proportional to their contribution to reducing surprise. Nodes that did not participate lose weight proportional to their overlap with the nodes that did:
+
+```
+for each active node h:
+    if h was in explanation tree:
+        w_h += α · (1 - w_h) · accuracy_h
+    else:
+        for each explaining node j:
+            w_h -= β · κ_hj · w_h
+        where κ_hj = h.overlap(j)
+```
+
+This is a discrete per-query update, not a continuous ODE. α and β are learning rate constants.
+
+**Structural absorption.** When node `j` has persistently lost weight to node `h` over the last N queries, **and** κ_hj exceeds threshold α_struct, the Forest absorbs `j` as a child of `h`:
+
+- A new parent node is created via `h.recombine(j)` or by directly adding `j` to `h`'s child list (depending on implementation).
+- `j` is not destroyed; it becomes a structural component of `h`.
+- This is how competition resolves into hierarchy: weaker, highly overlapping nodes become sub-patterns of stronger nodes.
+
+**Node creation — residual surprise.** When residual surprise (returned by Observer) exceeds a threshold, the Forest spawns a new leaf node. The new node's Gaussian is initialised from the unexplained component of `x`. It starts with low weight w = w_init and is registered in the Forest.
+
+**Node creation — query-induced compression.** The Forest tracks which sub-structures recur across explanation trees. When a set of nodes [h₁, h₂, ... hₙ] consistently co-appear in the same expansion path across M consecutive queries, the Forest creates a new node whose children are [h₁ ... hₙ] and whose Gaussian is derived from their combined structure. This node represents the compressed form of the recurring relationship. It enters the Forest as a candidate with low initial weight w = w_init and must earn stability through continued predictive accuracy. This is the primary mechanism by which new abstractions form: not from unexplained signals alone, but from structural patterns discovered through repeated querying.
+
+### 7.3 Forest invariant
+
+The Forest never writes to or mutates any HFN node. It reads Gaussian identities via `log_prob`, `overlap`, and `description_length` to compute weights and scores. Structural changes (creating new parent nodes, adding children) produce new node objects; they do not alter existing ones.
+
+---
+
+## 8. Cross-Cutting Invariants
+
+| Invariant | Statement |
+|---|---|
+| Structural ignorance | A node knows only its children. No node knows its parents, its Forest weight, or its level. |
+| Immutability under query | Any call to any node method returns a value; it never changes any node's fields. |
+| Fractal uniformity | The HFN interface is identical at every depth. Depth is a property of traversal. |
+| Compression as default | The scoring function S = accuracy − λ · complexity means simpler nodes are preferred when predictive power is equal. |
+| Pattern density as emergent stability | Nodes persist by earning accurate predictions repeatedly. Weight is not assigned; it is accumulated. |
+
+---
+
+## 9. HPM Alignment
+
+| HPM Concept | HFN Implementation |
+|---|---|
+| Pattern substrate | The HFN node — both Gaussian and DAG structure |
+| Pattern dynamics | Forest competitive updates, structural absorption, node creation |
+| Pattern evaluator / gatekeeper | Observer surprise threshold τ; Forest score S_h with compression penalty |
+| Pattern field | The Forest's active population and the proximity structure of Z |
+| Hierarchy of abstraction levels | Depth-first expansion by Observer; absorption resolves competition into hierarchy |
+| Innate priors | Initial Gaussian parameters; w_init for new nodes vs. established nodes |
+
+---
+
+## 10. Out of Scope
+
+The following are **explicitly excluded** from this specification. They are implementation decisions to be made separately:
+
+- How Gaussians are initialised from raw (non-latent) signals (encoder architecture)
+- Data structure for proximity search in Z (e.g. k-d tree, HNSW, ball tree)
+- How the attention budget B is set (may be fixed, signal-dependent, or externally controlled)
+- Sources of evaluator signal (affect, social reward, curiosity) that modulate λ or τ
+- Training procedure for Gaussian parameters within a node over time
+
+---
+
+## 11. Glossary
+
+| Term | Definition |
+|---|---|
+| HFN | HPM Fractal Node — the core pattern unit |
+| Z | The shared D-dimensional latent space in which all Gaussians live |
+| N(μ, Σ) | Multivariate Gaussian with mean μ and covariance Σ |
+| D_KL | Kullback-Leibler divergence — measures how surprised a Gaussian is by a signal |
+| τ | Surprise threshold — below this the Observer considers a node to explain the signal adequately |
+| κ_hj | Overlap coefficient between nodes h and j: ∫ N_h · N_j dz |
+| B | Attention budget — limits the number of expansions per signal |
+| Δ(h) | Expected surprise reduction from expanding node h |
+| S_h | Score of node h: accuracy minus compression penalty |
+| λ | Compression pressure constant — weight of complexity in the scoring function |
+| α_struct | Structural absorption threshold for overlap coefficient κ |
+| w_h | Weight of node h in the Forest — accumulated predictive success |
+| Polygraph body | The DAG of children and typed edges that forms the structural face of a node |

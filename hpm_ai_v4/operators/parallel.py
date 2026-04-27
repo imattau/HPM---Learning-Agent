@@ -70,6 +70,14 @@ def pattern_worker(state_dict: dict, obs_buffer: list,
     return state
 
 
+def _worker_context_window(obs_buffer: list, params: dict) -> list:
+    """Keep only the tail of the observation buffer needed by the worker path."""
+    window = max(30, int(params.get('adapt_window', 100)))
+    if not obs_buffer:
+        return []
+    return list(obs_buffer[-window:])
+
+
 def update_pattern_resident(pattern, obs_buffer: list,
                             field_freq: dict, params: dict) -> dict:
     """Update a resident pattern object in place and return its scores."""
@@ -83,7 +91,10 @@ def update_pattern_resident(pattern, obs_buffer: list,
             if pattern.complexity >= 2 or pattern.latent_dim > 1:
                 ll = pattern.update_parameters_online(obs_buffer, window_size=params.get('adapt_window', 100))
             else:
-                pattern.observe(obs_buffer[-1], learning_rate=params['learning_rate'])
+                if hasattr(pattern, "observe"):
+                    pattern.observe(obs_buffer[-1], learning_rate=params['learning_rate'])
+                else:
+                    ll = pattern.log_likelihood(obs_buffer[-30:])
         if ll is None:
             ll = pattern.log_likelihood(obs_buffer[-30:])
         pattern.update_running_loss(obs_buffer, ll=ll)
@@ -121,8 +132,9 @@ class ParallelPatternPool:
 
     def map_patterns(self, patterns: list, obs_buffer: list,
                      field_freq: dict, params: dict) -> list:
+        worker_obs = _worker_context_window(obs_buffer, params)
         task_args = [
-            (pattern_to_dict(p), list(obs_buffer), dict(field_freq),
+            (pattern_to_dict(p), list(worker_obs), dict(field_freq),
              {**params, 'external_soc': params.get('external_soc_map', {}).get(p.id, 0.5)})
             for p in patterns
         ]

@@ -19,6 +19,7 @@ def test_observe_code_dsl_feeds_execution_feedback():
     assert stats["execution_match"] is True
     assert stats["parseable"] is True
     assert "kind" in stats
+    assert "structure_score" in stats
     assert agent.l1.reasoner.memory_size > 0
 
 
@@ -36,6 +37,7 @@ def test_run_code_dsl_simulation_short(tmp_path):
     assert "repair_agreement" in final
     assert "repair_improvement" in final
     assert "execution_match" in final
+    assert "text_signal_score" in final
     assert (tmp_path / "code_dsl_library.l1.pkl").exists()
     assert (tmp_path / "code_dsl_library.l2.pkl").exists()
     assert (tmp_path / "code_dsl_library.l3.pkl").exists()
