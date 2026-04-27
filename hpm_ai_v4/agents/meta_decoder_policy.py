@@ -34,7 +34,9 @@ class MetaDecoderPolicy:
         self.bootstrap_half_life = 48.0
         self.bootstrap_floor = 0.0
         self.bootstrap_warmup = 64
-        self.exploration_weight = 0.03
+        self.exploration_weight = 0.10
+        self.exploration_start_weight = 0.25
+        self.exploration_decay_half_life = 2000.0
 
     def select(
         self,
@@ -204,7 +206,9 @@ class MetaDecoderPolicy:
     def _exploration_bonus(self, spec: DecoderSpec) -> float:
         """Small novelty bonus so unseen or underused specs are not crowded out."""
         count = self._selection_counts.get(spec.key(), 0)
-        return self.exploration_weight / float(np.sqrt(count + 1.0))
+        early_phase = float(np.exp(-self._age / max(1.0, self.exploration_decay_half_life)))
+        effective_weight = self.exploration_weight + (self.exploration_start_weight - self.exploration_weight) * early_phase
+        return effective_weight / float(np.sqrt(count + 1.0))
 
     def _outcome_reward(self, outcome: Dict[str, float]) -> float:
         agreement = float(outcome.get("token_agreement", 0.0))
@@ -232,6 +236,8 @@ class MetaDecoderPolicy:
             "bootstrap_floor": self.bootstrap_floor,
             "bootstrap_warmup": self.bootstrap_warmup,
             "exploration_weight": self.exploration_weight,
+            "exploration_start_weight": self.exploration_start_weight,
+            "exploration_decay_half_life": self.exploration_decay_half_life,
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
@@ -249,6 +255,8 @@ class MetaDecoderPolicy:
         self.bootstrap_floor = float(state.get("bootstrap_floor", self.bootstrap_floor))
         self.bootstrap_warmup = int(state.get("bootstrap_warmup", self.bootstrap_warmup))
         self.exploration_weight = float(state.get("exploration_weight", self.exploration_weight))
+        self.exploration_start_weight = float(state.get("exploration_start_weight", self.exploration_start_weight))
+        self.exploration_decay_half_life = float(state.get("exploration_decay_half_life", self.exploration_decay_half_life))
 
     @staticmethod
     def _decode_spec_key(key: str) -> DecoderSpec:

@@ -5,7 +5,7 @@ def epistemic_score(pattern):
     return -pattern.running_loss
 
 
-def compression_gate(pattern, target_loss=0.9, slope=4.0):
+def compression_gate(pattern, target_loss=0.3, slope=4.0):
     """Only reward compression when the pattern is epistemically competitive."""
     if pattern.latent_dim <= 1:
         return 0.0

@@ -461,6 +461,30 @@ class LayeredAgent:
             'best_weight': max(p.weight for p in self.l5.patterns) if self.l5.patterns else 0.0,
         }
 
+    @classmethod
+    def from_library(cls, path: str, frozen: bool = True,
+                     num_workers: int = 1,
+                     dictionary=None, grammar=None) -> "LayeredAgent":
+        """Create a LayeredAgent with l1 patterns pre-loaded from a saved library.
+
+        Parameters
+        ----------
+        path:
+            Path to a .pkl file produced by build_large_nlp_library.
+        frozen:
+            If True, the loaded l1 patterns' weights are fixed (no weight
+            updates during further training) so the library acts as a stable
+            prior.  Higher levels train freely on top.
+        """
+        from hpm_ai_v4.tools.serializer import PatternSerializer
+        agent = cls(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+        patterns = PatternSerializer.load(path)
+        agent.l1.patterns = patterns
+        if frozen:
+            for p in agent.l1.patterns:
+                p._frozen = True
+        return agent
+
     def save_bundle(self, base_path: str) -> None:
         from hpm_ai_v4.tools.serializer import PatternSerializer
         PatternSerializer.save(self.l1.patterns, base_path + ".l1.pkl")

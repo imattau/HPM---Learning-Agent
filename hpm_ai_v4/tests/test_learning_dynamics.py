@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.pattern import HierarchicalPattern
+from hpm_ai_v4.evaluators.metrics import compression_gate
 
 class FixedEnvironment:
     """A simple environment with a fixed structure: alternating 0s and 1s."""
@@ -84,3 +85,14 @@ def test_pattern_update_recovers_from_nan_parameters():
     assert np.all(np.isfinite(p.pi))
     assert np.all(np.isfinite(dist))
     assert abs(dist.sum() - 1.0) < 1e-6
+
+
+def test_compression_gate_activates_earlier():
+    p = HierarchicalPattern(pattern_id=100, latent_dim=2, obs_dim=2)
+    p.running_loss = 0.3
+    low_gate = compression_gate(p)
+    p.running_loss = 0.9
+    high_gate = compression_gate(p)
+
+    assert low_gate > high_gate
+    assert low_gate > 0.4

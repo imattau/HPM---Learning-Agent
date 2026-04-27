@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from hpm_ai_v4.pattern import HierarchicalPattern
 from hpm_ai_v4.agents.agent import HPMAgent
-from hpm_ai_v4.agents.reasoning import Reasoner
+from hpm_ai_v4.agents.reasoning import EpisodeRecord, Reasoner
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +333,84 @@ class TestMemory:
         assert summary["graph_counts"]["stage"] >= 1
         assert summary["graph_counts"]["policy"] >= 1
         assert summary["graph_counts"]["outcome"] >= 1
+
+    def test_projection_summary_reports_structured_episode_fields(self, reasoner):
+        reasoner.memory = []
+        reasoner.record_episode(
+            [1, 2, 3, 4],
+            action=1,
+            reward=0.9,
+            tag="chat",
+            metadata={
+                "domain": "chat",
+                "task_family": "troubleshooting",
+                "intent": "question",
+                "action_label": "user_question",
+                "outcome_label": "agent_answer",
+                "stage": "diagnosis",
+                "policy": "word",
+            },
+        )
+
+        summary = reasoner.polygraph.projection_summary(
+            [1, 2, 3, 4],
+            query_action=1,
+            query_stage="diagnosis",
+            query_policy="word",
+            query_intent="question",
+            query_task_family="troubleshooting",
+            query_domain="chat",
+        )
+
+        assert summary["graph_counts"]["intent"] >= 1
+        assert summary["graph_counts"]["task_family"] >= 1
+        assert summary["graph_counts"]["domain"] >= 1
+
+    def test_retrieve_memory_supports_structured_queries(self, reasoner):
+        reasoner.memory = []
+        reasoner.record_episode(
+            [1, 2, 3, 4],
+            action=1,
+            reward=1.0,
+            tag="chat",
+            metadata={
+                "domain": "chat",
+                "task_family": "troubleshooting",
+                "intent": "question",
+                "action_label": "user_question",
+                "outcome_label": "agent_answer",
+                "stage": "diagnosis",
+                "policy": "word",
+            },
+        )
+        reasoner.record_episode(
+            [0, 0, 0, 0],
+            action=0,
+            reward=0.2,
+            tag="chat",
+            metadata={
+                "domain": "text",
+                "task_family": "repair",
+                "intent": "repair",
+                "action_label": "corrupted_input",
+                "outcome_label": "repair_output",
+                "stage": "denoise",
+                "policy": "char",
+            },
+        )
+
+        hits = reasoner.retrieve_memory(
+            [1, 2, 3, 4],
+            top_k=1,
+            query_domain="chat",
+            query_task_family="troubleshooting",
+            query_intent="question",
+        )
+
+        assert hits
+        assert hits[0].domain == "chat"
+        assert hits[0].task_family == "troubleshooting"
+        assert hits[0].intent == "question"
 
     def test_consolidation_emits_summary_records(self, reasoner):
         reasoner.memory = []

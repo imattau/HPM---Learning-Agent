@@ -1,5 +1,6 @@
 from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, _resolve_chat_library_path
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.text_signals import TextSignalPack, TextSignalExtractor
 
 
@@ -302,6 +303,10 @@ def test_resolve_chat_library_path_prefers_existing_default(tmp_path, monkeypatc
     base = tmp_path / "daily_dialog_chat_library"
     (tmp_path / "daily_dialog_chat_library.l1.pkl").write_text("stub")
     monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_REGISTRY_CANDIDATES",
+        ["/tmp/does-not-exist"],
+    )
+    monkeypatch.setattr(
         "hpm_ai_v4.simulations.chat_simulation.CHAT_LIBRARY_CANDIDATES",
         [str(base), "/tmp/does-not-exist"],
     )
@@ -315,6 +320,10 @@ def test_resolve_chat_library_path_prefers_mixed_library(tmp_path, monkeypatch):
     daily = tmp_path / "daily_dialog_chat_library"
     (tmp_path / "conversational_chat_library.l1.pkl").write_text("stub")
     (tmp_path / "daily_dialog_chat_library.l1.pkl").write_text("stub")
+    monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_REGISTRY_CANDIDATES",
+        ["/tmp/does-not-exist"],
+    )
     monkeypatch.setattr(
         "hpm_ai_v4.simulations.chat_simulation.CHAT_LIBRARY_CANDIDATES",
         [str(mixed), str(daily)],
@@ -330,8 +339,53 @@ def test_resolve_chat_library_path_prefers_ultra_bundle(tmp_path, monkeypatch):
     (tmp_path / "chat_ultra_bundle.l1.pkl").write_text("stub")
     (tmp_path / "conversational_chat_library.l1.pkl").write_text("stub")
     monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_REGISTRY_CANDIDATES",
+        ["/tmp/does-not-exist"],
+    )
+    monkeypatch.setattr(
         "hpm_ai_v4.simulations.chat_simulation.CHAT_LIBRARY_CANDIDATES",
         [str(bundle), str(mixed)],
+    )
+
+    resolved = _resolve_chat_library_path()
+    assert resolved == str(bundle)
+
+
+def test_resolve_chat_library_path_prefers_registry_view(tmp_path, monkeypatch):
+    registry_path = tmp_path / "registry.json"
+    registry = LibraryRegistry(str(registry_path))
+    bundle = tmp_path / "chat_ultra_bundle"
+    text = tmp_path / "text_seed.pkl"
+    (tmp_path / "chat_ultra_bundle.l1.pkl").write_text("stub")
+    text.write_text("stub")
+    registry.upsert(
+        name="chat_ultra_bundle_seed",
+        path=str(bundle),
+        domain="chat",
+        status="promoted",
+        bundle_kind="stacked",
+        level_contract="l1-l5",
+        obs_dims=[5, 10, 10, 32, 64],
+        pattern_count=64,
+    )
+    registry.upsert(
+        name="text_seed",
+        path=str(text),
+        domain="text",
+        status="promoted",
+        bundle_kind="flat",
+        level_contract="l1",
+        obs_dims=[5],
+        pattern_count=12,
+    )
+
+    monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_REGISTRY_CANDIDATES",
+        [str(registry_path)],
+    )
+    monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_LIBRARY_CANDIDATES",
+        ["/tmp/does-not-exist"],
     )
 
     resolved = _resolve_chat_library_path()

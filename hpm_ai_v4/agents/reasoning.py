@@ -17,6 +17,11 @@ class EpisodeRecord:
     reward: float
     tag: str = "observe"
     metadata: Optional[Dict[str, Any]] = None
+    domain: str = "unknown"
+    task_family: str = "unknown"
+    intent: str = "unknown"
+    action_label: str = "unknown"
+    outcome_label: str = "unknown"
     stage: str = "unknown"
     policy: str = "unknown"
     community: str = "unknown"
@@ -38,6 +43,11 @@ class EpisodeRecord:
             reward=float(data.get("reward", 0.0)),
             tag=str(data.get("tag", "observe")),
             metadata=metadata,
+            domain=str(data.get("domain", metadata.get("domain", "unknown"))),
+            task_family=str(data.get("task_family", metadata.get("task_family", "unknown"))),
+            intent=str(data.get("intent", metadata.get("intent", "unknown"))),
+            action_label=str(data.get("action_label", metadata.get("action_label", "unknown"))),
+            outcome_label=str(data.get("outcome_label", metadata.get("outcome_label", "unknown"))),
             stage=str(data.get("stage", metadata.get("stage", "unknown"))),
             policy=str(data.get("policy", metadata.get("policy", "unknown"))),
             community=str(data.get("community", metadata.get("community", "unknown"))),
@@ -121,11 +131,21 @@ class EpisodicPolygraph:
         self.policy_index: Dict[str, List[int]] = {}
         self.action_index: Dict[int, List[int]] = {}
         self.outcome_index: Dict[int, List[int]] = {}
+        self.action_label_index: Dict[str, List[int]] = {}
+        self.outcome_label_index: Dict[str, List[int]] = {}
+        self.intent_index: Dict[str, List[int]] = {}
+        self.task_family_index: Dict[str, List[int]] = {}
+        self.domain_index: Dict[str, List[int]] = {}
         self.summary_community_keys: set[str] = set()
         self.summary_context_index: Dict[Tuple[int, ...], set[str]] = {}
         self.summary_stage_index: Dict[str, set[str]] = {}
         self.summary_policy_index: Dict[str, set[str]] = {}
         self.summary_action_index: Dict[int, set[str]] = {}
+        self.summary_action_label_index: Dict[str, set[str]] = {}
+        self.summary_outcome_label_index: Dict[str, set[str]] = {}
+        self.summary_intent_index: Dict[str, set[str]] = {}
+        self.summary_task_family_index: Dict[str, set[str]] = {}
+        self.summary_domain_index: Dict[str, set[str]] = {}
         self._step = 0
         self.summary_threshold = 3
         self.summary_interval = 2
@@ -178,12 +198,27 @@ class EpisodicPolygraph:
         query_action: Optional[int] = None,
         query_stage: Optional[str] = None,
         query_policy: Optional[str] = None,
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
+        query_action_label: Optional[str] = None,
+        query_outcome_label: Optional[str] = None,
     ) -> List[EpisodeRecord]:
         if not self.records:
             return []
 
         context = list(context_obs[-self.window:]) if context_obs else []
-        candidate_map = self._candidate_map(context, query_action, query_stage, query_policy)
+        candidate_map = self._candidate_map(
+            context,
+            query_action,
+            query_stage,
+            query_policy,
+            query_intent=query_intent,
+            query_task_family=query_task_family,
+            query_domain=query_domain,
+            query_action_label=query_action_label,
+            query_outcome_label=query_outcome_label,
+        )
         if not candidate_map:
             candidate_map = {idx: {"fallback"} for idx in range(len(self.records))}
 
@@ -192,14 +227,36 @@ class EpisodicPolygraph:
             rec = self.records[idx]
             if min_reward is not None and rec.reward < min_reward:
                 continue
-            score = self._resonance_score(context, rec, query_action, query_stage, query_policy)
+            score = self._resonance_score(
+                context,
+                rec,
+                query_action,
+                query_stage,
+                query_policy,
+                query_intent=query_intent,
+                query_task_family=query_task_family,
+                query_domain=query_domain,
+                query_action_label=query_action_label,
+                query_outcome_label=query_outcome_label,
+            )
             score += self.graph_weights["support"] * max(0, len(sources) - 1)
             scored.append((score, rec))
 
         for rec in self._summary_candidates(context, query_action, query_stage, query_policy):
             if min_reward is not None and rec.reward < min_reward:
                 continue
-            score = self._resonance_score(context, rec, query_action, query_stage, query_policy)
+            score = self._resonance_score(
+                context,
+                rec,
+                query_action,
+                query_stage,
+                query_policy,
+                query_intent=query_intent,
+                query_task_family=query_task_family,
+                query_domain=query_domain,
+                query_action_label=query_action_label,
+                query_outcome_label=query_outcome_label,
+            )
             score += 0.10 * min(1.0, rec.reward)
             if rec.is_summary:
                 score += 0.15
@@ -216,16 +273,32 @@ class EpisodicPolygraph:
         query_action: Optional[int] = None,
         query_stage: Optional[str] = None,
         query_policy: Optional[str] = None,
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Return how strongly each projection graph supports the current query."""
         context = list(context_obs[-self.window:]) if context_obs else []
-        candidate_map = self._candidate_map(context, query_action, query_stage, query_policy)
+        candidate_map = self._candidate_map(
+            context,
+            query_action,
+            query_stage,
+            query_policy,
+            query_intent=query_intent,
+            query_task_family=query_task_family,
+            query_domain=query_domain,
+        )
         counts = {
             "context": 0,
             "action": 0,
+            "action_label": 0,
+            "outcome_label": 0,
             "stage": 0,
             "policy": 0,
             "outcome": 0,
+            "intent": 0,
+            "task_family": 0,
+            "domain": 0,
             "summary": 0,
         }
         for sources in candidate_map.values():
@@ -280,12 +353,22 @@ class EpisodicPolygraph:
         self.policy_index = {}
         self.action_index = {}
         self.outcome_index = {}
+        self.action_label_index = {}
+        self.outcome_label_index = {}
+        self.intent_index = {}
+        self.task_family_index = {}
+        self.domain_index = {}
         self.community_members = {}
         self.summary_community_keys = set()
         self.summary_context_index = {}
         self.summary_stage_index = {}
         self.summary_policy_index = {}
         self.summary_action_index = {}
+        self.summary_action_label_index = {}
+        self.summary_outcome_label_index = {}
+        self.summary_intent_index = {}
+        self.summary_task_family_index = {}
+        self.summary_domain_index = {}
         for idx, rec in enumerate(self.records):
             self._index_record(idx, rec)
 
@@ -301,6 +384,11 @@ class EpisodicPolygraph:
         self.policy_index.setdefault(rec.policy, []).append(idx)
         self.action_index.setdefault(int(rec.action), []).append(idx)
         self.outcome_index.setdefault(self._outcome_bucket(rec), []).append(idx)
+        self.action_label_index.setdefault(rec.action_label, []).append(idx)
+        self.outcome_label_index.setdefault(rec.outcome_label, []).append(idx)
+        self.intent_index.setdefault(rec.intent, []).append(idx)
+        self.task_family_index.setdefault(rec.task_family, []).append(idx)
+        self.domain_index.setdefault(rec.domain, []).append(idx)
         self.community_members.setdefault(rec.community, []).append(idx)
 
     def _update_community(self, idx: int, rec: EpisodeRecord, rebuild: bool = False) -> None:
@@ -328,6 +416,11 @@ class EpisodicPolygraph:
         query_action: Optional[int],
         query_stage: Optional[str],
         query_policy: Optional[str],
+        query_action_label: Optional[str] = None,
+        query_outcome_label: Optional[str] = None,
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
     ) -> List[EpisodeRecord]:
         summaries: List[EpisodeRecord] = []
         candidate_keys: set[str] = set()
@@ -339,6 +432,16 @@ class EpisodicPolygraph:
             candidate_keys.update(self.summary_stage_index.get(query_stage, set()))
         if query_policy:
             candidate_keys.update(self.summary_policy_index.get(query_policy, set()))
+        if query_action_label:
+            candidate_keys.update(self.summary_action_label_index.get(query_action_label, set()))
+        if query_outcome_label:
+            candidate_keys.update(self.summary_outcome_label_index.get(query_outcome_label, set()))
+        if query_intent:
+            candidate_keys.update(self.summary_intent_index.get(query_intent, set()))
+        if query_task_family:
+            candidate_keys.update(self.summary_task_family_index.get(query_task_family, set()))
+        if query_domain:
+            candidate_keys.update(self.summary_domain_index.get(query_domain, set()))
         if not candidate_keys:
             candidate_keys = set(self.summary_community_keys)
         else:
@@ -351,6 +454,16 @@ class EpisodicPolygraph:
             if query_stage and summary.stage != query_stage:
                 continue
             if query_policy and summary.policy != query_policy:
+                continue
+            if query_action_label and summary.action_label != query_action_label:
+                continue
+            if query_outcome_label and summary.outcome_label != query_outcome_label:
+                continue
+            if query_intent and summary.intent != query_intent:
+                continue
+            if query_task_family and summary.task_family != query_task_family:
+                continue
+            if query_domain and summary.domain != query_domain:
                 continue
             if query_action is not None and summary.action != int(query_action):
                 continue
@@ -365,6 +478,11 @@ class EpisodicPolygraph:
         query_action: Optional[int],
         query_stage: Optional[str],
         query_policy: Optional[str],
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
+        query_action_label: Optional[str] = None,
+        query_outcome_label: Optional[str] = None,
     ) -> Dict[int, set[str]]:
         candidate_map: Dict[int, set[str]] = {}
 
@@ -383,6 +501,21 @@ class EpisodicPolygraph:
         if query_policy:
             for idx in self.policy_index.get(query_policy, []):
                 add(idx, "policy")
+        if query_action_label:
+            for idx in self.action_label_index.get(query_action_label, []):
+                add(idx, "action_label")
+        if query_outcome_label:
+            for idx in self.outcome_label_index.get(query_outcome_label, []):
+                add(idx, "outcome_label")
+        if query_intent:
+            for idx in self.intent_index.get(query_intent, []):
+                add(idx, "intent")
+        if query_task_family:
+            for idx in self.task_family_index.get(query_task_family, []):
+                add(idx, "task_family")
+        if query_domain:
+            for idx in self.domain_index.get(query_domain, []):
+                add(idx, "domain")
 
         # Outcome graph: bias toward high-value episodes and summary records.
         for bucket in (3, 2):
@@ -394,7 +527,7 @@ class EpisodicPolygraph:
     def _community_key(self, rec: EpisodeRecord) -> str:
         context_tail = tuple(rec.context[-4:]) if rec.context else tuple()
         outcome_bucket = self._outcome_bucket(rec)
-        return f"{rec.stage}|{rec.policy}|{int(rec.action)}|{outcome_bucket}|{context_tail}"
+        return f"{rec.domain}|{rec.task_family}|{rec.intent}|{rec.stage}|{rec.policy}|{int(rec.action)}|{outcome_bucket}|{context_tail}"
 
     def _community_resonance(self, context: Sequence[int], community: CommunityState) -> float:
         if not community.summary_record:
@@ -416,19 +549,39 @@ class EpisodicPolygraph:
         action_counts: Dict[int, int] = {}
         stage_counts: Dict[str, int] = {}
         policy_counts: Dict[str, int] = {}
+        domain_counts: Dict[str, int] = {}
+        task_family_counts: Dict[str, int] = {}
+        intent_counts: Dict[str, int] = {}
+        action_label_counts: Dict[str, int] = {}
+        outcome_label_counts: Dict[str, int] = {}
         for rec in member_records:
             action_counts[rec.action] = action_counts.get(rec.action, 0) + 1
             stage_counts[rec.stage] = stage_counts.get(rec.stage, 0) + 1
             policy_counts[rec.policy] = policy_counts.get(rec.policy, 0) + 1
+            domain_counts[rec.domain] = domain_counts.get(rec.domain, 0) + 1
+            task_family_counts[rec.task_family] = task_family_counts.get(rec.task_family, 0) + 1
+            intent_counts[rec.intent] = intent_counts.get(rec.intent, 0) + 1
+            action_label_counts[rec.action_label] = action_label_counts.get(rec.action_label, 0) + 1
+            outcome_label_counts[rec.outcome_label] = outcome_label_counts.get(rec.outcome_label, 0) + 1
         action = max(action_counts.items(), key=lambda item: item[1])[0]
         stage = max(stage_counts.items(), key=lambda item: item[1])[0]
         policy = max(policy_counts.items(), key=lambda item: item[1])[0]
+        domain = max(domain_counts.items(), key=lambda item: item[1])[0]
+        task_family = max(task_family_counts.items(), key=lambda item: item[1])[0]
+        intent = max(intent_counts.items(), key=lambda item: item[1])[0]
+        action_label = max(action_label_counts.items(), key=lambda item: item[1])[0]
+        outcome_label = max(outcome_label_counts.items(), key=lambda item: item[1])[0]
         reward = float(sum(rec.reward for rec in member_records) / len(member_records))
         metadata = {
             "community": key,
             "count": len(member_records),
             "summary": True,
             "avg_reward": reward,
+            "domain": domain,
+            "task_family": task_family,
+            "intent": intent,
+            "action_label": action_label,
+            "outcome_label": outcome_label,
         }
         return EpisodeRecord(
             context=context,
@@ -436,6 +589,11 @@ class EpisodicPolygraph:
             reward=reward,
             tag="summary",
             metadata=metadata,
+            domain=domain,
+            task_family=task_family,
+            intent=intent,
+            action_label=action_label,
+            outcome_label=outcome_label,
             stage=stage,
             policy=policy,
             community=key,
@@ -455,6 +613,11 @@ class EpisodicPolygraph:
         self.summary_stage_index.setdefault(summary.stage, set()).add(key)
         self.summary_policy_index.setdefault(summary.policy, set()).add(key)
         self.summary_action_index.setdefault(int(summary.action), set()).add(key)
+        self.summary_action_label_index.setdefault(summary.action_label, set()).add(key)
+        self.summary_outcome_label_index.setdefault(summary.outcome_label, set()).add(key)
+        self.summary_intent_index.setdefault(summary.intent, set()).add(key)
+        self.summary_task_family_index.setdefault(summary.task_family, set()).add(key)
+        self.summary_domain_index.setdefault(summary.domain, set()).add(key)
 
     def _merge_contexts(self, contexts: List[List[int]], target_len: int) -> List[int]:
         if not contexts:
@@ -513,6 +676,11 @@ class EpisodicPolygraph:
         query_action: Optional[int],
         query_stage: Optional[str],
         query_policy: Optional[str],
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
+        query_action_label: Optional[str] = None,
+        query_outcome_label: Optional[str] = None,
     ) -> float:
         ctx_sim = self._context_similarity(context, rec.context)
         reward = float(rec.reward)
@@ -525,6 +693,9 @@ class EpisodicPolygraph:
         stage_sim = 1.0 if query_stage and rec.stage == query_stage else 0.0
         policy_sim = 1.0 if query_policy and rec.policy == query_policy else 0.0
         action_sim = 1.0 if query_action is not None and int(rec.action) == int(query_action) else 0.0
+        intent_sim = 1.0 if query_intent and rec.intent == query_intent else 0.0
+        task_family_sim = 1.0 if query_task_family and rec.task_family == query_task_family else 0.0
+        domain_sim = 1.0 if query_domain and rec.domain == query_domain else 0.0
         age = max(0, self._step - int(rec.timestamp))
         recency = float(np.exp(-age / max(1.0, float(self.window))))
         bucket_bonus = 0.1 * float(self._outcome_bucket(rec))
@@ -533,6 +704,9 @@ class EpisodicPolygraph:
             + 0.15 * action_sim
             + 0.15 * stage_sim
             + 0.10 * policy_sim
+            + 0.12 * intent_sim
+            + 0.10 * task_family_sim
+            + 0.10 * domain_sim
             + 0.15 * min(1.0, outcome)
             + 0.05 * recency
             + bucket_bonus
@@ -634,10 +808,19 @@ class Reasoner:
             reward=float(reward),
             tag=tag,
             metadata=meta,
+            domain=str(meta.get("domain", meta.get("task_family", "unknown"))),
+            task_family=str(meta.get("task_family", meta.get("domain", "unknown"))),
+            intent=str(meta.get("intent", meta.get("dialogue_act", "unknown"))),
+            action_label=str(meta.get("action_label", meta.get("action_name", "unknown"))),
+            outcome_label=str(meta.get("outcome_label", meta.get("outcome", "unknown"))),
             stage=stage_name,
             policy=policy_name,
             timestamp=int(meta.get("timestamp", 0)),
         )
+        self.polygraph.add(episode)
+
+    def record_structured_episode(self, episode: EpisodeRecord) -> None:
+        """Store a pre-structured episode directly in the polygraph."""
         self.polygraph.add(episode)
 
     def retrieve_memory(
@@ -646,13 +829,22 @@ class Reasoner:
         top_k: Optional[int] = None,
         min_reward: Optional[float] = None,
         query_action: Optional[int] = None,
+        query_stage: Optional[str] = None,
+        query_policy: Optional[str] = None,
+        query_intent: Optional[str] = None,
+        query_task_family: Optional[str] = None,
+        query_domain: Optional[str] = None,
+        query_action_label: Optional[str] = None,
+        query_outcome_label: Optional[str] = None,
     ) -> List[MemoryEpisode]:
         """Return best matching memory traces for the current context."""
         if not self.memory:
             return []
 
         top_k = top_k or self.memory_top_k
-        query_stage, query_policy = self._current_control_signature()
+        control_stage, control_policy = self._current_control_signature()
+        query_stage = query_stage or control_stage
+        query_policy = query_policy or control_policy
         return self.polygraph.query(
             context_obs=context_obs,
             top_k=top_k,
@@ -660,6 +852,11 @@ class Reasoner:
             query_action=query_action,
             query_stage=query_stage,
             query_policy=query_policy,
+            query_intent=query_intent,
+            query_task_family=query_task_family,
+            query_domain=query_domain,
+            query_action_label=query_action_label,
+            query_outcome_label=query_outcome_label,
         )
 
     def _memory_similarity(self, context_obs: Sequence[int], memory_ctx: Sequence[int]) -> float:
@@ -706,11 +903,22 @@ class Reasoner:
             context_obs = list(self.agent.obs_buffer[-self.context_window:]) if self.agent.obs_buffer else []
         graph_summary = self.polygraph.projection_summary(context_obs)
         feature_pack = dict(feature_pack or {})
-        hits = self.retrieve_memory(context_obs, top_k=top_k or self.memory_top_k)
+        hits = self.retrieve_memory(
+            context_obs,
+            top_k=top_k or self.memory_top_k,
+            query_intent=str(feature_pack.get("intent", "")) or None,
+            query_task_family=str(feature_pack.get("task_family", "")) or None,
+            query_domain=str(feature_pack.get("domain", "")) or None,
+            query_action_label=str(feature_pack.get("action_label", "")) or None,
+            query_outcome_label=str(feature_pack.get("outcome_label", "")) or None,
+        )
         family_scores: Dict[str, float] = {}
         mode_scores: Dict[str, float] = {}
         stage_scores: Dict[str, float] = {}
         community_scores: Dict[str, float] = {}
+        intent_scores: Dict[str, float] = {}
+        task_family_scores: Dict[str, float] = {}
+        domain_scores: Dict[str, float] = {}
         summary_count = 0
 
         for rec in hits:
@@ -732,15 +940,27 @@ class Reasoner:
                 stage_scores[rec.stage] = stage_scores.get(rec.stage, 0.0) + base
             if rec.community != "unknown":
                 community_scores[rec.community] = community_scores.get(rec.community, 0.0) + base
+            if rec.intent != "unknown":
+                intent_scores[rec.intent] = intent_scores.get(rec.intent, 0.0) + base
+            if rec.task_family != "unknown":
+                task_family_scores[rec.task_family] = task_family_scores.get(rec.task_family, 0.0) + base
+            if rec.domain != "unknown":
+                domain_scores[rec.domain] = domain_scores.get(rec.domain, 0.0) + base
 
         family_prior = self._normalize_scores(family_scores)
         mode_prior = self._normalize_scores(mode_scores)
         learned_mode_prior = self._mode_prior()
         combined_mode_prior = self._normalize_scores({**mode_prior, **learned_mode_prior}) if (mode_prior or learned_mode_prior) else {}
         stage_prior = self._normalize_scores(stage_scores)
+        intent_prior = self._normalize_scores(intent_scores)
+        task_family_prior = self._normalize_scores(task_family_scores)
+        domain_prior = self._normalize_scores(domain_scores)
         dominant_family = max(family_prior, key=family_prior.get) if family_prior else None
         dominant_mode = max(combined_mode_prior, key=combined_mode_prior.get) if combined_mode_prior else None
         dominant_stage = max(stage_prior, key=stage_prior.get) if stage_prior else None
+        dominant_intent = max(intent_prior, key=intent_prior.get) if intent_prior else None
+        dominant_task_family = max(task_family_prior, key=task_family_prior.get) if task_family_prior else None
+        dominant_domain = max(domain_prior, key=domain_prior.get) if domain_prior else None
         top_community = max(community_scores, key=community_scores.get) if community_scores else None
         community_strength = float(sum(community_scores.values()) / max(1, len(community_scores))) if community_scores else 0.0
 
@@ -749,11 +969,17 @@ class Reasoner:
             "mode_prior": combined_mode_prior,
             "learned_mode_prior": learned_mode_prior,
             "stage_prior": stage_prior,
+            "intent_prior": intent_prior,
+            "task_family_prior": task_family_prior,
+            "domain_prior": domain_prior,
             "feature_mode_prior": self._normalize_scores(dict(feature_pack.get("mode_prior", {}) or {})),
             "community_strength": community_strength,
             "dominant_family": dominant_family,
             "dominant_mode": dominant_mode,
             "dominant_stage": dominant_stage,
+            "dominant_intent": dominant_intent,
+            "dominant_task_family": dominant_task_family,
+            "dominant_domain": dominant_domain,
             "top_community": top_community,
             "summary_count": summary_count,
             "retrieved_count": len(hits),

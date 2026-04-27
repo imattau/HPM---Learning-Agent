@@ -84,3 +84,15 @@ def test_state_dict_roundtrip_preserves_spec_mapping():
     assert clone._next_spec_code == policy._next_spec_code
     assert clone._selection_counts == policy._selection_counts
     assert clone._reward_ema == policy._reward_ema
+
+
+def test_exploration_bonus_is_higher_early():
+    policy = MetaDecoderPolicy(num_workers=1)
+    spec = DecoderSpec("word", "decode", True)
+
+    early = policy._exploration_bonus(spec)
+    policy._age = 4000
+    late = policy._exploration_bonus(spec)
+
+    assert early > late
+    assert early > 0.03

@@ -1,8 +1,16 @@
 import json
+import re
 import numpy as np
 from PIL import Image
 from typing import List, Any, Union, Optional, Sequence, Dict
 import matplotlib.pyplot as plt
+
+try:
+    import sympy as sp
+    from sympy.parsing.sympy_parser import parse_expr as _parse_expr
+except Exception:  # pragma: no cover - optional dependency
+    sp = None
+    _parse_expr = None
 
 class InputAdapter:
     """Base class for converting raw input to HPM observation tokens."""
@@ -99,6 +107,220 @@ class StructuredTextAdapter(InputAdapter):
         if isinstance(value, (np.bool_, bool, np.integer, int, np.floating, float, str)) or value is None:
             return value
         return repr(value)
+
+
+class MathTextAdapter(InputAdapter):
+    """Canonical adapter for mixed natural-language text with inline math."""
+
+    MATH_SPAN_RE = re.compile(
+        r"(?<!\w)(?:[A-Za-z_]\w*|\d+(?:\.\d+)?)"
+        r"(?:\s*(?:[+\-*/^=<>±×÷]|<=|>=|!=|≈|∈|∉)\s*(?:[A-Za-z_]\w*|\d+(?:\.\d+)?))*"
+        r"(?:\s*(?:\(|\)|\^)\s*(?:[A-Za-z_]\w*|\d+(?:\.\d+)?))*"
+    )
+    MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>±×÷∑∫√≈≠≤≥∈∉∞πθλμσΔαβγ]")
+    WHITESPACE_RE = re.compile(r"\s+")
+
+    def __init__(self, obs_dim: int = 256):
+        self._obs_dim = max(2, int(obs_dim))
+        self._text_adapter = TextAdapter()
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_text(self, raw_input: Any) -> str:
+        if isinstance(raw_input, dict) and "text" in raw_input:
+            text = str(raw_input["text"])
+        else:
+            text = str(raw_input)
+        return self._canonicalize(text)
+
+    def from_text(self, text: str) -> str:
+        return self._canonicalize(text)
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        canonical = self.to_text(raw_input)
+        return self._text_adapter.to_observations(canonical, max_length=max_length)
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        return "".join(self._text_adapter.reverse_vocab.get(int(tok) % 256, "?") for tok in tokens)
+
+    def extract_math_spans(self, text: str) -> List[str]:
+        canonical = self._canonicalize(text)
+        return [match.group(0).strip() for match in self.MATH_SPAN_RE.finditer(canonical) if self.MATH_SYMBOL_RE.search(match.group(0))]
+
+    def act(self, token: int, context: Any = None):
+        if isinstance(context, dict) and "text" in context:
+            return self.to_text(context)
+        return self._text_adapter.reverse_vocab.get(int(token) % 256, chr(int(token) % 95 + 32))
+
+    def _canonicalize(self, text: str) -> str:
+        text = str(text or "")
+        text = text.replace("\u2212", "-").replace("\u00d7", "×").replace("\u00f7", "÷")
+        text = self.WHITESPACE_RE.sub(" ", text.strip())
+        text = re.sub(r"\s*([=+\-*/^<>±×÷])\s*", r" \1 ", text)
+        text = re.sub(r"\s*([(){}\[\],:])\s*", r"\1", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+
+class SympyMathAdapter(InputAdapter):
+    """Symbolic math adapter backed by SymPy.
+
+    This is the math equivalent of a dict/grammar validator:
+    - parseability
+    - simplification
+    - equivalence
+    - solve/evaluate feedback
+    """
+
+    def __init__(self, obs_dim: int = 256):
+        self._obs_dim = max(2, int(obs_dim))
+        self._text_adapter = MathTextAdapter(obs_dim=obs_dim)
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_text(self, raw_input: Any) -> str:
+        return self._text_adapter.to_text(raw_input)
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        canonical = self.to_text(raw_input)
+        return self._text_adapter.to_observations(canonical, max_length=max_length)
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        return self._text_adapter.from_observations(tokens)
+
+    def parse(self, text: str):
+        if sp is None or _parse_expr is None:
+            return None
+        canonical = self._text_adapter.to_text(text)
+        try:
+            lhs, rhs = self._split_equation(canonical)
+            if rhs is not None:
+                return sp.Eq(self._parse_side(lhs), self._parse_side(rhs))
+            return self._parse_side(canonical)
+        except Exception:
+            return None
+
+    def simplify(self, text: str) -> Optional[str]:
+        expr = self.parse(text)
+        if expr is None:
+            return None
+        try:
+            if isinstance(expr, sp.Equality):
+                lhs = sp.simplify(expr.lhs)
+                rhs = sp.simplify(expr.rhs)
+                return str(sp.Eq(lhs, rhs))
+            return str(sp.simplify(expr))
+        except Exception:
+            return None
+
+    def equivalent(self, left: str, right: str) -> bool:
+        if sp is None or _parse_expr is None:
+            return False
+        left_expr = self.parse(left)
+        right_expr = self.parse(right)
+        if left_expr is None or right_expr is None:
+            return False
+        try:
+            if isinstance(left_expr, sp.Equality) and isinstance(right_expr, sp.Equality):
+                return sp.simplify((left_expr.lhs - left_expr.rhs) - (right_expr.lhs - right_expr.rhs)) == 0
+            if isinstance(left_expr, sp.Equality):
+                return sp.simplify(left_expr.lhs - left_expr.rhs - right_expr) == 0
+            if isinstance(right_expr, sp.Equality):
+                return sp.simplify(left_expr - (right_expr.lhs - right_expr.rhs)) == 0
+            return sp.simplify(left_expr - right_expr) == 0
+        except Exception:
+            return False
+
+    def evaluate(self, text: str, substitutions: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        if sp is None or _parse_expr is None:
+            return None
+        expr = self.parse(text)
+        if expr is None:
+            return None
+        subs = self._sympy_substitutions(substitutions)
+        try:
+            if isinstance(expr, sp.Equality):
+                lhs = sp.simplify(expr.lhs.subs(subs))
+                rhs = sp.simplify(expr.rhs.subs(subs))
+                return sp.simplify(lhs - rhs)
+            return sp.simplify(expr.subs(subs))
+        except Exception:
+            return None
+
+    def solve(self, equation_text: str, symbol: Optional[str] = None) -> List[str]:
+        if sp is None or _parse_expr is None:
+            return []
+        expr = self.parse(equation_text)
+        if expr is None:
+            return []
+        try:
+            if isinstance(expr, sp.Equality):
+                lhs = expr.lhs
+                rhs = expr.rhs
+                target = sp.Symbol(symbol) if symbol else self._first_symbol(lhs, rhs)
+                if target is None:
+                    return []
+                sol = sp.solve(sp.Eq(lhs, rhs), target)
+            else:
+                target = sp.Symbol(symbol) if symbol else self._first_symbol(expr)
+                if target is None:
+                    return []
+                sol = sp.solve(expr, target)
+            if not isinstance(sol, (list, tuple)):
+                sol = [sol]
+            return [str(item) for item in sol]
+        except Exception:
+            return []
+
+    def feedback(self, text: str, target_text: Optional[str] = None, substitutions: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        parsed = self.parse(text)
+        parseable = parsed is not None
+        simplified = self.simplify(text) if parseable else None
+        equivalent = self.equivalent(text, target_text) if target_text else False
+        evaluated = self.evaluate(text, substitutions=substitutions) if substitutions else None
+        return {
+            "parseable": parseable,
+            "equivalent": equivalent,
+            "simplified": simplified,
+            "evaluated": str(evaluated) if evaluated is not None else None,
+            "symbolic_score": float(parseable) + (0.5 if equivalent else 0.0),
+        }
+
+    def act(self, token: int, context: Any = None):
+        return self._text_adapter.act(token, context=context)
+
+    def _parse_side(self, text: str):
+        canonical = text.replace("^", "**")
+        return _parse_expr(canonical, evaluate=True)
+
+    def _split_equation(self, text: str) -> tuple[str, Optional[str]]:
+        if "=" not in text or "==" in text:
+            return text, None
+        left, right = text.split("=", 1)
+        return left.strip(), right.strip()
+
+    def _first_symbol(self, *exprs):
+        for expr in exprs:
+            free = list(getattr(expr, "free_symbols", []))
+            if free:
+                return free[0]
+        return None
+
+    def _sympy_substitutions(self, substitutions: Optional[Dict[str, Any]]) -> Dict[Any, Any]:
+        subs: Dict[Any, Any] = {}
+        if not substitutions:
+            return subs
+        for key, value in substitutions.items():
+            try:
+                sym = sp.Symbol(str(key)) if sp is not None else str(key)
+                subs[sym] = value
+            except Exception:
+                continue
+        return subs
 
 
 class CodeDSLAdapter(InputAdapter):

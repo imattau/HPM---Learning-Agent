@@ -5,6 +5,8 @@ from hpm_ai_v4.io.adapters import (
     EpisodeBundleAdapter,
     CurriculumAdapter,
     EnvironmentStateAdapter,
+    MathTextAdapter,
+    SympyMathAdapter,
     StructuredTextAdapter,
     ToolActionAdapter,
 )
@@ -138,6 +140,49 @@ def test_structured_text_adapter_round_trip_json():
     assert decoded["kind"] == "bundle"
     assert decoded["phase"] == "train"
     assert decoded["level"] == 3
+
+
+def test_math_text_adapter_canonicalizes_inline_equations():
+    adapter = MathTextAdapter()
+    text = "The area is A=pi r^2 and y = 2x + 1."
+    canonical = adapter.to_text(text)
+    spans = adapter.extract_math_spans(text)
+
+    assert "A = pi r ^ 2" in canonical
+    assert "y = 2x + 1" in canonical or "y = 2 x + 1" in canonical
+    assert spans
+    assert any("=" in span for span in spans)
+
+
+def test_math_text_adapter_round_trips_observations():
+    adapter = MathTextAdapter()
+    text = "F = m a and E = m c^2"
+    tokens = adapter.to_observations(text, max_length=64)
+    decoded = adapter.from_observations(tokens)
+
+    assert len(tokens) > 0
+    assert isinstance(decoded, str)
+    assert "=" in decoded
+    assert "F" in decoded or "f" in decoded.lower()
+
+
+def test_sympy_math_adapter_parses_and_compares_equations():
+    adapter = SympyMathAdapter()
+    feedback = adapter.feedback("x + x", target_text="2*x")
+
+    assert feedback["parseable"] is True
+    assert feedback["equivalent"] is True
+    assert "symbolic_score" in feedback
+
+
+def test_sympy_math_adapter_simplifies_and_solves():
+    adapter = SympyMathAdapter()
+    simplified = adapter.simplify("x + x")
+    solutions = adapter.solve("x + 2 = 5", symbol="x")
+
+    assert simplified is not None
+    assert "2" in simplified or "2*x" in simplified
+    assert solutions == ["3"] or solutions == [3]
 
 
 def test_code_dsl_adapter_canonicalizes_and_executes():

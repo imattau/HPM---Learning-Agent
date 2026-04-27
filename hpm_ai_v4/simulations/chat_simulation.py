@@ -9,10 +9,19 @@ from hpm_ai_v4.simulations.full_simulation import WikipediaStream
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
+from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.text_signals import TextSignalExtractor, TextSignalPack
 
 CHAT_SEED_CORPUS = os.path.join(os.path.dirname(__file__), "data", "chat_seed.txt")
 CHAT_LIBRARY_ENV = "HPM_CHAT_LIBRARY"
+CHAT_REGISTRY_ENV = "HPM_LIBRARY_REGISTRY"
+CHAT_REGISTRY_CANDIDATES = [
+    os.environ.get(CHAT_REGISTRY_ENV, ""),
+    os.path.join(os.getcwd(), "library_bootstrap", "registry.json"),
+    "/tmp/hpm_library_registry.json",
+    "/tmp/hpm_chat_registry.json",
+    "/tmp/hpm_dailydialog_registry.json",
+]
 CHAT_LIBRARY_CANDIDATES = [
     os.environ.get(CHAT_LIBRARY_ENV, ""),
     os.path.join(os.getcwd(), "library_bootstrap", "chat_ultra_bundle", "chat_ultra_bundle"),
@@ -35,9 +44,23 @@ CHAT_LIBRARY_CANDIDATES = [
 ]
 
 
+def _resolve_registered_chat_library() -> Optional[str]:
+    for registry_path in CHAT_REGISTRY_CANDIDATES:
+        if not registry_path or not os.path.exists(registry_path):
+            continue
+        registry = LibraryRegistry(registry_path)
+        resolution = registry.resolve_bundle(view="chat")
+        if resolution is not None:
+            return resolution.path
+    return None
+
+
 def _resolve_chat_library_path(explicit: Optional[str] = None) -> Optional[str]:
     if explicit:
         return explicit
+    resolved = _resolve_registered_chat_library()
+    if resolved:
+        return resolved
     for candidate in CHAT_LIBRARY_CANDIDATES:
         if not candidate:
             continue

@@ -32,6 +32,9 @@ except Exception:  # pragma: no cover - optional dependency
     spacy = None
 
 _WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|[0-9]+|[^\w\s]")
+_MATH_TOKEN_RE = re.compile(r"(?<!\w)(?:\d+(?:\.\d+)?|[A-Za-z])(?:\s*[-+*/=^<>±×÷(){}\[\],:.]\s*(?:\d+(?:\.\d+)?|[A-Za-z]))+")
+_MATH_SYMBOL_RE = re.compile(r"[=+\-*/^<>±×÷∑∫√≈≠≤≥∈∉∞πθλμσΔαβγ]")
+_INLINE_EQUATION_RE = re.compile(r"(?<!\w)[A-Za-z0-9\s+\-*/^=<>±×÷().,:]+=(?:[^=\n]+)")
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -58,6 +61,9 @@ class TextSignalPack:
     commonness_score: float = 0.0
     sentence_confidence: float = 0.0
     target_alignment: float = 0.0
+    math_symbol_score: float = 0.0
+    equation_score: float = 0.0
+    mixed_domain_score: float = 0.0
     source: str = "fallback"
 
     def combined_score(self) -> float:
@@ -67,6 +73,7 @@ class TextSignalPack:
             + 0.24 * self.commonness_score
             + 0.18 * self.sentence_confidence
             + 0.14 * self.target_alignment
+            + 0.10 * self.mixed_domain_score
             - 0.38 * self.repeat_score
         )
 
@@ -115,6 +122,9 @@ class TextSignalExtractor:
         sentence_confidence = self._sentence_confidence(text, tokens, alpha_tokens, grammar=grammar)
         repeat_score = self._repeat_score(text, context_texts)
         target_alignment = _similarity(text, target_text) if target_text else 0.0
+        math_symbol_score = self._math_symbol_score(text, tokens)
+        equation_score = self._equation_score(text)
+        mixed_domain_score = self._mixed_domain_score(text, tokens, math_symbol_score, equation_score)
 
         source = "heuristic"
         if self._nlp is not None:
@@ -126,6 +136,9 @@ class TextSignalExtractor:
             commonness_score=_clamp(commonness_score),
             sentence_confidence=_clamp(sentence_confidence),
             target_alignment=_clamp(target_alignment),
+            math_symbol_score=_clamp(math_symbol_score),
+            equation_score=_clamp(equation_score),
+            mixed_domain_score=_clamp(mixed_domain_score),
             source=source,
         )
 
@@ -283,3 +296,46 @@ class TextSignalExtractor:
             contextual = max(_similarity(text, ctx) for ctx in context_texts)
 
         return min(1.0, 0.55 * token_repeat + 0.45 * contextual)
+
+    def _math_symbol_score(self, text: str, tokens: Sequence[str]) -> float:
+        if not text.strip():
+            return 0.0
+        symbol_hits = len(_MATH_SYMBOL_RE.findall(text))
+        token_hits = len(_MATH_TOKEN_RE.findall(text))
+        digit_tokens = sum(1 for tok in tokens if tok.isdigit())
+        symbol_density = min(1.0, symbol_hits / max(1, len(text)))
+        token_density = min(1.0, token_hits / max(1, len(tokens)))
+        digit_density = min(1.0, digit_tokens / max(1, len(tokens)))
+        return min(1.0, 0.45 * symbol_density + 0.35 * token_density + 0.20 * digit_density)
+
+    def _equation_score(self, text: str) -> float:
+        if not text.strip():
+            return 0.0
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return 0.0
+        eq_hits = 0
+        for line in lines:
+            if _INLINE_EQUATION_RE.search(line):
+                eq_hits += 1
+            elif _MATH_TOKEN_RE.search(line) and "=" in line:
+                eq_hits += 1
+        return _clamp(eq_hits / max(1, len(lines)))
+
+    def _mixed_domain_score(
+        self,
+        text: str,
+        tokens: Sequence[str],
+        math_symbol_score: float,
+        equation_score: float,
+    ) -> float:
+        if not text.strip():
+            return 0.0
+        alpha_tokens = [tok for tok in tokens if tok.isalpha()]
+        digit_tokens = [tok for tok in tokens if tok.isdigit()]
+        symbol_tokens = [tok for tok in tokens if not tok.isalnum()]
+        if not (alpha_tokens and (digit_tokens or symbol_tokens)):
+            return max(math_symbol_score, equation_score) * 0.6
+        blended = 0.55 * math_symbol_score + 0.30 * equation_score
+        blended += 0.15 * min(1.0, len(symbol_tokens) / max(1, len(tokens)))
+        return _clamp(blended)
