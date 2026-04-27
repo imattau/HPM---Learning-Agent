@@ -163,7 +163,7 @@ class CharDecoder:
             for ch, count in candidates.items():
                 score = np.log(count / total)
                 class_name = agent._token_class_name(ch if ch != "\n" else " ")
-                score += 1.2 * np.log(pred_probs.get(class_name, 1e-6) + 1e-12)
+                score += 0.4 * np.log(pred_probs.get(class_name, 1e-6) + 1e-12)
                 if expected_char:
                     if ch == expected_char:
                         score += target_bias

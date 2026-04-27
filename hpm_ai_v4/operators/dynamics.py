@@ -6,7 +6,7 @@ def compute_conflict_matrix(patterns):
     """k_ij = 1 - cosine similarity between parameter vectors (Vectorized)."""
     K = len(patterns)
     if K == 0:
-        return np.array([[]])
+        return np.zeros((0, 0), dtype=np.float32)
     
     # 1. Extract and flatten parameters for all patterns
     def get_params(pat):
