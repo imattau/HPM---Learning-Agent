@@ -1,3 +1,5 @@
+import os
+
 from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, _resolve_chat_library_path
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
@@ -175,6 +177,103 @@ def test_basic_chat_session_passes_dialogue_act_to_policy(monkeypatch):
     session.chat_turn("Hello there.")
 
     assert captured["generate_text"]["context_features"]["dialogue_act"] == "greeting"
+
+
+def test_basic_chat_session_sentence_features_prefer_single_clear_sentence(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+    monkeypatch.setattr(agent, "_text_plausibility", lambda text: 0.5)
+
+    class FakeSignals:
+        def analyze(self, text, **kwargs):
+            return TextSignalPack(
+                structure_score=0.5,
+                repeat_score=0.0,
+                commonness_score=0.5,
+                sentence_confidence=0.8,
+                target_alignment=0.0,
+                source="fake",
+            )
+
+    session = BasicChatSession(
+        agent,
+        history_window=2,
+        response_steps=16,
+        use_constraints=False,
+        text_signals=FakeSignals(),
+    )
+
+    single_sentence = "What do you mean?"
+    two_sentences = "What do you mean? Please explain."
+    chosen = session._choose_chat_candidate(
+        [two_sentences, single_sentence],
+        user_text="Can you clarify that?",
+        dialogue_act="question",
+    )
+
+    assert chosen == single_sentence
+
+
+def test_basic_chat_session_can_disable_sentence_features(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(
+        agent,
+        history_window=2,
+        response_steps=16,
+        use_constraints=False,
+        use_sentence_features=False,
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("sentence scoring should be disabled")
+
+    monkeypatch.setattr(session, "_sentence_score", fail_if_called)
+    score = session._chat_response_score("A clean reply.", "Hello there.", dialogue_act="greeting")
+
+    assert isinstance(score, float)
+
+
+def test_basic_chat_session_target_sentence_features_prefer_matching_shape(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+    monkeypatch.setattr(agent, "_text_plausibility", lambda text: 0.5)
+
+    class FakeSignals:
+        def analyze(self, text, **kwargs):
+            return TextSignalPack(
+                structure_score=0.5,
+                repeat_score=0.0,
+                commonness_score=0.5,
+                sentence_confidence=0.9 if text.count("?") == 1 else 0.4,
+                target_alignment=0.0,
+                source="fake",
+            )
+
+    session = BasicChatSession(
+        agent,
+        history_window=2,
+        response_steps=16,
+        use_constraints=False,
+        text_signals=FakeSignals(),
+        use_sentence_features=True,
+    )
+
+    matching = "What do you mean?"
+    mismatching = "What do you mean? Please explain."
+    chosen = session._choose_chat_candidate(
+        [mismatching, matching],
+        user_text="Can you clarify that?",
+        dialogue_act="question",
+        target_sentence_features={
+            "sentence_count": 1,
+            "dominant_sentence_type": "question",
+            "sentence_confidence": 0.9,
+        },
+    )
+
+    assert chosen == matching
 
 
 def test_reverse_chat_session_asks_questions(monkeypatch):
@@ -390,3 +489,20 @@ def test_resolve_chat_library_path_prefers_registry_view(tmp_path, monkeypatch):
 
     resolved = _resolve_chat_library_path()
     assert resolved == str(bundle)
+
+
+def test_resolve_chat_library_path_prefers_repo_nltk_large_base(tmp_path, monkeypatch):
+    repo_base = os.path.join(os.getcwd(), "library_bootstrap", "nltk_large", "nltk_large_nlp_2000")
+    assert os.path.exists(repo_base + ".pkl")
+
+    monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_REGISTRY_CANDIDATES",
+        ["/tmp/does-not-exist"],
+    )
+    monkeypatch.setattr(
+        "hpm_ai_v4.simulations.chat_simulation.CHAT_LIBRARY_CANDIDATES",
+        [repo_base, "/tmp/does-not-exist"],
+    )
+
+    resolved = _resolve_chat_library_path()
+    assert resolved == repo_base + ".pkl"

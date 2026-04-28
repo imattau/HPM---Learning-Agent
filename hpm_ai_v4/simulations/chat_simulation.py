@@ -10,6 +10,7 @@ from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.dictionary import NLTKWordList
 from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
+from hpm_ai_v4.io.adapters import SentenceAdapter
 from hpm_ai_v4.tools.text_signals import TextSignalExtractor, TextSignalPack
 
 CHAT_SEED_CORPUS = os.path.join(os.path.dirname(__file__), "data", "chat_seed.txt")
@@ -34,6 +35,8 @@ CHAT_LIBRARY_CANDIDATES = [
     os.path.join(os.getcwd(), "library_bootstrap", "chat_mixed", "conversational_chat_library.pkl"),
     os.path.join(os.getcwd(), "library_bootstrap", "chat_dailydialog", "daily_dialog_chat_library"),
     os.path.join(os.getcwd(), "library_bootstrap", "chat_dailydialog", "daily_dialog_chat_library.pkl"),
+    os.path.join(os.getcwd(), "library_bootstrap", "nltk_large", "nltk_large_nlp_2000"),
+    os.path.join(os.getcwd(), "library_bootstrap", "nltk_large", "nltk_large_nlp_2000.pkl"),
     "/tmp/hpm_chat_super/chat_super_library",
     "/tmp/hpm_chat_super/chat_super_library.pkl",
     "/tmp/hpm_chat_ultra/chat_ultra_library",
@@ -67,12 +70,21 @@ def _resolve_chat_library_path(explicit: Optional[str] = None) -> Optional[str]:
         base = candidate[:-4] if candidate.endswith(".pkl") else candidate
         if os.path.exists(base + ".l1.pkl"):
             return base
+        if os.path.exists(candidate):
+            return candidate
+        if os.path.exists(base + ".pkl"):
+            return base + ".pkl"
     return None
 
 
 def _load_chat_library(layered: LayeredAgent, resolved_library_path: str) -> int:
     if os.path.exists(resolved_library_path + ".l1.pkl"):
         return layered.load_bundle(resolved_library_path)
+    if os.path.exists(resolved_library_path):
+        from hpm_ai_v4.tools.serializer import PatternSerializer
+
+        layered.l1.patterns = PatternSerializer.load(resolved_library_path)
+        return 1 if layered.l1.patterns else 0
     return 0
 
 
@@ -105,6 +117,7 @@ class BasicChatSession:
         learn_from_reply: bool = False,
         reply_feedback_weight: float = 0.02,
         text_signals: Optional[TextSignalExtractor] = None,
+        use_sentence_features: bool = True,
     ):
         self.agent = agent
         self.history_window = max(1, int(history_window))
@@ -115,6 +128,8 @@ class BasicChatSession:
         self.learn_from_reply = bool(learn_from_reply)
         self.reply_feedback_weight = float(reply_feedback_weight)
         self.text_signals = text_signals or TextSignalExtractor()
+        self.sentence_adapter = SentenceAdapter()
+        self.use_sentence_features = bool(use_sentence_features)
         self.history: List[ChatTurn] = []
 
     def _dialogue_act(self, user_text: str) -> str:
@@ -157,6 +172,7 @@ class BasicChatSession:
             user_text=user_text,
             target_reply=target_reply,
             dialogue_act=dialogue_act,
+            target_sentence_features=self._sentence_features(target_reply) if (self.use_sentence_features and target_reply) else {},
         )
 
         response_signal = self._response_signal_pack(
@@ -165,14 +181,17 @@ class BasicChatSession:
             target_reply=target_reply,
             context_texts=[user_text, *prior_texts],
         )
+        sentence_features = self._sentence_features(response_text)
         self._append("assistant", response_text)
         response_stats: Dict[str, Any] = {}
         response_stats.update(response_signal.to_dict())
         response_stats["text_signal_score"] = response_signal.combined_score()
+        response_stats.update(sentence_features)
         if target_reply:
             response_stats = self.agent.evaluate_generated_text(response_text, target_reply)
             response_stats.update(response_signal.to_dict())
             response_stats["text_signal_score"] = response_signal.combined_score()
+            response_stats.update(sentence_features)
             if self.learn_from_reply:
                 response_stats.update(
                     self.agent.observe_text(
@@ -231,6 +250,7 @@ class BasicChatSession:
         user_text: str,
         target_reply: str | None = None,
         dialogue_act: str = "default",
+        target_sentence_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         use_constraints = self._should_use_constraints()
         mode = "target" if target_reply else "decode"
@@ -243,6 +263,7 @@ class BasicChatSession:
             "reply_budget": "short" if len(user_text) < 40 or dialogue_act in {"greeting", "closing"} else "medium",
             "reply_style": "concise",
         }
+        context_features.update(target_sentence_features or {})
 
         def add(candidate: str) -> None:
             cleaned = self._sanitize_response(candidate)
@@ -359,7 +380,12 @@ class BasicChatSession:
         if not candidates:
             candidates = [self._sanitize_response(seed_text)]
 
-        response = self._choose_chat_candidate(candidates, user_text=user_text, dialogue_act=dialogue_act)
+        response = self._choose_chat_candidate(
+            candidates,
+            user_text=user_text,
+            dialogue_act=dialogue_act,
+            target_sentence_features=target_sentence_features,
+        )
         return self._sanitize_response(response)
 
     def _response_seed_text(self, user_text: str) -> str:
@@ -374,17 +400,34 @@ class BasicChatSession:
         seed = " ".join(part for part in seed_parts if part)
         return seed.strip() or user_text.strip()
 
-    def _choose_chat_candidate(self, candidates: List[str], user_text: str, dialogue_act: str = "default") -> str:
+    def _choose_chat_candidate(
+        self,
+        candidates: List[str],
+        user_text: str,
+        dialogue_act: str = "default",
+        target_sentence_features: Optional[Dict[str, Any]] = None,
+    ) -> str:
         best_text = ""
         best_score = -1e9
         for text in candidates:
-            score = self._chat_response_score(text, user_text, dialogue_act=dialogue_act)
+            score = self._chat_response_score(
+                text,
+                user_text,
+                dialogue_act=dialogue_act,
+                target_sentence_features=target_sentence_features,
+            )
             if score > best_score:
                 best_score = score
                 best_text = text
         return best_text
 
-    def _chat_response_score(self, text: str, user_text: str, dialogue_act: str = "default") -> float:
+    def _chat_response_score(
+        self,
+        text: str,
+        user_text: str,
+        dialogue_act: str = "default",
+        target_sentence_features: Optional[Dict[str, Any]] = None,
+    ) -> float:
         if not text:
             return -1e9
         tokens = self.agent._tokenize_words(text)
@@ -415,6 +458,7 @@ class BasicChatSession:
         punctuation_bonus = 0.08 if text.rstrip().endswith((".", "!", "?", ":")) else 0.0
         length_penalty = min(0.2, abs(len(text) - 40) / 200.0)
         signal_pack = self._response_signal_pack(text, user_text=user_text, context_texts=recent_context)
+        sentence_features = self._sentence_features(text) if self.use_sentence_features else {}
         duplicate_penalty = signal_pack.repeat_score
         if recent_context:
             duplicate_penalty = min(1.0, duplicate_penalty + max(
@@ -423,6 +467,10 @@ class BasicChatSession:
             ) * 0.35)
 
         act_bonus = self._dialogue_act_bonus(dialogue_act, text)
+        sentence_bonus = self._sentence_score(dialogue_act, sentence_features) if self.use_sentence_features else 0.0
+        target_sentence_bonus = 0.0
+        if self.use_sentence_features and target_sentence_features:
+            target_sentence_bonus = self._target_sentence_score(sentence_features, target_sentence_features)
 
         return (
             0.48 * plausibility
@@ -430,6 +478,8 @@ class BasicChatSession:
             + 0.18 * uniq_ratio
             + punctuation_bonus
             + act_bonus
+            + sentence_bonus
+            + target_sentence_bonus
             - 0.30 * repetition_penalty
             - 0.22 * duplicate_penalty
             - marker_penalty
@@ -473,6 +523,65 @@ class BasicChatSession:
             dictionary=self.agent.dictionary,
             grammar=self.agent.grammar,
         )
+
+    def _sentence_features(self, text: str) -> Dict[str, Any]:
+        spans = self.sentence_adapter.segment(text)
+        sentence_count = len(spans)
+        dominant_type = spans[0].sentence_type if spans else "fragment"
+        average_confidence = float(sum(span.confidence for span in spans) / max(1, sentence_count)) if spans else 0.0
+        return {
+            "sentence_count": sentence_count,
+            "dominant_sentence_type": dominant_type,
+            "sentence_confidence": average_confidence,
+        }
+
+    def _sentence_score(self, dialogue_act: str, sentence_features: Dict[str, Any]) -> float:
+        sentence_count = int(sentence_features.get("sentence_count", 0))
+        dominant_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+        confidence = float(sentence_features.get("sentence_confidence", 0.0))
+        score = 0.0
+        if sentence_count == 1:
+            score += 0.08
+        elif sentence_count > 1:
+            score -= min(0.15, 0.04 * (sentence_count - 1))
+        if confidence > 0.6:
+            score += 0.05
+        if dialogue_act == "question" and dominant_type == "question":
+            score += 0.14
+        elif dialogue_act == "greeting" and dominant_type in {"declarative", "exclamation"}:
+            score += 0.10
+        elif dialogue_act == "request" and dominant_type in {"declarative", "question"}:
+            score += 0.08
+        elif dialogue_act == "clarification" and dominant_type in {"question", "clarification"}:
+            score += 0.12
+        elif dialogue_act == "closing" and dominant_type == "closing":
+            score += 0.12
+        return score
+
+    def _target_sentence_score(
+        self,
+        sentence_features: Dict[str, Any],
+        target_sentence_features: Dict[str, Any],
+    ) -> float:
+        score = 0.0
+        target_count = int(target_sentence_features.get("sentence_count", 0))
+        target_type = str(target_sentence_features.get("dominant_sentence_type", "fragment"))
+        target_confidence = float(target_sentence_features.get("sentence_confidence", 0.0))
+        generated_count = int(sentence_features.get("sentence_count", 0))
+        generated_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+        generated_confidence = float(sentence_features.get("sentence_confidence", 0.0))
+
+        if target_count > 0:
+            if generated_count == target_count:
+                score += 0.18
+            else:
+                count_gap = abs(generated_count - target_count)
+                score -= min(0.14, 0.04 * count_gap)
+        if target_type != "fragment" and generated_type == target_type:
+            score += 0.14
+        if target_confidence > 0.5 and generated_confidence > 0.5:
+            score += 0.05
+        return score
 
     def _sanitize_response(self, text: str) -> str:
         cleaned = text.strip()
@@ -557,6 +666,7 @@ class ReverseChatSession(BasicChatSession):
         learn_from_reply: bool = False,
         reply_feedback_weight: float = 0.02,
         text_signals: Optional[TextSignalExtractor] = None,
+        use_sentence_features: bool = True,
     ):
         super().__init__(
             agent=agent,
@@ -568,6 +678,7 @@ class ReverseChatSession(BasicChatSession):
             learn_from_reply=learn_from_reply,
             reply_feedback_weight=reply_feedback_weight,
             text_signals=text_signals,
+            use_sentence_features=use_sentence_features,
         )
         self._question_history: List[str] = []
 

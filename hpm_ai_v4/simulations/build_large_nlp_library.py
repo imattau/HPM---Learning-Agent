@@ -15,14 +15,26 @@ import os
 import sys
 import time
 import numpy as np
+from dataclasses import dataclass
 from multiprocessing import Pool, cpu_count
 from typing import List, Optional
+from datetime import datetime, timezone
 
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.io.adapters import CharClassAdapter
 from hpm_ai_v4.evaluators.metrics import epistemic_score, affective_score, social_score, pattern_density
+from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.serializer import PatternSerializer
 from hpm_ai_v4.pattern import HierarchicalPattern
+
+
+@dataclass
+class LargeNlpLibraryBuildResult:
+    output: str
+    pattern_count: int
+    chunk_count: int
+    source: str
+    registry_name: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +116,7 @@ def load_hf_chunks(target_chars: int = 5_000_000) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _train_chunk(args):
-    chunk_text, steps, min_density, chunk_idx = args
+    chunk_text, steps, min_density, chunk_idx, keep_top_k = args
     adapter = CharClassAdapter()
     tokens = [adapter.encode_char(ch) for ch in chunk_text if 32 <= ord(ch) <= 127 or ch == '\n']
     if len(tokens) < 50:
@@ -117,7 +129,7 @@ def _train_chunk(args):
         agent.perceive_and_learn(obs)
 
     field_freq = {p.id: p.weight for p in agent.patterns}
-    kept = []
+    scored = []
     for p in agent.patterns:
         if p.latent_dim <= 1:
             continue  # skip FlatPatterns
@@ -126,10 +138,22 @@ def _train_chunk(args):
         soc = social_score(p, field_freq)
         field_infl = 0.2 * soc
         d = pattern_density(p, agent.obs_buffer, [ep, aff, soc, field_infl])
-        if d >= min_density and p.weight > 0.01:
-            p.source_corpus = f"chunk_{chunk_idx}"
-            p.density_at_save = float(d)
-            kept.append(p)
+        if p.weight > 0.01:
+            scored.append((float(d), p))
+
+    if not scored:
+        return []
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    kept: List[HierarchicalPattern] = []
+    for density, pattern in scored:
+        if density >= min_density or len(kept) < keep_top_k:
+            pattern.source_corpus = f"chunk_{chunk_idx}"
+            pattern.density_at_save = float(density)
+            kept.append(pattern)
+        if len(kept) >= keep_top_k and density < min_density:
+            # Once we have the floor and are past the density gate, stop early.
+            break
 
     return kept
 
@@ -170,9 +194,15 @@ def build_large_library(
     target: int = 2000,
     steps_per_chunk: int = 8000,
     min_density: float = 0.15,
+    keep_top_k: int = 4,
+    dedup_threshold: float = 0.97,
+    promote: bool = False,
     num_workers: int = 1,
     target_chars: int = 10_000_000,
-) -> int:
+    registry_path: Optional[str] = None,
+    name: Optional[str] = None,
+    domain: str = "text",
+) -> LargeNlpLibraryBuildResult | int:
     os.makedirs(os.path.dirname(output) if os.path.dirname(output) else ".", exist_ok=True)
 
     chunks = load_hf_chunks(target_chars=target_chars)
@@ -185,12 +215,12 @@ def build_large_library(
     t_start = time.perf_counter()
 
     print(f"\n[build] Target: {target} patterns | {steps_per_chunk} steps/chunk | "
-          f"{num_workers} workers | min_density={min_density}")
+          f"{num_workers} workers | min_density={min_density} | keep_top_k={keep_top_k}")
 
     while len(all_patterns) < target and chunk_idx < len(chunks):
         batch_size = min(num_workers * 4, len(chunks) - chunk_idx, 32)
         batch = [
-            (chunks[chunk_idx + i], steps_per_chunk, min_density, chunk_idx + i)
+            (chunks[chunk_idx + i], steps_per_chunk, min_density, chunk_idx + i, keep_top_k)
             for i in range(batch_size)
         ]
         chunk_idx += batch_size
@@ -203,7 +233,7 @@ def build_large_library(
 
         new_patterns = [p for result in results for p in result]
         all_patterns.extend(new_patterns)
-        all_patterns = deduplicate(all_patterns)
+        all_patterns = deduplicate(all_patterns, sim_threshold=dedup_threshold)
 
         elapsed = time.perf_counter() - t_start
         rate = len(all_patterns) / max(1, elapsed)
@@ -225,7 +255,39 @@ def build_large_library(
     PatternSerializer.save(all_patterns, output)
     elapsed = time.perf_counter() - t_start
     print(f"\n[done] {len(all_patterns)} patterns saved to {output} ({elapsed:.0f}s)")
-    return 0
+    result = LargeNlpLibraryBuildResult(
+        output=output,
+        pattern_count=len(all_patterns),
+        chunk_count=chunk_idx,
+        source="nltk",
+        registry_name="",
+    )
+
+    if registry_path:
+        densities = [float(getattr(p, "density_at_save", 0.0)) for p in all_patterns]
+        registry = LibraryRegistry(registry_path)
+        entry_name = name or os.path.splitext(os.path.basename(output))[0]
+        entry_status = "promoted" if promote or result.pattern_count >= 2000 else "seed"
+        registry.upsert(
+            name=entry_name,
+            path=output,
+            domain=domain,
+            status=entry_status,
+            bundle_kind="flat",
+            level_contract="l1",
+            obs_dims=[5],
+            source="nltk",
+            density_mean=float(np.mean(densities)) if densities else 0.0,
+            density_min=float(min(densities)) if densities else 0.0,
+            density_max=float(max(densities)) if densities else 0.0,
+            pattern_count=result.pattern_count,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            notes=f"built from {result.chunk_count} chunks; base text library",
+        )
+        result.registry_name = entry_name
+        print(f"[registry] registered {entry_name!r} ({entry_status}) in {registry_path}")
+
+    return result
 
 
 def _parse_args():
@@ -234,18 +296,31 @@ def _parse_args():
     p.add_argument("--target", type=int, default=2000)
     p.add_argument("--steps-per-chunk", type=int, default=8000)
     p.add_argument("--min-density", type=float, default=0.15)
+    p.add_argument("--keep-top-k", type=int, default=4)
+    p.add_argument("--dedup-threshold", type=float, default=0.97)
+    p.add_argument("--promote", action="store_true", help="Register the built library as promoted")
     p.add_argument("--workers", type=int, default=max(1, cpu_count() - 1))
     p.add_argument("--target-chars", type=int, default=10_000_000)
+    p.add_argument("--registry", help="Optional JSON registry path for curated libraries")
+    p.add_argument("--name", help="Registry entry name")
+    p.add_argument("--domain", default="text", help="Registry domain label")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    sys.exit(build_large_library(
+    result = build_large_library(
         output=args.output,
         target=args.target,
         steps_per_chunk=args.steps_per_chunk,
         min_density=args.min_density,
+        keep_top_k=args.keep_top_k,
+        dedup_threshold=args.dedup_threshold,
+        promote=args.promote,
         num_workers=args.workers,
         target_chars=args.target_chars,
-    ))
+        registry_path=args.registry,
+        name=args.name,
+        domain=args.domain,
+    )
+    sys.exit(0 if isinstance(result, LargeNlpLibraryBuildResult) else int(result))

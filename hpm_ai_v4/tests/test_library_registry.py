@@ -122,3 +122,37 @@ def test_bundle_resolver_falls_back_to_text_bundle_when_no_chat_stack(tmp_path):
     assert resolution is not None
     assert resolution.entry.name == "text_seed"
     assert resolution.path == str(text_path)
+
+
+def test_bundle_resolver_prefers_promoted_text_base(tmp_path):
+    registry = LibraryRegistry(str(tmp_path / "registry.json"))
+    seed_path = tmp_path / "text_seed.pkl"
+    promoted_path = tmp_path / "nltk_large_nlp.pkl"
+    seed_path.write_text("stub")
+    promoted_path.write_text("stub")
+
+    registry.upsert(
+        name="text_seed",
+        path=str(seed_path),
+        domain="text",
+        status="seed",
+        bundle_kind="flat",
+        level_contract="l1",
+        obs_dims=[5],
+        pattern_count=12,
+    )
+    registry.upsert(
+        name="nltk_large_seed_2000",
+        path=str(promoted_path),
+        domain="text",
+        status="promoted",
+        bundle_kind="flat",
+        level_contract="l1",
+        obs_dims=[5],
+        pattern_count=2270,
+    )
+
+    resolution = registry.resolve_bundle(view="text")
+    assert resolution is not None
+    assert resolution.entry.name == "nltk_large_seed_2000"
+    assert resolution.path == str(promoted_path)

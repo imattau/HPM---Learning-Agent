@@ -6,6 +6,7 @@ from hpm_ai_v4.io.adapters import (
     CurriculumAdapter,
     EnvironmentStateAdapter,
     MathTextAdapter,
+    SentenceAdapter,
     SympyMathAdapter,
     StructuredTextAdapter,
     ToolActionAdapter,
@@ -164,6 +165,82 @@ def test_math_text_adapter_round_trips_observations():
     assert isinstance(decoded, str)
     assert "=" in decoded
     assert "F" in decoded or "f" in decoded.lower()
+
+
+def test_sentence_adapter_segments_and_classifies():
+    adapter = SentenceAdapter()
+    text = "Hello there. What do you mean? Please explain."
+    spans = adapter.segment(text)
+
+    assert len(spans) == 3
+    assert spans[0].sentence_type == "declarative"
+    assert spans[1].sentence_type == "question"
+    assert spans[2].sentence_type == "request"
+
+
+def test_sentence_adapter_observations_round_trip():
+    adapter = SentenceAdapter()
+    tokens = adapter.to_observations("Thanks. Can you clarify that?")
+    decoded = adapter.from_observations(tokens)
+
+    assert len(tokens) > 0
+    assert "<closing:" in decoded
+    assert "<question:" in decoded
+
+
+def test_sentence_adapter_paragraph_markers_are_optional():
+    adapter = SentenceAdapter()
+    text = "Hello there.\n\nWhat do you mean?"
+    default_tokens = adapter.to_observations(text)
+    paragraph_tokens = adapter.to_observations(text, include_paragraph_markers=True)
+
+    assert default_tokens != paragraph_tokens
+    assert adapter.PARA_START_TOKEN in paragraph_tokens
+    assert adapter.PARA_END_TOKEN in paragraph_tokens
+    assert adapter.paragraph_markers(text) == [adapter.PARA_START_TOKEN, adapter.PARA_END_TOKEN, adapter.PARA_START_TOKEN, adapter.PARA_END_TOKEN]
+
+
+def test_sentence_adapter_default_fallback_stays_usable():
+    adapter = SentenceAdapter(use_spacy=False)
+    spans = adapter.segment("Hello there. What do you mean?")
+
+    assert len(spans) == 2
+    assert spans[0].sentence_type == "declarative"
+    assert spans[1].sentence_type == "question"
+
+
+def test_sentence_adapter_can_use_spacy_like_segmenter(monkeypatch):
+    class FakeSent:
+        def __init__(self, text):
+            self._text = text
+
+        def __str__(self):
+            return self._text
+
+        def __iter__(self):
+            return iter([])
+
+    class FakeDoc:
+        def __init__(self, text):
+            self._sents = [FakeSent("Hello there."), FakeSent("Please explain.")]
+
+        @property
+        def sents(self):
+            return self._sents
+
+    class FakeNLP:
+        pipe_names = ["sentencizer"]
+
+        def __call__(self, text):
+            return FakeDoc(text)
+
+    monkeypatch.setattr("hpm_ai_v4.io.adapters.spacy", None, raising=False)
+    adapter = SentenceAdapter(use_spacy=True)
+    adapter._nlp = FakeNLP()
+    spans = adapter.segment("Hello there. Please explain.")
+
+    assert len(spans) == 2
+    assert spans[1].sentence_type in {"request", "declarative"}
 
 
 def test_sympy_math_adapter_parses_and_compares_equations():

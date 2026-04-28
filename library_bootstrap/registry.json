@@ -117,6 +117,25 @@
     "status": "seed"
   },
   {
+    "bundle_kind": "flat",
+    "created_at": "2026-04-27T10:59:41.896412+00:00",
+    "decoder_families": [],
+    "density_max": 0.4322714471627398,
+    "density_mean": -0.26285970042726725,
+    "density_min": -3.608919088793687,
+    "domain": "text",
+    "level_contract": "l1",
+    "name": "nltk_large_seed_2000",
+    "notes": "2000+ pattern base text library",
+    "obs_dims": [
+      5
+    ],
+    "path": "library_bootstrap/nltk_large/nltk_large_nlp_2000.pkl",
+    "pattern_count": 2270,
+    "source": "nltk",
+    "status": "promoted"
+  },
+  {
     "created_at": "",
     "density_max": 0.0,
     "density_mean": 0.0,

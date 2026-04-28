@@ -11,6 +11,17 @@ from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
 from hpm_ai_v4.tools.text_signals import TextSignalExtractor
 
 
+def _load_library(layered: LayeredAgent, library_path: Optional[str]) -> int:
+    if not library_path or not os.path.exists(library_path):
+        return 0
+    if os.path.exists(library_path + ".l1.pkl"):
+        return layered.load_bundle(library_path)
+    from hpm_ai_v4.tools.serializer import PatternSerializer
+
+    layered.l1.patterns = PatternSerializer.load(library_path)
+    return 1 if layered.l1.patterns else 0
+
+
 def _corrupt_text(text: str) -> str:
     """Create a deterministic noisy version of text for repair tests."""
     out: List[str] = []
@@ -85,8 +96,8 @@ def run_text_repair_simulation(
     grammar = HeuristicGrammarLibrary() if use_dict else None
     layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
 
-    if library_path and os.path.exists(library_path + ".l1.pkl"):
-        layered.load_bundle(library_path)
+    loaded = _load_library(layered, library_path)
+    if loaded:
         print(f"Loaded library from {library_path}")
 
     stream = WikipediaStream(corpus_path)

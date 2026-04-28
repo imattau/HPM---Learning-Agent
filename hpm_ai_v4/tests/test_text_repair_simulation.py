@@ -1,5 +1,7 @@
+from hpm_ai_v4.pattern import FlatPattern
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
-from hpm_ai_v4.simulations.text_repair_simulation import run_text_repair_simulation
+from hpm_ai_v4.simulations.text_repair_simulation import _load_library, run_text_repair_simulation
+from hpm_ai_v4.tools.serializer import PatternSerializer
 
 
 def test_repair_text_returns_readable_text():
@@ -45,3 +47,14 @@ def test_run_text_repair_simulation_short(tmp_path):
     assert (tmp_path / "final_repair_library.l3.pkl").exists()
     assert (tmp_path / "final_repair_library.l4.pkl").exists()
     assert (tmp_path / "final_repair_library.l5.pkl").exists()
+
+
+def test_repair_simulation_loads_flat_library(tmp_path):
+    library = tmp_path / "repair_seed.pkl"
+    PatternSerializer.save([FlatPattern.flat(0, obs_dim=5)], str(library))
+
+    agent = LayeredAgent(num_workers=1)
+    loaded = _load_library(agent, str(library))
+
+    assert loaded == 1
+    assert len(agent.l1.patterns) == 1

@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 from typing import List, Any, Union, Optional, Sequence, Dict
@@ -59,6 +60,288 @@ class TextAdapter(InputAdapter):
         # Simple character-level tokenization
         tokens = [self.vocab.get(ch, 0) % 256 for ch in text[:max_length]]
         return tokens
+
+
+@dataclass(frozen=True)
+class SentenceSpan:
+    text: str
+    sentence_type: str
+    start: int
+    end: int
+    confidence: float
+
+
+@dataclass(frozen=True)
+class ParagraphSpan:
+    text: str
+    sentences: List[SentenceSpan]
+    start: int
+    end: int
+    confidence: float
+
+
+class SentenceAdapter(InputAdapter):
+    """Sentence-level abstraction built on top of the char/text substrate."""
+
+    SENTENCE_TYPES = (
+        "declarative",
+        "question",
+        "request",
+        "clarification",
+        "closing",
+        "exclamation",
+        "fragment",
+    )
+    TYPE_TO_ID = {name: idx for idx, name in enumerate(SENTENCE_TYPES)}
+    ID_TO_TYPE = {idx: name for name, idx in TYPE_TO_ID.items()}
+    _SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+    _PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n+")
+    _WHITESPACE_RE = re.compile(r"\s+")
+    PARA_START_TOKEN = len(SENTENCE_TYPES) + 16
+    PARA_END_TOKEN = len(SENTENCE_TYPES) + 17
+
+    def __init__(self, obs_dim: int = 32, use_spacy: bool = False, spacy_model: str = "en_core_web_sm"):
+        self._obs_dim = max(8, int(obs_dim))
+        self._text_adapter = TextAdapter()
+        self._use_spacy = bool(use_spacy)
+        self._spacy_model = str(spacy_model)
+        self._nlp = self._load_spacy() if self._use_spacy else None
+
+    @property
+    def obs_dim(self) -> int:
+        return self._obs_dim
+
+    def to_text(self, raw_input: Any) -> str:
+        return self._canonicalize(str(raw_input or ""))
+
+    def from_text(self, text: str) -> str:
+        return self._canonicalize(text)
+
+    def segment(self, text: str) -> List[SentenceSpan]:
+        paragraphs = self.segment_paragraphs(text)
+        if not paragraphs:
+            return []
+        spans: List[SentenceSpan] = []
+        for paragraph in paragraphs:
+            spans.extend(paragraph.sentences)
+        return spans
+
+    def segment_paragraphs(self, text: str) -> List[ParagraphSpan]:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return []
+        paragraph_texts = [piece.strip() for piece in self._PARAGRAPH_SPLIT_RE.split(raw_text) if piece.strip()]
+        if not paragraph_texts:
+            paragraph_texts = [raw_text]
+        paragraphs: List[ParagraphSpan] = []
+        cursor = 0
+        for paragraph_text in paragraph_texts:
+            start = raw_text.find(paragraph_text, cursor)
+            if start < 0:
+                start = cursor
+            end = start + len(paragraph_text)
+            sentences = self._segment_sentences(self._canonicalize(paragraph_text), base_offset=start)
+            confidence = float(sum(sentence.confidence for sentence in sentences) / max(1, len(sentences))) if sentences else 0.0
+            paragraphs.append(
+                ParagraphSpan(
+                    text=paragraph_text,
+                    sentences=sentences,
+                    start=start,
+                    end=end,
+                    confidence=confidence,
+                )
+            )
+            cursor = end
+        return paragraphs
+
+    def _segment_sentences(self, text: str, base_offset: int = 0) -> List[SentenceSpan]:
+        if self._nlp is not None:
+            spans = self._segment_sentences_spacy(text, base_offset=base_offset)
+            if spans:
+                return spans
+        spans: List[SentenceSpan] = []
+        cursor = 0
+        for chunk in self._split(text):
+            start = text.find(chunk, cursor)
+            if start < 0:
+                start = cursor
+            end = start + len(chunk)
+            sentence_type = self.classify_sentence(chunk)
+            confidence = self._sentence_confidence(chunk, sentence_type)
+            spans.append(
+                SentenceSpan(
+                    text=chunk,
+                    sentence_type=sentence_type,
+                    start=base_offset + start,
+                    end=base_offset + end,
+                    confidence=confidence,
+                )
+            )
+            cursor = end
+        return spans
+
+    def _segment_sentences_spacy(self, text: str, base_offset: int = 0) -> List[SentenceSpan]:
+        if self._nlp is None:
+            return []
+        try:
+            doc = self._nlp(text)
+        except Exception:
+            return []
+        spans: List[SentenceSpan] = []
+        cursor = 0
+        for sent in getattr(doc, "sents", []):
+            chunk = str(sent).strip()
+            if not chunk:
+                continue
+            start = text.find(chunk, cursor)
+            if start < 0:
+                start = cursor
+            end = start + len(chunk)
+            sentence_type = self.classify_sentence(chunk)
+            confidence = self._sentence_confidence(chunk, sentence_type)
+            try:
+                sent_tokens = [tok for tok in sent if not tok.is_space]
+                if sent_tokens:
+                    if any(tok.text == "?" for tok in sent_tokens):
+                        sentence_type = "question"
+                    elif any(tok.text == "!" for tok in sent_tokens):
+                        sentence_type = "exclamation"
+                    if any(tok.dep_ in {"aux", "cop"} for tok in sent_tokens if hasattr(tok, "dep_")):
+                        confidence = min(1.0, confidence + 0.05)
+            except Exception:
+                pass
+            spans.append(
+                SentenceSpan(
+                    text=chunk,
+                    sentence_type=sentence_type,
+                    start=base_offset + start,
+                    end=base_offset + end,
+                    confidence=confidence,
+                )
+            )
+            cursor = end
+        return spans
+
+    def classify_sentence(self, sentence: str) -> str:
+        text = self._canonicalize(sentence).lower()
+        if not text:
+            return "fragment"
+        if text.endswith("?"):
+            return "question"
+        if text.endswith("!"):
+            return "exclamation"
+        if any(text.startswith(prefix) for prefix in ("tell me", "give me", "show me", "help me", "please", "explain")):
+            return "request"
+        if any(phrase in text for phrase in ("what do you mean", "can you clarify", "which part", "clarify that", "say more")):
+            return "clarification"
+        if any(text.startswith(prefix) for prefix in ("bye", "goodbye", "thanks", "thank you", "see you")):
+            return "closing"
+        if len(text.split()) < 2:
+            return "fragment"
+        return "declarative"
+
+    def to_observations(
+        self,
+        raw_input: Any,
+        max_length: int = 100,
+        include_paragraph_markers: bool = False,
+    ) -> List[int]:
+        text = self.to_text(raw_input)
+        paragraphs = self.segment_paragraphs(text)
+        if not paragraphs:
+            return []
+
+        tokens: List[int] = []
+        for paragraph in paragraphs:
+            if include_paragraph_markers:
+                tokens.append(self.PARA_START_TOKEN)
+            for span in paragraph.sentences:
+                if len(tokens) >= max_length:
+                    break
+                type_id = self.TYPE_TO_ID.get(span.sentence_type, self.TYPE_TO_ID["fragment"])
+                length_bucket = min(7, max(0, len(span.text.split()) // 4))
+                confidence_bucket = min(7, max(0, int(round(span.confidence * 7))))
+                tokens.extend([
+                    type_id,
+                    len(self.SENTENCE_TYPES) + length_bucket,
+                    len(self.SENTENCE_TYPES) + 8 + confidence_bucket,
+                ])
+                if len(tokens) >= max_length:
+                    break
+            if include_paragraph_markers:
+                tokens.append(self.PARA_END_TOKEN)
+        return tokens[:max_length]
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        if not tokens:
+            return ""
+        spans: List[str] = []
+        for idx in range(0, len(tokens), 3):
+            type_id = int(tokens[idx]) % len(self.SENTENCE_TYPES)
+            length_bucket = int(tokens[idx + 1]) if idx + 1 < len(tokens) else 0
+            confidence_bucket = int(tokens[idx + 2]) if idx + 2 < len(tokens) else 0
+            sentence_type = self.ID_TO_TYPE.get(type_id, "fragment")
+            length_label = f"len{max(0, length_bucket - len(self.SENTENCE_TYPES))}"
+            confidence_label = f"conf{max(0, confidence_bucket - len(self.SENTENCE_TYPES) - 8)}"
+            spans.append(f"<{sentence_type}:{length_label}:{confidence_label}>")
+        return " ".join(spans)
+
+    def paragraph_markers(self, text: str) -> List[int]:
+        tokens: List[int] = []
+        for paragraph in self.segment_paragraphs(text):
+            tokens.extend([self.PARA_START_TOKEN, self.PARA_END_TOKEN])
+        return tokens
+
+    def act(self, token: int, context: Any = None):
+        if isinstance(context, dict) and "text" in context:
+            return self.to_text(context["text"])
+        if token == self.PARA_START_TOKEN:
+            return "<PARA_START>"
+        if token == self.PARA_END_TOKEN:
+            return "<PARA_END>"
+        return self.ID_TO_TYPE.get(int(token) % len(self.SENTENCE_TYPES), "fragment")
+
+    def _split(self, text: str) -> List[str]:
+        pieces = [piece.strip() for piece in self._SPLIT_RE.split(text) if piece.strip()]
+        return pieces or [text.strip()]
+
+    def _canonicalize(self, text: str) -> str:
+        text = str(text or "").strip()
+        text = self._WHITESPACE_RE.sub(" ", text)
+        text = re.sub(r"\s+([.!?,;:])", r"\1", text)
+        text = re.sub(r"([.!?])([A-Za-z])", r"\1 \2", text)
+        return text.strip()
+
+    def _load_spacy(self):
+        if spacy is None:  # pragma: no cover - optional dependency
+            return None
+        try:
+            if hasattr(spacy, "util") and spacy.util.is_package(self._spacy_model):
+                return spacy.load(self._spacy_model, disable=["ner"])
+        except Exception:
+            pass
+        try:
+            nlp = spacy.blank("en")
+            if "sentencizer" not in nlp.pipe_names:
+                nlp.add_pipe("sentencizer")
+            return nlp
+        except Exception:
+            return None
+
+    def _sentence_confidence(self, sentence: str, sentence_type: str) -> float:
+        words = sentence.split()
+        if not words:
+            return 0.0
+        base = 0.25
+        if sentence_type in {"question", "request", "clarification", "closing"}:
+            base += 0.25
+        if sentence.endswith((".", "?", "!", ":")):
+            base += 0.20
+        if len(words) >= 4:
+            base += 0.15
+        if len(words) >= 8:
+            base += 0.10
+        return float(max(0.0, min(1.0, base)))
 
 
 class StructuredTextAdapter(InputAdapter):

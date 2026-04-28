@@ -1,24 +1,44 @@
-# Code Review Session State
+# Session State Checkpoint
+Generated: 2026-04-25
+Reason: Context threshold exceeded (95%+)
 
-## Task
-Review hpm_ai_v4 codebase thoroughly for:
-1. Architecture coherence
-2. Bugs/anti-patterns in: agents/agent.py, agents/reasoning.py, operators/dynamics.py, operators/parallel.py, pattern.py, evaluators/metrics.py, simulations/layered_agent.py
-3. Most significant technical debt/risk
-4. Missing capabilities for meaningful tasks
-Output: bullet points, max 400 words, terse
+## Execution Mode
+**Mode**: unattended
+**Auto-Continue**: true
 
-## Progress
-- Identified 108 total Python files in codebase
-- Next: Read target files and analyze patterns
+## Current Task
+Build a large NLP pattern library (2000+ patterns) using HuggingFace datasets.
+
+## Progress Summary
+- Fixed `trust_remote_code=True` deprecation in `hpm_ai_v4/simulations/build_large_nlp_library.py` (completed)
+- All performance fixes from prior session are in place (beam search, Baum-Welch throttle, compression cache, weight floor for HierarchicalPatterns)
 
 ## Remaining Work
-1. Read all 7 target files completely
-2. Analyze architecture coherence
-3. Identify bugs/anti-patterns
-4. Assess technical debt
-5. Determine missing capabilities
-6. Generate concise report
 
-## execution_mode
-unattended, auto_continue: true
+### IMMEDIATE: Launch the library build
+```bash
+cd /home/mattthomson/workspace/HPM---Learning-Agent
+mkdir -p library_bootstrap
+python3 -u -m hpm_ai_v4.simulations.build_large_nlp_library \
+    --output library_bootstrap/nlp_large.pkl \
+    --target 2000 \
+    --steps-per-chunk 8000 \
+    --workers 4
+```
+Run in background and monitor output.
+
+### AFTER build launches:
+1. Fix compression gate: `target_loss=0.9` is too high in layered_agent.py — lower to ~0.5
+2. Raise decoder policy exploration weight from 0.03 to ~0.1 in layered_agent.py
+3. Implement frozen library inference mode: `LayeredAgent.from_library(path, frozen=True)`
+
+## Active Files
+- `hpm_ai_v4/simulations/build_large_nlp_library.py` - trust_remote_code fix applied
+- `hpm_ai_v4/simulations/layered_agent.py` - needs compression gate + decoder fixes
+- `library_bootstrap/nlp_large.pkl` - output target (doesn't exist yet)
+
+## Key Context
+- Working directory: `/home/mattthomson/workspace/HPM---Learning-Agent`
+- Branch: `hpm-ai-v3-dev`
+- Workers=4 for parallel chunk training
+- Checkpoints saved every 500 patterns to `library_bootstrap/nlp_large_ckptN.pkl`

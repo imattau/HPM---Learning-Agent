@@ -1,4 +1,7 @@
+from hpm_ai_v4.pattern import FlatPattern
 from hpm_ai_v4.simulations.text_generalization_simulation import run_text_generalization_simulation
+from hpm_ai_v4.simulations.text_generalization_simulation import _load_library
+from hpm_ai_v4.tools.serializer import PatternSerializer
 
 
 def test_run_text_generalization_simulation_short(tmp_path):
@@ -29,3 +32,16 @@ def test_run_text_generalization_simulation_short(tmp_path):
     assert (tmp_path / "final_generalization_library.l3.pkl").exists()
     assert (tmp_path / "final_generalization_library.l4.pkl").exists()
     assert (tmp_path / "final_generalization_library.l5.pkl").exists()
+
+
+def test_generalization_simulation_loads_flat_library(tmp_path):
+    library = tmp_path / "generalization_seed.pkl"
+    PatternSerializer.save([FlatPattern.flat(0, obs_dim=5)], str(library))
+
+    from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+
+    agent = LayeredAgent(num_workers=1)
+    loaded = _load_library(agent, str(library))
+
+    assert loaded == 1
+    assert len(agent.l1.patterns) == 1
