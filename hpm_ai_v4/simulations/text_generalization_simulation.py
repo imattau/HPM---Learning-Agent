@@ -68,7 +68,7 @@ def run_text_generalization_simulation(
     warmup_chars: int = 500,
     num_workers: int = 1,
     use_dict: bool = True,
-    surface_mode: str = "coarse",
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
 ) -> List[Dict[str, Any]]:
@@ -95,8 +95,8 @@ def run_text_generalization_simulation(
         layered.observe_text(warmup_text, feedback_mode="target")
 
     train_tail = train_text[warmup_chars:]
-    for ch in train_tail:
-        layered.perceive(94 if ch == "\n" else ord(ch) - 32)
+    if train_tail:
+        layered.observe_text(train_tail, feedback_mode="target")
 
     history: List[Dict[str, Any]] = []
     train_snapshot = _text_metrics_snapshot(
@@ -210,7 +210,7 @@ def _parse_args():
     p.add_argument("--warmup-chars", type=int, default=500)
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--dict", action="store_true", help="Enable dictionary and grammar validators")
-    p.add_argument("--surface-mode", default="coarse", help="Text surface mode: coarse or ascii")
+    p.add_argument("--surface-mode", default="word", help="Text surface mode: word, ascii, or coarse")
     p.add_argument("--library", default=None, help="Base path to pre-built pattern library (no .pkl suffix)")
     p.add_argument("--checkpoint-dir", default=".", help="Directory for checkpoint files")
     return p.parse_args()

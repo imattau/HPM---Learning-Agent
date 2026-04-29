@@ -7,6 +7,7 @@ from hpm_ai_v4.io.adapters import (
     CurriculumAdapter,
     EnvironmentStateAdapter,
     MathTextAdapter,
+    WordAdapter,
     SentenceAdapter,
     SympyMathAdapter,
     StructuredTextAdapter,
@@ -99,6 +100,16 @@ def test_ascii_char_adapter_preserves_surface_tokens():
     assert a.encode_char(' ') != a.encode_char('a')
     assert a.encode_char('\n') == 94
     assert a.bucket_for_token(a.encode_char('a')) == "letter"
+
+
+def test_word_adapter_round_trip_and_vocab_growth():
+    a = WordAdapter(max_vocab_size=64)
+    tokens = a.to_observations("Hello world, hello test.")
+    assert tokens
+    assert a.obs_dim == 64
+    assert a.decode_token(tokens[0]) == "hello"
+    assert a.from_observations(tokens).startswith("hello world")
+    assert a.encode_token("newtoken") != a.encode_token("hello")
 
 def test_encode_char_uppercase():
     a = CharClassAdapter()

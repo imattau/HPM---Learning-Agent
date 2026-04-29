@@ -88,13 +88,14 @@ def run_text_repair_simulation(
     warmup_chars: int = 500,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
 ) -> List[Dict[str, Any]]:
     """Run a minimal denoising / text repair benchmark."""
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     loaded = _load_library(layered, library_path)
     if loaded:

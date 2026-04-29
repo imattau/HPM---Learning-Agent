@@ -157,6 +157,7 @@ def test_basic_chat_session_uses_multiple_candidates_and_penalizes_echo(monkeypa
         "I can help with that.",
         "Here is a short answer.",
         "The main idea is simple.",
+        "What would you like next?",
     }
     assert response != "What do you mean?" or calls["generate_text"] == 1
 

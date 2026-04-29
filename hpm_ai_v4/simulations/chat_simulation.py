@@ -915,6 +915,7 @@ def run_basic_chat_simulation(
     history_window: int = 6,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
     seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
@@ -922,7 +923,7 @@ def run_basic_chat_simulation(
     """Run a small scripted chat benchmark."""
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     resolved_library_path = _resolve_chat_library_path(library_path)
     if resolved_library_path:
@@ -986,6 +987,7 @@ def run_reverse_chat_simulation(
     history_window: int = 6,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
     seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
@@ -993,7 +995,7 @@ def run_reverse_chat_simulation(
     """Run a small scripted reverse-chat benchmark where the model asks and the user answers."""
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     resolved_library_path = _resolve_chat_library_path(library_path)
     if resolved_library_path:

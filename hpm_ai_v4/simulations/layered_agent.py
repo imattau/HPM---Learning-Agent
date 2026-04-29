@@ -1,5 +1,5 @@
 """LayeredAgent: stacked L1 -> L2 -> L3 hierarchy over character streams."""
-from collections import Counter
+from collections import Counter, defaultdict
 import json
 import os
 import re
@@ -9,7 +9,7 @@ import numpy as np
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.agents.decoders import CharDecoder, ConstrainedDecoder, ExplanationDecoder, TargetDecoder, WordDecoder
 from hpm_ai_v4.agents.meta_decoder_policy import DecoderSpec, MetaDecoderPolicy
-from hpm_ai_v4.io.adapters import AsciiCharAdapter, CharClassAdapter
+from hpm_ai_v4.io.adapters import AsciiCharAdapter, CharClassAdapter, WordAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
@@ -38,12 +38,10 @@ class LayeredAgent:
     def __init__(self, num_workers: int = 1,
                  dictionary: Optional[DictionaryValidator] = None,
                  grammar: Optional[GrammarValidator] = None,
-                 surface_mode: str = "coarse"):
-        self.surface_mode = str(surface_mode)
-        if self.surface_mode == "ascii":
-            self._adapter = AsciiCharAdapter()
-        else:
-            self._adapter = CharClassAdapter()
+                 surface_mode: str = "ascii"):
+        self._adapter = None
+        self.surface_mode = ""
+        self._set_surface_mode(surface_mode)
         self.dictionary = dictionary
         self.grammar = grammar
         self.l1 = HPMAgent(obs_dim=self._adapter.obs_dim, num_initial_patterns=4, num_workers=num_workers,
@@ -82,16 +80,36 @@ class LayeredAgent:
             "explain": ExplanationDecoder(),
         }
 
+    def _set_surface_mode(self, surface_mode: str, surface_state: Optional[Dict[str, Any]] = None) -> None:
+        mode = str(surface_mode or "coarse")
+        if mode == "ascii":
+            adapter = AsciiCharAdapter()
+        elif mode == "word":
+            adapter = WordAdapter(
+                max_vocab_size=int((surface_state or {}).get("max_vocab_size", 5000)),
+                lowercase=bool((surface_state or {}).get("lowercase", True)),
+                vocab=dict((surface_state or {}).get("word_vocab", {}) or {}) or None,
+            )
+        else:
+            adapter = CharClassAdapter()
+            mode = "coarse"
+        self.surface_mode = mode
+        self._adapter = adapter
+        if hasattr(self, "l1"):
+            self.l1.obs_dim = adapter.obs_dim
+            self.l1.reasoner.agent = self.l1
+        self._class_char_counts = defaultdict(Counter)
+
     def perceive(self, raw_char_id: int, feedback: Optional[Dict[str, Any]] = None) -> None:
         """Feed one character through the hierarchy."""
         class_id = self._adapter.encode(raw_char_id)
-        self._raw_history.append(raw_char_id)
-        ch = chr(raw_char_id + 32)
-        self._class_char_counts[class_id][ch] += 1
-        self._char_counts[ch] += 1
+        self._raw_history.append(int(class_id))
+        surface_label = self._surface_label_for_obs(class_id)
+        self._class_char_counts[class_id][surface_label] += 1
+        self._char_counts[surface_label] += 1
         if len(self._raw_history) > 1:
-            prev_ch = chr(self._raw_history[-2] + 32)
-            self._transition_counts[(prev_ch, ch)] += 1
+            prev_label = self._surface_label_for_obs(self._raw_history[-2])
+            self._transition_counts[(prev_label, surface_label)] += 1
         stacked_feedback = self._stack_feedback_signal(feedback)
         self.l1.perceive_and_learn(class_id, feedback=stacked_feedback)
 
@@ -359,7 +377,14 @@ class LayeredAgent:
         context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate readable text using a learned decoder policy."""
-        if target_text and mode == "target":
+        if self.surface_mode == "word":
+            candidates = [
+                DecoderSpec("word", "decode", include_seed),
+                DecoderSpec("word", "hybrid", include_seed),
+            ]
+            if target_text:
+                candidates.append(DecoderSpec("word", "target", include_seed))
+        elif target_text and mode == "target":
             candidates = [DecoderSpec("target", "target", False)]
             if self.dictionary or self.grammar:
                 candidates.append(DecoderSpec("constrained", "target", False))
@@ -388,7 +413,17 @@ class LayeredAgent:
             learn_policy=update_policy,
         )
         decoder = self.decoders[chosen.family]
-        if chosen.family == "target":
+        if self.surface_mode == "word":
+            text = decoder.decode(
+                self,
+                steps=steps,
+                seed_text=seed_text,
+                target_text=target_text,
+                mode=chosen.mode,
+                include_seed=chosen.include_seed,
+                feedback=feedback,
+            )
+        elif chosen.family == "target":
             text = decoder.decode(
                 self,
                 target_text=target_text or "",
@@ -423,6 +458,17 @@ class LayeredAgent:
         context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate printable character continuation through a learned policy."""
+        if self.surface_mode == "word":
+            return self.generate_text(
+                steps=steps,
+                seed_text=seed_text,
+                target_text=target_text,
+                mode=mode,
+                include_seed=include_seed,
+                feedback=feedback,
+                update_policy=update_policy,
+                context_features=context_features,
+            )
         candidates = [
             DecoderSpec("char", "decode", include_seed),
             DecoderSpec("char", "hybrid", include_seed),
@@ -488,7 +534,17 @@ class LayeredAgent:
         """
         from hpm_ai_v4.tools.serializer import PatternSerializer
         agent = cls(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+        surface_path = path + ".surface.json"
+        if os.path.exists(surface_path):
+            with open(surface_path, "r", encoding="utf-8") as f:
+                surface_state = json.load(f)
+            agent._set_surface_mode(surface_state.get("surface_mode", agent.surface_mode), surface_state=surface_state)
         patterns = PatternSerializer.load(path)
+        if patterns:
+            obs_dim = getattr(patterns[0], "obs_dim", agent._adapter.obs_dim)
+            if not os.path.exists(surface_path):
+                inferred_surface = "word" if obs_dim > 95 else "ascii" if obs_dim == 95 else "coarse"
+                agent._set_surface_mode(inferred_surface)
         agent.l1.patterns = patterns
         if frozen:
             for p in agent.l1.patterns:
@@ -507,6 +563,13 @@ class LayeredAgent:
         self._save_reasoner_state(base_path, "l3", self.l3.reasoner)
         self._save_reasoner_state(base_path, "l4", self.l4.reasoner)
         self._save_reasoner_state(base_path, "l5", self.l5.reasoner)
+        with open(base_path + ".surface.json", "w", encoding="utf-8") as f:
+            surface_state = {"surface_mode": self.surface_mode}
+            if self.surface_mode == "word" and hasattr(self._adapter, "_word_to_id"):
+                surface_state["max_vocab_size"] = int(getattr(self._adapter, "_max_vocab_size", 5000))
+                surface_state["lowercase"] = bool(getattr(self._adapter, "lowercase", True))
+                surface_state["word_vocab"] = dict(getattr(self._adapter, "_word_to_id", {}))
+            json.dump(surface_state, f)
         with open(base_path + ".policy.json", "w", encoding="utf-8") as f:
             json.dump(self.decoder_policy.state_dict(), f)
 
@@ -537,6 +600,15 @@ class LayeredAgent:
         if os.path.exists(policy_path):
             with open(policy_path, "r", encoding="utf-8") as f:
                 self.decoder_policy.load_state_dict(json.load(f))
+        surface_path = base_path + ".surface.json"
+        if os.path.exists(surface_path):
+            with open(surface_path, "r", encoding="utf-8") as f:
+                surface_state = json.load(f)
+            self._set_surface_mode(surface_state.get("surface_mode", self.surface_mode), surface_state=surface_state)
+        elif self.l1.patterns:
+            obs_dim = getattr(self.l1.patterns[0], "obs_dim", self._adapter.obs_dim)
+            inferred_surface = "word" if obs_dim > 95 else "ascii" if obs_dim == 95 else "coarse"
+            self._set_surface_mode(inferred_surface)
         return loaded
 
     def _save_reasoner_state(self, base_path: str, level: str, reasoner) -> None:
@@ -562,6 +634,15 @@ class LayeredAgent:
         feature_pack: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Plan a printable continuation directly through the reasoner."""
+        if self.surface_mode == "word":
+            return self.decoders["word"].decode(
+                self,
+                steps=horizon if horizon is not None else len(self._tokenize_words(target_text)),
+                seed_text=seed_text,
+                target_text=target_text,
+                mode="target",
+                include_seed=False,
+            )
         return self.decoders["target"].decode(
             self,
             target_text=target_text,
@@ -587,6 +668,17 @@ class LayeredAgent:
         context_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate text with additional lexical constraints."""
+        if self.surface_mode == "word":
+            return self.generate_text(
+                steps=steps,
+                seed_text=seed_text,
+                target_text=target_text,
+                mode=mode,
+                include_seed=include_seed,
+                feedback=feedback,
+                update_policy=update_policy,
+                context_features=context_features,
+            )
         candidates = [
             DecoderSpec("constrained", "decode", include_seed),
             DecoderSpec("constrained", "hybrid", include_seed),
@@ -637,6 +729,16 @@ class LayeredAgent:
             use_constraints = bool(self.dictionary or self.grammar)
 
         if use_constraints:
+            if self.surface_mode == "word":
+                return self.generate_text(
+                    steps=steps,
+                    seed_text=corrupted_text,
+                    target_text=target_text,
+                    mode=mode,
+                    include_seed=False,
+                    update_policy=update_policy,
+                    context_features={"task_family": "repair", "repair_mode": True},
+                )
             return self.generate_constrained_text(
                 steps=steps,
                 seed_text=corrupted_text,
@@ -685,7 +787,7 @@ class LayeredAgent:
         }
 
         if text:
-            for raw_id in self._text_to_raw_ids(text):
+            for raw_id in self._surface_ids_from_text(text):
                 self.perceive(raw_id, feedback=feedback_signal)
                 stats["target_chars"] += 1
 
@@ -776,6 +878,10 @@ class LayeredAgent:
 
     def predict_next_chars(self, context_raw: List[int], top_k: int = 5) -> List[Tuple[str, float]]:
         """Top-k next surface-bucket predictions from L1."""
+        return self.predict_next_surface(context_raw, top_k=top_k)
+
+    def predict_next_surface(self, context_raw: List[int], top_k: int = 5) -> List[Tuple[str, float]]:
+        """Top-k next surface-token predictions from L1."""
         context_cls = [self._adapter.encode(v) for v in context_raw]
         relevant = self.l1.reasoner.get_relevant_patterns(context_cls, top_k=top_k)
         if not relevant:
@@ -783,7 +889,9 @@ class LayeredAgent:
         dist = self.l1.reasoner.compose_predictions(relevant, context_cls)
         bucketed: Dict[str, float] = {}
         for idx, prob in enumerate(dist):
-            if hasattr(self._adapter, "bucket_for_token"):
+            if self.surface_mode == "word" and hasattr(self._adapter, "decode_token"):
+                bucket = self._adapter.decode_token(int(idx))
+            elif hasattr(self._adapter, "bucket_for_token"):
                 bucket = self._adapter.bucket_for_token(int(idx))
             else:
                 bucket = self._adapter.decode_class(int(idx))
@@ -798,6 +906,8 @@ class LayeredAgent:
         return 3
 
     def _tokenize_words(self, text: str) -> List[str]:
+        if self.surface_mode == "word" and hasattr(self._adapter, "tokenize"):
+            return [tok for tok in self._adapter.tokenize(text) if tok not in {self._adapter.NEWLINE_TOKEN, getattr(self._adapter, "PARA_TOKEN", "<PARA>")}]
         return re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?|[0-9]+|[^\w\s]", text)
 
     def _text_to_raw_ids(self, text: str) -> List[int]:
@@ -808,6 +918,28 @@ class LayeredAgent:
             elif 32 <= ord(ch) <= 126:
                 raw_ids.append(ord(ch) - 32)
         return raw_ids
+
+    def _surface_ids_from_text(self, text: str) -> List[int]:
+        if self.surface_mode == "word" and hasattr(self._adapter, "to_observations"):
+            return [int(tok) for tok in self._adapter.to_observations(text, max_length=max(1000, len(text) * 2))]
+        return self._text_to_raw_ids(text)
+
+    def _surface_history_text(self) -> str:
+        if self.surface_mode == "word" and hasattr(self._adapter, "from_observations"):
+            try:
+                return self._adapter.from_observations(self._raw_history)
+            except Exception:
+                pass
+        return "".join(chr(v + 32) for v in self._raw_history if 0 <= int(v) <= 94)
+
+    def _surface_label_for_obs(self, obs: int) -> str:
+        if self.surface_mode == "word" and hasattr(self._adapter, "decode_token"):
+            return str(self._adapter.decode_token(int(obs)))
+        if int(obs) == 94:
+            return "\n"
+        if 0 <= int(obs) <= 94:
+            return chr(int(obs) + 32)
+        return str(int(obs))
 
     def _text_agreement(self, generated_text: str, target_text: str) -> float:
         generated_tokens = self._tokenize_words(generated_text.lower())
@@ -874,13 +1006,7 @@ class LayeredAgent:
 
     def _feed_text_back(self, text: str, feedback: Optional[Dict[str, Any]] = None) -> None:
         """Optionally close the loop by letting generated text update the stack."""
-        for ch in text:
-            if ch == '\n':
-                raw_id = 94
-            elif 32 <= ord(ch) <= 126:
-                raw_id = ord(ch) - 32
-            else:
-                continue
+        for raw_id in self._surface_ids_from_text(text):
             self.perceive(raw_id, feedback=feedback)
 
     def _fallback_chars_for_class(self, class_id: int) -> List[str]:

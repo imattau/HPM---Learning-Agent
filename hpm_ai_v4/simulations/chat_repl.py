@@ -102,12 +102,13 @@ def _build_session(
     history_window: int = 6,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
 ) -> BasicChatSession:
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     resolved_library_path = _resolve_chat_library_path(library_path)
     if resolved_library_path:
@@ -190,12 +191,13 @@ def _build_reverse_session(
     history_window: int = 6,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "word",
     library_path: Optional[str] = None,
     seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
 ) -> ReverseChatSession:
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     resolved_library_path = _resolve_chat_library_path(library_path)
     if resolved_library_path:

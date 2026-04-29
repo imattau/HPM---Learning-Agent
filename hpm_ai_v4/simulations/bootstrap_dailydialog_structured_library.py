@@ -31,7 +31,7 @@ def bootstrap_dailydialog_structured_library(
 ) -> DailyDialogStructuredBootstrapResult:
     os.makedirs(output_dir, exist_ok=True)
     dataset = dd._load_dataset(dataset_name, split=split)
-    agent = LayeredAgent(num_workers=1)
+    agent = LayeredAgent(num_workers=1, surface_mode="word")
 
     dialogs_written = 0
     episodes_written = 0

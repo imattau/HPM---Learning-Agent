@@ -240,6 +240,21 @@ class SentenceAdapter(InputAdapter):
             return "fragment"
         return "declarative"
 
+    def _sentence_confidence(self, sentence: str, sentence_type: str) -> float:
+        words = self._canonicalize(sentence).split()
+        if not words:
+            return 0.0
+        base = 0.25
+        if sentence_type in {"question", "request", "clarification", "closing"}:
+            base += 0.25
+        if sentence.endswith((".", "?", "!", ":")):
+            base += 0.20
+        if len(words) >= 4:
+            base += 0.15
+        if len(words) >= 8:
+            base += 0.10
+        return float(max(0.0, min(1.0, base)))
+
     def to_observations(
         self,
         raw_input: Any,
@@ -327,6 +342,112 @@ class SentenceAdapter(InputAdapter):
             return nlp
         except Exception:
             return None
+
+
+class WordAdapter(InputAdapter):
+    """Word-level surface adapter with a bounded dynamic vocabulary."""
+
+    TOKEN_RE = re.compile(r"\n|[A-Za-z]+(?:'[A-Za-z]+)?|[0-9]+|[^\w\s]", re.UNICODE)
+
+    def __init__(self, max_vocab_size: int = 5000, lowercase: bool = True, vocab: Optional[Dict[str, int]] = None):
+        self._max_vocab_size = max(8, int(max_vocab_size))
+        self.lowercase = bool(lowercase)
+        self.UNK_TOKEN = "<UNK>"
+        self.BOS_TOKEN = "<BOS>"
+        self.EOS_TOKEN = "<EOS>"
+        self.NEWLINE_TOKEN = "<NL>"
+        self.PARA_TOKEN = "<PARA>"
+        base_vocab: Dict[str, int] = {
+            self.UNK_TOKEN: 0,
+            self.BOS_TOKEN: 1,
+            self.EOS_TOKEN: 2,
+            self.NEWLINE_TOKEN: 3,
+            self.PARA_TOKEN: 4,
+        }
+        if vocab:
+            for tok, idx in vocab.items():
+                tok = str(tok)
+                idx = int(idx)
+                if 0 <= idx < self._max_vocab_size:
+                    base_vocab[tok] = idx
+        self._word_to_id = dict(sorted(base_vocab.items(), key=lambda item: item[1]))
+        self._id_to_word: Dict[int, str] = {idx: tok for tok, idx in self._word_to_id.items()}
+
+    @property
+    def obs_dim(self) -> int:
+        return self._max_vocab_size
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._word_to_id)
+
+    def tokenize(self, text: str) -> List[str]:
+        raw = str(text or "")
+        tokens: List[str] = []
+        for tok in self.TOKEN_RE.findall(raw):
+            if not tok or tok.isspace():
+                continue
+            if tok == "\n":
+                tokens.append(self.NEWLINE_TOKEN)
+                continue
+            tokens.append(tok.lower() if self.lowercase else tok)
+        return tokens
+
+    def encode_token(self, token: str) -> int:
+        tok = str(token or "").strip()
+        if not tok:
+            return self._word_to_id[self.UNK_TOKEN]
+        if tok == "\n":
+            tok = self.NEWLINE_TOKEN
+        if self.lowercase and tok not in {self.UNK_TOKEN, self.BOS_TOKEN, self.EOS_TOKEN, self.NEWLINE_TOKEN, self.PARA_TOKEN}:
+            tok = tok.lower()
+        if tok in self._word_to_id:
+            return self._word_to_id[tok]
+        if len(self._word_to_id) >= self._max_vocab_size:
+            return self._word_to_id[self.UNK_TOKEN]
+        idx = len(self._word_to_id)
+        self._word_to_id[tok] = idx
+        self._id_to_word[idx] = tok
+        return idx
+
+    def decode_token(self, token_id: int) -> str:
+        return self._id_to_word.get(int(token_id), self.UNK_TOKEN)
+
+    def encode(self, token_id: int) -> int:
+        return int(token_id) if 0 <= int(token_id) < self._max_vocab_size else self._word_to_id[self.UNK_TOKEN]
+
+    def encode_char(self, ch: str) -> int:
+        return self.encode_token(ch)
+
+    def decode_class(self, class_id: int) -> str:
+        return self.decode_token(class_id)
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens = [self.encode_token(tok) for tok in self.tokenize(str(raw_input or ""))]
+        if not tokens:
+            tokens = [self._word_to_id[self.UNK_TOKEN]]
+        return tokens[:max_length]
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        pieces: List[str] = []
+        for token_id in tokens:
+            tok = self.decode_token(int(token_id))
+            if tok == self.NEWLINE_TOKEN:
+                pieces.append("\n")
+                continue
+            if tok == self.PARA_TOKEN:
+                pieces.append("\n\n")
+                continue
+            if not pieces:
+                pieces.append(tok)
+                continue
+            if tok in {".", ",", ";", ":", "!", "?", ")", "]", "}"}:
+                pieces[-1] = pieces[-1].rstrip() + tok
+            elif pieces[-1] in {"(", "[", "{"}:
+                pieces.append(tok)
+            else:
+                pieces.append(" " + tok)
+        return "".join(pieces).strip()
 
     def _sentence_confidence(self, sentence: str, sentence_type: str) -> float:
         words = sentence.split()

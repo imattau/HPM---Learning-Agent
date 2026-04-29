@@ -42,6 +42,9 @@ def _read_text(path: str) -> str:
 
 
 def _warm_agent(agent: LayeredAgent, text: str) -> None:
+    if getattr(agent, "surface_mode", "ascii") == "word":
+        agent.observe_text(text, feedback_mode="target")
+        return
     for ch in text:
         raw = 94 if ch == "\n" else ord(ch) - 32
         if 0 <= raw <= 94:
@@ -94,7 +97,7 @@ def _run_arm(
 ) -> Dict[str, Any]:
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode="word")
     warmup_text = corpus_text[:warmup_chars]
     if warmup_text:
         _warm_agent(agent, warmup_text)

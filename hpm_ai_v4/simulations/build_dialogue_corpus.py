@@ -126,6 +126,9 @@ def _load_seed_text(seed_corpus_path: str, extra_corpus_path: Optional[str] = No
 
 
 def _warm_agent(agent: LayeredAgent, warmup_text: str) -> None:
+    if getattr(agent, "surface_mode", "ascii") == "word":
+        agent.observe_text(warmup_text, feedback_mode="target")
+        return
     for ch in warmup_text:
         raw = 94 if ch == "\n" else ord(ch) - 32
         if 0 <= raw <= 94:
@@ -157,8 +160,8 @@ def build_dialogue_corpus(
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
 
-    questioner_agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
-    responder_agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    questioner_agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode="word")
+    responder_agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode="word")
 
     seed_text = _load_seed_text(seed_corpus_path, extra_corpus_path)
     if seed_text:

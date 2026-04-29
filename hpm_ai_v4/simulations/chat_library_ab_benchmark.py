@@ -24,6 +24,9 @@ class ChatLibraryRun:
 
 
 def _warm_agent(agent: LayeredAgent, text: str) -> None:
+    if getattr(agent, "surface_mode", "ascii") == "word":
+        agent.observe_text(text, feedback_mode="target")
+        return
     for ch in text:
         raw = 94 if ch == "\n" else ord(ch) - 32
         if 0 <= raw <= 94:
@@ -62,7 +65,7 @@ def _run_single_library(
 ) -> ChatLibraryRun:
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    agent = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode="word")
 
     loaded = _load_chat_library(agent, library_path)
     if loaded:

@@ -49,9 +49,17 @@ def test_layered_agent_perceive_injects_meta_feedback(monkeypatch):
 
 def test_layered_agent_obs_dims():
     agent = LayeredAgent(num_workers=1)
-    assert agent.l1.obs_dim == 5
+    assert agent.l1.obs_dim == 95
     assert agent.l2.obs_dim == 10
     assert agent.l3.obs_dim == 10
+
+
+def test_layered_agent_word_surface_mode():
+    agent = LayeredAgent(num_workers=1, surface_mode="word")
+    agent.observe_text("hello world", feedback_mode="target")
+    assert agent.surface_mode == "word"
+    assert agent.l1.obs_dim > 95
+    assert agent._surface_history_text()
 
 def test_layered_agent_equal_weights():
     agent = LayeredAgent(num_workers=1)
@@ -326,7 +334,7 @@ def test_repair_text_without_constraints_preserves_word_spacing():
 
 
 def test_layered_agent_bundle_persists_reasoner_memory(tmp_path):
-    agent = LayeredAgent(num_workers=1)
+    agent = LayeredAgent(num_workers=1, surface_mode="coarse")
 
     agent.l1.reasoner.record_episode([0, 1, 0, 1], action=1, reward=0.9, tag="train")
     agent.l2.reasoner.record_episode([1, 0, 1], action=0, reward=0.7, tag="train")
@@ -344,3 +352,19 @@ def test_layered_agent_bundle_persists_reasoner_memory(tmp_path):
     assert loaded.l1.reasoner.memory[0].action == 1
     assert loaded.l2.reasoner.memory_size == 1
     assert loaded.l2.reasoner.memory[0].action == 0
+    assert loaded.surface_mode == "coarse"
+    assert loaded.l1.obs_dim == 5
+
+
+def test_layered_agent_word_bundle_round_trip(tmp_path):
+    agent = LayeredAgent(num_workers=1, surface_mode="word")
+    agent.observe_text("hello world hello", feedback_mode="target")
+
+    base = tmp_path / "word_bundle"
+    agent.save_bundle(str(base))
+
+    loaded = LayeredAgent(num_workers=1)
+    loaded.load_bundle(str(base))
+
+    assert loaded.surface_mode == "word"
+    assert loaded.l1.obs_dim > 95

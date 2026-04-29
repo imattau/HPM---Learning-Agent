@@ -21,7 +21,7 @@ class WordDecoder:
         if mode not in {"decode", "target", "hybrid"}:
             raise ValueError(f"Unsupported generation mode: {mode!r}")
 
-        corpus_text = "".join(chr(v + 32) for v in agent._raw_history)
+        corpus_text = agent._surface_history_text()
         if seed_text:
             seed_tokens = agent._tokenize_words(seed_text)
         else:
@@ -51,8 +51,12 @@ class WordDecoder:
         generated_start = len(output_tokens)
 
         for _ in range(steps):
-            context_raw = [ord(ch) - 32 for ch in " ".join(output_tokens)[-20:]]
-            pred = agent.predict_next_chars(context_raw, top_k=5)
+            if getattr(agent, "surface_mode", "ascii") == "word":
+                context_raw = agent._surface_ids_from_text(" ".join(output_tokens))[-20:]
+                pred = agent.predict_next_surface(context_raw, top_k=5)
+            else:
+                context_raw = [ord(ch) - 32 for ch in " ".join(output_tokens)[-20:]]
+                pred = agent.predict_next_chars(context_raw, top_k=5)
             pred_probs = {name: prob for name, prob in pred}
             gen_idx = max(0, len(output_tokens) - generated_start)
             expected_token = target_tokens[min(gen_idx, len(target_tokens) - 1)] if target_tokens else None
@@ -66,14 +70,17 @@ class WordDecoder:
             total = sum(candidates.values()) + 1e-12
             for tok, count in candidates.items():
                 base = np.log(count / total)
-                class_name = agent._token_class_name(tok)
-                base += 1.5 * np.log(pred_probs.get(class_name, 1e-6) + 1e-12)
+                if getattr(agent, "surface_mode", "ascii") == "word":
+                    base += 1.5 * np.log(pred_probs.get(tok.lower(), 1e-6) + 1e-12)
+                else:
+                    class_name = agent._token_class_name(tok)
+                    base += 1.5 * np.log(pred_probs.get(class_name, 1e-6) + 1e-12)
                 if expected_token:
                     if tok == expected_token:
                         base += target_bias
                     elif tok.lower() == expected_token.lower():
                         base += target_bias * 0.8
-                    elif agent._token_class_name(expected_token) == class_name:
+                    elif getattr(agent, "surface_mode", "ascii") != "word" and agent._token_class_name(expected_token) == class_name:
                         base += target_bias * 0.25
                     else:
                         base -= target_bias * 0.15
@@ -125,7 +132,7 @@ class CharDecoder:
         if mode not in {"decode", "target", "hybrid"}:
             raise ValueError(f"Unsupported generation mode: {mode!r}")
 
-        corpus_text = "".join(chr(v + 32) for v in agent._raw_history)
+        corpus_text = agent._surface_history_text()
         seed_chars = list(seed_text[-20:]) if seed_text else list(corpus_text[-20:])
         target_chars = list(target_text) if target_text else []
 
@@ -208,14 +215,26 @@ class TargetDecoder:
         if not target_classes:
             return ""
 
-        planned_classes = agent.l1.reasoner.plan_sequence(
-            target_sequence=target_classes,
-            horizon=horizon if horizon is not None else len(target_classes),
-            strategy=strategy,
-            lookback=lookback,
-            target_weight=2.5,
-            feature_pack=feature_pack,
-        )
+        planned_classes = []
+        reasoner_agent = getattr(getattr(agent, "l1", None), "reasoner", None)
+        reasoner_agent = getattr(reasoner_agent, "agent", None)
+        original_obs_buffer = list(getattr(reasoner_agent, "obs_buffer", []))
+        try:
+            if seed_text:
+                for obs in agent._surface_ids_from_text(seed_text):
+                    if reasoner_agent is not None:
+                        reasoner_agent.obs_buffer.append(int(obs))
+            planned_classes = agent.l1.reasoner.plan_sequence(
+                target_sequence=target_classes,
+                horizon=horizon if horizon is not None else len(target_classes),
+                strategy=strategy,
+                lookback=lookback,
+                target_weight=2.5,
+                feature_pack=feature_pack,
+            )
+        finally:
+            if reasoner_agent is not None:
+                reasoner_agent.obs_buffer = original_obs_buffer
 
         target_chars = [ch for ch in target_text if 32 <= ord(ch) <= 126]
         chars = []
@@ -250,7 +269,7 @@ class ConstrainedDecoder(WordDecoder):
         if mode not in {"decode", "target", "hybrid"}:
             raise ValueError(f"Unsupported generation mode: {mode!r}")
 
-        corpus_text = "".join(chr(v + 32) for v in agent._raw_history)
+        corpus_text = agent._surface_history_text()
         if seed_text:
             seed_tokens = agent._tokenize_words(seed_text)
         else:

@@ -82,7 +82,7 @@ def bootstrap_chat_ultra_bundle(
     bundle_base = os.path.join(output_dir, "chat_ultra_bundle")
     from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 
-    stacked = LayeredAgent(num_workers=1)
+    stacked = LayeredAgent(num_workers=1, surface_mode="word")
     stacked.l1.patterns = groups["l1"]
     stacked.l2.patterns = groups["l2"]
     stacked.l3.patterns = groups["l3"]
