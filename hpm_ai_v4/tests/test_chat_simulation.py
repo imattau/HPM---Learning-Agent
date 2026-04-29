@@ -299,6 +299,65 @@ def test_reverse_chat_session_asks_questions(monkeypatch):
     assert captured["generate_text"]["context_features"]["desired_question"] is True
 
 
+def test_basic_chat_session_discourse_state_persists_across_pronouns(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    captured = []
+
+    def fake_generate_text(**kwargs):
+        captured.append(kwargs)
+        return "It sat down."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=3, response_steps=16, use_constraints=False)
+    first = session.chat_turn("The cat chased the dog.")
+    first_topic = session.discourse_state.topic
+    first_confidence = session.discourse_state.topic_confidence
+    second = session.chat_turn("It sat down.")
+
+    assert first_topic != "unknown"
+    assert "Focus:" in first.prompt_text
+    assert second.prompt_text.count("Focus:") == 1
+    assert session.discourse_state.topic == first_topic
+    assert session.discourse_state.topic_confidence >= first_confidence
+    assert session.discourse_state.active_entities
+    assert any(call["context_features"]["discourse_topic"] == first_topic for call in captured)
+    assert any("discourse_summary" in call["context_features"] for call in captured)
+
+
+def test_reverse_chat_session_discourse_state_persists(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    captured = []
+
+    def fake_generate_text(**kwargs):
+        captured.append(kwargs)
+        return "What should I ask next?"
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = ReverseChatSession(agent, history_window=3, response_steps=16, use_constraints=False)
+    opening = session.ask()
+    first_topic = session.discourse_state.topic
+    answer = session.answer_turn("The cat is on the mat.")
+
+    assert opening.endswith("?")
+    assert answer.response_text.endswith("?")
+    assert first_topic != "unknown"
+    assert "Focus:" in answer.prompt_text
+    assert session.discourse_state.topic != "unknown"
+    assert session.discourse_state.topic_confidence > 0.0
+    assert session.discourse_state.active_entities
+    assert any(call["context_features"]["discourse_topic"] != "unknown" for call in captured)
+    assert any(call["context_features"]["discourse_summary"] for call in captured)
+    assert any(call["context_features"]["conversation_mode"] == "reverse" for call in captured)
+
+
 def test_basic_chat_session_falls_back_to_dialogue_bank(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)

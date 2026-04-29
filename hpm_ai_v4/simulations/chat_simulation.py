@@ -2,7 +2,7 @@
 import argparse
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from hpm_ai_v4.simulations.full_simulation import WikipediaStream
@@ -45,6 +45,86 @@ CHAT_LIBRARY_CANDIDATES = [
     "/tmp/hpm_conversational_chat/conversational_chat_library.pkl",
     "/tmp/hpm_dailydialog_chat/daily_dialog_chat_library",
 ]
+
+_DISCOURSE_PRONOUNS = {
+    "it",
+    "they",
+    "them",
+    "their",
+    "theirs",
+    "he",
+    "him",
+    "his",
+    "she",
+    "her",
+    "hers",
+    "this",
+    "that",
+    "these",
+    "those",
+    "its",
+    "we",
+    "us",
+    "our",
+    "ours",
+    "you",
+    "your",
+    "yours",
+}
+
+_DISCOURSE_STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "so",
+    "because",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "with",
+    "at",
+    "by",
+    "from",
+    "as",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "do",
+    "does",
+    "did",
+    "can",
+    "could",
+    "would",
+    "should",
+    "will",
+    "shall",
+    "may",
+    "might",
+    "must",
+    "have",
+    "has",
+    "had",
+    "i",
+    "me",
+    "my",
+    "mine",
+    "we",
+    "us",
+    "our",
+    "you",
+    "your",
+}
 
 
 def _resolve_registered_chat_library() -> Optional[str]:
@@ -103,6 +183,48 @@ class ChatResult:
     response_stats: Dict[str, Any]
 
 
+@dataclass
+class DiscourseState:
+    """Lightweight persistent discourse memory for a chat session."""
+
+    turn_index: int = 0
+    topic: str = "unknown"
+    topic_confidence: float = 0.0
+    active_entities: List[str] = field(default_factory=list)
+    entity_salience: Dict[str, float] = field(default_factory=dict)
+    pronoun_candidates: List[str] = field(default_factory=list)
+    last_dialogue_act: str = "default"
+    last_sentence_type: str = "fragment"
+    focus_stack: List[str] = field(default_factory=list)
+    discourse_summary: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "turn_index": self.turn_index,
+            "topic": self.topic,
+            "topic_confidence": self.topic_confidence,
+            "active_entities": list(self.active_entities),
+            "entity_salience": dict(self.entity_salience),
+            "pronoun_candidates": list(self.pronoun_candidates),
+            "last_dialogue_act": self.last_dialogue_act,
+            "last_sentence_type": self.last_sentence_type,
+            "focus_stack": list(self.focus_stack),
+            "discourse_summary": self.discourse_summary,
+        }
+
+    def reset(self) -> None:
+        self.turn_index = 0
+        self.topic = "unknown"
+        self.topic_confidence = 0.0
+        self.active_entities.clear()
+        self.entity_salience.clear()
+        self.pronoun_candidates.clear()
+        self.last_dialogue_act = "default"
+        self.last_sentence_type = "fragment"
+        self.focus_stack.clear()
+        self.discourse_summary = ""
+
+
 class BasicChatSession:
     """Minimal dialogue wrapper over LayeredAgent."""
 
@@ -131,6 +253,7 @@ class BasicChatSession:
         self.sentence_adapter = SentenceAdapter()
         self.use_sentence_features = bool(use_sentence_features)
         self.history: List[ChatTurn] = []
+        self.discourse_state = DiscourseState()
 
     def _dialogue_act(self, user_text: str) -> str:
         text = user_text.strip().lower()
@@ -150,6 +273,7 @@ class BasicChatSession:
 
     def reset(self) -> None:
         self.history.clear()
+        self.discourse_state.reset()
 
     def chat(self, user_text: str, target_reply: str | None = None) -> str:
         return self.chat_turn(user_text, target_reply=target_reply).response_text
@@ -162,36 +286,52 @@ class BasicChatSession:
         prior_texts = [turn.text for turn in self._recent_turns() if turn.text.strip()]
         dialogue_act = self._dialogue_act(user_text)
         self._append("user", user_text)
+        user_sentence_features = self._sentence_features(user_text)
+        self._update_discourse_state(user_text, role="user", dialogue_act=dialogue_act, sentence_features=user_sentence_features)
         learn_stats: Dict[str, Any] = {"target_chars": 0, "self_chars": 0}
         if self.learn_from_user:
-            learn_stats = self.agent.observe_text(user_text, feedback_mode="target")
+            learn_stats = self.agent.observe_text(
+                user_text,
+                feedback_mode="target",
+                feedback_signal=self._discourse_feedback_signal(user_text, role="user", dialogue_act=dialogue_act),
+            )
 
         prompt_text = self._build_prompt()
+        discourse_features = self._discourse_context_features()
         response_text = self._generate_response(
             prompt_text,
             user_text=user_text,
             target_reply=target_reply,
             dialogue_act=dialogue_act,
             target_sentence_features=self._sentence_features(target_reply) if (self.use_sentence_features and target_reply) else {},
+            discourse_features=discourse_features,
         )
 
         response_signal = self._response_signal_pack(
             response_text,
             user_text=user_text,
             target_reply=target_reply,
-            context_texts=[user_text, *prior_texts],
+            context_texts=[user_text, self.discourse_state.discourse_summary, *prior_texts],
         )
         sentence_features = self._sentence_features(response_text)
         self._append("assistant", response_text)
+        self._update_discourse_state(
+            response_text,
+            role="assistant",
+            dialogue_act=dialogue_act,
+            sentence_features=sentence_features,
+        )
         response_stats: Dict[str, Any] = {}
         response_stats.update(response_signal.to_dict())
         response_stats["text_signal_score"] = response_signal.combined_score()
         response_stats.update(sentence_features)
+        response_stats.update(self._discourse_context_features())
         if target_reply:
             response_stats = self.agent.evaluate_generated_text(response_text, target_reply)
             response_stats.update(response_signal.to_dict())
             response_stats["text_signal_score"] = response_signal.combined_score()
             response_stats.update(sentence_features)
+            response_stats.update(self._discourse_context_features())
             if self.learn_from_reply:
                 response_stats.update(
                     self.agent.observe_text(
@@ -199,7 +339,7 @@ class BasicChatSession:
                         feedback_mode="hybrid",
                         generated_text=response_text,
                         self_feedback_weight=self.reply_feedback_weight,
-                        feedback_signal=response_signal.to_dict(),
+                        feedback_signal={**response_signal.to_dict(), **self._discourse_feedback_signal(response_text, role="assistant", dialogue_act=dialogue_act)},
                     )
                 )
         elif self.learn_from_reply and response_text:
@@ -209,7 +349,7 @@ class BasicChatSession:
                 feedback_mode="self",
                 generated_text=response_text,
                 self_feedback_weight=self.reply_feedback_weight,
-                feedback_signal=response_signal.to_dict(),
+                feedback_signal={**response_signal.to_dict(), **self._discourse_feedback_signal(response_text, role="assistant", dialogue_act=dialogue_act)},
             )
 
         return ChatResult(
@@ -234,6 +374,8 @@ class BasicChatSession:
         lines: List[str] = []
         if self.system_prompt:
             lines.append(self.system_prompt)
+        if self.discourse_state.discourse_summary:
+            lines.append(f"Focus: {self.discourse_state.discourse_summary}")
         for turn in self._recent_turns():
             lines.append(f"{turn.role.title()}: {turn.text}")
         lines.append("Assistant:")
@@ -251,6 +393,7 @@ class BasicChatSession:
         target_reply: str | None = None,
         dialogue_act: str = "default",
         target_sentence_features: Optional[Dict[str, Any]] = None,
+        discourse_features: Optional[Dict[str, Any]] = None,
     ) -> str:
         use_constraints = self._should_use_constraints()
         mode = "target" if target_reply else "decode"
@@ -264,6 +407,7 @@ class BasicChatSession:
             "reply_style": "concise",
         }
         context_features.update(target_sentence_features or {})
+        context_features.update(discourse_features or {})
 
         def add(candidate: str) -> None:
             cleaned = self._sanitize_response(candidate)
@@ -393,6 +537,8 @@ class BasicChatSession:
         seed_parts: List[str] = []
         if self.system_prompt:
             seed_parts.append(self.system_prompt)
+        if self.discourse_state.discourse_summary:
+            seed_parts.append(f"Focus: {self.discourse_state.discourse_summary}")
         if recent_texts:
             seed_parts.extend(recent_texts[-2:])
         else:
@@ -406,6 +552,7 @@ class BasicChatSession:
         user_text: str,
         dialogue_act: str = "default",
         target_sentence_features: Optional[Dict[str, Any]] = None,
+        discourse_state: Optional[DiscourseState] = None,
     ) -> str:
         best_text = ""
         best_score = -1e9
@@ -415,6 +562,7 @@ class BasicChatSession:
                 user_text,
                 dialogue_act=dialogue_act,
                 target_sentence_features=target_sentence_features,
+                discourse_state=discourse_state,
             )
             if score > best_score:
                 best_score = score
@@ -427,12 +575,14 @@ class BasicChatSession:
         user_text: str,
         dialogue_act: str = "default",
         target_sentence_features: Optional[Dict[str, Any]] = None,
+        discourse_state: Optional[DiscourseState] = None,
     ) -> float:
         if not text:
             return -1e9
         tokens = self.agent._tokenize_words(text)
         if not tokens:
             return -1e9
+        discourse_state = discourse_state or self.discourse_state
 
         recent_assistant = [turn.text for turn in self._recent_turns() if turn.role == "assistant" and turn.text.strip()]
         recent_context = recent_assistant[-4:] if recent_assistant else []
@@ -471,6 +621,7 @@ class BasicChatSession:
         target_sentence_bonus = 0.0
         if self.use_sentence_features and target_sentence_features:
             target_sentence_bonus = self._target_sentence_score(sentence_features, target_sentence_features)
+        discourse_bonus = self._discourse_bonus(text, user_text, discourse_state)
 
         return (
             0.48 * plausibility
@@ -480,6 +631,7 @@ class BasicChatSession:
             + act_bonus
             + sentence_bonus
             + target_sentence_bonus
+            + discourse_bonus
             - 0.30 * repetition_penalty
             - 0.22 * duplicate_penalty
             - marker_penalty
@@ -523,6 +675,117 @@ class BasicChatSession:
             dictionary=self.agent.dictionary,
             grammar=self.agent.grammar,
         )
+
+    def _content_tokens(self, text: str) -> List[str]:
+        tokens = []
+        for tok in self.agent._tokenize_words(text):
+            low = tok.lower()
+            if not low or low in _DISCOURSE_STOPWORDS or low in _DISCOURSE_PRONOUNS:
+                continue
+            if any(ch.isalpha() for ch in low):
+                tokens.append(low)
+        return tokens
+
+    def _update_discourse_state(
+        self,
+        text: str,
+        *,
+        role: str,
+        dialogue_act: str,
+        sentence_features: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        tokens = self._content_tokens(text)
+        pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if tok.lower() in _DISCOURSE_PRONOUNS]
+        sentence_features = sentence_features or self._sentence_features(text)
+        last_sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+
+        if tokens:
+            for tok in list(self.discourse_state.entity_salience):
+                self.discourse_state.entity_salience[tok] *= 0.86
+                if self.discourse_state.entity_salience[tok] < 0.01:
+                    self.discourse_state.entity_salience.pop(tok, None)
+            for tok in tokens:
+                self.discourse_state.entity_salience[tok] = self.discourse_state.entity_salience.get(tok, 0.0) * 0.72 + 1.0
+
+        ranked = sorted(self.discourse_state.entity_salience.items(), key=lambda item: item[1], reverse=True)
+        self.discourse_state.active_entities = [tok for tok, _ in ranked[:4]]
+        if self.discourse_state.active_entities:
+            if self.discourse_state.topic == "unknown" or self.discourse_state.topic not in self.discourse_state.active_entities:
+                if pronouns and self.discourse_state.topic != "unknown":
+                    self.discourse_state.active_entities = list(dict.fromkeys([self.discourse_state.topic, *self.discourse_state.active_entities]))
+                else:
+                    self.discourse_state.topic = self.discourse_state.active_entities[0]
+            elif self.discourse_state.topic_confidence < 0.25:
+                self.discourse_state.topic = self.discourse_state.active_entities[0]
+
+        if pronouns and self.discourse_state.active_entities:
+            self.discourse_state.topic_confidence = min(1.0, self.discourse_state.topic_confidence + 0.10 * len(pronouns))
+            self.discourse_state.pronoun_candidates = list(dict.fromkeys(pronouns + self.discourse_state.active_entities[:3]))
+        elif tokens:
+            self.discourse_state.topic_confidence = min(1.0, 0.70 * self.discourse_state.topic_confidence + 0.15 * min(3, len(tokens)))
+            self.discourse_state.pronoun_candidates = self.discourse_state.active_entities[:3]
+        else:
+            self.discourse_state.topic_confidence = max(0.0, self.discourse_state.topic_confidence * 0.92)
+
+        self.discourse_state.last_dialogue_act = dialogue_act or role
+        self.discourse_state.last_sentence_type = last_sentence_type
+        self.discourse_state.focus_stack = self.discourse_state.active_entities[:3]
+        self.discourse_state.turn_index += 1
+        self.discourse_state.discourse_summary = self._format_discourse_summary()
+
+    def _format_discourse_summary(self) -> str:
+        parts: List[str] = []
+        if self.discourse_state.topic != "unknown":
+            parts.append(f"topic={self.discourse_state.topic}")
+        if self.discourse_state.active_entities:
+            parts.append(f"entities={','.join(self.discourse_state.active_entities[:3])}")
+        if self.discourse_state.last_dialogue_act:
+            parts.append(f"act={self.discourse_state.last_dialogue_act}")
+        if self.discourse_state.last_sentence_type:
+            parts.append(f"sentence={self.discourse_state.last_sentence_type}")
+        if self.discourse_state.pronoun_candidates:
+            parts.append(f"refs={','.join(self.discourse_state.pronoun_candidates[:3])}")
+        parts.append(f"confidence={self.discourse_state.topic_confidence:.2f}")
+        return "; ".join(parts)
+
+    def _discourse_context_features(self) -> Dict[str, Any]:
+        return {
+            "discourse_topic": self.discourse_state.topic,
+            "topic_confidence": float(self.discourse_state.topic_confidence),
+            "active_entity_count": len(self.discourse_state.active_entities),
+            "active_entities": list(self.discourse_state.active_entities[:4]),
+            "pronoun_candidates": list(self.discourse_state.pronoun_candidates[:4]),
+            "focus_stack": list(self.discourse_state.focus_stack[:4]),
+            "discourse_summary": self.discourse_state.discourse_summary,
+            "last_dialogue_act": self.discourse_state.last_dialogue_act,
+            "last_sentence_type": self.discourse_state.last_sentence_type,
+            "turn_index": int(self.discourse_state.turn_index),
+        }
+
+    def _discourse_feedback_signal(self, text: str, *, role: str, dialogue_act: str) -> Dict[str, Any]:
+        return {
+            "kind": "discourse",
+            "role": role,
+            "dialogue_act": dialogue_act,
+            **self._discourse_context_features(),
+            **self._sentence_features(text),
+        }
+
+    def _discourse_bonus(self, text: str, user_text: str, discourse_state: DiscourseState) -> float:
+        if discourse_state.topic == "unknown" or discourse_state.topic_confidence <= 0.0:
+            return 0.0
+        lower = text.lower()
+        topic_hits = 0
+        for tok in discourse_state.active_entities[:4]:
+            if tok and tok in lower:
+                topic_hits += 1
+        if topic_hits == 0 and any(pron in user_text.lower().split() for pron in _DISCOURSE_PRONOUNS):
+            # If the user is referring back with pronouns, prefer responses that keep the topic visible.
+            if discourse_state.topic in lower or any(tok in lower for tok in discourse_state.focus_stack[:2]):
+                topic_hits += 1
+        if topic_hits == 0:
+            return -0.05 * min(1.0, discourse_state.topic_confidence)
+        return min(0.16, 0.05 * topic_hits * max(0.3, discourse_state.topic_confidence))
 
     def _sentence_features(self, text: str) -> Dict[str, Any]:
         spans = self.sentence_adapter.segment(text)
@@ -685,6 +948,12 @@ class ReverseChatSession(BasicChatSession):
     def ask(self, seed_text: str | None = None) -> str:
         question = self._generate_question(seed_text=seed_text)
         self._append("assistant", question)
+        self._update_discourse_state(
+            question,
+            role="assistant",
+            dialogue_act="question",
+            sentence_features=self._sentence_features(question),
+        )
         self._question_history.append(question)
         return question
 
@@ -696,10 +965,21 @@ class ReverseChatSession(BasicChatSession):
         prior_questions = [turn.text for turn in self._recent_turns() if turn.role == "assistant" and turn.text.strip()]
         dialogue_act = self._dialogue_act(answer_text)
         self._append("user", answer_text)
+        answer_sentence_features = self._sentence_features(answer_text)
+        self._update_discourse_state(
+            answer_text,
+            role="user",
+            dialogue_act=dialogue_act,
+            sentence_features=answer_sentence_features,
+        )
 
         learn_stats: Dict[str, Any] = {"target_chars": 0, "self_chars": 0}
         if self.learn_from_user:
-            learn_stats = self.agent.observe_text(answer_text, feedback_mode="target")
+            learn_stats = self.agent.observe_text(
+                answer_text,
+                feedback_mode="target",
+                feedback_signal=self._discourse_feedback_signal(answer_text, role="user", dialogue_act=dialogue_act),
+            )
 
         prompt_text = self._build_prompt()
         question_text = self._generate_question(
@@ -712,9 +992,15 @@ class ReverseChatSession(BasicChatSession):
         question_signal = self._response_signal_pack(
             question_text,
             user_text=answer_text,
-            context_texts=[answer_text, *prior_questions],
+            context_texts=[answer_text, self.discourse_state.discourse_summary, *prior_questions],
         )
         self._append("assistant", question_text)
+        self._update_discourse_state(
+            question_text,
+            role="assistant",
+            dialogue_act="question",
+            sentence_features=self._sentence_features(question_text),
+        )
         response_stats = dict(question_signal.to_dict())
         response_stats["text_signal_score"] = question_signal.combined_score()
         if self.learn_from_reply and question_text:
@@ -724,7 +1010,7 @@ class ReverseChatSession(BasicChatSession):
                     feedback_mode="self",
                     generated_text=question_text,
                     self_feedback_weight=self.reply_feedback_weight,
-                    feedback_signal=question_signal.to_dict(),
+                    feedback_signal={**question_signal.to_dict(), **self._discourse_feedback_signal(question_text, role="assistant", dialogue_act="question")},
                 )
             )
 
@@ -757,6 +1043,7 @@ class ReverseChatSession(BasicChatSession):
             "conversation_mode": "reverse",
             "desired_question": True,
         }
+        context_features.update(self._discourse_context_features())
 
         def add(candidate: str) -> None:
             cleaned = self._sanitize_question(candidate)
