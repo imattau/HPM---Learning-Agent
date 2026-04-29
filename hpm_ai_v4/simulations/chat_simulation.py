@@ -113,6 +113,41 @@ _DISCOURSE_NEGATIONS = {
     "n't",
 }
 
+_DISCOURSE_CLAUSE_MARKERS = {
+    "that",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "because",
+    "although",
+    "when",
+    "if",
+}
+
+_DISCOURSE_PREPOSITIONS = {
+    "on",
+    "in",
+    "at",
+    "with",
+    "to",
+    "from",
+    "by",
+    "under",
+    "over",
+    "of",
+    "for",
+    "about",
+    "into",
+    "onto",
+    "inside",
+    "outside",
+    "near",
+    "behind",
+    "beneath",
+    "between",
+}
+
 _DISCOURSE_STOPWORDS = {
     "the",
     "a",
@@ -289,6 +324,7 @@ class RelationalState:
     confidence: float = 0.0
     role_bindings: Dict[str, str] = field(default_factory=dict)
     proposition_history: List[str] = field(default_factory=list)
+    binding_stack: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -301,6 +337,7 @@ class RelationalState:
             "confidence": self.confidence,
             "role_bindings": dict(self.role_bindings),
             "proposition_history": list(self.proposition_history[-5:]),
+            "binding_stack": list(self.binding_stack[-4:]),
         }
 
     def reset(self) -> None:
@@ -313,6 +350,7 @@ class RelationalState:
         self.confidence = 0.0
         self.role_bindings.clear()
         self.proposition_history.clear()
+        self.binding_stack.clear()
 
 
 class BasicChatSession:
@@ -1074,6 +1112,114 @@ class BasicChatSession:
                 tokens.append(low)
         return tokens
 
+    def _raw_tokens(self, text: str) -> List[str]:
+        return [tok.lower() for tok in re.findall(r"[A-Za-z']+", text)]
+
+    def _first_meaningful_token(self, tokens: List[str]) -> str:
+        for tok in tokens:
+            if tok and tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and tok not in _DISCOURSE_INTERROGATIVES:
+                return tok
+        return ""
+
+    def _split_clause_segments(self, raw_tokens: List[str]) -> List[List[str]]:
+        segments: List[List[str]] = []
+        current: List[str] = []
+        for tok in raw_tokens:
+            if tok in _DISCOURSE_CLAUSE_MARKERS and current:
+                segments.append(current)
+                current = []
+                continue
+            current.append(tok)
+        if current:
+            segments.append(current)
+        return [segment for segment in segments if segment]
+
+    def _infer_clause_frame(
+        self,
+        raw_tokens: List[str],
+        *,
+        role: str,
+        dialogue_act: str,
+        sentence_features: Dict[str, Any],
+        fallback_subject: str = "unknown",
+    ) -> Dict[str, Any]:
+        content_tokens = [
+            tok
+            for tok in raw_tokens
+            if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and any(ch.isalpha() for ch in tok)
+        ]
+        subject = self._first_meaningful_token(content_tokens)
+        predicate = content_tokens[1] if len(content_tokens) > 1 else "unknown"
+        obj = content_tokens[2] if len(content_tokens) > 2 else "unknown"
+        voice = "active"
+        grammatical_subject = subject if subject != "unknown" else fallback_subject
+        agent = subject
+        patient = obj
+
+        by_index = raw_tokens.index("by") if "by" in raw_tokens else -1
+        passive_aux = any(tok in {"was", "were", "been"} for tok in raw_tokens) and by_index >= 0
+        if passive_aux:
+            voice = "passive"
+            before_by = raw_tokens[:by_index]
+            after_by = raw_tokens[by_index + 1 :]
+            patient = self._first_meaningful_token(before_by) or subject
+            agent = self._first_meaningful_token(after_by) or subject
+            grammatical_subject = patient
+            subject = agent
+            predicate_candidates = [
+                tok
+                for tok in before_by
+                if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and tok not in {"was", "were", "been", "by"}
+            ]
+            predicate = predicate_candidates[-1] if predicate_candidates else predicate
+            obj = patient
+
+        preposition_index = next(
+            (
+                idx
+                for idx, tok in enumerate(raw_tokens)
+                if tok in _DISCOURSE_PREPOSITIONS and not (passive_aux and tok == "by")
+            ),
+            -1,
+        )
+        if preposition_index > 0:
+            preposition_object = self._first_meaningful_token(raw_tokens[preposition_index + 1 :])
+            if preposition_object != "unknown":
+                obj = preposition_object
+
+        proposition_parts = [part for part in (predicate, subject, obj) if part and part != "unknown"]
+        proposition = ""
+        if predicate != "unknown" and subject != "unknown":
+            proposition = f"{predicate}({subject})"
+        if predicate != "unknown" and obj != "unknown":
+            proposition = f"{predicate}({subject}, {obj})" if subject != "unknown" else f"{predicate}({obj})"
+        if not proposition and proposition_parts:
+            proposition = " ".join(proposition_parts[:3])
+
+        return {
+            "subject": subject,
+            "predicate": predicate,
+            "object": obj,
+            "voice": voice,
+            "agent": agent,
+            "patient": patient,
+            "grammatical_subject": grammatical_subject,
+            "proposition": proposition,
+            "confidence": 0.0,
+            "role_bindings": {
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj,
+                "voice": voice,
+                "agent": agent,
+                "patient": patient,
+                "grammatical_subject": grammatical_subject,
+                "dialogue_act": dialogue_act,
+                "role": role,
+                "sentence_type": str(sentence_features.get("dominant_sentence_type", "fragment")),
+            },
+        }
+
     def _rank_tokens(self, tokens: List[str]) -> List[str]:
         if not tokens:
             return []
@@ -1148,75 +1294,76 @@ class BasicChatSession:
         dialogue_act: str,
         sentence_features: Optional[Dict[str, Any]] = None,
     ) -> None:
-        raw_tokens = [tok.lower() for tok in re.findall(r"[A-Za-z']+", text)]
+        raw_tokens = self._raw_tokens(text)
         tokens = list(tokens or self._content_tokens(text))
         pronouns = list(pronouns or [])
         sentence_features = sentence_features or self._sentence_features(text)
         sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+        segments = self._split_clause_segments(raw_tokens) or [raw_tokens]
+        frames: List[Dict[str, Any]] = []
+        inherited_subject = self.relational_state.subject if self.relational_state.subject != "unknown" else self.discourse_state.topic
+        for segment in segments:
+            frame = self._infer_clause_frame(
+                segment,
+                role=role,
+                dialogue_act=dialogue_act,
+                sentence_features=sentence_features,
+                fallback_subject=inherited_subject,
+            )
+            if frame["subject"] == "unknown" and self.discourse_state.active_entities:
+                frame["subject"] = self.discourse_state.active_entities[0]
+                frame["agent"] = frame["subject"]
+                frame["role_bindings"]["subject"] = frame["subject"]
+                frame["role_bindings"]["agent"] = frame["subject"]
+            if frame["subject"] == "unknown" and role == "assistant" and self.relational_state.subject != "unknown":
+                frame["subject"] = self.relational_state.subject
+                frame["agent"] = frame["subject"]
+                frame["role_bindings"]["subject"] = frame["subject"]
+                frame["role_bindings"]["agent"] = frame["subject"]
+            frames.append(frame)
+            inherited_subject = frame["subject"] if frame["subject"] != "unknown" else inherited_subject
 
-        subject = "unknown"
-        predicate = "unknown"
-        obj = "unknown"
-        voice = "active"
-        grammatical_subject = "unknown"
-        if tokens:
-            passive_voice = "by" in raw_tokens and len(tokens) >= 3
-            if passive_voice:
-                voice = "passive"
-                grammatical_subject = tokens[0]
-                subject = tokens[-1]
-                predicate = tokens[1]
-                obj = tokens[0]
-            elif len(tokens) >= 3:
-                grammatical_subject = tokens[0]
-                subject = tokens[0]
-                predicate = tokens[1]
-                obj = tokens[2] if len(tokens) > 2 else "unknown"
-            elif len(tokens) == 2:
-                grammatical_subject = tokens[0]
-                subject, predicate = tokens
-            else:
-                grammatical_subject = tokens[0]
-                subject = tokens[0]
+        if pronouns and self.discourse_state.active_entities and frames:
+            frames[-1]["subject"] = self.discourse_state.active_entities[0]
+            frames[-1]["agent"] = frames[-1]["subject"]
+            frames[-1]["role_bindings"]["subject"] = frames[-1]["subject"]
+            frames[-1]["role_bindings"]["agent"] = frames[-1]["subject"]
 
-        if pronouns and self.discourse_state.active_entities:
-            subject = self.discourse_state.active_entities[0]
+        if frames:
+            self.relational_state.binding_stack.extend(frames)
+            self.relational_state.binding_stack = self.relational_state.binding_stack[-4:]
 
-        if role == "assistant" and self.relational_state.subject != "unknown" and subject == "unknown":
-            subject = self.relational_state.subject
-        if role == "assistant" and self.relational_state.predicate != "unknown" and predicate == "unknown":
-            predicate = self.relational_state.predicate
+        current = frames[-1] if frames else self._infer_clause_frame(
+            raw_tokens,
+            role=role,
+            dialogue_act=dialogue_act,
+            sentence_features=sentence_features,
+            fallback_subject=inherited_subject,
+        )
 
-        if self.discourse_state.topic != "unknown" and subject == "unknown":
-            subject = self.discourse_state.topic
-
-        proposition_parts = [part for part in (predicate, subject, obj) if part and part != "unknown"]
-        proposition = f"{predicate}({subject})" if predicate != "unknown" and subject != "unknown" else ""
-        if predicate != "unknown" and obj != "unknown":
-            proposition = f"{predicate}({subject}, {obj})" if subject != "unknown" else f"{predicate}({obj})"
-        if not proposition and proposition_parts:
-            proposition = " ".join(proposition_parts[:3])
-
-        if subject != "unknown":
-            self.relational_state.subject = subject
-            self.relational_state.role_bindings["subject"] = subject
-        if predicate != "unknown":
-            self.relational_state.predicate = predicate
-            self.relational_state.role_bindings["predicate"] = predicate
-        if obj != "unknown":
-            self.relational_state.object = obj
-            self.relational_state.role_bindings["object"] = obj
-        if grammatical_subject != "unknown":
-            self.relational_state.role_bindings["grammatical_subject"] = grammatical_subject
-        self.relational_state.voice = voice
-        self.relational_state.agent = subject
-        self.relational_state.role_bindings["voice"] = voice
-        self.relational_state.role_bindings["agent"] = subject
-        if voice == "passive" and grammatical_subject != "unknown":
-            self.relational_state.role_bindings["patient"] = grammatical_subject
-        if proposition:
-            self.relational_state.proposition = proposition
-            self.relational_state.proposition_history.append(proposition)
+        if current["subject"] != "unknown":
+            self.relational_state.subject = current["subject"]
+            self.relational_state.role_bindings["subject"] = current["subject"]
+        if current["predicate"] != "unknown":
+            self.relational_state.predicate = current["predicate"]
+            self.relational_state.role_bindings["predicate"] = current["predicate"]
+        if current["object"] != "unknown":
+            self.relational_state.object = current["object"]
+            self.relational_state.role_bindings["object"] = current["object"]
+        if current["grammatical_subject"] != "unknown":
+            self.relational_state.role_bindings["grammatical_subject"] = current["grammatical_subject"]
+        self.relational_state.voice = current["voice"]
+        self.relational_state.agent = current["agent"]
+        self.relational_state.role_bindings["voice"] = current["voice"]
+        self.relational_state.role_bindings["agent"] = current["agent"]
+        if current["voice"] == "passive" and current["patient"] != "unknown":
+            self.relational_state.role_bindings["patient"] = current["patient"]
+        if current["proposition"]:
+            self.relational_state.proposition = current["proposition"]
+            self.relational_state.proposition_history.append(current["proposition"])
+        if len(frames) > 1:
+            self.relational_state.role_bindings["main_subject"] = frames[0]["subject"]
+            self.relational_state.role_bindings["clause_count"] = str(len(frames))
         if dialogue_act in {"question", "clarification"} and pronouns:
             self.relational_state.confidence = min(1.0, self.relational_state.confidence + 0.08)
         elif tokens:
@@ -1266,6 +1413,136 @@ class BasicChatSession:
             "relational_object": self.relational_state.object,
             "relational_proposition": self.relational_state.proposition,
             "relational_confidence": float(self.relational_state.confidence),
+            "relational_voice": self.relational_state.voice,
+            "binding_stack_depth": len(self.relational_state.binding_stack),
+        }
+
+    def _lookup_entity_by_relation(self, subject_hint: str = "", predicate_hint: str = "") -> str:
+        subject_hint = subject_hint.strip().lower()
+        predicate_hint = predicate_hint.strip().lower()
+        best_entity = ""
+        best_score = -1e9
+        for entity, record in self.discourse_state.entity_registry.items():
+            score = float(record.get("binding_confidence", 0.0)) + float(record.get("salience", 0.0))
+            if subject_hint and (
+                record.get("last_subject") == subject_hint
+                or record.get("role_bindings", {}).get("subject") == subject_hint
+            ):
+                score += 1.0
+            if predicate_hint and record.get("last_predicate") == predicate_hint:
+                score += 1.0
+            if predicate_hint and record.get("role_bindings", {}).get("predicate") == predicate_hint:
+                score += 0.7
+            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 4):
+                score += 0.08
+            if score > best_score:
+                best_score = score
+                best_entity = entity
+        return best_entity
+
+    def _lookup_property_for_entity(self, entity: str, property_hints: Iterable[str]) -> str:
+        entity = entity.strip().lower()
+        hints = {hint.strip().lower() for hint in property_hints if hint}
+        if not entity or not hints:
+            return ""
+        copulas = {"is", "are", "was", "were", "be", "been"}
+        direct_record = self.discourse_state.entity_registry.get(entity)
+        if direct_record is not None:
+            direct_predicate = str(direct_record.get("last_predicate", "unknown")).lower()
+            direct_subject = str(direct_record.get("last_subject", "unknown")).lower()
+            direct_object = str(direct_record.get("last_object", "unknown")).lower()
+            if hints.intersection({"color", "colour"}):
+                if direct_subject == entity:
+                    if direct_predicate in copulas and direct_object and direct_object != "unknown":
+                        return direct_object
+                    if direct_predicate not in copulas and direct_predicate not in {"unknown", entity}:
+                        return direct_predicate
+        if hints.intersection({"color", "colour"}):
+            direct_matches = sorted(
+                self.discourse_state.entity_registry.items(),
+                key=lambda item: (
+                    int(item[1].get("last_turn", -1)),
+                    float(item[1].get("binding_confidence", 0.0)),
+                ),
+                reverse=True,
+            )
+            for candidate, record in direct_matches:
+                predicate = str(record.get("last_predicate", "unknown")).lower()
+                subject_match = record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity
+                if subject_match:
+                    if predicate in copulas:
+                        value = str(record.get("last_object", "")).strip().lower()
+                        if value and value != "unknown":
+                            return value
+                    if predicate not in copulas and predicate not in {"unknown", entity}:
+                        return predicate
+        best_value = ""
+        best_score = -1e9
+        for candidate, record in self.discourse_state.entity_registry.items():
+            score = float(record.get("binding_confidence", 0.0)) + float(record.get("salience", 0.0))
+            candidate_value = candidate
+            if record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity:
+                score += 0.8
+            if record.get("last_object") == entity or record.get("role_bindings", {}).get("object") == entity:
+                score += 0.45
+            predicate = str(record.get("last_predicate", "unknown")).lower()
+            if predicate in hints or record.get("role_bindings", {}).get("predicate") in hints:
+                score += 1.0
+            if hints.intersection({"color", "colour"}) and predicate in copulas and candidate != entity:
+                score += 0.55
+                if record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity:
+                    candidate_value = str(record.get("last_object", candidate)).strip().lower() or candidate_value
+                    score += 0.35
+            if candidate in hints:
+                score += 0.25
+            if score > best_score:
+                best_score = score
+                best_value = candidate_value
+        return best_value
+
+    def query_chain(self, question_text: str) -> Dict[str, Any]:
+        question_text = question_text.strip()
+        lower = question_text.lower()
+        if not question_text:
+            raise ValueError("question_text must not be empty")
+
+        chain_match = re.search(
+            r"what\s+(?:color|colour)\s+is\s+the\s+thing\s+the\s+([a-z']+)\s+([a-z']+)\s+(?:on|in|at|with|from|under|over)\b",
+            lower,
+        )
+        if not chain_match:
+            return {
+                "question": question_text,
+                "answer": "unknown",
+                "source": "chain_unavailable",
+                "hops": 0,
+            }
+
+        subject_hint = chain_match.group(1)
+        predicate_hint = chain_match.group(2)
+        relation_key = self._lookup_entity_by_relation(subject_hint=subject_hint, predicate_hint=predicate_hint)
+        if not relation_key:
+            return {
+                "question": question_text,
+                "answer": "unknown",
+                "source": "chain_failed",
+                "hops": 1,
+                "intermediate_entity": "unknown",
+            }
+        relation_record = self.discourse_state.entity_registry.get(relation_key, {})
+        intermediate_entity = str(relation_record.get("last_object", relation_key)).strip().lower()
+        if intermediate_entity == "unknown" or not intermediate_entity:
+            intermediate_entity = relation_key
+
+        answer = self._lookup_property_for_entity(intermediate_entity, {"color", "colour"})
+        if not answer:
+            answer = self.query(f"What colour is {intermediate_entity}?").get("answer", "unknown")
+        return {
+            "question": question_text,
+            "answer": answer or "unknown",
+            "source": "chain_resolved",
+            "hops": 2,
+            "intermediate_entity": intermediate_entity,
         }
 
     def query(self, question_text: str) -> Dict[str, Any]:
@@ -1313,6 +1590,18 @@ class BasicChatSession:
         else:
             answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
 
+        if answer == "unknown" or answer == "" or "thing the" in lower:
+            chain_result = self.query_chain(question_text)
+            if chain_result.get("answer") and chain_result.get("answer") != "unknown":
+                answer = chain_result["answer"]
+                resolution_source = chain_result.get("source", resolution_source)
+            if chain_result.get("hops"):
+                chain_hops = int(chain_result.get("hops", 0))
+            else:
+                chain_hops = 0
+        else:
+            chain_hops = 0
+
         if not answer:
             answer = "unknown"
 
@@ -1342,6 +1631,7 @@ class BasicChatSession:
             "negated": bool(parsed["negated"]),
             "predicted_entity": predicted_entity,
             "prediction_matched": prediction_matched,
+            "hops": chain_hops,
         }
 
     def _discourse_feedback_signal(self, text: str, *, role: str, dialogue_act: str) -> Dict[str, Any]:

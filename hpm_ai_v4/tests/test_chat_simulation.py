@@ -423,6 +423,37 @@ def test_basic_chat_session_relational_state_distinguishes_active_and_passive_vo
     assert passive["role_bindings"]["agent"] == "dog"
 
 
+def test_basic_chat_session_clause_stack_preserves_nested_frames():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+
+    session._update_relational_state("The cat that the dog chased sat on the mat.", role="user", dialogue_act="default")
+
+    stack = session.relational_state.to_dict()["binding_stack"]
+    subjects = [frame.get("subject") for frame in stack]
+
+    assert len(stack) >= 2
+    assert "cat" in subjects
+    assert "dog" in subjects
+    assert session.relational_state.role_bindings.get("main_subject") == "cat"
+
+
+def test_basic_chat_session_query_chain_resolves_two_step_property():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat sat on the mat.")
+    session.chat_turn("The mat is red.")
+
+    result = session.query("What colour is the thing the cat sat on?")
+
+    assert result["source"] == "chain_resolved"
+    assert result["hops"] == 2
+    assert result["answer"] == "red"
+
+
 def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
