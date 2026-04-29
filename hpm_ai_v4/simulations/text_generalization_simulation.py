@@ -58,6 +58,33 @@ def _validation_summary(history: List[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
+def _disable_topdown_suppression(layered: LayeredAgent) -> None:
+    """Turn off the new selection-side suppression while leaving the rest of the stack intact."""
+    def _identity(totals, results, feedback=None):
+        return dict(totals)
+
+    for name in ("l1", "l2", "l3"):
+        agent = getattr(layered, name, None)
+        if agent is not None:
+            agent._apply_topdown_suppression = _identity  # type: ignore[method-assign]
+
+
+def _aggregate_history(history: List[Dict[str, Any]]) -> Dict[str, float]:
+    val = [snap for snap in history if snap.get("phase") == "validation"]
+    if not val:
+        return {
+            "target_agreement": 0.0,
+            "plausibility": 0.0,
+            "compression_mi": 0.0,
+            "l2_compression_mi": 0.0,
+            "l3_compression_mi": 0.0,
+            "l1_accuracy": 0.0,
+            "l2_accuracy": 0.0,
+            "l3_accuracy": 0.0,
+        }
+    return _validation_summary(history)
+
+
 def run_text_generalization_simulation(
     corpus_path: str,
     train_steps: int = 20_000,
@@ -197,6 +224,141 @@ def run_text_generalization_simulation(
     _phase_report("train", train_final)
     _phase_report("validation (mean)", val_final)
     return history
+
+
+def run_topdown_suppression_ab_benchmark(
+    corpus_path: str,
+    train_steps: int = 20_000,
+    validation_steps: int = 4_000,
+    log_every: int = 1_000,
+    chunk_size: int = 120,
+    prompt_size: int = 200,
+    warmup_chars: int = 500,
+    num_workers: int = 1,
+    use_dict: bool = True,
+    surface_mode: str = "word",
+    library_path: Optional[str] = None,
+    checkpoint_dir: str = ".",
+) -> Dict[str, Any]:
+    """Compare the standard top-down path against a suppression-disabled baseline."""
+    base_history = run_text_generalization_simulation(
+        corpus_path=corpus_path,
+        train_steps=train_steps,
+        validation_steps=validation_steps,
+        log_every=log_every,
+        chunk_size=chunk_size,
+        prompt_size=prompt_size,
+        warmup_chars=warmup_chars,
+        num_workers=num_workers,
+        use_dict=use_dict,
+        surface_mode=surface_mode,
+        library_path=library_path,
+        checkpoint_dir=checkpoint_dir,
+    )
+
+    # Re-run with suppression removed from the selection path.
+    dictionary = NLTKWordList(download=False) if use_dict else None
+    grammar = HeuristicGrammarLibrary() if use_dict else None
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
+    if library_path and os.path.exists(library_path):
+        if os.path.exists(library_path + ".l1.pkl"):
+            layered.load_bundle(library_path)
+        else:
+            from hpm_ai_v4.tools.serializer import PatternSerializer
+
+            layered.l1.patterns = PatternSerializer.load(library_path)
+    _disable_topdown_suppression(layered)
+
+    stream = WikipediaStream(corpus_path)
+    stream_iter = iter(stream)
+    needed = warmup_chars + train_steps + validation_steps + chunk_size + prompt_size
+    raw_ids = [next(stream_iter) for _ in range(needed)]
+    corpus_text = _ids_to_text(raw_ids)
+    train_text = corpus_text[: warmup_chars + train_steps]
+    validation_text = corpus_text[warmup_chars + train_steps : warmup_chars + train_steps + validation_steps + chunk_size]
+
+    warmup_text = train_text[:warmup_chars]
+    if warmup_text:
+        layered.observe_text(warmup_text, feedback_mode="target")
+    train_tail = train_text[warmup_chars:]
+    if train_tail:
+        layered.observe_text(train_tail, feedback_mode="target")
+
+    history: List[Dict[str, Any]] = []
+    cursor = 0
+    while cursor < validation_steps:
+        target_text = validation_text[cursor:cursor + chunk_size]
+        if not target_text:
+            break
+        seed_start = max(0, cursor - prompt_size)
+        seed_text = validation_text[seed_start:cursor]
+        planned_text = layered.plan_text_continuation(
+            target_text=target_text,
+            seed_text=seed_text[-200:] if seed_text else None,
+            horizon=max(8, min(80, len(target_text) // 2)),
+            strategy="beam",
+            lookback=240,
+        )
+        if use_dict:
+            generated_text = layered.generate_constrained_text(
+                steps=max(8, min(80, len(target_text) // 2)),
+                seed_text=seed_text[-200:] if seed_text else None,
+                target_text=target_text,
+                mode="target",
+                include_seed=False,
+                allowed_words=set(layered.dictionary.words) if layered.dictionary else None,
+                strict_dictionary=True,
+                strict_grammar=True,
+                update_policy=False,
+            )
+        else:
+            generated_text = layered.generate_text(
+                steps=max(8, min(80, len(target_text) // 2)),
+                seed_text=seed_text[-200:] if seed_text else None,
+                target_text=target_text,
+                mode="target",
+                include_seed=False,
+                update_policy=False,
+            )
+        planned_stats = layered.evaluate_generated_text(planned_text, target_text) if planned_text else {"token_agreement": 0.0, "plausibility": 0.0}
+        target_stats = layered.evaluate_generated_text(generated_text, target_text)
+        target_stats["planned_agreement"] = planned_stats["token_agreement"]
+        target_stats["planned_plausibility"] = planned_stats["plausibility"]
+        target_stats.update(
+            layered.observe_text(
+                target_text,
+                feedback_mode="hybrid",
+                generated_text=generated_text,
+                self_feedback_weight=0.02,
+            )
+        )
+        snap = _text_metrics_snapshot(
+            layered=layered,
+            recent_chars=raw_ids[max(0, cursor - 240):cursor + len(target_text)],
+            step=cursor,
+            generated_text=generated_text,
+            target_text=target_text,
+            target_stats=target_stats,
+        )
+        snap["phase"] = "validation"
+        history.append(snap)
+        cursor += chunk_size
+
+    report = {
+        "suppression_on": _aggregate_history(base_history),
+        "suppression_off": _aggregate_history(history),
+    }
+    report["delta"] = {
+        key: float(report["suppression_on"].get(key, 0.0) - report["suppression_off"].get(key, 0.0))
+        for key in sorted(set(report["suppression_on"]) | set(report["suppression_off"]))
+    }
+    out_path = os.path.join(checkpoint_dir, "topdown_suppression_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        import json
+
+        json.dump(report, f, indent=2, sort_keys=True)
+    report["report_path"] = out_path
+    return report
 
 
 def _parse_args():

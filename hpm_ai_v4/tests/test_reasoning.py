@@ -535,6 +535,22 @@ class TestHPMAgentAct:
         assert adjusted["gamma_soc"] <= base["gamma_soc"]
         assert adjusted["do_param_update"] is True
 
+    def test_topdown_suppression_downweights_high_loss_patterns(self, agent):
+        totals = {0: 1.0, 1: 1.0}
+        results = {
+            0: {"running_loss": 0.15},
+            1: {"running_loss": 0.95},
+        }
+
+        neutral = agent._apply_topdown_suppression(totals, results, feedback={"topdown_gate": 0.0})
+        strong = agent._apply_topdown_suppression(totals, results, feedback={"topdown_gate": 0.9})
+
+        assert neutral[0] == pytest.approx(1.0)
+        assert neutral[1] == pytest.approx(1.0)
+        assert strong[0] >= strong[1]
+        assert strong[1] < neutral[1]
+        assert strong[0] == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # 8. TotalHPMSystem integration

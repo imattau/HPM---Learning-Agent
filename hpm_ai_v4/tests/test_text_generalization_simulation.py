@@ -1,6 +1,7 @@
 from hpm_ai_v4.pattern import FlatPattern
 from hpm_ai_v4.simulations.text_generalization_simulation import run_text_generalization_simulation
 from hpm_ai_v4.simulations.text_generalization_simulation import _load_library
+from hpm_ai_v4.simulations.text_generalization_simulation import run_topdown_suppression_ab_benchmark
 from hpm_ai_v4.tools.serializer import PatternSerializer
 
 
@@ -67,3 +68,27 @@ def test_generalization_simulation_loads_flat_library(tmp_path):
 
     assert loaded == 1
     assert len(agent.l1.patterns) == 1
+
+
+def test_topdown_suppression_ab_benchmark(tmp_path):
+    corpus = tmp_path / "corpus_ab.txt"
+    corpus.write_text("the quick brown fox jumps over the lazy dog. " * 60)
+    report = run_topdown_suppression_ab_benchmark(
+        corpus_path=str(corpus),
+        train_steps=80,
+        validation_steps=40,
+        log_every=40,
+        chunk_size=20,
+        prompt_size=20,
+        warmup_chars=20,
+        num_workers=1,
+        use_dict=False,
+        surface_mode="word",
+        library_path=None,
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert "suppression_on" in report
+    assert "suppression_off" in report
+    assert "delta" in report
+    assert (tmp_path / "topdown_suppression_benchmark.json").exists()

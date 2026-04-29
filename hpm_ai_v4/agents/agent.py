@@ -147,6 +147,53 @@ class HPMAgent:
 
         return params
 
+    def _apply_topdown_suppression(
+        self,
+        totals: Dict[int, float],
+        results: Dict[int, Dict[str, Any]],
+        feedback: Optional[Dict[str, Any]] = None,
+    ) -> Dict[int, float]:
+        """Down-weight weak lower-level patterns when higher-level confidence is high.
+
+        This is the selection-side complement to `_feedback_worker_params`: instead of
+        only speeding up the winning pattern, we also suppress patterns whose recent
+        loss suggests they are inconsistent with the current higher-level context.
+        """
+        if not totals:
+            return totals
+
+        meta = dict(feedback or {})
+        control_strength = float(meta.get("control_strength", meta.get("meta_structural_score", 0.0)))
+        topdown_gate = float(meta.get("topdown_gate", meta.get("topdown_confidence", 0.0)))
+        pattern_pressure = float(meta.get("topdown_pattern_suppression", meta.get("topdown_pattern_pressure", 0.0)))
+        gate = float(np.clip(max(control_strength, topdown_gate, pattern_pressure), 0.0, 1.0))
+        if gate <= 0.2:
+            return totals
+
+        losses = []
+        ids = []
+        for pattern_id, total in totals.items():
+            result = results.get(pattern_id, {})
+            loss = result.get("running_loss")
+            if loss is None or not np.isfinite(float(loss)):
+                continue
+            ids.append(pattern_id)
+            losses.append(float(loss))
+
+        if len(losses) < 2:
+            return totals
+
+        loss_arr = np.asarray(losses, dtype=np.float32)
+        median = float(np.median(loss_arr))
+        spread = float(np.std(loss_arr) + 1e-12)
+        pressure = np.maximum(0.0, (loss_arr - median) / spread)
+        suppress_strength = 0.12 + 0.55 * gate
+
+        adjusted = dict(totals)
+        for pattern_id, loss_pressure in zip(ids, pressure):
+            adjusted[pattern_id] = float(adjusted[pattern_id] - suppress_strength * float(loss_pressure))
+        return adjusted
+
     def perceive_and_learn(self, obs: int, feedback: Optional[Dict[str, Any]] = None):
         """Update patterns based on a new observation."""
         context_before = list(self.obs_buffer[-20:])
@@ -206,6 +253,8 @@ class HPMAgent:
                 p.B = r['B']
             p.running_loss = r['running_loss']
             totals[p.id] = r['total_score']
+
+        totals = self._apply_topdown_suppression(totals, result_by_id, feedback)
 
         # 4. Meta Pattern Update (Replicator Dynamics with Conflict)
         k_mat = compute_conflict_matrix(self.patterns)
