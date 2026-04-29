@@ -358,6 +358,211 @@ def test_reverse_chat_session_discourse_state_persists(monkeypatch):
     assert any(call["context_features"]["conversation_mode"] == "reverse" for call in captured)
 
 
+def test_basic_chat_session_bounded_history_compresses_old_turns(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It sits there."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    for idx in range(10):
+        session.chat_turn(f"The cat {idx} chased the dog.")
+
+    assert len(session.history) <= session.history_cap
+    assert session.discourse_state.archived_entities
+    assert session.discourse_state.archived_summary
+    assert "archive=" in session.discourse_state.discourse_summary
+
+
+def test_basic_chat_session_rewrites_relation_from_prompt(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    captured = {}
+
+    def fake_generate_text(**kwargs):
+        captured["generate_text"] = kwargs
+        return "The cat sat."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=3, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+
+    assert session.relational_state.subject == "cat"
+    assert session.relational_state.proposition
+    assert "Relation:" in captured["generate_text"]["seed_text"]
+    assert captured["generate_text"]["context_features"]["relational_subject"] == "cat"
+    assert captured["generate_text"]["context_features"]["relational_confidence"] > 0.0
+
+
+def test_basic_chat_session_relational_state_distinguishes_active_and_passive_voice():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+
+    session._update_relational_state("The dog chased the cat.", role="user", dialogue_act="default")
+    active = session.relational_state.to_dict()
+
+    session.relational_state.reset()
+    session._update_relational_state("The cat was chased by the dog.", role="user", dialogue_act="default")
+    passive = session.relational_state.to_dict()
+
+    assert active["subject"] == "dog"
+    assert active["object"] == "cat"
+    assert active["voice"] == "active"
+    assert passive["subject"] == "dog"
+    assert passive["object"] == "cat"
+    assert passive["voice"] == "passive"
+    assert passive["role_bindings"]["grammatical_subject"] == "cat"
+    assert passive["role_bindings"]["agent"] == "dog"
+
+
+def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+    for idx in range(8):
+        session.chat_turn(f"The robot {idx} noted the signal.")
+
+    result = session.query("Who chased the dog?")
+
+    assert len(session.history) <= session.history_cap
+    assert "cat" in session.discourse_state.entity_registry
+    assert session.discourse_state.entity_registry["cat"]["last_predicate"] == "chased"
+    assert result["answer"] == "cat"
+    assert result["source"] in {"registry_subject", "relational_subject"}
+    assert result["confidence"] > 0.0
+    assert result["predicted_entity"]
+    assert isinstance(result["prediction_matched"], bool)
+
+
+def test_basic_chat_session_query_resolves_pronouns_from_registry(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+    for idx in range(8):
+        session.chat_turn(f"The robot {idx} noted the signal.")
+
+    result = session.query("What about it?")
+
+    assert result["source"] == "coreference"
+    assert result["answer"] in session.discourse_state.entity_registry
+    assert result["answer"] != "unknown"
+    assert "predicted_entity" in result
+    assert isinstance(result["prediction_matched"], bool)
+
+
+def test_basic_chat_session_query_handles_did_question_word_order(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The dog chased the cat.")
+
+    result = session.query("Who did the dog chase?")
+
+    assert result["answer"] == "cat"
+    assert result["source"] == "registry_object"
+    assert result["prediction_matched"] in {True, False}
+
+
+def test_basic_chat_session_query_handles_plain_who_subject(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+
+    result = session.query("Who chased the dog?")
+
+    assert result["answer"] == "cat"
+    assert result["source"] == "registry_subject"
+
+
+def test_basic_chat_session_query_handles_negation_with_low_confidence(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+
+    result = session.query("What didn't the cat do?")
+
+    assert result["negated"] is True
+    assert result["source"] == "negated_query"
+    assert result["answer"] == "unknown"
+    assert result["confidence"] <= session.relational_state.confidence + 1e-6
+
+
+def test_binding_confidence_calibrates_from_match_and_mismatch(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+
+    before = session.relational_state.confidence
+    match_feedback = session.record_binding_feedback("cat", "cat")
+    after_match = session.relational_state.confidence
+    mismatch_feedback = session.record_binding_feedback("cat", "dog")
+    after_mismatch = session.relational_state.confidence
+
+    assert match_feedback["matched"] is True
+    assert mismatch_feedback["matched"] is False
+    assert after_match > before
+    assert after_mismatch < after_match
+    assert session.discourse_state.entity_registry["cat"]["binding_confidence"] > 0.0
+    query_result = session.query("Who chased the dog?")
+    assert query_result["predicted_entity"]
+    assert isinstance(query_result["prediction_matched"], bool)
+
+
 def test_basic_chat_session_falls_back_to_dialogue_bank(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)

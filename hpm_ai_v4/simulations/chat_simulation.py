@@ -72,6 +72,47 @@ _DISCOURSE_PRONOUNS = {
     "yours",
 }
 
+_DISCOURSE_INTERROGATIVES = {
+    "who",
+    "what",
+    "where",
+    "when",
+    "why",
+    "how",
+    "which",
+    "whom",
+    "whose",
+}
+
+_DISCOURSE_AUXILIARIES = {
+    "did",
+    "do",
+    "does",
+    "was",
+    "were",
+    "is",
+    "are",
+    "am",
+    "will",
+    "would",
+    "could",
+    "should",
+    "can",
+    "has",
+    "have",
+    "had",
+}
+
+_DISCOURSE_NEGATIONS = {
+    "not",
+    "never",
+    "no",
+    "none",
+    "nothing",
+    "nowhere",
+    "n't",
+}
+
 _DISCOURSE_STOPWORDS = {
     "the",
     "a",
@@ -197,6 +238,9 @@ class DiscourseState:
     last_sentence_type: str = "fragment"
     focus_stack: List[str] = field(default_factory=list)
     discourse_summary: str = ""
+    archived_entities: List[str] = field(default_factory=list)
+    archived_summary: str = ""
+    entity_registry: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -210,6 +254,10 @@ class DiscourseState:
             "last_sentence_type": self.last_sentence_type,
             "focus_stack": list(self.focus_stack),
             "discourse_summary": self.discourse_summary,
+            "archived_entities": list(self.archived_entities),
+            "archived_summary": self.archived_summary,
+            "entity_registry_size": len(self.entity_registry),
+            "entity_registry_top": list(self.entity_registry.keys())[:4],
         }
 
     def reset(self) -> None:
@@ -223,6 +271,48 @@ class DiscourseState:
         self.last_sentence_type = "fragment"
         self.focus_stack.clear()
         self.discourse_summary = ""
+        self.archived_entities.clear()
+        self.archived_summary = ""
+        self.entity_registry.clear()
+
+
+@dataclass
+class RelationalState:
+    """Persistent relational frame for lightweight binding and slot-filling."""
+
+    subject: str = "unknown"
+    predicate: str = "unknown"
+    object: str = "unknown"
+    voice: str = "active"
+    agent: str = "unknown"
+    proposition: str = ""
+    confidence: float = 0.0
+    role_bindings: Dict[str, str] = field(default_factory=dict)
+    proposition_history: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "subject": self.subject,
+            "predicate": self.predicate,
+            "object": self.object,
+            "voice": self.voice,
+            "agent": self.agent,
+            "proposition": self.proposition,
+            "confidence": self.confidence,
+            "role_bindings": dict(self.role_bindings),
+            "proposition_history": list(self.proposition_history[-5:]),
+        }
+
+    def reset(self) -> None:
+        self.subject = "unknown"
+        self.predicate = "unknown"
+        self.object = "unknown"
+        self.voice = "active"
+        self.agent = "unknown"
+        self.proposition = ""
+        self.confidence = 0.0
+        self.role_bindings.clear()
+        self.proposition_history.clear()
 
 
 class BasicChatSession:
@@ -253,7 +343,9 @@ class BasicChatSession:
         self.sentence_adapter = SentenceAdapter()
         self.use_sentence_features = bool(use_sentence_features)
         self.history: List[ChatTurn] = []
+        self.history_cap = max(4, self.history_window * 4)
         self.discourse_state = DiscourseState()
+        self.relational_state = RelationalState()
 
     def _dialogue_act(self, user_text: str) -> str:
         text = user_text.strip().lower()
@@ -274,6 +366,7 @@ class BasicChatSession:
     def reset(self) -> None:
         self.history.clear()
         self.discourse_state.reset()
+        self.relational_state.reset()
 
     def chat(self, user_text: str, target_reply: str | None = None) -> str:
         return self.chat_turn(user_text, target_reply=target_reply).response_text
@@ -285,9 +378,15 @@ class BasicChatSession:
 
         prior_texts = [turn.text for turn in self._recent_turns() if turn.text.strip()]
         dialogue_act = self._dialogue_act(user_text)
+        predicted_entity = self._predict_binding_entity(user_text)
         self._append("user", user_text)
         user_sentence_features = self._sentence_features(user_text)
         self._update_discourse_state(user_text, role="user", dialogue_act=dialogue_act, sentence_features=user_sentence_features)
+        self.record_binding_feedback(
+            predicted_entity=predicted_entity,
+            observed_entity=self._observed_binding_entity(user_text),
+            observed_text=user_text,
+        )
         learn_stats: Dict[str, Any] = {"target_chars": 0, "self_chars": 0}
         if self.learn_from_user:
             learn_stats = self.agent.observe_text(
@@ -320,6 +419,11 @@ class BasicChatSession:
             role="assistant",
             dialogue_act=dialogue_act,
             sentence_features=sentence_features,
+        )
+        self.record_binding_feedback(
+            predicted_entity=self._predict_binding_entity(response_text),
+            observed_entity=self._observed_binding_entity(response_text),
+            observed_text=response_text,
         )
         response_stats: Dict[str, Any] = {}
         response_stats.update(response_signal.to_dict())
@@ -365,10 +469,290 @@ class BasicChatSession:
 
     def _append(self, role: str, text: str) -> None:
         self.history.append(ChatTurn(role=role, text=text.strip()))
+        if len(self.history) > self.history_cap:
+            overflow = len(self.history) - self.history_cap
+            pruned = self.history[:overflow]
+            self.history = self.history[overflow:]
+            self._fold_pruned_turns(pruned)
 
     def _recent_turns(self) -> List[ChatTurn]:
         limit = self.history_window * 2
         return self.history[-limit:]
+
+    def _fold_pruned_turns(self, turns: List[ChatTurn]) -> None:
+        if not turns:
+            return
+        pruned_tokens: List[str] = []
+        for turn in turns:
+            pruned_tokens.extend(self._content_tokens(turn.text))
+        if pruned_tokens:
+            ranked = self._rank_tokens(pruned_tokens)[:3]
+            for tok in ranked:
+                if tok not in self.discourse_state.archived_entities:
+                    self.discourse_state.archived_entities.append(tok)
+            archive = ", ".join(ranked)
+            if archive:
+                self.discourse_state.archived_summary = archive
+        self.discourse_state.discourse_summary = self._format_discourse_summary()
+
+    def _predict_binding_entity(self, text: str) -> str:
+        lower = text.strip().lower()
+        if not lower:
+            return ""
+        words = re.findall(r"[A-Za-z']+", lower)
+        pronouns = {tok for tok in words if tok in _DISCOURSE_PRONOUNS}
+        if pronouns:
+            if self.discourse_state.focus_stack:
+                return self.discourse_state.focus_stack[0]
+            if self.discourse_state.topic != "unknown":
+                return self.discourse_state.topic
+        if lower.startswith("who") and self.relational_state.subject != "unknown":
+            return self.relational_state.subject
+        if any(phrase in lower for phrase in ("what about it", "what about them", "what about this", "what about that")):
+            if self.discourse_state.focus_stack:
+                return self.discourse_state.focus_stack[0]
+        if self.discourse_state.active_entities:
+            return self.discourse_state.active_entities[0]
+        return self.discourse_state.topic if self.discourse_state.topic != "unknown" else ""
+
+    def _observed_binding_entity(self, text: str) -> str:
+        lower = text.strip().lower()
+        if not lower:
+            return ""
+        if self.relational_state.subject != "unknown":
+            return self.relational_state.subject
+        if self.discourse_state.active_entities:
+            return self.discourse_state.active_entities[0]
+        return self.discourse_state.topic if self.discourse_state.topic != "unknown" else ""
+
+    def _update_entity_registry(
+        self,
+        tokens: List[str],
+        *,
+        role: str,
+        dialogue_act: str,
+        sentence_type: str,
+        sentence_features: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not tokens:
+            return
+        sentence_features = sentence_features or {}
+        current_turn = self.discourse_state.turn_index
+        subject = self.relational_state.subject
+        predicate = self.relational_state.predicate
+        obj = self.relational_state.object
+        for idx, tok in enumerate(tokens):
+            entry = self.discourse_state.entity_registry.setdefault(
+                tok,
+                {
+                    "entity": tok,
+                    "first_seen_turn": current_turn,
+                    "last_turn": current_turn,
+                    "last_role": role,
+                    "last_dialogue_act": dialogue_act,
+                    "last_sentence_type": sentence_type,
+                    "last_subject": subject,
+                    "last_predicate": predicate,
+                    "last_object": obj,
+                    "mention_count": 0,
+                    "salience": 0.0,
+                    "binding_confidence": 0.0,
+                    "last_position": idx,
+                },
+            )
+            entry["last_turn"] = current_turn
+            entry["last_role"] = "subject" if tok == subject else "object" if tok == obj else role
+            entry["last_dialogue_act"] = dialogue_act
+            entry["last_sentence_type"] = sentence_type
+            entry["last_subject"] = subject
+            entry["last_predicate"] = predicate
+            entry["last_object"] = obj
+            entry["mention_count"] = int(entry.get("mention_count", 0)) + 1
+            entry["last_position"] = idx
+            current_salience = float(self.discourse_state.entity_salience.get(tok, 0.0))
+            entry["salience"] = max(float(entry.get("salience", 0.0)) * 0.88, current_salience)
+            if sentence_features:
+                entry["sentence_confidence"] = float(sentence_features.get("sentence_confidence", 0.0))
+
+    def _entity_registry_scores(self, question_text: str = "") -> Dict[str, float]:
+        scores: Dict[str, float] = {}
+        lower = question_text.lower()
+        pronouns = {tok.lower() for tok in self.agent._tokenize_words(question_text) if tok.lower() in _DISCOURSE_PRONOUNS}
+        for entity, record in self.discourse_state.entity_registry.items():
+            if not entity:
+                continue
+            score = float(record.get("salience", 0.0))
+            score += 0.10 * min(5, int(record.get("mention_count", 0)))
+            if record.get("last_role") == "subject":
+                score += 0.14
+            if record.get("last_role") == "object":
+                score += 0.04
+            if entity == self.discourse_state.topic:
+                score += 0.18 * max(0.3, float(self.discourse_state.topic_confidence))
+            if entity in self.discourse_state.focus_stack[:2]:
+                score += 0.12
+            if entity in self.discourse_state.active_entities[:2]:
+                score += 0.10
+            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 2):
+                score += 0.08
+            if pronouns:
+                score += 0.08 if record.get("last_role") in {"subject", "topic"} else 0.0
+            if entity in lower:
+                score += 0.10
+            if record.get("last_predicate") != "unknown" and record.get("last_predicate") in lower:
+                score += 0.05
+            scores[entity] = score
+        return scores
+
+    def _best_entity_from_registry(self, question_text: str = "") -> str:
+        scores = self._entity_registry_scores(question_text)
+        if not scores:
+            return ""
+        ranked = sorted(scores.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        return ranked[0][0] if ranked else ""
+
+    def _best_subject_for_query(self, predicate_hint: str = "", object_hint: str = "") -> str:
+        predicate_hint = predicate_hint.strip().lower()
+        object_hint = object_hint.strip().lower()
+        candidates = list(self.discourse_state.entity_registry.items())
+        if predicate_hint:
+            matching = [(entity, record) for entity, record in candidates if record.get("last_predicate") == predicate_hint]
+            if matching:
+                candidates = matching
+        best_entity = ""
+        best_score = -1e9
+        for entity, record in candidates:
+            score = float(record.get("salience", 0.0))
+            if predicate_hint:
+                if record.get("last_predicate") == predicate_hint:
+                    score += 1.15
+                else:
+                    score -= 0.70
+            if object_hint and record.get("last_object") == object_hint:
+                score += 0.30
+            if record.get("last_role") == "subject":
+                score += 0.20
+            if entity == self.discourse_state.topic:
+                score += 0.10 * max(0.2, float(self.discourse_state.topic_confidence))
+            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+                score += 0.08
+            if score > best_score:
+                best_score = score
+                best_entity = entity
+        return best_entity
+
+    def _best_object_for_query(self, subject_hint: str = "", predicate_hint: str = "") -> str:
+        subject_hint = subject_hint.strip().lower()
+        predicate_hint = predicate_hint.strip().lower()
+        candidates = list(self.discourse_state.entity_registry.items())
+        if subject_hint:
+            matching = [(entity, record) for entity, record in candidates if record.get("last_subject") == subject_hint]
+            if matching:
+                candidates = matching
+        best_entity = ""
+        best_score = -1e9
+        for entity, record in candidates:
+            score = float(record.get("salience", 0.0))
+            if predicate_hint:
+                if record.get("last_predicate") == predicate_hint:
+                    score += 1.10
+                else:
+                    score -= 0.55
+            if subject_hint and record.get("last_subject") == subject_hint:
+                score += 0.75
+            if record.get("last_role") == "object":
+                score += 0.20
+            if entity == self.discourse_state.topic:
+                score += 0.08 * max(0.2, float(self.discourse_state.topic_confidence))
+            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+                score += 0.08
+            if score > best_score:
+                best_score = score
+                best_entity = entity
+        return best_entity
+
+    def _parse_query_frame(self, question_text: str) -> Dict[str, Any]:
+        lower = question_text.strip().lower()
+        tokens = re.findall(r"[A-Za-z']+", lower)
+        content_tokens = [
+            tok
+            for tok in tokens
+            if tok not in _DISCOURSE_STOPWORDS
+            and tok not in _DISCOURSE_PRONOUNS
+            and tok not in _DISCOURSE_INTERROGATIVES
+            and tok not in _DISCOURSE_AUXILIARIES
+            and any(ch.isalpha() for ch in tok)
+        ]
+        negated = any(tok in _DISCOURSE_NEGATIONS or "n't" in tok for tok in tokens)
+        predicate_hint = ""
+        subject_hint = ""
+        object_hint = ""
+        if lower.startswith("who"):
+            if any(tok in _DISCOURSE_AUXILIARIES for tok in tokens):
+                if content_tokens:
+                    predicate_hint = content_tokens[-1]
+                if len(content_tokens) >= 2:
+                    subject_hint = content_tokens[0]
+            elif len(content_tokens) >= 2:
+                predicate_hint = content_tokens[0]
+                object_hint = content_tokens[1]
+            elif content_tokens:
+                predicate_hint = content_tokens[0]
+        elif lower.startswith("what"):
+            if any(tok in _DISCOURSE_AUXILIARIES for tok in tokens) and content_tokens:
+                predicate_hint = content_tokens[-1]
+                if len(content_tokens) >= 2:
+                    object_hint = content_tokens[0]
+            elif len(content_tokens) >= 2:
+                predicate_hint = content_tokens[0]
+                object_hint = content_tokens[1]
+            elif content_tokens:
+                predicate_hint = content_tokens[0]
+        else:
+            if len(content_tokens) >= 2:
+                predicate_hint = content_tokens[0]
+                object_hint = content_tokens[1]
+            elif content_tokens:
+                predicate_hint = content_tokens[0]
+        return {
+            "tokens": tokens,
+            "content_tokens": content_tokens,
+            "subject_hint": subject_hint,
+            "predicate_hint": predicate_hint,
+            "object_hint": object_hint,
+            "negated": negated,
+        }
+
+    def _calibrate_binding_confidence(self, predicted_entity: str, observed_entity: str, observed_text: str = "") -> Dict[str, Any]:
+        predicted = predicted_entity.strip().lower()
+        observed = observed_entity.strip().lower()
+        matched = bool(predicted and observed and predicted == observed)
+        if not matched and observed_text:
+            lower = observed_text.lower()
+            matched = bool(observed and observed in lower and (not predicted or predicted in lower))
+
+        if matched:
+            self.relational_state.confidence = min(1.0, self.relational_state.confidence + 0.12)
+        else:
+            self.relational_state.confidence = max(0.0, self.relational_state.confidence * 0.82)
+
+        for entity in {predicted, observed}:
+            if not entity or entity not in self.discourse_state.entity_registry:
+                continue
+            entry = self.discourse_state.entity_registry[entity]
+            if matched:
+                entry["binding_confidence"] = min(1.0, float(entry.get("binding_confidence", 0.0)) + 0.12)
+            else:
+                entry["binding_confidence"] = max(0.0, float(entry.get("binding_confidence", 0.0)) * 0.88)
+        return {
+            "predicted_entity": predicted,
+            "observed_entity": observed,
+            "matched": matched,
+            "binding_confidence": float(self.relational_state.confidence),
+        }
+
+    def record_binding_feedback(self, predicted_entity: str, observed_entity: str, observed_text: str = "") -> Dict[str, Any]:
+        return self._calibrate_binding_confidence(predicted_entity, observed_entity, observed_text=observed_text)
 
     def _build_prompt(self) -> str:
         lines: List[str] = []
@@ -376,6 +760,8 @@ class BasicChatSession:
             lines.append(self.system_prompt)
         if self.discourse_state.discourse_summary:
             lines.append(f"Focus: {self.discourse_state.discourse_summary}")
+        if self.relational_state.proposition:
+            lines.append(f"Relation: {self.relational_state.proposition}")
         for turn in self._recent_turns():
             lines.append(f"{turn.role.title()}: {turn.text}")
         lines.append("Assistant:")
@@ -539,6 +925,8 @@ class BasicChatSession:
             seed_parts.append(self.system_prompt)
         if self.discourse_state.discourse_summary:
             seed_parts.append(f"Focus: {self.discourse_state.discourse_summary}")
+        if self.relational_state.proposition:
+            seed_parts.append(f"Relation: {self.relational_state.proposition}")
         if recent_texts:
             seed_parts.extend(recent_texts[-2:])
         else:
@@ -686,6 +1074,15 @@ class BasicChatSession:
                 tokens.append(low)
         return tokens
 
+    def _rank_tokens(self, tokens: List[str]) -> List[str]:
+        if not tokens:
+            return []
+        scores: Dict[str, float] = {}
+        for idx, tok in enumerate(tokens):
+            scores[tok] = scores.get(tok, 0.0) + 1.0 + 0.08 * idx
+        ranked = sorted(scores.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        return [tok for tok, _ in ranked]
+
     def _update_discourse_state(
         self,
         text: str,
@@ -698,6 +1095,14 @@ class BasicChatSession:
         pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if tok.lower() in _DISCOURSE_PRONOUNS]
         sentence_features = sentence_features or self._sentence_features(text)
         last_sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+        self._update_relational_state(text, tokens=tokens, pronouns=pronouns, role=role, dialogue_act=dialogue_act, sentence_features=sentence_features)
+        self._update_entity_registry(
+            tokens,
+            role=role,
+            dialogue_act=dialogue_act,
+            sentence_type=last_sentence_type,
+            sentence_features=sentence_features,
+        )
 
         if tokens:
             for tok in list(self.discourse_state.entity_salience):
@@ -733,18 +1138,108 @@ class BasicChatSession:
         self.discourse_state.turn_index += 1
         self.discourse_state.discourse_summary = self._format_discourse_summary()
 
+    def _update_relational_state(
+        self,
+        text: str,
+        *,
+        tokens: Optional[List[str]] = None,
+        pronouns: Optional[List[str]] = None,
+        role: str,
+        dialogue_act: str,
+        sentence_features: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        raw_tokens = [tok.lower() for tok in re.findall(r"[A-Za-z']+", text)]
+        tokens = list(tokens or self._content_tokens(text))
+        pronouns = list(pronouns or [])
+        sentence_features = sentence_features or self._sentence_features(text)
+        sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
+
+        subject = "unknown"
+        predicate = "unknown"
+        obj = "unknown"
+        voice = "active"
+        grammatical_subject = "unknown"
+        if tokens:
+            passive_voice = "by" in raw_tokens and len(tokens) >= 3
+            if passive_voice:
+                voice = "passive"
+                grammatical_subject = tokens[0]
+                subject = tokens[-1]
+                predicate = tokens[1]
+                obj = tokens[0]
+            elif len(tokens) >= 3:
+                grammatical_subject = tokens[0]
+                subject = tokens[0]
+                predicate = tokens[1]
+                obj = tokens[2] if len(tokens) > 2 else "unknown"
+            elif len(tokens) == 2:
+                grammatical_subject = tokens[0]
+                subject, predicate = tokens
+            else:
+                grammatical_subject = tokens[0]
+                subject = tokens[0]
+
+        if pronouns and self.discourse_state.active_entities:
+            subject = self.discourse_state.active_entities[0]
+
+        if role == "assistant" and self.relational_state.subject != "unknown" and subject == "unknown":
+            subject = self.relational_state.subject
+        if role == "assistant" and self.relational_state.predicate != "unknown" and predicate == "unknown":
+            predicate = self.relational_state.predicate
+
+        if self.discourse_state.topic != "unknown" and subject == "unknown":
+            subject = self.discourse_state.topic
+
+        proposition_parts = [part for part in (predicate, subject, obj) if part and part != "unknown"]
+        proposition = f"{predicate}({subject})" if predicate != "unknown" and subject != "unknown" else ""
+        if predicate != "unknown" and obj != "unknown":
+            proposition = f"{predicate}({subject}, {obj})" if subject != "unknown" else f"{predicate}({obj})"
+        if not proposition and proposition_parts:
+            proposition = " ".join(proposition_parts[:3])
+
+        if subject != "unknown":
+            self.relational_state.subject = subject
+            self.relational_state.role_bindings["subject"] = subject
+        if predicate != "unknown":
+            self.relational_state.predicate = predicate
+            self.relational_state.role_bindings["predicate"] = predicate
+        if obj != "unknown":
+            self.relational_state.object = obj
+            self.relational_state.role_bindings["object"] = obj
+        if grammatical_subject != "unknown":
+            self.relational_state.role_bindings["grammatical_subject"] = grammatical_subject
+        self.relational_state.voice = voice
+        self.relational_state.agent = subject
+        self.relational_state.role_bindings["voice"] = voice
+        self.relational_state.role_bindings["agent"] = subject
+        if voice == "passive" and grammatical_subject != "unknown":
+            self.relational_state.role_bindings["patient"] = grammatical_subject
+        if proposition:
+            self.relational_state.proposition = proposition
+            self.relational_state.proposition_history.append(proposition)
+        if dialogue_act in {"question", "clarification"} and pronouns:
+            self.relational_state.confidence = min(1.0, self.relational_state.confidence + 0.08)
+        elif tokens:
+            self.relational_state.confidence = min(1.0, 0.68 * self.relational_state.confidence + 0.12)
+        else:
+            self.relational_state.confidence = max(0.0, self.relational_state.confidence * 0.90)
+
     def _format_discourse_summary(self) -> str:
         parts: List[str] = []
         if self.discourse_state.topic != "unknown":
             parts.append(f"topic={self.discourse_state.topic}")
         if self.discourse_state.active_entities:
             parts.append(f"entities={','.join(self.discourse_state.active_entities[:3])}")
+        if self.relational_state.proposition:
+            parts.append(f"prop={self.relational_state.proposition}")
         if self.discourse_state.last_dialogue_act:
             parts.append(f"act={self.discourse_state.last_dialogue_act}")
         if self.discourse_state.last_sentence_type:
             parts.append(f"sentence={self.discourse_state.last_sentence_type}")
         if self.discourse_state.pronoun_candidates:
             parts.append(f"refs={','.join(self.discourse_state.pronoun_candidates[:3])}")
+        if self.discourse_state.archived_entities:
+            parts.append(f"archive={','.join(self.discourse_state.archived_entities[:3])}")
         parts.append(f"confidence={self.discourse_state.topic_confidence:.2f}")
         return "; ".join(parts)
 
@@ -754,12 +1249,99 @@ class BasicChatSession:
             "topic_confidence": float(self.discourse_state.topic_confidence),
             "active_entity_count": len(self.discourse_state.active_entities),
             "active_entities": list(self.discourse_state.active_entities[:4]),
+            "entity_registry_size": len(self.discourse_state.entity_registry),
+            "entity_registry_top": [entity for entity, _ in sorted(
+                self._entity_registry_scores(self.discourse_state.discourse_summary).items(),
+                key=lambda item: (item[1], item[0]),
+                reverse=True,
+            )[:4]],
             "pronoun_candidates": list(self.discourse_state.pronoun_candidates[:4]),
             "focus_stack": list(self.discourse_state.focus_stack[:4]),
             "discourse_summary": self.discourse_state.discourse_summary,
             "last_dialogue_act": self.discourse_state.last_dialogue_act,
             "last_sentence_type": self.discourse_state.last_sentence_type,
             "turn_index": int(self.discourse_state.turn_index),
+            "relational_subject": self.relational_state.subject,
+            "relational_predicate": self.relational_state.predicate,
+            "relational_object": self.relational_state.object,
+            "relational_proposition": self.relational_state.proposition,
+            "relational_confidence": float(self.relational_state.confidence),
+        }
+
+    def query(self, question_text: str) -> Dict[str, Any]:
+        question_text = question_text.strip()
+        if not question_text:
+            raise ValueError("question_text must not be empty")
+
+        lower = question_text.lower()
+        parsed = self._parse_query_frame(question_text)
+        question_tokens = parsed["tokens"]
+        content_tokens = parsed["content_tokens"]
+        pronoun_tokens = [tok for tok in question_tokens if tok in _DISCOURSE_PRONOUNS]
+        resolution_source = "registry"
+        answer = ""
+
+        if parsed["negated"]:
+            answer = "unknown"
+            resolution_source = "negated_query"
+        elif lower.startswith("who"):
+            predicate_hint = parsed["predicate_hint"]
+            subject_hint = parsed["subject_hint"]
+            object_hint = parsed["object_hint"]
+            if subject_hint:
+                answer = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
+                resolution_source = "registry_object" if answer else "relational_object"
+                if not answer and self.relational_state.object != "unknown":
+                    answer = self.relational_state.object
+            else:
+                answer = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=object_hint)
+                resolution_source = "registry_subject" if answer else "relational_subject"
+                if not answer and self.relational_state.subject != "unknown":
+                    answer = self.relational_state.subject
+        elif pronoun_tokens:
+            answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
+            resolution_source = "coreference"
+        elif lower.startswith("what") and self.relational_state.object != "unknown":
+            answer = self.relational_state.object
+            resolution_source = "relational_object"
+        elif any(phrase in lower for phrase in ("what is the topic", "what are we talking about", "what is this about")):
+            answer = self.discourse_state.topic
+            resolution_source = "topic"
+        elif self.relational_state.proposition:
+            answer = self.relational_state.proposition
+            resolution_source = "proposition"
+        else:
+            answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
+
+        if not answer:
+            answer = "unknown"
+
+        predicted_entity = self._predict_binding_entity(question_text)
+        prediction_matched = bool(predicted_entity and answer != "unknown" and predicted_entity == answer)
+        self.record_binding_feedback(
+            predicted_entity=predicted_entity,
+            observed_entity=answer,
+            observed_text=question_text,
+        )
+        confidence = float(self.relational_state.confidence)
+        registry_entry = self.discourse_state.entity_registry.get(answer)
+        if registry_entry is not None:
+            confidence = max(confidence, float(registry_entry.get("binding_confidence", 0.0)))
+        elif answer == self.discourse_state.topic and self.discourse_state.topic != "unknown":
+            confidence = max(confidence, float(self.discourse_state.topic_confidence))
+        return {
+            "question": question_text,
+            "answer": answer,
+            "confidence": confidence,
+            "source": resolution_source,
+            "topic": self.discourse_state.topic,
+            "subject": self.relational_state.subject,
+            "predicate": self.relational_state.predicate,
+            "object": self.relational_state.object,
+            "registry_size": len(self.discourse_state.entity_registry),
+            "negated": bool(parsed["negated"]),
+            "predicted_entity": predicted_entity,
+            "prediction_matched": prediction_matched,
         }
 
     def _discourse_feedback_signal(self, text: str, *, role: str, dialogue_act: str) -> Dict[str, Any]:
@@ -768,6 +1350,7 @@ class BasicChatSession:
             "role": role,
             "dialogue_act": dialogue_act,
             **self._discourse_context_features(),
+            **self.relational_state.to_dict(),
             **self._sentence_features(text),
         }
 
@@ -785,7 +1368,14 @@ class BasicChatSession:
                 topic_hits += 1
         if topic_hits == 0:
             return -0.05 * min(1.0, discourse_state.topic_confidence)
-        return min(0.16, 0.05 * topic_hits * max(0.3, discourse_state.topic_confidence))
+        relation_bonus = 0.0
+        if self.relational_state.subject != "unknown" and self.relational_state.subject in lower:
+            relation_bonus += 0.06
+        if self.relational_state.predicate != "unknown" and self.relational_state.predicate in lower:
+            relation_bonus += 0.04
+        if self.relational_state.object != "unknown" and self.relational_state.object in lower:
+            relation_bonus += 0.04
+        return min(0.22, 0.05 * topic_hits * max(0.3, discourse_state.topic_confidence) + relation_bonus)
 
     def _sentence_features(self, text: str) -> Dict[str, Any]:
         spans = self.sentence_adapter.segment(text)
@@ -954,6 +1544,11 @@ class ReverseChatSession(BasicChatSession):
             dialogue_act="question",
             sentence_features=self._sentence_features(question),
         )
+        self.record_binding_feedback(
+            predicted_entity=self._predict_binding_entity(question),
+            observed_entity=self._observed_binding_entity(question),
+            observed_text=question,
+        )
         self._question_history.append(question)
         return question
 
@@ -1000,6 +1595,11 @@ class ReverseChatSession(BasicChatSession):
             role="assistant",
             dialogue_act="question",
             sentence_features=self._sentence_features(question_text),
+        )
+        self.record_binding_feedback(
+            predicted_entity=self._predict_binding_entity(question_text),
+            observed_entity=self._observed_binding_entity(question_text),
+            observed_text=question_text,
         )
         response_stats = dict(question_signal.to_dict())
         response_stats["text_signal_score"] = question_signal.combined_score()
