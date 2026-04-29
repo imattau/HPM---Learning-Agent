@@ -44,6 +44,7 @@ def test_layered_agent_perceive_injects_meta_feedback(monkeypatch):
 
     assert captured["l1"]["control_dominant_mode"] == "continue"
     assert captured["l2"]["control_strength"] == 0.6
+    assert 0.0 <= captured["l3"]["topdown_gate"] <= 1.0
     assert "meta_structural_score" in captured["l3"]
 
 def test_layered_agent_obs_dims():

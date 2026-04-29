@@ -9,7 +9,7 @@ import numpy as np
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.agents.decoders import CharDecoder, ConstrainedDecoder, ExplanationDecoder, TargetDecoder, WordDecoder
 from hpm_ai_v4.agents.meta_decoder_policy import DecoderSpec, MetaDecoderPolicy
-from hpm_ai_v4.io.adapters import CharClassAdapter
+from hpm_ai_v4.io.adapters import AsciiCharAdapter, CharClassAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
@@ -37,11 +37,16 @@ class LayeredAgent:
 
     def __init__(self, num_workers: int = 1,
                  dictionary: Optional[DictionaryValidator] = None,
-                 grammar: Optional[GrammarValidator] = None):
-        self._adapter = CharClassAdapter()
+                 grammar: Optional[GrammarValidator] = None,
+                 surface_mode: str = "coarse"):
+        self.surface_mode = str(surface_mode)
+        if self.surface_mode == "ascii":
+            self._adapter = AsciiCharAdapter()
+        else:
+            self._adapter = CharClassAdapter()
         self.dictionary = dictionary
         self.grammar = grammar
-        self.l1 = HPMAgent(obs_dim=5, num_initial_patterns=4, num_workers=num_workers,
+        self.l1 = HPMAgent(obs_dim=self._adapter.obs_dim, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
         self.l2 = HPMAgent(obs_dim=self.SOFT_STATE_OBS_DIM, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
@@ -49,14 +54,14 @@ class LayeredAgent:
                            dictionary=dictionary, grammar=grammar)
         self.l4 = HPMAgent(obs_dim=32, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
-        _init_equal_weights(self.l1, hier_k=2, obs_dim=5)
+        _init_equal_weights(self.l1, hier_k=2, obs_dim=self._adapter.obs_dim)
         _init_equal_weights(self.l2, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
         _init_equal_weights(self.l3, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
         _init_equal_weights(self.l4, hier_k=2, obs_dim=32)
         self._raw_history: List[int] = []
         self._l1_state_history: List[int] = []
         self._l2_state_history: List[int] = []
-        self._class_char_counts = {i: Counter() for i in range(5)}
+        self._class_char_counts = {i: Counter() for i in range(self._adapter.obs_dim)}
         self._char_counts = Counter()
         self._transition_counts = Counter()
         self._last_decoder_choice = "word"
@@ -231,15 +236,20 @@ class LayeredAgent:
         """Blend external feedback with current meta-state for lower-level learning."""
         signal = dict(feedback or {})
         control = self.l1.reasoner.control_context(self._raw_history, feature_pack=signal)
+        meta_structural_score = float((self.l4_metrics()["mi"] + self.l5_metrics()["mi"]) / 2.0)
+        control_strength = float(control.get("community_strength", 0.0))
+        topdown_gate = float(np.clip(0.5 * control_strength + 0.5 * meta_structural_score, 0.0, 1.0))
         signal.setdefault("control_mode_prior", control.get("mode_prior", {}))
         signal.setdefault("control_family_prior", control.get("family_prior", {}))
         signal.setdefault("control_stage_prior", control.get("stage_prior", {}))
-        signal.setdefault("control_strength", float(control.get("community_strength", 0.0)))
+        signal.setdefault("control_strength", control_strength)
         signal.setdefault("control_dominant_mode", control.get("dominant_mode"))
         signal.setdefault("control_dominant_family", control.get("dominant_family"))
         signal.setdefault("control_dominant_stage", control.get("dominant_stage"))
         signal.setdefault("control_summary_count", int(control.get("summary_count", 0)))
-        signal.setdefault("meta_structural_score", float((self.l4_metrics()["mi"] + self.l5_metrics()["mi"]) / 2.0))
+        signal.setdefault("meta_structural_score", meta_structural_score)
+        signal.setdefault("topdown_gate", topdown_gate)
+        signal.setdefault("topdown_confidence", topdown_gate)
         if signal.get("mode") is None and signal.get("desired_mode") is None:
             signal.setdefault("mode", control.get("dominant_mode"))
         return signal
@@ -765,14 +775,21 @@ class LayeredAgent:
         }
 
     def predict_next_chars(self, context_raw: List[int], top_k: int = 5) -> List[Tuple[str, float]]:
-        """Top-k next char-class predictions from L1."""
+        """Top-k next surface-bucket predictions from L1."""
         context_cls = [self._adapter.encode(v) for v in context_raw]
         relevant = self.l1.reasoner.get_relevant_patterns(context_cls, top_k=top_k)
         if not relevant:
             return []
         dist = self.l1.reasoner.compose_predictions(relevant, context_cls)
-        top = np.argsort(dist)[::-1][:top_k]
-        return [(self._adapter.decode_class(int(i)), float(dist[i])) for i in top]
+        bucketed: Dict[str, float] = {}
+        for idx, prob in enumerate(dist):
+            if hasattr(self._adapter, "bucket_for_token"):
+                bucket = self._adapter.bucket_for_token(int(idx))
+            else:
+                bucket = self._adapter.decode_class(int(idx))
+            bucketed[bucket] = bucketed.get(bucket, 0.0) + float(prob)
+        top = sorted(bucketed.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        return [(name, float(prob)) for name, prob in top]
 
     def _class_name_to_id(self, class_name: str) -> int:
         for i in range(self._adapter.obs_dim):

@@ -530,6 +530,7 @@ class TestHPMAgentAct:
 
         assert adjusted["learning_rate"] > base["learning_rate"]
         assert adjusted["lambda_l"] > 0.0
+        assert adjusted["adapt_window"] >= base["adapt_window"]
         assert adjusted["beta_aff"] >= base["beta_aff"]
         assert adjusted["gamma_soc"] <= base["gamma_soc"]
         assert adjusted["do_param_update"] is True

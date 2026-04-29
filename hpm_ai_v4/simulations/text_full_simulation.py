@@ -119,13 +119,14 @@ def run_text_simulation(
     warmup_chars: int = 500,
     num_workers: int = 1,
     use_dict: bool = True,
+    surface_mode: str = "coarse",
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
 ) -> List[Dict[str, Any]]:
     """Run a target-driven text simulation with optional self-feedback."""
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar)
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
 
     if library_path and os.path.exists(library_path + ".l1.pkl"):
         layered.load_bundle(library_path)
@@ -239,6 +240,7 @@ def _parse_args():
     p.add_argument("--warmup-chars", type=int, default=500)
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--dict", action="store_true", help="Enable dictionary and grammar validators")
+    p.add_argument("--surface-mode", default="coarse", help="Text surface mode: coarse or ascii")
     p.add_argument("--library", default=None, help="Base path to pre-built pattern library (no .pkl suffix)")
     p.add_argument("--checkpoint-dir", default=".", help="Directory for checkpoint files")
     return p.parse_args()
@@ -254,6 +256,7 @@ if __name__ == "__main__":
         warmup_chars=args.warmup_chars,
         num_workers=args.workers,
         use_dict=args.dict,
+        surface_mode=args.surface_mode,
         library_path=args.library,
         checkpoint_dir=args.checkpoint_dir,
     )

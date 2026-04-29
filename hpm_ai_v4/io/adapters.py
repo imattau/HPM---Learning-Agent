@@ -854,6 +854,61 @@ class CharClassAdapter:
         return self.encode(char_id)
 
 
+class AsciiCharAdapter:
+    """
+    Surface adapter that preserves printable ASCII distinctions.
+
+    This expands the observation space from 5 coarse character classes to 95
+    printable ASCII slots plus the newline sentinel, while still exposing the
+    coarse bucket labels used by the decoders as a fallback prior.
+    """
+
+    CLASS_NAMES = ['letter', 'digit', 'space', 'punctuation', 'newline']
+    NEWLINE_ID = 94
+
+    def __init__(self):
+        self._table = {}
+        for char_id in range(95):
+            ch = chr(char_id + 32)
+            if ch == ' ':
+                self._table[char_id] = char_id
+            else:
+                self._table[char_id] = char_id
+
+    @property
+    def obs_dim(self) -> int:
+        return 95
+
+    def encode(self, char_id: int) -> int:
+        if char_id == self.NEWLINE_ID:
+            return self.NEWLINE_ID
+        return self._table.get(int(char_id), self.NEWLINE_ID)
+
+    def encode_char(self, ch: str) -> int:
+        if ch == '\n':
+            return self.NEWLINE_ID
+        char_id = ord(ch) - 32
+        if 0 <= char_id < 95:
+            return self.encode(char_id)
+        return self.NEWLINE_ID
+
+    def decode_class(self, class_id: int) -> str:
+        """Return a coarse bucket name for compatibility with old decoders."""
+        if class_id == self.NEWLINE_ID:
+            return 'newline'
+        ch = chr(int(class_id) + 32)
+        if ch == ' ':
+            return 'space'
+        if ch.isdigit():
+            return 'digit'
+        if ch.isalpha():
+            return 'letter'
+        return 'punctuation'
+
+    def bucket_for_token(self, token_id: int) -> str:
+        return self.decode_class(int(token_id))
+
+
 class EnvironmentStateAdapter(InputAdapter):
     """Encode structured environment state into discrete observation tokens."""
 

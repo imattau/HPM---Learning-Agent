@@ -114,34 +114,36 @@ class HPMAgent:
 
         meta = dict(feedback)
         control_strength = float(meta.get("control_strength", meta.get("meta_structural_score", 0.0)))
+        topdown_gate = float(meta.get("topdown_gate", meta.get("topdown_confidence", 0.0)))
         mode_prior = meta.get("control_mode_prior") or meta.get("mode_prior") or {}
         dominant_mode = str(meta.get("control_dominant_mode") or meta.get("mode") or meta.get("desired_mode") or "")
         reward_hint = float(meta.get("reward", meta.get("quality", 0.0)))
         structure_hint = float(meta.get("meta_structural_score", meta.get("structural_score", 0.0)))
-        certainty = max(control_strength, structure_hint, reward_hint)
+        certainty = max(control_strength, structure_hint, reward_hint, topdown_gate)
         prefer_repair = dominant_mode == "repair" or float(mode_prior.get("repair", 0.0)) >= 0.5
+        gate = float(np.clip(max(certainty, topdown_gate), 0.0, 1.0))
 
         # The lower stack should update more eagerly when higher-level control is confident.
-        params["learning_rate"] = float(params.get("learning_rate", 0.02)) * (0.85 + 0.25 * min(1.0, certainty))
-        params["lambda_l"] = float(params.get("lambda_l", 0.1)) * (0.90 + 0.20 * min(1.0, control_strength))
-        params["adapt_window"] = int(round(float(params.get("adapt_window", 20)) * (1.0 + 0.25 * max(0.0, structure_hint - 0.5))))
+        params["learning_rate"] = float(params.get("learning_rate", 0.02)) * (0.80 + 0.45 * gate)
+        params["lambda_l"] = float(params.get("lambda_l", 0.1)) * (0.85 + 0.30 * min(1.0, max(control_strength, topdown_gate)))
+        params["adapt_window"] = int(round(float(params.get("adapt_window", 20)) * (1.0 + 0.35 * max(0.0, gate - 0.35))))
 
         beta_aff = float(params.get("beta_aff", self.beta_aff))
         gamma_soc = float(params.get("gamma_soc", self.gamma_soc))
         if prefer_repair:
-            beta_aff += 0.08 * min(1.0, certainty + 0.2)
-            gamma_soc -= 0.03 * min(1.0, certainty)
+            beta_aff += 0.10 * min(1.0, gate + 0.2)
+            gamma_soc -= 0.04 * min(1.0, gate)
         else:
-            beta_aff += 0.03 * max(0.0, structure_hint - 0.5)
-            gamma_soc += 0.02 * max(0.0, control_strength - 0.3)
+            beta_aff += 0.04 * max(0.0, gate - 0.45)
+            gamma_soc += 0.03 * max(0.0, gate - 0.25)
         params["beta_aff"] = float(np.clip(beta_aff, 0.05, 0.95))
         params["gamma_soc"] = float(np.clip(gamma_soc, 0.05, 0.95))
 
         # Strong high-level confidence should encourage actual parameter updates.
-        if certainty > 0.8:
+        if gate > 0.75:
             params["do_param_update"] = True
-        elif certainty < 0.2 and "do_param_update" in params:
-            params["do_param_update"] = bool(params["do_param_update"])
+        elif gate < 0.20:
+            params["do_param_update"] = False
 
         return params
 

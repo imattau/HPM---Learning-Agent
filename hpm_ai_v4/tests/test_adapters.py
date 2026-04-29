@@ -1,6 +1,7 @@
 import pytest
 from hpm_ai_v4.io.adapters import (
     CharClassAdapter,
+    AsciiCharAdapter,
     CodeDSLAdapter,
     EpisodeBundleAdapter,
     CurriculumAdapter,
@@ -89,6 +90,15 @@ def test_encode_char_punctuation():
 def test_encode_char_newline():
     a = CharClassAdapter()
     assert a.encode_char('\n') == 4
+
+
+def test_ascii_char_adapter_preserves_surface_tokens():
+    a = AsciiCharAdapter()
+    assert a.obs_dim == 95
+    assert a.encode_char('a') != a.encode_char('b')
+    assert a.encode_char(' ') != a.encode_char('a')
+    assert a.encode_char('\n') == 94
+    assert a.bucket_for_token(a.encode_char('a')) == "letter"
 
 def test_encode_char_uppercase():
     a = CharClassAdapter()

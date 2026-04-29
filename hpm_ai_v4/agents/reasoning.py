@@ -745,10 +745,10 @@ class Reasoner:
         self.agent = agent
         self.dictionary = dictionary
         self.grammar = grammar
-        self.context_window = 40
+        self.context_window = 80
         self.beam_width = 3
         self.candidate_top_k = 3
-        self.memory_window = 24
+        self.memory_window = 48
         self.memory_capacity = 256
         self.memory_top_k = 6
         self.memory_weight = 0.25
@@ -1081,8 +1081,8 @@ class Reasoner:
             obs = int(np.random.choice(len(dist), p=dist))
             simulated.append(obs)
             context.append(obs)
-            if len(context) > 40:
-                context = context[-40:]
+            if len(context) > self.context_window:
+                context = context[-self.context_window:]
 
         return simulated
 

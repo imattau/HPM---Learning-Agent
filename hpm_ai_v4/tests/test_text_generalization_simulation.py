@@ -34,6 +34,28 @@ def test_run_text_generalization_simulation_short(tmp_path):
     assert (tmp_path / "final_generalization_library.l5.pkl").exists()
 
 
+def test_run_text_generalization_simulation_ascii_surface(tmp_path):
+    corpus = tmp_path / "corpus_ascii.txt"
+    corpus.write_text("the quick brown fox jumps over the lazy dog. " * 20)
+    history = run_text_generalization_simulation(
+        corpus_path=str(corpus),
+        train_steps=60,
+        validation_steps=40,
+        log_every=40,
+        chunk_size=20,
+        prompt_size=20,
+        warmup_chars=20,
+        num_workers=1,
+        use_dict=False,
+        surface_mode="ascii",
+        library_path=None,
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert len(history) >= 2
+    assert history[-1]["phase"] == "validation"
+
+
 def test_generalization_simulation_loads_flat_library(tmp_path):
     library = tmp_path / "generalization_seed.pkl"
     PatternSerializer.save([FlatPattern.flat(0, obs_dim=5)], str(library))
