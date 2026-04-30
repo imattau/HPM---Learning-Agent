@@ -844,13 +844,18 @@ class BasicChatSession:
         best_score = -1e9
         for entity, record in candidates:
             score = float(record.get("salience", 0.0))
+            candidate_value = entity
             if predicate_hint:
                 if record.get("last_predicate") == predicate_hint:
                     score += 1.22
+                    if record.get("last_object") not in {"", "unknown"}:
+                        candidate_value = str(record.get("last_object")).strip().lower() or candidate_value
                 else:
                     score -= 0.65
             if subject_hint and record.get("last_subject") == subject_hint:
                 score += 0.90
+                if record.get("last_object") not in {"", "unknown"}:
+                    candidate_value = str(record.get("last_object")).strip().lower() or candidate_value
             if record.get("last_role") == "object":
                 score += 0.28
             elif record.get("last_role") == "subject":
@@ -863,7 +868,7 @@ class BasicChatSession:
                 score += 0.08
             if score > best_score:
                 best_score = score
-                best_entity = entity
+                best_entity = candidate_value
         return best_entity
 
     def _best_entity_by_property(self, property_hints: Iterable[str]) -> str:
@@ -957,23 +962,165 @@ class BasicChatSession:
                 continue
             property_hint = tok
             break
-
-        clause_pattern = re.search(
-            r"\bthe\s+(?P<head>[a-z']+)\s+(?:that\s+|which\s+|who\s+|the\s+)?(?:the\s+)?(?P<subject>[a-z']+)\s+(?P<predicate>[a-z']+)(?:\s+(?P<prep>on|in|at|with|from|under|over|of|for|to|by))?",
-            lower,
-        )
-        if not clause_pattern:
+        copula_match = re.search(r"\b(is|are|was|were|be|been)\b", lower)
+        if not copula_match:
+            return {"matched": False}
+        pivot_phrase = lower[copula_match.end():].strip(" ?.")
+        if not pivot_phrase:
             return {"matched": False}
 
         return {
             "matched": True,
             "property_hint": property_hint,
-            "head_noun": clause_pattern.group("head"),
-            "subject_hint": clause_pattern.group("subject"),
-            "predicate_hint": clause_pattern.group("predicate"),
-            "preposition": clause_pattern.group("prep") or "",
+            "pivot_phrase": pivot_phrase,
             "token_count": len(tokens),
         }
+
+    def _strip_article_prefix(self, phrase: str) -> str:
+        text = phrase.strip().lower().strip(" ?.")
+        text = re.sub(r"^(?:the|a|an)\s+", "", text)
+        return text.strip()
+
+    def _split_last_clause_marker(self, phrase: str) -> tuple[str, str]:
+        lower = phrase.strip().lower()
+        best_idx = -1
+        best_marker = ""
+        for marker in sorted(_DISCOURSE_CLAUSE_MARKERS, key=len, reverse=True):
+            idx = lower.rfind(f" {marker} ")
+            if idx > best_idx:
+                best_idx = idx
+                best_marker = marker
+        if best_idx < 0:
+            return "", ""
+        left = lower[:best_idx].strip()
+        right = lower[best_idx + len(best_marker) + 2 :].strip()
+        return left, right
+
+    def _split_by_phrase(self, phrase: str) -> tuple[str, str]:
+        lower = phrase.strip().lower()
+        idx = lower.rfind(" by ")
+        if idx < 0:
+            return "", ""
+        return lower[:idx].strip(), lower[idx + 4 :].strip()
+
+    def _relation_hints_from_phrase(self, phrase: str) -> Dict[str, str]:
+        text = self._strip_article_prefix(phrase)
+        raw_tokens = [tok for tok in re.findall(r"[A-Za-z']+", text) if tok]
+        if not raw_tokens:
+            return {"subject_hint": "", "predicate_hint": "", "object_hint": "", "relation_kind": ""}
+
+        if raw_tokens[0] in {
+            "thing",
+            "animal",
+            "person",
+            "object",
+            "item",
+            "entity",
+            "one",
+            "place",
+            "way",
+            "shape",
+            "colour",
+            "color",
+            "size",
+            "kind",
+            "type",
+        } and len(raw_tokens) > 1:
+            raw_tokens = raw_tokens[1:]
+
+        if raw_tokens and raw_tokens[-1] in _DISCOURSE_PREPOSITIONS:
+            raw_tokens = raw_tokens[:-1]
+        raw_tokens = [tok for tok in raw_tokens if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_AUXILIARIES and tok not in _DISCOURSE_PREPOSITIONS]
+        if not raw_tokens:
+            return {"subject_hint": "", "predicate_hint": "", "object_hint": "", "relation_kind": ""}
+
+        subject_hint = ""
+        predicate_hint = ""
+        object_hint = ""
+
+        if len(raw_tokens) == 1:
+            predicate_hint = raw_tokens[0]
+        else:
+            subject_hint = raw_tokens[0]
+            predicate_hint = raw_tokens[1]
+            if len(raw_tokens) > 2:
+                object_hint = raw_tokens[2]
+
+        relation_kind = "object"
+        if predicate_hint in {"is", "are", "was", "were", "be", "been"}:
+            relation_kind = "property"
+
+        return {
+            "subject_hint": subject_hint,
+            "predicate_hint": predicate_hint,
+            "object_hint": object_hint,
+            "relation_kind": relation_kind,
+        }
+
+    def _resolve_entity_phrase(self, phrase: str, *, max_hops: int = 2, _depth: int = 0) -> Dict[str, Any]:
+        phrase = self._strip_article_prefix(phrase)
+        if not phrase:
+            return {"entity": "", "hops": 0, "source": "empty"}
+
+        if phrase in self.discourse_state.entity_registry:
+            return {"entity": phrase, "hops": 0, "source": "registry"}
+
+        if _depth >= max_hops:
+            return {"entity": "", "hops": 0, "source": "depth_cap"}
+
+        relation_phrase, agent_phrase = self._split_by_phrase(phrase)
+        if agent_phrase:
+            agent_result = self._resolve_entity_phrase(agent_phrase, max_hops=max_hops, _depth=_depth + 1)
+            agent_entity = str(agent_result.get("entity", "")).strip().lower()
+            if agent_entity:
+                relation_hints = self._relation_hints_from_phrase(relation_phrase)
+                predicate_hint = relation_hints.get("predicate_hint", "")
+                subject_hint = relation_hints.get("subject_hint", "")
+                relation_kind = relation_hints.get("relation_kind", "object")
+                if relation_kind == "property" and predicate_hint:
+                    subject_candidate = subject_hint or agent_entity
+                    entity = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=subject_candidate)
+                else:
+                    entity = self._best_object_for_query(subject_hint=agent_entity, predicate_hint=predicate_hint)
+                    if not entity and subject_hint:
+                        entity = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
+                if entity:
+                    return {
+                        "entity": entity,
+                        "hops": int(agent_result.get("hops", 0)) + 1,
+                        "source": "by_chain",
+                        "pivot_phrase": relation_phrase,
+                        "agent_entity": agent_entity,
+                    }
+
+        head, clause = self._split_last_clause_marker(phrase)
+        if clause:
+            clause_result = self._resolve_entity_phrase(clause, max_hops=max_hops, _depth=_depth + 1)
+            if clause_result.get("entity"):
+                return {
+                    "entity": clause_result["entity"],
+                    "hops": int(clause_result.get("hops", 0)),
+                    "source": "clause",
+                    "pivot_phrase": clause,
+                }
+
+        relation_hints = self._relation_hints_from_phrase(phrase)
+        predicate_hint = relation_hints.get("predicate_hint", "")
+        subject_hint = relation_hints.get("subject_hint", "")
+        relation_kind = relation_hints.get("relation_kind", "object")
+        entity = ""
+        if relation_kind == "property" and predicate_hint:
+            entity = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=subject_hint)
+        elif subject_hint or predicate_hint:
+            entity = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
+        if entity:
+            return {
+                "entity": entity,
+                "hops": 1,
+                "source": "relation",
+                "pivot_phrase": phrase,
+            }
+        return {"entity": "", "hops": 0, "source": "unresolved"}
 
     def _calibrate_binding_confidence(self, predicted_entity: str, observed_entity: str, observed_text: str = "") -> Dict[str, Any]:
         predicted = predicted_entity.strip().lower()
@@ -1769,8 +1916,8 @@ class BasicChatSession:
         subject_hint = str(chain_frame.get("subject_hint", "")).strip().lower()
         predicate_hint = str(chain_frame.get("predicate_hint", "")).strip().lower()
         property_hint = str(chain_frame.get("property_hint", "")).strip().lower()
-        relation_key = self._lookup_entity_by_relation(subject_hint=subject_hint, predicate_hint=predicate_hint)
-        if not relation_key:
+        pivot_phrase = str(chain_frame.get("pivot_phrase", "")).strip().lower()
+        if not pivot_phrase:
             return {
                 "question": question_text,
                 "answer": "unknown",
@@ -1778,10 +1925,21 @@ class BasicChatSession:
                 "hops": 1,
                 "intermediate_entity": "unknown",
             }
-        relation_record = self.discourse_state.entity_registry.get(relation_key, {})
-        intermediate_entity = str(relation_record.get("last_object", relation_key)).strip().lower()
+        resolution = self._resolve_entity_phrase(pivot_phrase, max_hops=2)
+        intermediate_entity = str(resolution.get("entity", "")).strip().lower()
+        if not intermediate_entity and subject_hint and predicate_hint:
+            relation_key = self._lookup_entity_by_relation(subject_hint=subject_hint, predicate_hint=predicate_hint)
+            if relation_key:
+                relation_record = self.discourse_state.entity_registry.get(relation_key, {})
+                intermediate_entity = str(relation_record.get("last_object", relation_key)).strip().lower()
+                resolution = {
+                    "entity": intermediate_entity,
+                    "hops": 1,
+                    "source": "relation_fallback",
+                    "relation_key": relation_key,
+                }
         if intermediate_entity == "unknown" or not intermediate_entity:
-            intermediate_entity = relation_key
+            intermediate_entity = ""
 
         answer = self._lookup_property_for_entity(intermediate_entity, {property_hint} if property_hint else set())
         if not answer:
@@ -1791,10 +1949,12 @@ class BasicChatSession:
             "question": question_text,
             "answer": answer or "unknown",
             "source": "chain_resolved",
-            "hops": 2,
+            "hops": int(resolution.get("hops", 0)) + 1,
             "intermediate_entity": intermediate_entity,
             "property_hint": property_hint,
-            "relation_key": relation_key,
+            "relation_key": resolution.get("relation_key", ""),
+            "pivot_source": resolution.get("source", ""),
+            "pivot_phrase": pivot_phrase,
         }
 
     def query(self, question_text: str) -> Dict[str, Any]:

@@ -470,6 +470,23 @@ def test_basic_chat_session_query_chain_generalizes_property_hop():
     assert result["property_hint"] == "shape"
 
 
+def test_basic_chat_session_query_chain_supports_three_hops():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The dog chased the cat.")
+    session.chat_turn("The cat sat on the mat.")
+    session.chat_turn("The mat was red.")
+
+    result = session.query("What colour is the thing sat on by the animal that the dog chased?")
+
+    assert result["source"] == "chain_resolved"
+    assert result["hops"] == 3
+    assert result["answer"] == "red"
+    assert result["pivot_source"] in {"by_chain", "clause", "relation"}
+
+
 def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
