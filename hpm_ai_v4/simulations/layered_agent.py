@@ -1,4 +1,5 @@
 """LayeredAgent: stacked L1 -> L2 -> L3 hierarchy over character streams."""
+import copy
 from collections import Counter, defaultdict
 import json
 import os
@@ -692,7 +693,7 @@ class LayeredAgent:
                 target_text=target_text,
                 mode="target",
                 include_seed=False,
-            )
+        )
         return self.decoders["target"].decode(
             self,
             target_text=target_text,
@@ -702,6 +703,116 @@ class LayeredAgent:
             lookback=lookback,
             feature_pack=feature_pack,
         )
+
+    def _simulation_state_snapshot(self) -> Dict[str, Any]:
+        return {
+            "raw_history": list(self._raw_history),
+            "l1_state_history": list(self._l1_state_history),
+            "l2_state_history": list(self._l2_state_history),
+            "class_char_counts": copy.deepcopy(self._class_char_counts),
+            "char_counts": copy.deepcopy(self._char_counts),
+            "transition_counts": copy.deepcopy(self._transition_counts),
+            "pending_feedback": copy.deepcopy(self._pending_feedback),
+            "last_decoder_choice": self._last_decoder_choice,
+            "last_decoder_mode": self._last_decoder_mode,
+            "last_decoder_stats": copy.deepcopy(self._last_decoder_stats),
+            "decoder_policy_state": copy.deepcopy(self.decoder_policy.state_dict()),
+        }
+
+    def _restore_simulation_state(self, snapshot: Dict[str, Any]) -> None:
+        self._raw_history = list(snapshot.get("raw_history", []))
+        self._l1_state_history = list(snapshot.get("l1_state_history", []))
+        self._l2_state_history = list(snapshot.get("l2_state_history", []))
+        self._class_char_counts = copy.deepcopy(snapshot.get("class_char_counts", self._class_char_counts))
+        self._char_counts = copy.deepcopy(snapshot.get("char_counts", self._char_counts))
+        self._transition_counts = copy.deepcopy(snapshot.get("transition_counts", self._transition_counts))
+        self._pending_feedback = copy.deepcopy(snapshot.get("pending_feedback", {}))
+        self._last_decoder_choice = str(snapshot.get("last_decoder_choice", self._last_decoder_choice))
+        self._last_decoder_mode = str(snapshot.get("last_decoder_mode", self._last_decoder_mode))
+        self._last_decoder_stats = dict(snapshot.get("last_decoder_stats", self._last_decoder_stats))
+        decoder_state = snapshot.get("decoder_policy_state")
+        if isinstance(decoder_state, dict):
+            self.decoder_policy.load_state_dict(copy.deepcopy(decoder_state))
+
+    def _continuation_compression_score(self, text: str) -> float:
+        obs_seq = self._surface_ids_from_text(text)
+        if not obs_seq:
+            return float(self._text_plausibility(text))
+        top_patterns = sorted(self.l3.patterns, key=lambda p: -p.weight)[:3]
+        if not top_patterns:
+            return float(self._text_plausibility(text))
+        weighted_ll = 0.0
+        total_w = 0.0
+        window = obs_seq[-80:]
+        for pattern in top_patterns:
+            w = float(max(0.0, pattern.weight))
+            if w <= 0.0:
+                continue
+            ll = float(pattern.log_likelihood(window))
+            weighted_ll += w * (ll / max(1, len(window)))
+            total_w += w
+        if total_w <= 0.0:
+            return float(self._text_plausibility(text))
+        structural_bonus = float(sum(p.weight * p.compression() for p in top_patterns) / total_w)
+        plausibility = float(self._text_plausibility(text))
+        return float((weighted_ll / total_w) + 0.02 * structural_bonus + 0.02 * plausibility)
+
+    def simulate_continuation(
+        self,
+        seed_text: str,
+        steps: int = 5,
+        candidates: int = 3,
+        target_text: str | None = None,
+        include_seed: bool = True,
+        mode: str = "decode",
+    ) -> List[Dict[str, Any]]:
+        """Run bounded, frozen continuations and rank them by L3 compression fit."""
+        snapshot = self._simulation_state_snapshot()
+        try:
+            proposal_specs = [
+                DecoderSpec("word", "decode", include_seed),
+                DecoderSpec("word", "hybrid", include_seed),
+            ]
+            if target_text:
+                proposal_specs.append(DecoderSpec("word", "target", include_seed))
+            if self.surface_mode != "word":
+                proposal_specs.extend([
+                    DecoderSpec("char", "decode", include_seed),
+                    DecoderSpec("char", "hybrid", include_seed),
+                ])
+            if target_text:
+                proposal_specs.append(DecoderSpec("target", "target", False))
+
+            seen: set[tuple[str, str]] = set()
+            proposals: List[Dict[str, Any]] = []
+            for spec in proposal_specs:
+                key = (spec.family, spec.mode)
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidate_text = self.generate_text(
+                    steps=steps,
+                    seed_text=seed_text,
+                    target_text=target_text,
+                    mode=spec.mode if mode == "decode" else mode,
+                    include_seed=include_seed,
+                    feedback=False,
+                    update_policy=False,
+                    context_features={"task_family": "simulation", "simulation_mode": spec.family},
+                )
+                proposals.append({
+                    "text": candidate_text,
+                    "score": self._continuation_compression_score(candidate_text),
+                    "family": spec.family,
+                    "mode": spec.mode,
+                })
+                if len(proposals) >= max(1, candidates):
+                    break
+
+            proposals.sort(key=lambda item: (item["score"], item["text"]), reverse=True)
+            return proposals
+        finally:
+            self._restore_simulation_state(snapshot)
 
     def generate_constrained_text(
         self,

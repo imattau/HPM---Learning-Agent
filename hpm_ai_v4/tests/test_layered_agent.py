@@ -287,6 +287,43 @@ def test_plan_text_continuation_passes_feature_pack(monkeypatch):
     assert captured["kwargs"]["feature_pack"] == {"mode_prior": {"continue": 1.0}}
 
 
+def test_simulate_continuation_ranks_and_restores_state(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    agent._raw_history.extend([1, 2, 3])
+    agent._l1_state_history.extend([4, 5])
+    agent._l2_state_history.extend([6, 7])
+    agent._pending_feedback["reward"] = 0.4
+
+    outputs = iter(["low fit", "high fit", "medium fit", "extra fit"])
+
+    def fake_generate_text(**kwargs):
+        agent._raw_history.append(999)
+        return next(outputs)
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(
+        agent,
+        "_continuation_compression_score",
+        lambda text: {"low fit": 0.1, "medium fit": 0.5, "high fit": 0.9, "extra fit": 0.2}[text],
+    )
+
+    snapshot = {
+        "raw_history": list(agent._raw_history),
+        "l1_state_history": list(agent._l1_state_history),
+        "l2_state_history": list(agent._l2_state_history),
+        "pending_feedback": dict(agent._pending_feedback),
+    }
+
+    result = agent.simulate_continuation("seed text", steps=3, candidates=3)
+
+    assert [item["text"] for item in result] == ["high fit", "medium fit", "low fit"]
+    assert result[0]["score"] >= result[-1]["score"]
+    assert agent._raw_history == snapshot["raw_history"]
+    assert agent._l1_state_history == snapshot["l1_state_history"]
+    assert agent._l2_state_history == snapshot["l2_state_history"]
+    assert agent._pending_feedback == snapshot["pending_feedback"]
+
+
 def test_generate_constrained_text_returns_readable_text():
     dictionary = NLTKWordList(download=False)
     grammar = HeuristicGrammarLibrary()

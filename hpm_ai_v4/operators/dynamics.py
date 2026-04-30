@@ -40,12 +40,22 @@ def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, d
     Update pattern weights using replicator dynamics with inhibition and decay (Vectorized).
     """
     if not patterns: return
-    
+
     weights = np.array([p.weight for p in patterns], dtype=np.float32)
     total_vec = np.array([totals.get(p.id, 0.0) for p in patterns], dtype=np.float32)
+    density_prior = np.array([
+        float(getattr(p, "compression", lambda: 0.0)()) * max(0.1, float(getattr(p, "density_at_save", 0.1)))
+        if getattr(p, "latent_dim", 1) > 1 else 0.05
+        for p in patterns
+    ], dtype=np.float32)
+    if density_prior.size:
+        density_prior = density_prior / (density_prior.sum() + 1e-12)
+        effective_fitness = 0.75 * total_vec + 0.25 * (density_prior * len(patterns))
+    else:
+        effective_fitness = total_vec
     
-    avg_total = np.sum(weights * total_vec) / (np.sum(weights) + 1e-12)
-    rep = eta * (total_vec - avg_total) * weights
+    avg_total = np.sum(weights * effective_fitness) / (np.sum(weights) + 1e-12)
+    rep = eta * (effective_fitness - avg_total) * weights
     
     inhib = np.zeros_like(weights)
     if k_matrix is not None and k_matrix.shape == (len(patterns), len(patterns)):

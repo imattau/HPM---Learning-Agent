@@ -3,6 +3,7 @@ import pytest
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.pattern import HierarchicalPattern
 from hpm_ai_v4.evaluators.metrics import compression_gate
+from hpm_ai_v4.operators.dynamics import meta_pattern_update
 
 class FixedEnvironment:
     """A simple environment with a fixed structure: alternating 0s and 1s."""
@@ -96,3 +97,16 @@ def test_compression_gate_activates_earlier():
 
     assert low_gate > high_gate
     assert low_gate > 0.4
+
+
+def test_meta_pattern_update_prefers_dense_patterns():
+    dense = HierarchicalPattern(pattern_id=1, latent_dim=2, obs_dim=2)
+    sparse = HierarchicalPattern(pattern_id=2, latent_dim=2, obs_dim=2)
+    dense.weight = 0.5
+    sparse.weight = 0.5
+    dense.density_at_save = 1.0
+    sparse.density_at_save = 0.1
+
+    meta_pattern_update([dense, sparse], {1: 1.0, 2: 1.0}, eta=0.1, beta_c=0.0, decay=0.0)
+
+    assert dense.weight > sparse.weight
