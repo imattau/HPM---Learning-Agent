@@ -810,6 +810,8 @@ class BasicChatSession:
                     score -= 0.85
             if object_hint and record.get("last_object") == object_hint:
                 score += 0.12
+            if object_hint and entity == object_hint:
+                score -= 0.95
             if record.get("last_role") == "subject":
                 score += 0.34
             elif record.get("last_role") == "object":
@@ -1593,17 +1595,13 @@ class BasicChatSession:
                 current["role_bindings"]["agent"] = frames[0]["subject"]
                 current["role_bindings"]["grammatical_subject"] = frames[0]["subject"]
 
-        if current["subject"] != "unknown":
-            self.relational_state.subject = current["subject"]
-            self.relational_state.role_bindings["subject"] = current["subject"]
-        if current["predicate"] != "unknown":
-            self.relational_state.predicate = current["predicate"]
-            self.relational_state.role_bindings["predicate"] = current["predicate"]
-        if current["object"] != "unknown":
-            self.relational_state.object = current["object"]
-            self.relational_state.role_bindings["object"] = current["object"]
-        if current["grammatical_subject"] != "unknown":
-            self.relational_state.role_bindings["grammatical_subject"] = current["grammatical_subject"]
+        self.relational_state.subject = current["subject"] if current["subject"] != "unknown" else "unknown"
+        self.relational_state.predicate = current["predicate"] if current["predicate"] != "unknown" else "unknown"
+        self.relational_state.object = current["object"] if current["object"] != "unknown" else "unknown"
+        self.relational_state.role_bindings["subject"] = self.relational_state.subject
+        self.relational_state.role_bindings["predicate"] = self.relational_state.predicate
+        self.relational_state.role_bindings["object"] = self.relational_state.object
+        self.relational_state.role_bindings["grammatical_subject"] = current["grammatical_subject"]
         self.relational_state.voice = current["voice"]
         self.relational_state.agent = current["agent"]
         self.relational_state.role_bindings["voice"] = current["voice"]
@@ -1613,6 +1611,8 @@ class BasicChatSession:
         if current["proposition"]:
             self.relational_state.proposition = current["proposition"]
             self.relational_state.proposition_history.append(current["proposition"])
+        else:
+            self.relational_state.proposition = ""
         if len(frames) > 1:
             self.relational_state.role_bindings["main_subject"] = frames[0]["subject"]
             self.relational_state.role_bindings["clause_count"] = str(len(frames))
