@@ -98,10 +98,12 @@ class LayeredAgent:
         if mode == "ascii":
             adapter = AsciiCharAdapter()
         elif mode == "word":
+            canonical_aliases = dict((surface_state or {}).get("canonical_aliases", {}) or {}) or dict(WordAdapter.DEFAULT_CANONICAL_ALIASES)
             adapter = WordAdapter(
                 max_vocab_size=int((surface_state or {}).get("max_vocab_size", 5000)),
                 lowercase=bool((surface_state or {}).get("lowercase", True)),
                 vocab=dict((surface_state or {}).get("word_vocab", {}) or {}) or None,
+                canonical_aliases=canonical_aliases,
             )
         else:
             adapter = CharClassAdapter()
@@ -596,6 +598,8 @@ class LayeredAgent:
                 surface_state["max_vocab_size"] = int(getattr(self._adapter, "_max_vocab_size", 5000))
                 surface_state["lowercase"] = bool(getattr(self._adapter, "lowercase", True))
                 surface_state["word_vocab"] = dict(getattr(self._adapter, "_word_to_id", {}))
+                if hasattr(self._adapter, "_canonical_aliases"):
+                    surface_state["canonical_aliases"] = dict(getattr(self._adapter, "_canonical_aliases", {}))
             json.dump(surface_state, f)
         with open(base_path + ".policy.json", "w", encoding="utf-8") as f:
             json.dump(self.decoder_policy.state_dict(), f)

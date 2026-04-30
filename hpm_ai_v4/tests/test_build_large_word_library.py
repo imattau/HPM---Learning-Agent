@@ -80,3 +80,38 @@ def test_build_large_word_library_writes_surface_vocab(tmp_path):
     data = surface_path.read_text()
     assert '"surface_mode": "word"' in data
     assert '"word_vocab"' in data
+    assert '"canonical_aliases"' in data
+    assert '"vocab_contract"' in data
+
+
+def test_build_large_word_library_derives_aliases_from_corpus(tmp_path):
+    corpus = tmp_path / "word_corpus_aliases.txt"
+    corpus.write_text(
+        "The cat sat on the mat. The cat chased the mouse. "
+        "The feline sat on the mat. The feline chased the mouse. "
+        "The dog watched the cat. The canine watched the cat."
+    )
+    output_base = tmp_path / "word_large_aliases" / "word_large_library"
+
+    build_large_word_library(
+        output=str(output_base),
+        target=4,
+        steps_per_chunk=80,
+        min_density=0.0,
+        keep_top_k=1,
+        dedup_threshold=1.0,
+        promote=False,
+        num_workers=1,
+        target_chars=5_000,
+        registry_path=None,
+        corpus_paths=[str(corpus)],
+        max_vocab_size=32,
+        min_freq=1,
+    )
+
+    surface_path = tmp_path / "word_large_aliases" / "word_large_library.surface.json"
+    data = surface_path.read_text()
+    assert '"derived_corpus_aliases"' in data
+    assert '"canine": "dog"' in data
+    assert '"feline":' in data
+    assert '"cat":' in data

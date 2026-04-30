@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -38,7 +39,206 @@ class LargeWordLibraryBuildResult:
     registry_name: str = ""
 
 
-RESERVED_TOKENS = {"<UNK>", "<BOS>", "<EOS>", "<NL>", "<PARA>"}
+def _tokenize_raw_words(text: str, lowercase: bool = True) -> List[str]:
+    raw = str(text or "")
+    tokens: List[str] = []
+    for tok in WordAdapter.TOKEN_RE.findall(raw):
+        if not tok or tok.isspace():
+            continue
+        if tok == "\n":
+            continue
+        tokens.append(tok.lower() if lowercase else tok)
+    return tokens
+
+
+def _weighted_jaccard(a: Counter[str], b: Counter[str], limit: int = 12) -> float:
+    if not a or not b:
+        return 0.0
+    top_a = dict(a.most_common(limit))
+    top_b = dict(b.most_common(limit))
+    keys = set(top_a) | set(top_b)
+    if not keys:
+        return 0.0
+    intersection = sum(min(top_a.get(key, 0), top_b.get(key, 0)) for key in keys)
+    union = sum(max(top_a.get(key, 0), top_b.get(key, 0)) for key in keys)
+    return float(intersection / max(1, union))
+
+
+def _content_neighbors(counter: Counter[str]) -> Counter[str]:
+    filtered: Counter[str] = Counter()
+    for token, count in counter.items():
+        if not token or len(token) < 3:
+            continue
+        bucket = WordAdapter.semantic_bucket(token)
+        if bucket in {0, 1, 2, 3}:
+            continue
+        filtered[token] = count
+    return filtered
+
+
+def _sentence_chunks(text: str) -> List[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", raw)
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def _stem_like(token: str) -> str:
+    tok = str(token or "").strip().lower()
+    if len(tok) <= 3:
+        return tok
+    if tok.endswith("'s"):
+        tok = tok[:-2]
+    for suffix in ("ing", "ed", "es", "s"):
+        if tok.endswith(suffix) and len(tok) > len(suffix) + 2:
+            base = tok[: -len(suffix)]
+            if suffix == "es" and base.endswith("i"):
+                base = base[:-1] + "y"
+            return base
+    return tok
+
+
+def _build_corpus_aliases(
+    chunks: Sequence[str],
+    *,
+    lowercase: bool = True,
+    min_freq: int = 2,
+    max_aliases: int = 512,
+    similarity_threshold: float = 0.36,
+) -> Dict[str, str]:
+    counts: Counter[str] = Counter()
+    contexts: Dict[str, Counter[str]] = {}
+    sentence_contexts: Dict[str, Counter[str]] = {}
+
+    for chunk in chunks:
+        tokens = _tokenize_raw_words(chunk, lowercase=lowercase)
+        if len(tokens) < 2:
+            continue
+        counts.update(tokens)
+        for idx, tok in enumerate(tokens):
+            ctx = contexts.setdefault(tok, Counter())
+            left = tokens[max(0, idx - 2): idx]
+            right = tokens[idx + 1: idx + 3]
+            for neighbor in left + right:
+                if neighbor != tok:
+                    ctx[neighbor] += 1
+        for sentence in _sentence_chunks(chunk):
+            sentence_tokens = _tokenize_raw_words(sentence, lowercase=lowercase)
+            if len(sentence_tokens) < 2:
+                continue
+            sentence_content = _content_neighbors(Counter(sentence_tokens))
+            for tok in sentence_tokens:
+                sent_ctx = sentence_contexts.setdefault(tok, Counter())
+                for neighbor, value in sentence_content.items():
+                    if neighbor != tok:
+                        sent_ctx[neighbor] += value
+
+    ordered = sorted(
+        [tok for tok, count in counts.items() if count >= min_freq],
+        key=lambda tok: (-counts[tok], WordAdapter.semantic_bucket(tok), tok),
+    )
+
+    alias_map: Dict[str, str] = {}
+    canonical_heads = set()
+    alias_terms = set()
+
+    def _canonical_choice(a: str, b: str) -> str:
+        return min(
+            (a, b),
+            key=lambda tok: (-counts[tok], len(tok), WordAdapter.semantic_bucket(tok), tok),
+        )
+
+    candidate_pool = [
+        tok
+        for tok in ordered
+        if len(tok) >= 3
+        and WordAdapter.semantic_bucket(tok) not in {0, 1, 2, 3}
+        and tok not in WordAdapter.COMMON_VERBS
+        and tok not in WordAdapter.COMMON_ADJECTIVES
+    ]
+
+    candidate_scores: Dict[str, List[Tuple[float, str, int]]] = {}
+    token_context_cache: Dict[str, Counter[str]] = {
+        tok: _content_neighbors(contexts.get(tok, Counter()))
+        for tok in candidate_pool
+    }
+    token_sentence_context_cache: Dict[str, Counter[str]] = {
+        tok: _content_neighbors(sentence_contexts.get(tok, Counter()))
+        for tok in candidate_pool
+    }
+
+    for token in sorted(candidate_pool, key=lambda tok: (counts[tok], WordAdapter.semantic_bucket(tok), tok)):
+        if token in alias_map:
+            continue
+        bucket = WordAdapter.semantic_bucket(token)
+        stem = _stem_like(token)
+        token_ctx = token_context_cache.get(token, Counter())
+        token_sent_ctx = token_sentence_context_cache.get(token, Counter())
+        scored_candidates: List[Tuple[float, str, int]] = []
+        for candidate in ordered:
+            if candidate == token or counts[candidate] < counts[token]:
+                continue
+            if WordAdapter.semantic_bucket(candidate) != bucket:
+                continue
+            if candidate in WordAdapter.COMMON_VERBS or candidate in WordAdapter.COMMON_ADJECTIVES:
+                continue
+            candidate_stem = _stem_like(candidate)
+            candidate_ctx = token_context_cache.get(candidate, Counter())
+            candidate_sent_ctx = token_sentence_context_cache.get(candidate, Counter())
+            shared_neighbors = token_ctx.keys() & candidate_ctx.keys()
+            shared_sent_neighbors = token_sent_ctx.keys() & candidate_sent_ctx.keys()
+            overlap = len(shared_neighbors) + len(shared_sent_neighbors)
+            if overlap < 1:
+                continue
+            score = 0.65 * _weighted_jaccard(token_ctx, candidate_ctx)
+            if token_sent_ctx and candidate_sent_ctx:
+                score += 0.35 * _weighted_jaccard(token_sent_ctx, candidate_sent_ctx)
+            if stem == candidate_stem:
+                score += 0.18
+            if stem and candidate_stem and stem[:4] == candidate_stem[:4]:
+                score += 0.08
+            if abs(len(candidate) - len(token)) <= 3:
+                score += 0.04
+            scored_candidates.append((score, candidate, overlap))
+        if not scored_candidates:
+            continue
+        scored_candidates.sort(key=lambda item: (item[0], counts[item[1]], item[1]), reverse=True)
+        candidate_scores[token] = scored_candidates
+
+    def _best_choice(token: str) -> Tuple[str, float, int, float]:
+        scored = candidate_scores.get(token, [])
+        if not scored:
+            return "", 0.0, 0, 0.0
+        score, candidate, overlap = scored[0]
+        second_best = scored[1][0] if len(scored) > 1 else 0.0
+        return candidate, score, overlap, second_best
+
+    for token in sorted(candidate_scores, key=lambda tok: (counts[tok], WordAdapter.semantic_bucket(tok), tok)):
+        if token in alias_terms or token in canonical_heads:
+            continue
+        best_candidate, best_score, best_overlap, second_best = _best_choice(token)
+        if not best_candidate:
+            continue
+        if best_score < similarity_threshold:
+            continue
+        if best_score < second_best + 0.12:
+            continue
+        if best_overlap < 1:
+            continue
+        canonical = _canonical_choice(token, best_candidate)
+        alias = token if canonical == best_candidate else best_candidate
+        if alias == canonical:
+            continue
+        if canonical in alias_terms:
+            continue
+        alias_map[alias] = canonical
+        alias_terms.add(alias)
+        canonical_heads.add(canonical)
+        if len(alias_map) >= max_aliases:
+            break
+
+    return alias_map
 
 
 def _read_text(path: str) -> str:
@@ -112,38 +312,6 @@ def load_local_corpus_chunks(
             chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size) if len(text[i:i + chunk_size]) >= 100]
 
     return chunks
-
-
-def _build_vocab(
-    chunks: Sequence[str],
-    *,
-    max_vocab_size: int,
-    lowercase: bool = True,
-    min_freq: int = 2,
-) -> Dict[str, int]:
-    adapter = WordAdapter(max_vocab_size=max_vocab_size, lowercase=lowercase)
-    counts: Counter[str] = Counter()
-    for chunk in chunks:
-        counts.update(tok for tok in adapter.tokenize(chunk) if tok not in RESERVED_TOKENS)
-
-    vocab: Dict[str, int] = {
-        "<UNK>": 0,
-        "<BOS>": 1,
-        "<EOS>": 2,
-        "<NL>": 3,
-        "<PARA>": 4,
-    }
-    next_idx = len(vocab)
-    for token, count in counts.most_common():
-        if count < min_freq:
-            continue
-        if token in vocab:
-            continue
-        if next_idx >= max_vocab_size:
-            break
-        vocab[token] = next_idx
-        next_idx += 1
-    return vocab
 
 
 def _pattern_fingerprint(p: HierarchicalPattern) -> np.ndarray:
@@ -230,8 +398,27 @@ def build_large_word_library(
         print("[error] No data available.")
         return 1
 
-    vocab = _build_vocab(chunks, max_vocab_size=max_vocab_size, lowercase=lowercase, min_freq=min_freq)
-    adapter = WordAdapter(max_vocab_size=len(vocab), lowercase=lowercase, vocab=vocab)
+    corpus_aliases = _build_corpus_aliases(
+        chunks,
+        lowercase=lowercase,
+        min_freq=min_freq,
+        max_aliases=max(64, max_vocab_size // 8),
+    )
+    merged_aliases = dict(WordAdapter.DEFAULT_CANONICAL_ALIASES)
+    merged_aliases.update(corpus_aliases)
+    vocab = WordAdapter.build_semantic_vocab(
+        chunks,
+        max_vocab_size=max_vocab_size,
+        lowercase=lowercase,
+        min_freq=min_freq,
+        canonical_aliases=merged_aliases,
+    )
+    adapter = WordAdapter(
+        max_vocab_size=max_vocab_size,
+        lowercase=lowercase,
+        vocab=vocab,
+        canonical_aliases=merged_aliases,
+    )
     print(f"[data] {len(chunks)} chunks ready | vocab={len(vocab)}")
 
     all_patterns: List[HierarchicalPattern] = []
@@ -282,6 +469,9 @@ def build_large_word_library(
         "max_vocab_size": int(adapter.obs_dim),
         "lowercase": bool(lowercase),
         "word_vocab": dict(adapter._word_to_id),
+        "canonical_aliases": dict(adapter._canonical_aliases),
+        "derived_corpus_aliases": dict(corpus_aliases),
+        "vocab_contract": WordAdapter.vocab_contract(),
     }
     with open(base + ".surface.json", "w", encoding="utf-8") as f:
         json.dump(surface_state, f)

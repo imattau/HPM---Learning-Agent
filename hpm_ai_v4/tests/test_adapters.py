@@ -111,6 +111,53 @@ def test_word_adapter_round_trip_and_vocab_growth():
     assert a.from_observations(tokens).startswith("hello world")
     assert a.encode_token("newtoken") != a.encode_token("hello")
 
+
+def test_word_adapter_semantic_aliases_collapse_synonyms():
+    a = WordAdapter(
+        max_vocab_size=32,
+        canonical_aliases={"feline": "cat", "canine": "dog", "reply": "answer"},
+    )
+    tokens = a.to_observations("The feline and the canine reply.")
+    decoded = [a.decode_token(tok) for tok in tokens]
+
+    assert "cat" in decoded
+    assert "dog" in decoded
+    assert "answer" in decoded
+
+
+def test_word_adapter_build_semantic_vocab_orders_common_function_words_first():
+    vocab = WordAdapter.build_semantic_vocab(
+        [
+            "The cat chased the dog.",
+            "The cat saw the dog.",
+            "The feline saw the canine.",
+        ],
+        max_vocab_size=32,
+        min_freq=1,
+        canonical_aliases={"feline": "cat", "canine": "dog"},
+    )
+
+    assert vocab["<UNK>"] == 0
+    assert vocab["<BOS>"] == 1
+    assert vocab["<EOS>"] == 2
+    assert vocab["<NL>"] == 3
+    assert vocab["<PARA>"] == 4
+    assert vocab["the"] < vocab["cat"]
+    assert "feline" not in vocab
+    assert "canine" not in vocab
+
+
+def test_word_adapter_vocab_contract_exposes_hpm_guarantees():
+    contract = WordAdapter.vocab_contract()
+    checklist = WordAdapter.vocab_checklist()
+
+    assert contract["stable_tokenization"] is True
+    assert contract["bounded_vocab"] is True
+    assert "canonical_aliases" in contract["bundle_keys"]
+    assert "<UNK>" in contract["reserved_tokens"]
+    assert checklist
+    assert any("bounded" in item.lower() for item in checklist)
+
 def test_encode_char_uppercase():
     a = CharClassAdapter()
     assert a.encode_char('Z') == 0

@@ -352,10 +352,79 @@ class WordAdapter(InputAdapter):
     """Word-level surface adapter with a bounded dynamic vocabulary."""
 
     TOKEN_RE = re.compile(r"\n|[A-Za-z]+(?:'[A-Za-z]+)?|[0-9]+|[^\w\s]", re.UNICODE)
+    FUNCTION_WORDS = {
+        "a", "an", "the", "and", "or", "but", "if", "then", "so", "because", "while", "when", "where",
+        "of", "to", "in", "on", "at", "for", "from", "by", "with", "without", "into", "over", "under",
+        "is", "are", "was", "were", "be", "been", "being", "do", "does", "did", "have", "has", "had",
+        "can", "could", "will", "would", "should", "may", "might", "must",
+    }
+    PRONOUNS = {
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "their", "our", "its", "this", "that", "these", "those",
+    }
+    QUESTION_WORDS = {"who", "what", "when", "where", "why", "how", "which", "whom", "whose"}
+    COMMON_VERBS = {
+        "say", "says", "said", "see", "saw", "seen", "make", "made", "go", "went", "gone",
+        "know", "knew", "known", "think", "thought", "take", "took", "taken", "write", "wrote", "written",
+        "chase", "chased", "sit", "sat", "move", "moved", "run", "ran", "help", "helped", "notice", "noticed",
+        "admire", "admired", "like", "liked", "watch", "watched", "tell", "told", "read", "read", "give", "gave",
+        "given", "become", "became", "find", "found", "ask", "asked", "need", "needed", "want", "wanted",
+        "have", "had", "do", "did", "done", "be", "is", "are", "was", "were", "been",
+    }
+    COMMON_ADJECTIVES = {
+        "big", "small", "large", "little", "quick", "slow", "fast", "red", "blue", "green", "young",
+        "old", "new", "good", "bad", "happy", "sad", "warm", "cold", "bright", "dark", "round",
+        "clear", "simple", "complex", "useful", "helpful", "true", "false",
+    }
+    DEFAULT_CANONICAL_ALIASES = {
+        "feline": "cat",
+        "kitty": "cat",
+        "canine": "dog",
+        "puppy": "dog",
+        "automobile": "car",
+        "vehicle": "car",
+        "kid": "child",
+        "youth": "child",
+        "purchase": "buy",
+        "buying": "buy",
+        "begin": "start",
+        "commence": "start",
+        "finish": "end",
+        "finishs": "end",
+        "assist": "help",
+        "assistive": "help",
+        "reply": "answer",
+        "respond": "answer",
+        "quickly": "quick",
+        "rapid": "fast",
+        "large": "big",
+        "little": "small",
+        "glad": "happy",
+        "sadness": "sad",
+    }
+    VOCAB_CONTRACT = {
+        "stable_tokenization": True,
+        "bounded_vocab": True,
+        "canonicalization": "alias + light stemming",
+        "reserved_tokens": ("<UNK>", "<BOS>", "<EOS>", "<NL>", "<PARA>"),
+        "semantic_ordering": "frequency + lexical bucket",
+        "bundle_keys": ("max_vocab_size", "lowercase", "word_vocab", "canonical_aliases"),
+    }
 
-    def __init__(self, max_vocab_size: int = 5000, lowercase: bool = True, vocab: Optional[Dict[str, int]] = None):
+    def __init__(
+        self,
+        max_vocab_size: int = 5000,
+        lowercase: bool = True,
+        vocab: Optional[Dict[str, int]] = None,
+        canonical_aliases: Optional[Dict[str, str]] = None,
+    ):
         self._max_vocab_size = max(8, int(max_vocab_size))
         self.lowercase = bool(lowercase)
+        self._canonical_aliases = {
+            str(alias).strip().lower() if self.lowercase else str(alias).strip(): str(canonical).strip().lower() if self.lowercase else str(canonical).strip()
+            for alias, canonical in dict(canonical_aliases or {}).items()
+            if str(alias).strip() and str(canonical).strip()
+        }
         self.UNK_TOKEN = "<UNK>"
         self.BOS_TOKEN = "<BOS>"
         self.EOS_TOKEN = "<EOS>"
@@ -377,6 +446,27 @@ class WordAdapter(InputAdapter):
         self._word_to_id = dict(sorted(base_vocab.items(), key=lambda item: item[1]))
         self._id_to_word: Dict[int, str] = {idx: tok for tok, idx in self._word_to_id.items()}
 
+    @classmethod
+    def vocab_contract(cls) -> Dict[str, Any]:
+        return {
+            "stable_tokenization": bool(cls.VOCAB_CONTRACT["stable_tokenization"]),
+            "bounded_vocab": bool(cls.VOCAB_CONTRACT["bounded_vocab"]),
+            "canonicalization": str(cls.VOCAB_CONTRACT["canonicalization"]),
+            "reserved_tokens": list(cls.VOCAB_CONTRACT["reserved_tokens"]),
+            "semantic_ordering": str(cls.VOCAB_CONTRACT["semantic_ordering"]),
+            "bundle_keys": list(cls.VOCAB_CONTRACT["bundle_keys"]),
+        }
+
+    @classmethod
+    def vocab_checklist(cls) -> List[str]:
+        return [
+            "Tokenization is stable across runs.",
+            "Vocabulary size is bounded.",
+            "Canonical aliases are persisted with the bundle.",
+            "Reserved tokens are always present.",
+            "Vocabulary ordering is frequency- and bucket-aware.",
+        ]
+
     @property
     def obs_dim(self) -> int:
         return self._max_vocab_size
@@ -394,17 +484,29 @@ class WordAdapter(InputAdapter):
             if tok == "\n":
                 tokens.append(self.NEWLINE_TOKEN)
                 continue
-            tokens.append(tok.lower() if self.lowercase else tok)
+            tokens.append(self._canonical_token(tok))
         return tokens
 
-    def encode_token(self, token: str) -> int:
+    def _canonical_token(self, token: str) -> str:
         tok = str(token or "").strip()
         if not tok:
-            return self._word_to_id[self.UNK_TOKEN]
+            return self.UNK_TOKEN
         if tok == "\n":
-            tok = self.NEWLINE_TOKEN
+            return self.NEWLINE_TOKEN
         if self.lowercase and tok not in {self.UNK_TOKEN, self.BOS_TOKEN, self.EOS_TOKEN, self.NEWLINE_TOKEN, self.PARA_TOKEN}:
             tok = tok.lower()
+        tok = self._canonical_aliases.get(tok, tok)
+        if tok.endswith("'s") and len(tok) > 3:
+            tok = tok[:-2]
+        if tok.endswith("s") and len(tok) > 3 and not tok.endswith("ss") and tok not in self.COMMON_VERBS:
+            singular = tok[:-1]
+            tok = self._canonical_aliases.get(singular, singular)
+        return tok
+
+    def encode_token(self, token: str) -> int:
+        tok = self._canonical_token(token)
+        if not tok:
+            return self._word_to_id[self.UNK_TOKEN]
         if tok in self._word_to_id:
             return self._word_to_id[tok]
         if len(self._word_to_id) >= self._max_vocab_size:
@@ -452,6 +554,67 @@ class WordAdapter(InputAdapter):
             else:
                 pieces.append(" " + tok)
         return "".join(pieces).strip()
+
+    @classmethod
+    def semantic_bucket(cls, token: str) -> int:
+        tok = str(token or "").strip().lower()
+        if not tok or tok in {"<unk>", "<bos>", "<eos>", "<nl>", "<para>"}:
+            return 0
+        if tok in cls.PRONOUNS or tok in cls.QUESTION_WORDS:
+            return 1
+        if tok in cls.FUNCTION_WORDS:
+            return 2
+        if tok.isdigit():
+            return 3
+        if tok in cls.COMMON_VERBS or tok.endswith("ed") or tok.endswith("ing"):
+            return 4
+        if tok in cls.COMMON_ADJECTIVES or tok.endswith("ous") or tok.endswith("ful") or tok.endswith("able"):
+            return 5
+        if tok.isalpha():
+            return 6
+        return 7
+
+    @classmethod
+    def build_semantic_vocab(
+        cls,
+        chunks: Sequence[str],
+        *,
+        max_vocab_size: int = 5000,
+        lowercase: bool = True,
+        min_freq: int = 2,
+        canonical_aliases: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, int]:
+        adapter = cls(max_vocab_size=max_vocab_size, lowercase=lowercase, canonical_aliases=canonical_aliases)
+        counts: Dict[str, int] = {}
+        for chunk in chunks:
+            for tok in adapter.tokenize(chunk):
+                if tok in {adapter.UNK_TOKEN, adapter.BOS_TOKEN, adapter.EOS_TOKEN, adapter.NEWLINE_TOKEN, adapter.PARA_TOKEN}:
+                    continue
+                counts[tok] = counts.get(tok, 0) + 1
+        ordered_tokens = sorted(
+            (
+                token
+                for token, count in counts.items()
+                if count >= min_freq
+            ),
+            key=lambda token: (cls.semantic_bucket(token), -counts[token], token),
+        )
+        vocab: Dict[str, int] = {
+            adapter.UNK_TOKEN: 0,
+            adapter.BOS_TOKEN: 1,
+            adapter.EOS_TOKEN: 2,
+            adapter.NEWLINE_TOKEN: 3,
+            adapter.PARA_TOKEN: 4,
+        }
+        next_idx = len(vocab)
+        for token in ordered_tokens:
+            if token in vocab:
+                continue
+            if next_idx >= max_vocab_size:
+                break
+            vocab[token] = next_idx
+            next_idx += 1
+        return vocab
 
     def _sentence_confidence(self, sentence: str, sentence_type: str) -> float:
         words = sentence.split()
