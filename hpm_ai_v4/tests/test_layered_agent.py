@@ -52,6 +52,14 @@ def test_layered_agent_obs_dims():
     assert agent.l1.obs_dim == 95
     assert agent.l2.obs_dim == 10
     assert agent.l3.obs_dim == 10
+    assert agent.layer_latent_dims["l3"] == 8
+    assert agent.l3.patterns[0].latent_dim == 8
+
+
+def test_layered_agent_allows_custom_l3_latent_width():
+    agent = LayeredAgent(num_workers=1, layer_latent_dims={"l3": 12})
+    assert agent.layer_latent_dims["l3"] == 12
+    assert agent.l3.patterns[0].latent_dim == 12
 
 
 def test_layered_agent_word_surface_mode():

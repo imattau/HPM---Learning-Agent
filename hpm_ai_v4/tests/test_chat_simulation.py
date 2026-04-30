@@ -1,6 +1,6 @@
 import os
 
-from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, run_binding_evaluator_benchmark, _resolve_chat_library_path
+from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, run_binding_evaluator_benchmark, run_binding_width_sweep_benchmark, _resolve_chat_library_path
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.text_signals import TextSignalPack, TextSignalExtractor
@@ -615,6 +615,83 @@ def test_basic_chat_session_query_handles_plain_who_subject(monkeypatch):
     assert result["source"] == "registry_subject"
 
 
+def test_basic_chat_session_query_handles_nested_clause_subject(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat that the dog chased sat on the mat.")
+    session.chat_turn("The mat was red.")
+
+    result = session.query("Who sat on the mat?")
+
+    assert result["answer"] == "cat"
+    assert result["source"] == "registry_subject"
+
+
+def test_basic_chat_session_query_handles_passive_subject_binding(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The dog was chased by the cat.")
+
+    result = session.query("Who chased the dog?")
+
+    assert result["answer"] == "cat"
+    assert result["source"] in {"registry_subject", "relational_subject"}
+
+
+def test_basic_chat_session_query_handles_what_subject_lookup(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The robot moved toward the mat.")
+
+    result = session.query("What moved toward the mat?")
+
+    assert result["answer"] == "robot"
+    assert result["source"] in {"registry_subject", "relational_subject"}
+
+
+def test_basic_chat_session_query_handles_copula_property_lookup(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    def fake_generate_text(**kwargs):
+        return "It helps."
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "generate_chars", fake_generate_text)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The trophy was red.")
+
+    result = session.query("What was red?")
+
+    assert result["answer"] == "trophy"
+    assert result["source"] in {"property", "relational_property"}
+
+
 def test_basic_chat_session_query_handles_negation_with_low_confidence(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
@@ -704,6 +781,45 @@ def test_run_binding_evaluator_benchmark_reports_accuracy(tmp_path):
     assert 0.0 <= report["aggregate"]["avg_binding_prediction_accuracy"] <= 1.0
     assert 0.0 <= report["aggregate"]["avg_answer_accuracy"] <= 1.0
     assert (tmp_path / "binding_evaluator_benchmark.json").exists()
+
+
+def test_run_binding_width_sweep_benchmark_reports_comparison(tmp_path, monkeypatch):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("the quick brown fox jumps over the lazy dog " * 20)
+
+    calls = []
+
+    def fake_run_binding_evaluator_benchmark(*args, **kwargs):
+        width = int((kwargs.get("layer_latent_dims") or {}).get("l3", 0))
+        calls.append(width)
+        return {
+            "aggregate": {
+                "case_count": 3,
+                "avg_answer_accuracy": 0.25 + 0.05 * (width // 4),
+                "avg_binding_prediction_accuracy": 0.50 + 0.02 * (width // 4),
+                "avg_confidence": 0.40 + 0.01 * (width // 4),
+            },
+            "cases": [],
+        }
+
+    monkeypatch.setattr("hpm_ai_v4.simulations.chat_simulation.run_binding_evaluator_benchmark", fake_run_binding_evaluator_benchmark)
+
+    report = run_binding_width_sweep_benchmark(
+        corpus_path=str(corpus),
+        widths=[8, 12],
+        warmup_chars=32,
+        history_window=2,
+        response_steps=8,
+        num_workers=1,
+        use_dict=False,
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert calls == [8, 12]
+    assert report["baseline_width"] == 8
+    assert len(report["arms"]) == 2
+    assert report["comparison"][1]["delta_answer_accuracy"] > 0.0
+    assert (tmp_path / "binding_width_sweep_benchmark.json").exists()
 
 
 def test_chat_response_score_penalizes_recent_echo():

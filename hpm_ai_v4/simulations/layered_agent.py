@@ -34,13 +34,25 @@ class LayeredAgent:
 
     SOFT_STATE_BINS = 5
     SOFT_STATE_OBS_DIM = 10
+    DEFAULT_LAYER_LATENT_DIMS = {
+        "l1": 2,
+        "l2": 2,
+        "l3": 8,
+        "l4": 2,
+    }
 
     def __init__(self, num_workers: int = 1,
                  dictionary: Optional[DictionaryValidator] = None,
                  grammar: Optional[GrammarValidator] = None,
-                 surface_mode: str = "ascii"):
+                 surface_mode: str = "ascii",
+                 layer_latent_dims: Optional[Dict[str, int]] = None):
         self._adapter = None
         self.surface_mode = ""
+        self.layer_latent_dims = dict(self.DEFAULT_LAYER_LATENT_DIMS)
+        if layer_latent_dims:
+            for key, value in layer_latent_dims.items():
+                if key in self.layer_latent_dims:
+                    self.layer_latent_dims[key] = max(2, int(value))
         self._set_surface_mode(surface_mode)
         self.dictionary = dictionary
         self.grammar = grammar
@@ -52,10 +64,10 @@ class LayeredAgent:
                            dictionary=dictionary, grammar=grammar)
         self.l4 = HPMAgent(obs_dim=32, num_initial_patterns=4, num_workers=num_workers,
                            dictionary=dictionary, grammar=grammar)
-        _init_equal_weights(self.l1, hier_k=2, obs_dim=self._adapter.obs_dim)
-        _init_equal_weights(self.l2, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
-        _init_equal_weights(self.l3, hier_k=2, obs_dim=self.SOFT_STATE_OBS_DIM)
-        _init_equal_weights(self.l4, hier_k=2, obs_dim=32)
+        _init_equal_weights(self.l1, hier_k=self.layer_latent_dims["l1"], obs_dim=self._adapter.obs_dim)
+        _init_equal_weights(self.l2, hier_k=self.layer_latent_dims["l2"], obs_dim=self.SOFT_STATE_OBS_DIM)
+        _init_equal_weights(self.l3, hier_k=self.layer_latent_dims["l3"], obs_dim=self.SOFT_STATE_OBS_DIM)
+        _init_equal_weights(self.l4, hier_k=self.layer_latent_dims["l4"], obs_dim=32)
         self._raw_history: List[int] = []
         self._l1_state_history: List[int] = []
         self._l2_state_history: List[int] = []
@@ -576,7 +588,10 @@ class LayeredAgent:
         self._save_reasoner_state(base_path, "l4", self.l4.reasoner)
         self._save_reasoner_state(base_path, "l5", self.l5.reasoner)
         with open(base_path + ".surface.json", "w", encoding="utf-8") as f:
-            surface_state = {"surface_mode": self.surface_mode}
+            surface_state = {
+                "surface_mode": self.surface_mode,
+                "layer_latent_dims": dict(self.layer_latent_dims),
+            }
             if self.surface_mode == "word" and hasattr(self._adapter, "_word_to_id"):
                 surface_state["max_vocab_size"] = int(getattr(self._adapter, "_max_vocab_size", 5000))
                 surface_state["lowercase"] = bool(getattr(self._adapter, "lowercase", True))
@@ -616,6 +631,11 @@ class LayeredAgent:
         if os.path.exists(surface_path):
             with open(surface_path, "r", encoding="utf-8") as f:
                 surface_state = json.load(f)
+            layer_latent_dims = surface_state.get("layer_latent_dims")
+            if isinstance(layer_latent_dims, dict):
+                for key, value in layer_latent_dims.items():
+                    if key in self.layer_latent_dims:
+                        self.layer_latent_dims[key] = max(2, int(value))
             self._set_surface_mode(surface_state.get("surface_mode", self.surface_mode), surface_state=surface_state)
         elif self.l1.patterns:
             obs_dim = getattr(self.l1.patterns[0], "obs_dim", self._adapter.obs_dim)

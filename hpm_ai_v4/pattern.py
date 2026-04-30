@@ -6,10 +6,10 @@ class HierarchicalPattern:
     """Single-level HMM. Hierarchy emerges from stacking patterns via get_top_state()."""
 
     def __init__(self, pattern_id, latent_dim=2, obs_dim=6):
-        if latent_dim > 4:
+        if latent_dim > 16:
             warnings.warn(
-                f"HierarchicalPattern created with latent_dim={latent_dim} > 4. "
-                "HPM architecture requires small-K (max 4). Use depth, not width.",
+                f"HierarchicalPattern created with latent_dim={latent_dim} > 16. "
+                "Very wide HMMs are experimental; prefer moderate widths and benchmark the effect.",
                 stacklevel=2,
             )
         self.id = pattern_id

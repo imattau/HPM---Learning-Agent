@@ -791,7 +791,12 @@ class BasicChatSession:
         object_hint = object_hint.strip().lower()
         candidates = list(self.discourse_state.entity_registry.items())
         if predicate_hint:
-            matching = [(entity, record) for entity, record in candidates if record.get("last_predicate") == predicate_hint]
+            matching = [
+                (entity, record)
+                for entity, record in candidates
+                if record.get("last_predicate") == predicate_hint
+                or record.get("role_bindings", {}).get("predicate") == predicate_hint
+            ]
             if matching:
                 candidates = matching
         best_entity = ""
@@ -800,17 +805,21 @@ class BasicChatSession:
             score = float(record.get("salience", 0.0))
             if predicate_hint:
                 if record.get("last_predicate") == predicate_hint:
-                    score += 1.15
+                    score += 1.25
                 else:
-                    score -= 0.70
+                    score -= 0.85
             if object_hint and record.get("last_object") == object_hint:
-                score += 0.30
+                score += 0.12
             if record.get("last_role") == "subject":
-                score += 0.20
+                score += 0.34
+            elif record.get("last_role") == "object":
+                score -= 0.18
             if entity == self.discourse_state.topic:
                 score += 0.10 * max(0.2, float(self.discourse_state.topic_confidence))
             if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
                 score += 0.08
+            if entity in self.discourse_state.active_entities[:2]:
+                score += 0.10
             if score > best_score:
                 best_score = score
                 best_entity = entity
@@ -821,7 +830,12 @@ class BasicChatSession:
         predicate_hint = predicate_hint.strip().lower()
         candidates = list(self.discourse_state.entity_registry.items())
         if subject_hint:
-            matching = [(entity, record) for entity, record in candidates if record.get("last_subject") == subject_hint]
+            matching = [
+                (entity, record)
+                for entity, record in candidates
+                if record.get("last_subject") == subject_hint
+                or record.get("role_bindings", {}).get("subject") == subject_hint
+            ]
             if matching:
                 candidates = matching
         best_entity = ""
@@ -830,17 +844,56 @@ class BasicChatSession:
             score = float(record.get("salience", 0.0))
             if predicate_hint:
                 if record.get("last_predicate") == predicate_hint:
-                    score += 1.10
+                    score += 1.22
                 else:
-                    score -= 0.55
+                    score -= 0.65
             if subject_hint and record.get("last_subject") == subject_hint:
-                score += 0.75
+                score += 0.90
             if record.get("last_role") == "object":
-                score += 0.20
+                score += 0.28
+            elif record.get("last_role") == "subject":
+                score -= 0.08
             if entity == self.discourse_state.topic:
                 score += 0.08 * max(0.2, float(self.discourse_state.topic_confidence))
             if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
                 score += 0.08
+            if entity in self.discourse_state.active_entities[:2]:
+                score += 0.08
+            if score > best_score:
+                best_score = score
+                best_entity = entity
+        return best_entity
+
+    def _best_entity_by_property(self, property_hints: Iterable[str]) -> str:
+        hints = {hint.strip().lower() for hint in property_hints if hint}
+        if not hints:
+            return ""
+        copulas = {"is", "are", "was", "were", "be", "been"}
+        best_entity = ""
+        best_score = -1e9
+        for entity, record in self.discourse_state.entity_registry.items():
+            score = float(record.get("salience", 0.0))
+            score += 0.08 * min(5, int(record.get("mention_count", 0)))
+            subject = str(record.get("last_subject", "")).lower()
+            predicate = str(record.get("last_predicate", "unknown")).lower()
+            obj = str(record.get("last_object", "unknown")).lower()
+            role_predicate = str(record.get("role_bindings", {}).get("predicate", "unknown")).lower()
+            if predicate in hints or role_predicate in hints:
+                score += 1.20
+            if obj in hints:
+                score += 1.28
+                if predicate in copulas:
+                    score += 0.22
+            if entity in hints:
+                score += 0.08
+            if subject == entity:
+                score += 0.12
+            if record.get("last_role") == "subject":
+                score += 0.10
+            elif record.get("last_role") == "object":
+                score -= 0.05
+            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+                score += 0.05
             if score > best_score:
                 best_score = score
                 best_entity = entity
@@ -849,15 +902,7 @@ class BasicChatSession:
     def _parse_query_frame(self, question_text: str) -> Dict[str, Any]:
         lower = question_text.strip().lower()
         tokens = re.findall(r"[A-Za-z']+", lower)
-        content_tokens = [
-            tok
-            for tok in tokens
-            if tok not in _DISCOURSE_STOPWORDS
-            and tok not in _DISCOURSE_PRONOUNS
-            and tok not in _DISCOURSE_INTERROGATIVES
-            and tok not in _DISCOURSE_AUXILIARIES
-            and any(ch.isalpha() for ch in tok)
-        ]
+        content_tokens = self._semantic_tokens(tokens)
         negated = any(tok in _DISCOURSE_NEGATIONS or "n't" in tok for tok in tokens)
         predicate_hint = ""
         subject_hint = ""
@@ -1288,6 +1333,18 @@ class BasicChatSession:
                 return tok
         return ""
 
+    def _semantic_tokens(self, tokens: List[str], *, keep_prepositions: bool = False) -> List[str]:
+        semantic: List[str] = []
+        for tok in tokens:
+            if not tok or not any(ch.isalpha() for ch in tok):
+                continue
+            if tok in _DISCOURSE_STOPWORDS or tok in _DISCOURSE_PRONOUNS or tok in _DISCOURSE_INTERROGATIVES or tok in _DISCOURSE_AUXILIARIES:
+                continue
+            if not keep_prepositions and tok in _DISCOURSE_PREPOSITIONS:
+                continue
+            semantic.append(tok)
+        return semantic
+
     def _split_clause_segments(self, raw_tokens: List[str]) -> List[List[str]]:
         segments: List[List[str]] = []
         current: List[str] = []
@@ -1310,14 +1367,10 @@ class BasicChatSession:
         sentence_features: Dict[str, Any],
         fallback_subject: str = "unknown",
     ) -> Dict[str, Any]:
-        content_tokens = [
-            tok
-            for tok in raw_tokens
-            if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and any(ch.isalpha() for ch in tok)
-        ]
+        content_tokens = self._semantic_tokens(raw_tokens)
         subject = self._first_meaningful_token(content_tokens)
-        predicate = content_tokens[1] if len(content_tokens) > 1 else "unknown"
-        obj = content_tokens[2] if len(content_tokens) > 2 else "unknown"
+        predicate = "unknown"
+        obj = "unknown"
         voice = "active"
         grammatical_subject = subject if subject != "unknown" else fallback_subject
         agent = subject
@@ -1336,7 +1389,10 @@ class BasicChatSession:
             predicate_candidates = [
                 tok
                 for tok in before_by
-                if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and tok not in {"was", "were", "been", "by"}
+                if tok not in _DISCOURSE_STOPWORDS
+                and tok not in _DISCOURSE_PRONOUNS
+                and tok not in _DISCOURSE_AUXILIARIES
+                and tok not in _DISCOURSE_PREPOSITIONS
             ]
             predicate = predicate_candidates[-1] if predicate_candidates else predicate
             obj = patient
@@ -1349,7 +1405,24 @@ class BasicChatSession:
             ),
             -1,
         )
-        if preposition_index > 0:
+        if not passive_aux and content_tokens:
+            if preposition_index > 0:
+                predicate_candidates = self._semantic_tokens(raw_tokens[:preposition_index])
+                if predicate_candidates:
+                    predicate = predicate_candidates[-1]
+                preposition_object = self._first_meaningful_token(raw_tokens[preposition_index + 1 :])
+                if preposition_object != "unknown":
+                    obj = preposition_object
+            elif len(content_tokens) == 1:
+                predicate = content_tokens[0]
+                obj = "unknown"
+            elif len(content_tokens) == 2:
+                predicate = content_tokens[1]
+                obj = "unknown"
+            else:
+                predicate = content_tokens[1]
+                obj = content_tokens[-1]
+        if preposition_index > 0 and passive_aux:
             preposition_object = self._first_meaningful_token(raw_tokens[preposition_index + 1 :])
             if preposition_object != "unknown":
                 obj = preposition_object
@@ -1507,6 +1580,18 @@ class BasicChatSession:
             sentence_features=sentence_features,
             fallback_subject=inherited_subject,
         )
+        if frames:
+            if frames[0]["voice"] == "passive":
+                current = frames[0]
+            elif len(frames) > 1 and frames[0]["subject"] != "unknown" and frames[-1]["predicate"] != "unknown":
+                current = dict(frames[-1])
+                current["subject"] = frames[0]["subject"]
+                current["agent"] = frames[0]["subject"]
+                current["grammatical_subject"] = frames[0]["subject"]
+                current["role_bindings"] = dict(current.get("role_bindings", {}))
+                current["role_bindings"]["subject"] = frames[0]["subject"]
+                current["role_bindings"]["agent"] = frames[0]["subject"]
+                current["role_bindings"]["grammatical_subject"] = frames[0]["subject"]
 
         if current["subject"] != "unknown":
             self.relational_state.subject = current["subject"]
@@ -1746,9 +1831,18 @@ class BasicChatSession:
         elif pronoun_tokens:
             answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
             resolution_source = "coreference"
-        elif lower.startswith("what") and self.relational_state.object != "unknown":
-            answer = self.relational_state.object
-            resolution_source = "relational_object"
+        elif lower.startswith("what"):
+            copula_query = any(tok in _DISCOURSE_AUXILIARIES for tok in parsed["tokens"])
+            if copula_query:
+                answer = self._best_entity_by_property(parsed["content_tokens"])
+                resolution_source = "property" if answer else "relational_property"
+                if not answer and self.relational_state.subject != "unknown":
+                    answer = self.relational_state.subject
+            else:
+                answer = self._best_subject_for_query(predicate_hint=parsed["predicate_hint"], object_hint=parsed["object_hint"])
+                resolution_source = "registry_subject" if answer else "relational_subject"
+                if not answer and self.relational_state.subject != "unknown":
+                    answer = self.relational_state.subject
         elif any(phrase in lower for phrase in ("what is the topic", "what are we talking about", "what is this about")):
             answer = self.discourse_state.topic
             resolution_source = "topic"
@@ -2402,6 +2496,50 @@ DEFAULT_BINDING_BENCHMARK_CASES: List[Dict[str, Any]] = [
 ]
 
 
+HARD_BINDING_BENCHMARK_CASES: List[Dict[str, Any]] = [
+    {
+        "statements": [
+            "The cat that the dog chased sat on the mat.",
+            "The mat was red.",
+        ],
+        "question": "Who sat on the mat?",
+        "expected": "cat",
+    },
+    {
+        "statements": [
+            "The scientist who the student admired wrote a book.",
+            "The book was blue.",
+        ],
+        "question": "Who wrote a book?",
+        "expected": "scientist",
+    },
+    {
+        "statements": [
+            "The robot saw the cat.",
+            "It then moved toward the mat.",
+        ],
+        "question": "What moved toward the mat?",
+        "expected": "robot",
+    },
+    {
+        "statements": [
+            "The dog was chased by the cat that the child liked.",
+            "The child was young.",
+        ],
+        "question": "Who chased the dog?",
+        "expected": "cat",
+    },
+    {
+        "statements": [
+            "The trophy that the dog noticed was red.",
+            "The dog slept.",
+        ],
+        "question": "What was red?",
+        "expected": "trophy",
+    },
+]
+
+
 def run_binding_evaluator_benchmark(
     corpus_path: str,
     cases: Optional[List[Dict[str, Any]]] = None,
@@ -2411,6 +2549,7 @@ def run_binding_evaluator_benchmark(
     num_workers: int = 1,
     use_dict: bool = False,
     surface_mode: str = "word",
+    layer_latent_dims: Optional[Dict[str, int]] = None,
     library_path: Optional[str] = None,
     checkpoint_dir: str = ".",
     seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
@@ -2425,7 +2564,13 @@ def run_binding_evaluator_benchmark(
     """
     dictionary = NLTKWordList(download=False) if use_dict else None
     grammar = HeuristicGrammarLibrary() if use_dict else None
-    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
+    layered = LayeredAgent(
+        num_workers=num_workers,
+        dictionary=dictionary,
+        grammar=grammar,
+        surface_mode=surface_mode,
+        layer_latent_dims=layer_latent_dims,
+    )
 
     resolved_library_path = _resolve_chat_library_path(library_path)
     if resolved_library_path:
@@ -2511,6 +2656,64 @@ def run_binding_evaluator_benchmark(
         json.dump(report, fh, indent=2, sort_keys=True)
     print(f"Binding evaluator benchmark written: {out_path}")
 
+    return report
+
+
+def run_binding_width_sweep_benchmark(
+    corpus_path: str,
+    widths: Optional[List[int]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Run the binding benchmark across multiple L3 latent widths.
+
+    The first width is treated as the baseline and later widths are compared
+    against it. This stays small and reuses the existing benchmark path.
+    """
+    sweep_widths = list(widths or [8, 12, 16])
+    if not sweep_widths:
+        raise ValueError("widths must contain at least one latent width")
+
+    cases = kwargs.pop("cases", None)
+    benchmark_kwargs = dict(kwargs)
+
+    arms: List[Dict[str, Any]] = []
+    for width in sweep_widths:
+        report = run_binding_evaluator_benchmark(
+            corpus_path=corpus_path,
+            cases=cases,
+            layer_latent_dims={"l3": int(width)},
+            **benchmark_kwargs,
+        )
+        arms.append({
+            "l3_width": int(width),
+            "report": report,
+        })
+
+    baseline = arms[0]["report"]["aggregate"] if arms else {}
+    comparison: List[Dict[str, Any]] = []
+    for arm in arms:
+        agg = arm["report"]["aggregate"]
+        comparison.append({
+            "l3_width": arm["l3_width"],
+            "avg_answer_accuracy": float(agg.get("avg_answer_accuracy", 0.0)),
+            "avg_binding_prediction_accuracy": float(agg.get("avg_binding_prediction_accuracy", 0.0)),
+            "avg_confidence": float(agg.get("avg_confidence", 0.0)),
+            "delta_answer_accuracy": float(agg.get("avg_answer_accuracy", 0.0) - float(baseline.get("avg_answer_accuracy", 0.0))),
+            "delta_binding_prediction_accuracy": float(agg.get("avg_binding_prediction_accuracy", 0.0) - float(baseline.get("avg_binding_prediction_accuracy", 0.0))),
+        })
+
+    report = {
+        "baseline_width": arms[0]["l3_width"],
+        "arms": arms,
+        "comparison": comparison,
+    }
+
+    checkpoint_dir = str(benchmark_kwargs.get("checkpoint_dir", "."))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    out_path = benchmark_kwargs.get("report_path") or os.path.join(checkpoint_dir, "binding_width_sweep_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, sort_keys=True)
+    print(f"Binding width sweep benchmark written: {out_path}")
     return report
 
 
