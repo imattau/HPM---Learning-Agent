@@ -50,9 +50,11 @@ def test_layered_agent_perceive_injects_meta_feedback(monkeypatch):
 def test_layered_agent_obs_dims():
     agent = LayeredAgent(num_workers=1)
     assert agent.l1.obs_dim == 95
-    assert agent.l2.obs_dim == 10
-    assert agent.l3.obs_dim == 10
+    assert agent.l2.obs_dim == 16
+    assert agent.l3.obs_dim == 16
+    assert agent.layer_latent_dims["l2"] == 8
     assert agent.layer_latent_dims["l3"] == 8
+    assert agent.l2.patterns[0].latent_dim == 8
     assert agent.l3.patterns[0].latent_dim == 8
 
 

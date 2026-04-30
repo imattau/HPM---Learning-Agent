@@ -32,11 +32,12 @@ def _init_equal_weights(agent: HPMAgent, hier_k: int, obs_dim: int) -> None:
 class LayeredAgent:
     """Three-level HPM stack where each level consumes the lower level's latent state."""
 
-    SOFT_STATE_BINS = 5
-    SOFT_STATE_OBS_DIM = 10
+    SOFT_STATE_BINS = 8
+    SOFT_STATE_CONFIDENCE_BINS = 2
+    SOFT_STATE_OBS_DIM = 16
     DEFAULT_LAYER_LATENT_DIMS = {
         "l1": 2,
-        "l2": 2,
+        "l2": 8,
         "l3": 8,
         "l4": 2,
     }
@@ -179,14 +180,18 @@ class LayeredAgent:
         if posterior.size == 0:
             return 0
         if posterior.size == 1:
-            return self.SOFT_STATE_BINS - 1
+            return self.SOFT_STATE_OBS_DIM - 1
         top = int(np.argmax(posterior))
         confidence = float(posterior[top])
-        confidence_bucket = min(
-            self.SOFT_STATE_BINS - 1,
-            max(0, int(round(confidence * (self.SOFT_STATE_BINS - 1)))),
-        )
-        return int(top * self.SOFT_STATE_BINS + confidence_bucket)
+        if posterior.size <= self.SOFT_STATE_BINS:
+            state_bucket = top
+        else:
+            state_bucket = int(round(
+                top * (self.SOFT_STATE_BINS - 1) / max(1, posterior.size - 1)
+            ))
+        state_bucket = max(0, min(self.SOFT_STATE_BINS - 1, state_bucket))
+        confidence_bucket = 1 if confidence >= 0.5 else 0
+        return int(state_bucket * self.SOFT_STATE_CONFIDENCE_BINS + confidence_bucket)
 
     def l1_state_distribution(self) -> np.ndarray:
         """Posterior over the best L1 latent state, preserved as a distribution."""
@@ -645,7 +650,16 @@ class LayeredAgent:
             obs_dim = getattr(self.l1.patterns[0], "obs_dim", self._adapter.obs_dim)
             inferred_surface = "word" if obs_dim > 95 else "ascii" if obs_dim == 95 else "coarse"
             self._set_surface_mode(inferred_surface)
+        self._sync_soft_state_obs_dims()
         return loaded
+
+    def _sync_soft_state_obs_dims(self) -> None:
+        """Keep L2/L3 observation spaces aligned with loaded patterns when possible."""
+        for agent in (self.l2, self.l3):
+            if agent.patterns:
+                pattern_obs_dim = int(getattr(agent.patterns[0], "obs_dim", agent.obs_dim))
+                if pattern_obs_dim > 0 and pattern_obs_dim != agent.obs_dim:
+                    agent.obs_dim = pattern_obs_dim
 
     def _save_reasoner_state(self, base_path: str, level: str, reasoner) -> None:
         path = f"{base_path}.reasoner.{level}.json"
