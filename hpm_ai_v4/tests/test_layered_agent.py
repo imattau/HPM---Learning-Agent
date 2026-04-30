@@ -324,6 +324,36 @@ def test_simulate_continuation_ranks_and_restores_state(monkeypatch):
     assert agent._pending_feedback == snapshot["pending_feedback"]
 
 
+def test_simulate_continuation_commit_best_replays_winner(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    outputs = iter(["low fit", "high fit", "medium fit"])
+    committed = {}
+
+    def fake_generate_text(**kwargs):
+        return next(outputs)
+
+    def fake_observe_text(text, **kwargs):
+        committed["text"] = text
+        committed["feedback_signal"] = kwargs.get("feedback_signal", {})
+        return {"target_chars": len(text)}
+
+    monkeypatch.setattr(agent, "generate_text", fake_generate_text)
+    monkeypatch.setattr(agent, "observe_text", fake_observe_text)
+    monkeypatch.setattr(
+        agent,
+        "_continuation_compression_score",
+        lambda text: {"low fit": 0.1, "medium fit": 0.5, "high fit": 0.9}[text],
+    )
+
+    before = list(agent._raw_history)
+    result = agent.simulate_continuation("seed text", steps=3, candidates=3, commit_best=True)
+
+    assert [item["text"] for item in result][0] == "high fit"
+    assert committed["text"] == "high fit"
+    assert committed["feedback_signal"]["kind"] == "simulation_commit"
+    assert agent._raw_history == before
+
+
 def test_generate_constrained_text_returns_readable_text():
     dictionary = NLTKWordList(download=False)
     grammar = HeuristicGrammarLibrary()

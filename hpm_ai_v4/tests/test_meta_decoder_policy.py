@@ -84,6 +84,28 @@ def test_state_dict_roundtrip_preserves_spec_mapping():
     assert clone._next_spec_code == policy._next_spec_code
     assert clone._selection_counts == policy._selection_counts
     assert clone._reward_ema == policy._reward_ema
+    assert clone._metacognitive_reward_ema == policy._metacognitive_reward_ema
+    assert clone._context_reward_ema == policy._context_reward_ema
+    assert clone._context_reliability == policy._context_reliability
+
+
+def test_select_uses_metacognitive_reliability():
+    policy = MetaDecoderPolicy(num_workers=1)
+    policy._distribution = lambda context_obs: np.ones(policy.agent.obs_dim, dtype=np.float32) / float(policy.agent.obs_dim)
+    policy._heuristic_bonus = lambda features, spec: 0.0
+    policy._control_bonus = lambda features, spec: 0.0
+    policy._exploration_bonus = lambda spec: 0.0
+
+    word = DecoderSpec("word", "decode", True)
+    char = DecoderSpec("char", "decode", True)
+    candidates = [word, char]
+
+    features = {"recent_agreement": 0.0, "recent_plausibility": 0.0, "structural_score": 0.0, "stage_idx": 0}
+    policy.observe(features, word, {"token_agreement": 1.0, "plausibility": 1.0, "structural_score": 1.0})
+
+    chosen = policy.select(features, candidates, learn=False)
+
+    assert chosen == word
 
 
 def test_exploration_bonus_is_higher_early():

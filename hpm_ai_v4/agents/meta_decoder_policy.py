@@ -30,6 +30,9 @@ class MetaDecoderPolicy:
         self._next_spec_code = 16
         self._selection_counts: Dict[str, int] = {}
         self._reward_ema: Dict[str, float] = {}
+        self._metacognitive_reward_ema: Dict[str, float] = {}
+        self._context_reward_ema: Dict[int, float] = {}
+        self._context_reliability: Dict[int, float] = {}
         self._age = 0
         self.bootstrap_half_life = 48.0
         self.bootstrap_floor = 0.0
@@ -59,6 +62,7 @@ class MetaDecoderPolicy:
             score += bootstrap * self._heuristic_bonus(features, spec)
             score += self._exploration_bonus(spec)
             score += 0.02 * self._reward_ema.get(spec.key(), 0.0)
+            score += self._metacognitive_bonus(context_code, spec)
             scored.append((score, spec))
 
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -79,6 +83,12 @@ class MetaDecoderPolicy:
         reward = self._outcome_reward(outcome)
         key = spec.key()
         self._reward_ema[key] = 0.85 * self._reward_ema.get(key, 0.0) + 0.15 * reward
+        self._metacognitive_reward_ema[key] = 0.90 * self._metacognitive_reward_ema.get(key, 0.0) + 0.10 * reward
+        self._context_reward_ema[context_code] = 0.88 * self._context_reward_ema.get(context_code, 0.0) + 0.12 * reward
+        self._context_reliability[context_code] = 0.90 * self._context_reliability.get(context_code, 0.0) + 0.10 * max(
+            0.0,
+            reward - 0.25,
+        )
         for obs in (context_code, spec_code, reward_code):
             self.agent.perceive_and_learn(obs)
 
@@ -203,6 +213,21 @@ class MetaDecoderPolicy:
             bonus += 0.015 + 0.02 * control_strength
         return bonus
 
+    def _metacognitive_bonus(self, context_code: int, spec: DecoderSpec) -> float:
+        """L5 self-monitoring prior over which strategies have been reliable in this context."""
+        context_signal = self._context_reward_ema.get(context_code, 0.0)
+        context_reliability = self._context_reliability.get(context_code, 0.0)
+        spec_signal = self._metacognitive_reward_ema.get(spec.key(), 0.0)
+        bonus = 0.0
+        bonus += 0.03 * context_signal
+        bonus += 0.04 * context_reliability
+        bonus += 0.02 * spec_signal
+        if spec.family == "target" and context_reliability > 0.35:
+            bonus += 0.02
+        if spec.family == "word" and context_signal > 0.35:
+            bonus += 0.015
+        return bonus
+
     def _exploration_bonus(self, spec: DecoderSpec) -> float:
         """Small novelty bonus so unseen or underused specs are not crowded out."""
         count = self._selection_counts.get(spec.key(), 0)
@@ -230,6 +255,9 @@ class MetaDecoderPolicy:
             "spec_codes": dict(self._spec_codes),
             "selection_counts": dict(self._selection_counts),
             "reward_ema": dict(self._reward_ema),
+            "metacognitive_reward_ema": dict(self._metacognitive_reward_ema),
+            "context_reward_ema": dict(self._context_reward_ema),
+            "context_reliability": dict(self._context_reliability),
             "obs_buffer": list(self.agent.obs_buffer),
             "next_spec_code": self._next_spec_code,
             "bootstrap_half_life": self.bootstrap_half_life,
@@ -249,6 +277,9 @@ class MetaDecoderPolicy:
         }
         self._selection_counts = dict(state.get("selection_counts", {}))
         self._reward_ema = dict(state.get("reward_ema", {}))
+        self._metacognitive_reward_ema = dict(state.get("metacognitive_reward_ema", {}))
+        self._context_reward_ema = dict(state.get("context_reward_ema", {}))
+        self._context_reliability = dict(state.get("context_reliability", {}))
         self.agent.obs_buffer = list(state.get("obs_buffer", []))
         self._next_spec_code = int(state.get("next_spec_code", self._next_spec_code))
         self.bootstrap_half_life = float(state.get("bootstrap_half_life", self.bootstrap_half_life))

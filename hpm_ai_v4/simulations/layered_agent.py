@@ -765,6 +765,7 @@ class LayeredAgent:
         target_text: str | None = None,
         include_seed: bool = True,
         mode: str = "decode",
+        commit_best: bool = False,
     ) -> List[Dict[str, Any]]:
         """Run bounded, frozen continuations and rank them by L3 compression fit."""
         snapshot = self._simulation_state_snapshot()
@@ -810,9 +811,27 @@ class LayeredAgent:
                     break
 
             proposals.sort(key=lambda item: (item["score"], item["text"]), reverse=True)
+            if commit_best and proposals:
+                best_text = proposals[0]["text"]
+                self._restore_simulation_state(snapshot)
+                self.observe_text(
+                    best_text,
+                    role="assistant",
+                    dialogue_act="default",
+                    feedback_mode="target",
+                    generated_text=best_text,
+                    self_feedback_weight=0.0,
+                    feedback_signal={
+                        "kind": "simulation_commit",
+                        "simulation_score": float(proposals[0]["score"]),
+                        "simulation_family": proposals[0]["family"],
+                        "simulation_mode": proposals[0]["mode"],
+                    },
+                )
             return proposals
         finally:
-            self._restore_simulation_state(snapshot)
+            if not commit_best:
+                self._restore_simulation_state(snapshot)
 
     def generate_constrained_text(
         self,
