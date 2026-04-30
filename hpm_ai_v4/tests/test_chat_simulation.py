@@ -1,6 +1,6 @@
 import os
 
-from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, _resolve_chat_library_path
+from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, run_binding_evaluator_benchmark, _resolve_chat_library_path
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.text_signals import TextSignalPack, TextSignalExtractor
@@ -454,6 +454,22 @@ def test_basic_chat_session_query_chain_resolves_two_step_property():
     assert result["answer"] == "red"
 
 
+def test_basic_chat_session_query_chain_generalizes_property_hop():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat sat on the mat.")
+    session.chat_turn("The mat is round.")
+
+    result = session.query("What shape is the thing the cat sat on?")
+
+    assert result["source"] == "chain_resolved"
+    assert result["hops"] == 2
+    assert result["answer"] == "round"
+    assert result["property_hint"] == "shape"
+
+
 def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
@@ -502,7 +518,62 @@ def test_basic_chat_session_query_resolves_pronouns_from_registry(monkeypatch):
     assert result["answer"] in session.discourse_state.entity_registry
     assert result["answer"] != "unknown"
     assert "predicted_entity" in result
-    assert isinstance(result["prediction_matched"], bool)
+
+
+def test_basic_chat_session_pending_feedback_reaches_next_sentence_learning(monkeypatch):
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+
+    current_l3 = int(agent.l3_soft_state())
+    session.discourse_state.entity_registry["cat"] = {
+        "entity": "cat",
+        "first_seen_turn": 0,
+        "last_turn": 0,
+        "last_role": "subject",
+        "last_dialogue_act": "default",
+        "last_sentence_type": "declarative",
+        "last_subject": "cat",
+        "last_predicate": "sat",
+        "last_object": "mat",
+        "mention_count": 3,
+        "salience": 1.0,
+        "binding_confidence": 0.9,
+        "stability_score": 0.9,
+        "prediction_hits": 3,
+        "prediction_misses": 0,
+        "last_position": 0,
+        "dominant_latent_state": current_l3,
+        "latent_states": [current_l3],
+    }
+    session.discourse_state.focus_stack = ["cat"]
+    session.discourse_state.active_entities = ["cat"]
+    session.discourse_state.topic = "cat"
+    session.discourse_state.topic_confidence = 0.9
+
+    observed_feedback = []
+    original_perceive = agent.perceive
+
+    def wrapped_perceive(raw_char_id, feedback=None):
+        observed_feedback.append(dict(feedback or {}))
+        return original_perceive(raw_char_id, feedback=feedback)
+
+    monkeypatch.setattr(agent, "perceive", wrapped_perceive)
+
+    stats_one = session.observe_text("The cat sat.", role="user", feedback_mode="target")
+    pending = dict(agent._pending_feedback)
+    assert float(pending.get("topdown_gate", 0.0)) > 0.0
+    assert float(pending.get("reward", 0.0)) > 0.0
+    assert stats_one["binding_predictions"] == 1
+    assert stats_one["binding_prediction_hits"] + stats_one["binding_prediction_misses"] == 1
+
+    observed_feedback.clear()
+    stats_two = session.observe_text("The cat slept.", role="user", feedback_mode="target")
+
+    assert any(float(payload.get("topdown_gate", 0.0)) > 0.0 for payload in observed_feedback)
+    assert any(float(payload.get("reward", 0.0)) > 0.0 for payload in observed_feedback)
+    assert stats_two["binding_predictions"] == 1
+    assert stats_two["binding_prediction_hits"] + stats_two["binding_prediction_misses"] == 1
 
 
 def test_basic_chat_session_query_handles_did_question_word_order(monkeypatch):
@@ -611,6 +682,28 @@ def test_basic_chat_session_falls_back_to_dialogue_bank(monkeypatch):
     response = session.chat_turn("Hello there.").response_text
 
     assert response in {"Hello.", "Hi there.", "How can I help?", "What can I do for you?"}
+
+
+def test_run_binding_evaluator_benchmark_reports_accuracy(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("the quick brown fox jumps over the lazy dog " * 20)
+
+    report = run_binding_evaluator_benchmark(
+        corpus_path=str(corpus),
+        warmup_chars=32,
+        history_window=2,
+        response_steps=8,
+        num_workers=1,
+        use_dict=False,
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert report["aggregate"]["case_count"] == 3
+    assert report["aggregate"]["binding_predictions"] >= 3
+    assert report["aggregate"]["binding_prediction_hits"] + report["aggregate"]["binding_prediction_misses"] == report["aggregate"]["binding_predictions"]
+    assert 0.0 <= report["aggregate"]["avg_binding_prediction_accuracy"] <= 1.0
+    assert 0.0 <= report["aggregate"]["avg_answer_accuracy"] <= 1.0
+    assert (tmp_path / "binding_evaluator_benchmark.json").exists()
 
 
 def test_chat_response_score_penalizes_recent_echo():

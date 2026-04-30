@@ -69,6 +69,7 @@ class LayeredAgent:
             "plausibility": 0.0,
             "structural_score": 0.0,
         }
+        self._pending_feedback: Dict[str, Any] = {}
         self.text_signals = TextSignalExtractor(use_spacy=False)
         self.decoder_policy = MetaDecoderPolicy(num_workers=num_workers)
         self.l5 = self.decoder_policy.agent
@@ -102,6 +103,12 @@ class LayeredAgent:
 
     def perceive(self, raw_char_id: int, feedback: Optional[Dict[str, Any]] = None) -> None:
         """Feed one character through the hierarchy."""
+        if feedback is None:
+            feedback = {}
+        if hasattr(self, "_pending_feedback") and self._pending_feedback:
+            feedback.update(self._pending_feedback)
+            self._pending_feedback = {}
+
         class_id = self._adapter.encode(raw_char_id)
         self._raw_history.append(int(class_id))
         surface_label = self._surface_label_for_obs(class_id)
@@ -198,6 +205,11 @@ class LayeredAgent:
     def l2_soft_state(self) -> int:
         """Encode L2 posterior state + confidence into a discrete symbol for L3."""
         posterior = self._best_pattern_posterior(self.l2)
+        return self._soft_state_code(posterior)
+
+    def l3_soft_state(self) -> int:
+        """Encode L3 posterior state + confidence into a discrete symbol for L4/Binding."""
+        posterior = self._best_pattern_posterior(self.l3)
         return self._soft_state_code(posterior)
 
     def generate(self, steps: int = 20) -> str:
@@ -775,8 +787,9 @@ class LayeredAgent:
             target  - only the supplied text is learned
             self    - only generated_text is fed back (if provided)
             hybrid  - learn target text and optionally add a gated self-feedback pass
+            none    - do not learn, just return stats (useful for discourse-only updates)
         """
-        if feedback_mode not in {"target", "self", "hybrid"}:
+        if feedback_mode not in {"target", "self", "hybrid", "none"}:
             raise ValueError(f"Unsupported feedback_mode: {feedback_mode!r}")
 
         stats: Dict[str, Any] = {
@@ -786,7 +799,7 @@ class LayeredAgent:
             "plausibility": 0.0,
         }
 
-        if text:
+        if text and feedback_mode != "none":
             for raw_id in self._surface_ids_from_text(text):
                 self.perceive(raw_id, feedback=feedback_signal)
                 stats["target_chars"] += 1

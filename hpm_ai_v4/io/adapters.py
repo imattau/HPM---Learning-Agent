@@ -316,6 +316,10 @@ class SentenceAdapter(InputAdapter):
             return "<PARA_END>"
         return self.ID_TO_TYPE.get(int(token) % len(self.SENTENCE_TYPES), "fragment")
 
+    def split(self, text: str) -> List[str]:
+        """Split text into individual sentences."""
+        return self._split(text)
+
     def _split(self, text: str) -> List[str]:
         pieces = [piece.strip() for piece in self._SPLIT_RE.split(text) if piece.strip()]
         return pieces or [text.strip()]

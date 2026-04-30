@@ -1,9 +1,11 @@
 """Basic chat wrapper around the stacked HPM text system."""
 import argparse
+import json
 import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
+import numpy as np
 
 from hpm_ai_v4.simulations.full_simulation import WikipediaStream
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
@@ -409,6 +411,74 @@ class BasicChatSession:
     def chat(self, user_text: str, target_reply: str | None = None) -> str:
         return self.chat_turn(user_text, target_reply=target_reply).response_text
 
+    def observe_text(
+        self,
+        text: str,
+        role: str = "user",
+        dialogue_act: str = "default",
+        feedback_mode: str = "target",
+        generated_text: str | None = None,
+        self_feedback_weight: float = 0.05,
+        feedback_signal: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Train on external text with sentence-level binding evaluator bracketing."""
+        sentences = self.sentence_adapter.split(text)
+        stats = {
+            "target_chars": 0,
+            "self_chars": 0,
+            "binding_predictions": 0,
+            "binding_prediction_hits": 0,
+            "binding_prediction_misses": 0,
+        }
+
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+
+            # 1. Predict (prior)
+            predicted = self._predict_next_entity()
+
+            # 2. Process (symbolic L4)
+            # This triggers _update_entity_registry which records l3_state
+            sentence_features = self._sentence_features(sentence)
+            self._update_discourse_state(
+                sentence,
+                role=role,
+                dialogue_act=dialogue_act,
+                sentence_features=sentence_features
+            )
+
+            # 3. Observe & Learn (probabilistic L1-L3)
+            current_feedback = dict(feedback_signal or {})
+            discourse_signal = self._discourse_feedback_signal(sentence, role=role, dialogue_act=dialogue_act)
+            current_feedback.update(discourse_signal)
+
+            learn_stats = self.agent.observe_text(
+                sentence,
+                feedback_mode=feedback_mode,
+                generated_text=generated_text if sentence in (generated_text or "") else None,
+                self_feedback_weight=self_feedback_weight,
+                feedback_signal=current_feedback,
+            )
+            for k, v in learn_stats.items():
+                if isinstance(v, (int, float)):
+                    stats[k] = stats.get(k, 0) + v
+
+            # 4. Evaluate (posterior)
+            content_tokens = self._content_tokens(sentence)
+            stats["binding_predictions"] += 1
+            self._tick_binding_evaluator(predicted, content_tokens)
+
+            # 5. Close loop back to L3
+            matched = any(t.lower() == predicted.lower() for t in content_tokens)
+            if matched:
+                stats["binding_prediction_hits"] += 1
+            else:
+                stats["binding_prediction_misses"] += 1
+            self._feed_binding_prediction_to_l3(predicted, matched)
+
+        return stats
+
     def chat_turn(self, user_text: str, target_reply: str | None = None) -> ChatResult:
         user_text = user_text.strip()
         if not user_text:
@@ -416,22 +486,15 @@ class BasicChatSession:
 
         prior_texts = [turn.text for turn in self._recent_turns() if turn.text.strip()]
         dialogue_act = self._dialogue_act(user_text)
-        predicted_entity = self._predict_binding_entity(user_text)
+
         self._append("user", user_text)
-        user_sentence_features = self._sentence_features(user_text)
-        self._update_discourse_state(user_text, role="user", dialogue_act=dialogue_act, sentence_features=user_sentence_features)
-        self.record_binding_feedback(
-            predicted_entity=predicted_entity,
-            observed_entity=self._observed_binding_entity(user_text),
-            observed_text=user_text,
+        # Process user text (includes prediction, discourse update, learning, evaluation)
+        learn_stats = self.observe_text(
+            user_text,
+            role="user",
+            dialogue_act=dialogue_act,
+            feedback_mode="target" if self.learn_from_user else "none"
         )
-        learn_stats: Dict[str, Any] = {"target_chars": 0, "self_chars": 0}
-        if self.learn_from_user:
-            learn_stats = self.agent.observe_text(
-                user_text,
-                feedback_mode="target",
-                feedback_signal=self._discourse_feedback_signal(user_text, role="user", dialogue_act=dialogue_act),
-            )
 
         prompt_text = self._build_prompt()
         discourse_features = self._discourse_context_features()
@@ -450,49 +513,28 @@ class BasicChatSession:
             target_reply=target_reply,
             context_texts=[user_text, self.discourse_state.discourse_summary, *prior_texts],
         )
-        sentence_features = self._sentence_features(response_text)
         self._append("assistant", response_text)
-        self._update_discourse_state(
-            response_text,
+        # Process assistant response (includes discourse update and learning)
+        response_stats = self.observe_text(
+            target_reply if target_reply else response_text,
             role="assistant",
             dialogue_act=dialogue_act,
-            sentence_features=sentence_features,
+            feedback_mode="target" if self.learn_from_reply else "none",
+            generated_text=response_text,
+            self_feedback_weight=self.reply_feedback_weight,
+            feedback_signal=response_signal.to_dict() if response_signal else None,
         )
-        self.record_binding_feedback(
-            predicted_entity=self._predict_binding_entity(response_text),
-            observed_entity=self._observed_binding_entity(response_text),
-            observed_text=response_text,
-        )
-        response_stats: Dict[str, Any] = {}
-        response_stats.update(response_signal.to_dict())
-        response_stats["text_signal_score"] = response_signal.combined_score()
-        response_stats.update(sentence_features)
-        response_stats.update(self._discourse_context_features())
-        if target_reply:
-            response_stats = self.agent.evaluate_generated_text(response_text, target_reply)
+
+        # Add additional metadata to stats
+        if response_signal:
             response_stats.update(response_signal.to_dict())
             response_stats["text_signal_score"] = response_signal.combined_score()
-            response_stats.update(sentence_features)
-            response_stats.update(self._discourse_context_features())
-            if self.learn_from_reply:
-                response_stats.update(
-                    self.agent.observe_text(
-                        target_reply,
-                        feedback_mode="hybrid",
-                        generated_text=response_text,
-                        self_feedback_weight=self.reply_feedback_weight,
-                        feedback_signal={**response_signal.to_dict(), **self._discourse_feedback_signal(response_text, role="assistant", dialogue_act=dialogue_act)},
-                    )
-                )
-        elif self.learn_from_reply and response_text:
-            # Optional self-feedback for unconstrained chat, kept off by default.
-            response_stats = self.agent.observe_text(
-                response_text,
-                feedback_mode="self",
-                generated_text=response_text,
-                self_feedback_weight=self.reply_feedback_weight,
-                feedback_signal={**response_signal.to_dict(), **self._discourse_feedback_signal(response_text, role="assistant", dialogue_act=dialogue_act)},
-            )
+        response_stats.update(self._sentence_features(response_text))
+        response_stats.update(self._discourse_context_features())
+
+        if target_reply:
+            eval_stats = self.agent.evaluate_generated_text(response_text, target_reply)
+            response_stats.update(eval_stats)
 
         return ChatResult(
             user_text=user_text,
@@ -563,6 +605,87 @@ class BasicChatSession:
             return self.discourse_state.active_entities[0]
         return self.discourse_state.topic if self.discourse_state.topic != "unknown" else ""
 
+    def _predict_next_entity(self) -> str:
+        """Predict next entity by matching current L3 soft-state to registered latent states."""
+        # Try latent prediction first
+        try:
+            current_l3 = int(self.agent.l3_soft_state())
+            best, best_score = "unknown", -1.0
+            current_turn = self.discourse_state.turn_index
+
+            for entity, record in self.discourse_state.entity_registry.items():
+                dominant = record.get("dominant_latent_state")
+                if dominant is None:
+                    continue
+                # Latent match: same state = strong signal
+                latent_match = 1.0 if int(dominant) == current_l3 else 0.0
+                recency = 1.0 / max(1, current_turn - int(record.get("last_turn", 0)) + 1)
+                conf = float(record.get("binding_confidence", 0.0))
+                stability = float(record.get("stability_score", 0.0))
+                score = 0.40 * latent_match + 0.25 * conf + 0.20 * recency + 0.15 * stability
+                if score > best_score:
+                    best, best_score = entity, score
+            if best != "unknown":
+                return best
+        except Exception:
+            pass
+
+        # Fall back to surface heuristic
+        best, best_score = "unknown", -1.0
+        current_turn = self.discourse_state.turn_index
+        for entity, record in self.discourse_state.entity_registry.items():
+            recency = 1.0 / max(1, current_turn - int(record.get("last_turn", 0)) + 1)
+            score = float(record.get("binding_confidence", 0.0)) * 0.6 + recency * 0.4
+            if score > best_score:
+                best, best_score = entity, score
+        return best
+
+    def _tick_binding_evaluator(self, predicted: str, observed_tokens: List[str]) -> None:
+        """
+        HPM evaluator step: reinforce bindings that predicted observed tokens,
+        decay those that didn't. Updates binding_confidence and stability_score.
+        """
+        observed_set = {t.lower() for t in observed_tokens}
+        for entity, record in self.discourse_state.entity_registry.items():
+            appeared = entity.lower() in observed_set
+            conf = float(record.get("binding_confidence", 0.0))
+            hits = int(record.get("prediction_hits", 0))
+            misses = int(record.get("prediction_misses", 0))
+
+            if appeared:
+                record["binding_confidence"] = min(1.0, conf + 0.08)
+                record["prediction_hits"] = hits + 1
+            else:
+                record["binding_confidence"] = max(0.0, conf * 0.92)
+                record["prediction_misses"] = misses + 1
+
+            # Stability = running prediction accuracy (HPM pattern density proxy)
+            total = hits + misses + (1 if appeared else 1)
+            record["stability_score"] = (hits + (1 if appeared else 0)) / max(1, total)
+
+        # Extra reinforcement for the entity that was explicitly predicted
+        if predicted != "unknown" and predicted in self.discourse_state.entity_registry:
+            entry = self.discourse_state.entity_registry[predicted]
+            if predicted.lower() in observed_set:
+                entry["binding_confidence"] = min(1.0, float(entry["binding_confidence"]) + 0.05)
+
+    def _feed_binding_prediction_to_l3(self, predicted_entity: str, matched: bool) -> None:
+        """Feed binding prediction success back into L3 patterns."""
+        if predicted_entity == "unknown":
+            return
+        record = self.discourse_state.entity_registry.get(predicted_entity, {})
+        stability = float(record.get("stability_score", 0.0))
+        gate_strength = stability * (0.8 if matched else -0.2)
+        gate_strength = float(np.clip(gate_strength, 0.0, 1.0))
+
+        feedback = {
+            "topdown_gate": gate_strength,
+            "topdown_pattern_suppression": 0.3 * gate_strength if matched else 0.0,
+            "reward": 0.1 if matched else 0.0,
+        }
+        if hasattr(self.agent, '_pending_feedback'):
+            self.agent._pending_feedback.update(feedback)
+
     def _update_entity_registry(
         self,
         tokens: List[str],
@@ -595,6 +718,9 @@ class BasicChatSession:
                     "mention_count": 0,
                     "salience": 0.0,
                     "binding_confidence": 0.0,
+                    "stability_score": 0.0,
+                    "prediction_hits": 0,
+                    "prediction_misses": 0,
                     "last_position": idx,
                 },
             )
@@ -607,6 +733,16 @@ class BasicChatSession:
             entry["last_object"] = obj
             entry["mention_count"] = int(entry.get("mention_count", 0)) + 1
             entry["last_position"] = idx
+
+            # Latent Seam: Record current L3 state for this entity
+            l3_state = self.agent.l3_soft_state() if hasattr(self.agent, "l3_soft_state") else None
+            if l3_state is not None:
+                prev = entry.get("latent_states", [])
+                prev.append(int(l3_state))
+                entry["latent_states"] = prev[-8:]
+                from collections import Counter
+                entry["dominant_latent_state"] = Counter(entry["latent_states"]).most_common(1)[0][0]
+
             current_salience = float(self.discourse_state.entity_salience.get(tok, 0.0))
             entry["salience"] = max(float(entry.get("salience", 0.0)) * 0.88, current_salience)
             if sentence_features:
@@ -629,6 +765,7 @@ class BasicChatSession:
                 score += 0.18 * max(0.3, float(self.discourse_state.topic_confidence))
             if entity in self.discourse_state.focus_stack[:2]:
                 score += 0.12
+            score += 0.15 * float(record.get("stability_score", 0.0))
             if entity in self.discourse_state.active_entities[:2]:
                 score += 0.10
             if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 2):
@@ -759,6 +896,36 @@ class BasicChatSession:
             "predicate_hint": predicate_hint,
             "object_hint": object_hint,
             "negated": negated,
+        }
+
+    def _parse_chain_query_frame(self, question_text: str) -> Dict[str, Any]:
+        lower = question_text.strip().lower()
+        tokens = re.findall(r"[A-Za-z']+", lower)
+        if not tokens or tokens[0] not in {"what", "which"}:
+            return {"matched": False}
+
+        property_hint = ""
+        for tok in tokens[1:]:
+            if tok in _DISCOURSE_STOPWORDS or tok in _DISCOURSE_INTERROGATIVES or tok in _DISCOURSE_AUXILIARIES:
+                continue
+            property_hint = tok
+            break
+
+        clause_pattern = re.search(
+            r"\bthe\s+(?P<head>[a-z']+)\s+(?:that\s+|which\s+|who\s+|the\s+)?(?:the\s+)?(?P<subject>[a-z']+)\s+(?P<predicate>[a-z']+)(?:\s+(?P<prep>on|in|at|with|from|under|over|of|for|to|by))?",
+            lower,
+        )
+        if not clause_pattern:
+            return {"matched": False}
+
+        return {
+            "matched": True,
+            "property_hint": property_hint,
+            "head_noun": clause_pattern.group("head"),
+            "subject_hint": clause_pattern.group("subject"),
+            "predicate_hint": clause_pattern.group("predicate"),
+            "preposition": clause_pattern.group("prep") or "",
+            "token_count": len(tokens),
         }
 
     def _calibrate_binding_confidence(self, predicted_entity: str, observed_entity: str, observed_text: str = "") -> Dict[str, Any]:
@@ -1451,12 +1618,11 @@ class BasicChatSession:
             direct_predicate = str(direct_record.get("last_predicate", "unknown")).lower()
             direct_subject = str(direct_record.get("last_subject", "unknown")).lower()
             direct_object = str(direct_record.get("last_object", "unknown")).lower()
-            if hints.intersection({"color", "colour"}):
-                if direct_subject == entity:
-                    if direct_predicate in copulas and direct_object and direct_object != "unknown":
-                        return direct_object
-                    if direct_predicate not in copulas and direct_predicate not in {"unknown", entity}:
-                        return direct_predicate
+            if direct_subject == entity:
+                if direct_predicate in copulas and direct_object and direct_object != "unknown":
+                    return direct_object
+                if direct_predicate not in copulas and direct_predicate not in {"unknown", entity}:
+                    return direct_predicate
         if hints.intersection({"color", "colour"}):
             direct_matches = sorted(
                 self.discourse_state.entity_registry.items(),
@@ -1506,11 +1672,8 @@ class BasicChatSession:
         if not question_text:
             raise ValueError("question_text must not be empty")
 
-        chain_match = re.search(
-            r"what\s+(?:color|colour)\s+is\s+the\s+thing\s+the\s+([a-z']+)\s+([a-z']+)\s+(?:on|in|at|with|from|under|over)\b",
-            lower,
-        )
-        if not chain_match:
+        chain_frame = self._parse_chain_query_frame(question_text)
+        if not chain_frame.get("matched"):
             return {
                 "question": question_text,
                 "answer": "unknown",
@@ -1518,8 +1681,9 @@ class BasicChatSession:
                 "hops": 0,
             }
 
-        subject_hint = chain_match.group(1)
-        predicate_hint = chain_match.group(2)
+        subject_hint = str(chain_frame.get("subject_hint", "")).strip().lower()
+        predicate_hint = str(chain_frame.get("predicate_hint", "")).strip().lower()
+        property_hint = str(chain_frame.get("property_hint", "")).strip().lower()
         relation_key = self._lookup_entity_by_relation(subject_hint=subject_hint, predicate_hint=predicate_hint)
         if not relation_key:
             return {
@@ -1534,15 +1698,18 @@ class BasicChatSession:
         if intermediate_entity == "unknown" or not intermediate_entity:
             intermediate_entity = relation_key
 
-        answer = self._lookup_property_for_entity(intermediate_entity, {"color", "colour"})
+        answer = self._lookup_property_for_entity(intermediate_entity, {property_hint} if property_hint else set())
         if not answer:
-            answer = self.query(f"What colour is {intermediate_entity}?").get("answer", "unknown")
+            fallback_property = property_hint or "property"
+            answer = self.query(f"What {fallback_property} is {intermediate_entity}?").get("answer", "unknown")
         return {
             "question": question_text,
             "answer": answer or "unknown",
             "source": "chain_resolved",
             "hops": 2,
             "intermediate_entity": intermediate_entity,
+            "property_hint": property_hint,
+            "relation_key": relation_key,
         }
 
     def query(self, question_text: str) -> Dict[str, Any]:
@@ -1557,6 +1724,7 @@ class BasicChatSession:
         pronoun_tokens = [tok for tok in question_tokens if tok in _DISCOURSE_PRONOUNS]
         resolution_source = "registry"
         answer = ""
+        chain_details: Dict[str, Any] = {"hops": 0}
 
         if parsed["negated"]:
             answer = "unknown"
@@ -1590,17 +1758,13 @@ class BasicChatSession:
         else:
             answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
 
-        if answer == "unknown" or answer == "" or "thing the" in lower:
+        chain_frame = self._parse_chain_query_frame(question_text)
+        if chain_frame.get("matched"):
             chain_result = self.query_chain(question_text)
             if chain_result.get("answer") and chain_result.get("answer") != "unknown":
                 answer = chain_result["answer"]
                 resolution_source = chain_result.get("source", resolution_source)
-            if chain_result.get("hops"):
-                chain_hops = int(chain_result.get("hops", 0))
-            else:
-                chain_hops = 0
-        else:
-            chain_hops = 0
+            chain_details = dict(chain_result)
 
         if not answer:
             answer = "unknown"
@@ -1631,7 +1795,7 @@ class BasicChatSession:
             "negated": bool(parsed["negated"]),
             "predicted_entity": predicted_entity,
             "prediction_matched": prediction_matched,
-            "hops": chain_hops,
+            **chain_details,
         }
 
     def _discourse_feedback_signal(self, text: str, *, role: str, dialogue_act: str) -> Dict[str, Any]:
@@ -1828,16 +1992,12 @@ class ReverseChatSession(BasicChatSession):
     def ask(self, seed_text: str | None = None) -> str:
         question = self._generate_question(seed_text=seed_text)
         self._append("assistant", question)
-        self._update_discourse_state(
+        # Process assistant question (includes discourse update and evaluator bracketing)
+        self.observe_text(
             question,
             role="assistant",
             dialogue_act="question",
-            sentence_features=self._sentence_features(question),
-        )
-        self.record_binding_feedback(
-            predicted_entity=self._predict_binding_entity(question),
-            observed_entity=self._observed_binding_entity(question),
-            observed_text=question,
+            feedback_mode="none"
         )
         self._question_history.append(question)
         return question
@@ -1850,21 +2010,14 @@ class ReverseChatSession(BasicChatSession):
         prior_questions = [turn.text for turn in self._recent_turns() if turn.role == "assistant" and turn.text.strip()]
         dialogue_act = self._dialogue_act(answer_text)
         self._append("user", answer_text)
-        answer_sentence_features = self._sentence_features(answer_text)
-        self._update_discourse_state(
+
+        # Process user answer
+        learn_stats = self.observe_text(
             answer_text,
             role="user",
             dialogue_act=dialogue_act,
-            sentence_features=answer_sentence_features,
+            feedback_mode="target" if self.learn_from_user else "none"
         )
-
-        learn_stats: Dict[str, Any] = {"target_chars": 0, "self_chars": 0}
-        if self.learn_from_user:
-            learn_stats = self.agent.observe_text(
-                answer_text,
-                feedback_mode="target",
-                feedback_signal=self._discourse_feedback_signal(answer_text, role="user", dialogue_act=dialogue_act),
-            )
 
         prompt_text = self._build_prompt()
         question_text = self._generate_question(
@@ -1880,29 +2033,18 @@ class ReverseChatSession(BasicChatSession):
             context_texts=[answer_text, self.discourse_state.discourse_summary, *prior_questions],
         )
         self._append("assistant", question_text)
-        self._update_discourse_state(
+        # Process assistant question
+        response_stats = self.observe_text(
             question_text,
             role="assistant",
             dialogue_act="question",
-            sentence_features=self._sentence_features(question_text),
+            feedback_mode="target" if self.learn_from_reply else "none",
+            feedback_signal=question_signal.to_dict() if question_signal else None
         )
-        self.record_binding_feedback(
-            predicted_entity=self._predict_binding_entity(question_text),
-            observed_entity=self._observed_binding_entity(question_text),
-            observed_text=question_text,
-        )
-        response_stats = dict(question_signal.to_dict())
-        response_stats["text_signal_score"] = question_signal.combined_score()
-        if self.learn_from_reply and question_text:
-            response_stats.update(
-                self.agent.observe_text(
-                    question_text,
-                    feedback_mode="self",
-                    generated_text=question_text,
-                    self_feedback_weight=self.reply_feedback_weight,
-                    feedback_signal={**question_signal.to_dict(), **self._discourse_feedback_signal(question_text, role="assistant", dialogue_act="question")},
-                )
-            )
+
+        if question_signal:
+            response_stats.update(question_signal.to_dict())
+            response_stats["text_signal_score"] = question_signal.combined_score()
 
         return ChatResult(
             user_text=answer_text,
@@ -2239,6 +2381,137 @@ def run_reverse_chat_simulation(
     print(f"Final reverse chat library saved: {final_base}.l1.pkl + .l2.pkl + .l3.pkl + .l4.pkl + .l5.pkl")
 
     return history
+
+
+DEFAULT_BINDING_BENCHMARK_CASES: List[Dict[str, Any]] = [
+    {
+        "statements": ["The cat chased the dog."],
+        "question": "Who chased the dog?",
+        "expected": "cat",
+    },
+    {
+        "statements": ["The dog was chased by the cat."],
+        "question": "Who chased the dog?",
+        "expected": "cat",
+    },
+    {
+        "statements": ["The cat sat on the mat.", "The mat is red."],
+        "question": "What colour is the thing the cat sat on?",
+        "expected": "red",
+    },
+]
+
+
+def run_binding_evaluator_benchmark(
+    corpus_path: str,
+    cases: Optional[List[Dict[str, Any]]] = None,
+    warmup_chars: int = 256,
+    history_window: int = 2,
+    response_steps: int = 16,
+    num_workers: int = 1,
+    use_dict: bool = False,
+    surface_mode: str = "word",
+    library_path: Optional[str] = None,
+    checkpoint_dir: str = ".",
+    seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
+    report_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run a tiny binding QA benchmark over scripted relation pairs.
+
+    The benchmark measures the predictor/evaluator loop directly:
+    - binding prediction counts, hits, and misses while observing statements
+    - query accuracy on the corresponding question
+    - whether the final answer matches the expected entity/property
+    """
+    dictionary = NLTKWordList(download=False) if use_dict else None
+    grammar = HeuristicGrammarLibrary() if use_dict else None
+    layered = LayeredAgent(num_workers=num_workers, dictionary=dictionary, grammar=grammar, surface_mode=surface_mode)
+
+    resolved_library_path = _resolve_chat_library_path(library_path)
+    if resolved_library_path:
+        loaded = _load_chat_library(layered, resolved_library_path)
+        print(f"Loaded library from {resolved_library_path} ({loaded} bundle parts)")
+
+    seed_source = seed_corpus_path if seed_corpus_path and os.path.exists(seed_corpus_path) else corpus_path
+    stream = WikipediaStream(seed_source)
+    stream_iter = iter(stream)
+    raw_ids = [next(stream_iter) for _ in range(max(warmup_chars, 1))]
+    warmup_text = "".join(chr(v + 32) for v in raw_ids if 0 <= v <= 94)
+    if warmup_text:
+        layered.observe_text(warmup_text, feedback_mode="target")
+
+    benchmark_cases = cases or DEFAULT_BINDING_BENCHMARK_CASES
+    case_reports: List[Dict[str, Any]] = []
+
+    for idx, case in enumerate(benchmark_cases, start=1):
+        session = BasicChatSession(
+            layered,
+            history_window=history_window,
+            response_steps=response_steps,
+            use_constraints=use_dict,
+        )
+        statement_reports: List[Dict[str, Any]] = []
+        for statement in case.get("statements", []):
+            stats = session.observe_text(statement, role="user", feedback_mode="target")
+            statement_reports.append({
+                "statement": statement,
+                "binding_predictions": int(stats.get("binding_predictions", 0)),
+                "binding_prediction_hits": int(stats.get("binding_prediction_hits", 0)),
+                "binding_prediction_misses": int(stats.get("binding_prediction_misses", 0)),
+            })
+
+        query_result = session.query(str(case.get("question", "")))
+        expected = str(case.get("expected", "")).strip().lower()
+        answer = str(query_result.get("answer", "")).strip().lower()
+        answer_correct = bool(expected and answer == expected)
+
+        total_predictions = sum(item["binding_predictions"] for item in statement_reports)
+        total_hits = sum(item["binding_prediction_hits"] for item in statement_reports)
+        total_misses = sum(item["binding_prediction_misses"] for item in statement_reports)
+        prediction_accuracy = float(total_hits / max(1, total_predictions))
+
+        case_reports.append({
+            "case": idx,
+            "question": case.get("question", ""),
+            "expected": case.get("expected", ""),
+            "answer": query_result.get("answer", "unknown"),
+            "answer_correct": answer_correct,
+            "source": query_result.get("source", ""),
+            "confidence": float(query_result.get("confidence", 0.0)),
+            "predicted_entity": query_result.get("predicted_entity", ""),
+            "prediction_matched": bool(query_result.get("prediction_matched", False)),
+            "binding_predictions": total_predictions,
+            "binding_prediction_hits": total_hits,
+            "binding_prediction_misses": total_misses,
+            "binding_prediction_accuracy": prediction_accuracy,
+            "statement_reports": statement_reports,
+        })
+
+    aggregate = {
+        "case_count": len(case_reports),
+        "avg_answer_accuracy": float(sum(1.0 if row["answer_correct"] else 0.0 for row in case_reports) / max(1, len(case_reports))),
+        "avg_binding_prediction_accuracy": float(sum(row["binding_prediction_accuracy"] for row in case_reports) / max(1, len(case_reports))),
+        "avg_confidence": float(sum(float(row["confidence"]) for row in case_reports) / max(1, len(case_reports))),
+        "avg_prediction_matched_rate": float(sum(1.0 if row["prediction_matched"] else 0.0 for row in case_reports) / max(1, len(case_reports))),
+        "binding_prediction_hits": int(sum(int(row["binding_prediction_hits"]) for row in case_reports)),
+        "binding_prediction_misses": int(sum(int(row["binding_prediction_misses"]) for row in case_reports)),
+        "binding_predictions": int(sum(int(row["binding_predictions"]) for row in case_reports)),
+    }
+
+    report = {
+        "aggregate": aggregate,
+        "cases": case_reports,
+        "surface_mode": surface_mode,
+        "library_path": resolved_library_path,
+    }
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    out_path = report_path or os.path.join(checkpoint_dir, "binding_evaluator_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, sort_keys=True)
+    print(f"Binding evaluator benchmark written: {out_path}")
+
+    return report
 
 
 def _parse_args():

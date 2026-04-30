@@ -90,6 +90,7 @@ class HPMAgent:
         self.beta_aff = 0.4
         self.gamma_soc = 0.3
         
+        self._pending_feedback: Dict[str, Any] = {}
         self._pool = ParallelPatternPool(num_workers=num_workers)
 
     def gossip_with_substrate(self, substrate: ExternalSubstrate):
@@ -196,6 +197,12 @@ class HPMAgent:
 
     def perceive_and_learn(self, obs: int, feedback: Optional[Dict[str, Any]] = None):
         """Update patterns based on a new observation."""
+        if feedback is None:
+            feedback = {}
+        if hasattr(self, "_pending_feedback") and self._pending_feedback:
+            feedback.update(self._pending_feedback)
+            self._pending_feedback = {}
+
         context_before = list(self.obs_buffer[-20:])
         self.obs_buffer.append(obs)
         cap = self.reasoner.context_window
