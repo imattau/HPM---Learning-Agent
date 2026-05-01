@@ -24,6 +24,17 @@ class DevelopmentalStage:
         self._all_signals = deque(maxlen=200)  # long window for adaptive targets
         self._min_observation_steps = 20
         self._min_hier_patterns = 5
+        self._evaluator_presets = {
+            "baseline": {"beta_aff": 0.4, "gamma_soc": 0.3},
+            "surface": {"beta_aff": 0.2, "gamma_soc": 0.6},
+            "local": {"beta_aff": 0.4, "gamma_soc": 0.4},
+            "relational": {"beta_aff": 0.6, "gamma_soc": 0.2},
+            "abstract": {"beta_aff": 0.75, "gamma_soc": 0.15},
+            "generative": {"beta_aff": 0.85, "gamma_soc": 0.10},
+        }
+        self._evaluator_ema: Dict[str, float] = {}
+        self._evaluator_ema_alpha = 0.05
+        self._current_evaluator_mode = "baseline"
         # Fallback targets used until enough signals accumulate
         self._stage_targets = [
             {"mean_ep": -0.30, "var_ep": 0.02, "mean_gate": 0.35, "mean_comp": 0.02},
@@ -86,6 +97,33 @@ class DevelopmentalStage:
             "mean_comp": float(np.percentile(comps, 70)),
         }
 
+    def record_evaluator_outcome(self, mode: str, reward: float) -> None:
+        if mode not in self._evaluator_presets:
+            return
+        prev = float(self._evaluator_ema.get(mode, 0.0))
+        alpha = float(self._evaluator_ema_alpha)
+        self._evaluator_ema[mode] = (1.0 - alpha) * prev + alpha * float(reward)
+
+    def _select_evaluator_mode(self) -> str:
+        modes = list(self._evaluator_presets.keys())
+        if not self._evaluator_ema:
+            return self._current_evaluator_mode if self._current_evaluator_mode in self._evaluator_presets else "baseline"
+
+        mean_ema = float(np.mean(list(self._evaluator_ema.values())))
+        pruned = [
+            mode for mode in modes
+            if self._evaluator_ema.get(mode, mean_ema) >= mean_ema - 0.3
+        ]
+        if not pruned:
+            pruned = modes
+        return max(
+            pruned,
+            key=lambda mode: (
+                self._evaluator_ema.get(mode, mean_ema),
+                1.0 if mode == self._current_evaluator_mode else 0.0,
+            ),
+        )
+
     def _should_advance_stage(self, patterns: List[HierarchicalPattern], global_step: int) -> bool:
         if global_step < self._min_observation_steps:
             return False
@@ -118,7 +156,12 @@ class DevelopmentalStage:
             and signal["var_ep"] <= target["var_ep"] * 1.5
         )
 
-    def update(self, patterns: List[HierarchicalPattern], global_step: int):
+    def update(
+        self,
+        patterns: List[HierarchicalPattern],
+        global_step: int,
+        mean_running_loss: Optional[float] = None,
+    ):
         if not patterns:
             return
 
@@ -126,21 +169,17 @@ class DevelopmentalStage:
         # stabilised, not when a hard-coded complexity threshold is crossed.
         if self.level_idx < len(self.LEVELS) - 1 and self._should_advance_stage(patterns, global_step):
             self.level_idx += 1
-       
-        # Modulate evaluator weightings based on developmental stage
-        # (Following Section 7.4 of the framework)
-        if self.level_idx == 0:
-            self.agent.beta_aff = 0.2   # focus on surface feedback (social)
-            self.agent.gamma_soc = 0.6
-        elif self.level_idx == 1:
-            self.agent.beta_aff = 0.4
-            self.agent.gamma_soc = 0.4
-        elif self.level_idx == 2:
-            self.agent.beta_aff = 0.6
-            self.agent.gamma_soc = 0.2
-        else:
-            self.agent.beta_aff = 0.8   # focus on curiosity and generative discovery
-            self.agent.gamma_soc = 0.1
+
+        current_mode = self._current_evaluator_mode
+        if mean_running_loss is not None and current_mode in self._evaluator_presets:
+            # Lower running loss should count as higher reward.
+            self.record_evaluator_outcome(current_mode, reward=-float(mean_running_loss))
+
+        selected_mode = self._select_evaluator_mode()
+        self._current_evaluator_mode = selected_mode
+        preset = self._evaluator_presets.get(selected_mode, self._evaluator_presets["baseline"])
+        self.agent.beta_aff = float(preset["beta_aff"])
+        self.agent.gamma_soc = float(preset["gamma_soc"])
 
 class HPMAgent:
     """The central HPM learner, integrating patterns, evaluators, and fields."""
@@ -407,7 +446,7 @@ class HPMAgent:
             self.external.broadcast(self.patterns)
 
         # 8. Developmental Update
-        self.development.update(self.patterns, self.step_counter)
+        self.development.update(self.patterns, self.step_counter, mean_running_loss=mean_running_loss)
 
         self.step_counter += 1
 

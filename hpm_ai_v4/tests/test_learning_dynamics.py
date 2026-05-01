@@ -159,6 +159,40 @@ def test_developmental_stage_holds_back_when_evaluator_signal_is_noisy():
     assert agent.development.level_idx == 0
 
 
+def test_developmental_stage_selects_best_evaluator_mode_from_ema():
+    agent = HPMAgent(num_initial_patterns=1)
+    stage = agent.development
+    stage._evaluator_ema.update(
+        {
+            "baseline": -0.40,
+            "surface": -0.60,
+            "local": -0.20,
+            "relational": 0.12,
+            "abstract": -0.25,
+        }
+    )
+    patterns = [_stage_pattern(i, 0.12) for i in range(5)]
+
+    for step in range(30, 34):
+        stage.update(patterns, global_step=step, mean_running_loss=0.08)
+
+    assert agent.beta_aff == pytest.approx(stage._evaluator_presets["relational"]["beta_aff"])
+    assert agent.gamma_soc == pytest.approx(stage._evaluator_presets["relational"]["gamma_soc"])
+    assert stage._current_evaluator_mode == "relational"
+
+
+def test_developmental_stage_records_outcome_from_current_mode():
+    agent = HPMAgent(num_initial_patterns=1)
+    stage = agent.development
+    stage._current_evaluator_mode = "surface"
+    patterns = [_stage_pattern(i, 0.12) for i in range(5)]
+
+    stage.update(patterns, global_step=30, mean_running_loss=0.25)
+
+    assert "surface" in stage._evaluator_ema
+    assert stage._evaluator_ema["surface"] < 0.0
+
+
 def test_density_weight_adapts_to_loss_trend():
     dense = HierarchicalPattern(pattern_id=1, latent_dim=2, obs_dim=2)
     sparse = HierarchicalPattern(pattern_id=2, latent_dim=2, obs_dim=2)
