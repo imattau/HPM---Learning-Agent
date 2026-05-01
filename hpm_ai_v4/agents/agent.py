@@ -21,8 +21,10 @@ class DevelopmentalStage:
         self.agent = agent
         self.level_idx = 0   # start at surface level
         self._recent_signals = deque(maxlen=8)
+        self._all_signals = deque(maxlen=200)  # long window for adaptive targets
         self._min_observation_steps = 20
         self._min_hier_patterns = 5
+        # Fallback targets used until enough signals accumulate
         self._stage_targets = [
             {"mean_ep": -0.30, "var_ep": 0.02, "mean_gate": 0.35, "mean_comp": 0.02},
             {"mean_ep": -0.25, "var_ep": 0.02, "mean_gate": 0.40, "mean_comp": 0.03},
@@ -62,6 +64,28 @@ class DevelopmentalStage:
             "count": float(len(hier)),
         }
 
+    def _adaptive_target(self) -> Optional[Dict[str, float]]:
+        """Derive advancement threshold from observed signal distribution.
+
+        Uses the 80th-percentile of historical mean_ep as the target — meaning
+        the agent advances when its current performance enters the top 20% of
+        what it has actually achieved, not a fixed absolute value.
+        Returns None if insufficient history.
+        """
+        if len(self._all_signals) < 40:
+            return None
+        hist = list(self._all_signals)
+        eps = np.array([s["mean_ep"] for s in hist], dtype=np.float32)
+        gates = np.array([s["mean_gate"] for s in hist], dtype=np.float32)
+        comps = np.array([s["mean_comp"] for s in hist], dtype=np.float32)
+        var_eps = np.array([s["var_ep"] for s in hist], dtype=np.float32)
+        return {
+            "mean_ep": float(np.percentile(eps, 80)),
+            "var_ep": float(np.percentile(var_eps, 20)),   # low variance = stable
+            "mean_gate": float(np.percentile(gates, 70)),
+            "mean_comp": float(np.percentile(comps, 70)),
+        }
+
     def _should_advance_stage(self, patterns: List[HierarchicalPattern], global_step: int) -> bool:
         if global_step < self._min_observation_steps:
             return False
@@ -71,6 +95,7 @@ class DevelopmentalStage:
             return False
 
         self._recent_signals.append(signal)
+        self._all_signals.append(signal)
         if len(self._recent_signals) < 4:
             return False
 
@@ -80,8 +105,11 @@ class DevelopmentalStage:
         mean_gate = float(np.mean([s["mean_gate"] for s in window]))
         mean_comp = float(np.mean([s["mean_comp"] for s in window]))
 
-        target_idx = min(self.level_idx, len(self._stage_targets) - 1)
-        target = self._stage_targets[target_idx]
+        target = self._adaptive_target()
+        if target is None:
+            target_idx = min(self.level_idx, len(self._stage_targets) - 1)
+            target = self._stage_targets[target_idx]
+
         return (
             mean_ep >= target["mean_ep"]
             and var_ep <= target["var_ep"]
