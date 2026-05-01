@@ -220,6 +220,21 @@ class SelfStudyAgent:
         self._read_pages: List[str] = []
         self._sentence_features = bool(sentence_features)
 
+    def _training_patterns(self) -> List[Any]:
+        patterns = getattr(self.agent, "patterns", None)
+        if patterns is not None:
+            return list(patterns)
+        if hasattr(self.agent, "l1") and getattr(self.agent.l1, "patterns", None) is not None:
+            return list(self.agent.l1.patterns)
+        return []
+
+    def _save_library(self, path: str) -> None:
+        if hasattr(self.agent, "save_bundle"):
+            base = path[:-4] if path.endswith(".pkl") else path
+            self.agent.save_bundle(base)
+            return
+        PatternSerializer.save(self._training_patterns(), path)
+
     def _chunk_page_text(self, text: str) -> List[str]:
         clean = str(text or "").strip()
         if not clean:
@@ -288,7 +303,7 @@ class SelfStudyAgent:
             self._train_on_page(page)
             pages_read += 1
 
-            pattern_count = len([p for p in self.agent.patterns if getattr(p, "latent_dim", 0) > 1])
+            pattern_count = len([p for p in self._training_patterns() if getattr(p, "latent_dim", 0) > 1])
             print(f"[{pages_read}] {page.title} — {pattern_count} patterns")
 
             self.scheduler.page_bonus[page.title] = max(
@@ -299,16 +314,16 @@ class SelfStudyAgent:
 
             if pages_read % 50 == 0:
                 ckpt_path = self.output_library.replace(".pkl", f"_ckpt{pages_read}.pkl")
-                PatternSerializer.save(self.agent.patterns, ckpt_path)
+                self._save_library(ckpt_path)
 
             if pattern_count >= self.target_patterns:
                 print(f"[done] target reached at page {pages_read}")
                 break
 
-        PatternSerializer.save(self.agent.patterns, self.output_library)
+        self._save_library(self.output_library)
         return StudyResult(
             pages_read=pages_read,
-            patterns_saved=len(self.agent.patterns),
+            patterns_saved=len(self._training_patterns()),
             output_path=self.output_library,
             visited=len(self.scheduler.visited),
             queued=len(self.scheduler.queue),
