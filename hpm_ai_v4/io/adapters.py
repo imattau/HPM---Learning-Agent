@@ -1402,7 +1402,16 @@ class LearnedSubstrateAdapter(InputAdapter):
         return "".join(pieces).strip()
 
     def bucket_for_token(self, token_id: int) -> str:
-        return self._base.bucket_for_token(int(token_id) if int(token_id) < self._base.obs_dim else self._base.NEWLINE_ID)
+        idx = int(token_id)
+        if idx in self._id_to_token:
+            tok = self._id_to_token[idx]
+            if not tok:
+                return "punctuation"
+            if tok == "\n":
+                return "newline"
+            first = tok[0]
+            return self._base.bucket_for_token(self._base.encode_char(first))
+        return self._base.bucket_for_token(idx if idx < self._base.obs_dim else self._base.NEWLINE_ID)
 
 
 class EnvironmentStateAdapter(InputAdapter):

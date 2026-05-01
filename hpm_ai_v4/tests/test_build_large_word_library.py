@@ -1,4 +1,5 @@
 from hpm_ai_v4.simulations.build_large_word_library import build_large_word_library
+from hpm_ai_v4.simulations.build_learned_substrate_library import build_learned_substrate_library
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 
@@ -115,3 +116,50 @@ def test_build_large_word_library_derives_aliases_from_corpus(tmp_path):
     assert '"canine": "dog"' in data
     assert '"feline":' in data
     assert '"cat":' in data
+
+
+def test_build_learned_substrate_library_round_trips_merged_surface(tmp_path):
+    corpus = tmp_path / "substrate_corpus.txt"
+    corpus.write_text(
+        "the the the cat sat. the the the dog sat. "
+        "the the the cat ran. the the the dog ran. "
+        "the the the fox watched."
+    )
+    output_base = tmp_path / "merged_large" / "merged_large_library"
+
+    result = build_learned_substrate_library(
+        output=str(output_base),
+        target=4,
+        steps_per_chunk=80,
+        min_density=0.0,
+        keep_top_k=1,
+        dedup_threshold=1.0,
+        promote=False,
+        num_workers=1,
+        target_chars=10_000,
+        registry_path=None,
+        corpus_paths=[str(corpus)],
+        max_merges=16,
+        min_support=1,
+        purity_threshold=0.5,
+    )
+
+    assert result.pattern_count > 0
+    surface_path = tmp_path / "merged_large" / "merged_large_library.surface.json"
+    assert surface_path.exists()
+    data = surface_path.read_text()
+    assert '"surface_mode": "merged"' in data
+    assert '"merge_rules"' in data
+
+    agent = LayeredAgent(num_workers=1)
+    loaded = agent.load_bundle(str(output_base))
+    assert loaded >= 1
+    assert agent.surface_mode == "merged"
+    assert agent.l1.obs_dim > 95
+
+    round_trip_base = tmp_path / "merged_large" / "merged_large_round_trip"
+    agent.save_bundle(str(round_trip_base))
+    reloaded = LayeredAgent(num_workers=1)
+    reloaded.load_bundle(str(round_trip_base))
+    assert reloaded.surface_mode == "merged"
+    assert reloaded.l1.obs_dim > 95

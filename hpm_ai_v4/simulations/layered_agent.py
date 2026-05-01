@@ -10,7 +10,7 @@ import numpy as np
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.agents.decoders import CharDecoder, ConstrainedDecoder, ExplanationDecoder, TargetDecoder, WordDecoder
 from hpm_ai_v4.agents.meta_decoder_policy import DecoderSpec, MetaDecoderPolicy
-from hpm_ai_v4.io.adapters import AsciiCharAdapter, CharClassAdapter, WordAdapter
+from hpm_ai_v4.io.adapters import AsciiCharAdapter, CharClassAdapter, LearnedSubstrateAdapter, SubstrateMergeRule, WordAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
@@ -99,6 +99,24 @@ class LayeredAgent:
         mode = str(surface_mode or "coarse")
         if mode == "ascii":
             adapter = AsciiCharAdapter()
+        elif mode in {"merged", "learned", "substrate"}:
+            adapter = LearnedSubstrateAdapter(
+                max_merges=int((surface_state or {}).get("merge_max_merges", 64)),
+                lowercase=bool((surface_state or {}).get("lowercase", True)),
+            )
+            merge_rules = dict((surface_state or {}).get("merge_rules", {}) or {})
+            if merge_rules:
+                adapter._merge_rules = {}
+                for token, rule in merge_rules.items():
+                    if isinstance(rule, dict):
+                        adapter._merge_rules[str(token)] = SubstrateMergeRule(
+                            token=str(token),
+                            latent_state=int(rule.get("latent_state", 0)),
+                            support=int(rule.get("support", 0)),
+                            purity=float(rule.get("purity", 1.0)),
+                            span=int(rule.get("span", len(str(token)))),
+                        )
+                adapter._refresh_merge_vocab()
         elif mode == "word":
             canonical_aliases = dict((surface_state or {}).get("canonical_aliases", {}) or {}) or dict(WordAdapter.DEFAULT_CANONICAL_ALIASES)
             adapter = WordAdapter(
@@ -626,6 +644,10 @@ class LayeredAgent:
                 surface_state["word_vocab"] = dict(getattr(self._adapter, "_word_to_id", {}))
                 if hasattr(self._adapter, "_canonical_aliases"):
                     surface_state["canonical_aliases"] = dict(getattr(self._adapter, "_canonical_aliases", {}))
+            elif self.surface_mode in {"merged", "learned", "substrate"} and hasattr(self._adapter, "merge_rules"):
+                surface_state["merge_max_merges"] = int(getattr(self._adapter, "_max_merges", 64))
+                surface_state["lowercase"] = bool(getattr(self._adapter, "lowercase", True))
+                surface_state["merge_rules"] = dict(self._adapter.merge_rules())
             json.dump(surface_state, f)
         with open(base_path + ".policy.json", "w", encoding="utf-8") as f:
             json.dump(self.decoder_policy.state_dict(), f)
@@ -1121,12 +1143,12 @@ class LayeredAgent:
         return raw_ids
 
     def _surface_ids_from_text(self, text: str) -> List[int]:
-        if self.surface_mode == "word" and hasattr(self._adapter, "to_observations"):
+        if self.surface_mode in {"word", "merged", "learned", "substrate"} and hasattr(self._adapter, "to_observations"):
             return [int(tok) for tok in self._adapter.to_observations(text, max_length=max(1000, len(text) * 2))]
         return self._text_to_raw_ids(text)
 
     def _surface_history_text(self) -> str:
-        if self.surface_mode == "word" and hasattr(self._adapter, "from_observations"):
+        if self.surface_mode in {"word", "merged", "learned", "substrate"} and hasattr(self._adapter, "from_observations"):
             try:
                 return self._adapter.from_observations(self._raw_history)
             except Exception:
@@ -1134,7 +1156,7 @@ class LayeredAgent:
         return "".join(chr(v + 32) for v in self._raw_history if 0 <= int(v) <= 94)
 
     def _surface_label_for_obs(self, obs: int) -> str:
-        if self.surface_mode == "word" and hasattr(self._adapter, "decode_token"):
+        if self.surface_mode in {"word", "merged", "learned", "substrate"} and hasattr(self._adapter, "decode_token"):
             return str(self._adapter.decode_token(int(obs)))
         if int(obs) == 94:
             return "\n"
