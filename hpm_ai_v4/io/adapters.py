@@ -1198,6 +1198,135 @@ class AsciiCharAdapter:
         return self.decode_class(int(token_id))
 
 
+class LearnedMergeAdapter:
+    """Substrate adapter with a learned vocabulary built by BPE-style bigram merging.
+
+    Starts from 95 printable ASCII slots and iteratively merges the most
+    frequent character pairs into new token IDs.  After learn_merges() the
+    vocabulary is frozen; encode() maps raw text to merged token sequences.
+
+    This gives the substrate a learned hierarchy: nearby IDs correspond to
+    similar surface units, and higher-level patterns see coarser tokens that
+    carry more semantic content per observation step.
+
+    Usage::
+
+        adapter = LearnedMergeAdapter(max_merges=200)
+        adapter.learn_merges(corpus_text)          # one-time training pass
+        tokens = adapter.encode("the quick brown") # list of ints
+        adapter.save("vocab.json")                 # persist
+        adapter2 = LearnedMergeAdapter.load("vocab.json")
+    """
+
+    BASE_SIZE = 95  # printable ASCII: ord(ch)-32 for ch in ' '...'~'
+
+    def __init__(self, max_merges: int = 200):
+        self.max_merges = max_merges
+        # merges: ordered list of (a, b) -> new_id
+        self._merges: List[Tuple[int, int]] = []
+        self._merge_map: Dict[Tuple[int, int], int] = {}
+        self._vocab_size: int = self.BASE_SIZE
+
+    @property
+    def obs_dim(self) -> int:
+        return self._vocab_size
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
+
+    def learn_merges(self, corpus: str, min_freq: int = 2) -> int:
+        """Run BPE merge pass on corpus text.  Returns number of merges learned."""
+        # Tokenise corpus to base IDs
+        tokens = self._base_encode(corpus)
+        # Represent as list of lists (one per word-like chunk) for efficiency
+        # We work on the flat token sequence directly.
+        seq = list(tokens)
+        learned = 0
+        for _ in range(self.max_merges):
+            counts: Counter = Counter()
+            for a, b in zip(seq, seq[1:]):
+                counts[(a, b)] += 1
+            if not counts:
+                break
+            best_pair, freq = counts.most_common(1)[0]
+            if freq < min_freq:
+                break
+            new_id = self.BASE_SIZE + learned
+            self._merges.append(best_pair)
+            self._merge_map[best_pair] = new_id
+            seq = self._apply_merge(seq, best_pair, new_id)
+            learned += 1
+        self._vocab_size = self.BASE_SIZE + learned
+        return learned
+
+    # ------------------------------------------------------------------
+    # Encoding
+    # ------------------------------------------------------------------
+
+    def _base_encode(self, text: str) -> List[int]:
+        out = []
+        for ch in text:
+            if ch == '\n':
+                out.append(self.BASE_SIZE - 1)  # use last slot for newline
+            else:
+                cid = ord(ch) - 32
+                if 0 <= cid < self.BASE_SIZE:
+                    out.append(cid)
+        return out
+
+    @staticmethod
+    def _apply_merge(seq: List[int], pair: Tuple[int, int], new_id: int) -> List[int]:
+        out: List[int] = []
+        i = 0
+        while i < len(seq):
+            if i < len(seq) - 1 and seq[i] == pair[0] and seq[i + 1] == pair[1]:
+                out.append(new_id)
+                i += 2
+            else:
+                out.append(seq[i])
+                i += 1
+        return out
+
+    def encode(self, text: str) -> List[int]:
+        """Encode text to merged token IDs."""
+        seq = self._base_encode(text)
+        for pair, new_id in self._merge_map.items():
+            seq = self._apply_merge(seq, pair, new_id)
+        return seq
+
+    def encode_char(self, ch: str) -> int:
+        """Encode a single character (no merging — for streaming use)."""
+        if ch == '\n':
+            return self.BASE_SIZE - 1
+        cid = ord(ch) - 32
+        return cid if 0 <= cid < self.BASE_SIZE else 0
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        import json as _json
+        data = {"max_merges": self.max_merges, "merges": self._merges}
+        with open(path, "w") as f:
+            _json.dump(data, f)
+
+    @classmethod
+    def load(cls, path: str) -> "LearnedMergeAdapter":
+        import json as _json
+        with open(path) as f:
+            data = _json.load(f)
+        adapter = cls(max_merges=data["max_merges"])
+        for pair in data["merges"]:
+            a, b = int(pair[0]), int(pair[1])
+            new_id = cls.BASE_SIZE + len(adapter._merges)
+            adapter._merges.append((a, b))
+            adapter._merge_map[(a, b)] = new_id
+        adapter._vocab_size = cls.BASE_SIZE + len(adapter._merges)
+        return adapter
+
+
 @dataclass(frozen=True)
 class SubstrateMergeRule:
     token: str
