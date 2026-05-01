@@ -460,23 +460,45 @@ class SelfStudyAgent:
             print(f"[consolidate] {page.title} removed {removed} near-duplicate patterns", flush=True)
         return {"chunks": len(chunks), "chars": chars, "learned": learned, "windows_seen": windows_seen, "windows_novel": windows_novel}
 
+    def _fetch_page(self, title: str):
+        """Fetch a single page; returns (page, elapsed) or (None, elapsed) on error."""
+        t = time.perf_counter()
+        try:
+            page = self.fetcher.fetch(title, max_links=self.max_links_per_page)
+            return page, time.perf_counter() - t
+        except Exception as exc:
+            print(f"[skip] {title}: {exc}", flush=True)
+            return None, time.perf_counter() - t
+
     def study(self) -> StudyResult:
+        from concurrent.futures import ThreadPoolExecutor, Future
         pages_read = 0
+        prefetch_future: Future | None = None
+        prefetch_title: str | None = None
+
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def _next_fetch():
+            t = self.scheduler.pop()
+            if t is None:
+                return None, None
+            return t, executor.submit(self._fetch_page, t)
+
+        # Kick off first prefetch
+        prefetch_title, prefetch_future = _next_fetch()
 
         while pages_read < self.max_pages:
-            title = self.scheduler.pop()
-            if title is None:
+            if prefetch_future is None:
                 break
 
-            fetch_start = time.perf_counter()
-            try:
-                page = self.fetcher.fetch(title, max_links=self.max_links_per_page)
-            except Exception as exc:
-                print(f"[skip] {title}: {exc}", flush=True)
-                continue
-            fetch_elapsed = time.perf_counter() - fetch_start
+            # Collect current page result
+            title = prefetch_title
+            page, fetch_elapsed = prefetch_future.result()
 
-            if not page.text.strip():
+            # Immediately kick off next prefetch while we train
+            prefetch_title, prefetch_future = _next_fetch()
+
+            if page is None or not page.text.strip():
                 continue
 
             self._read_pages.append(page.title)
@@ -507,6 +529,8 @@ class SelfStudyAgent:
             if pattern_count >= self.target_patterns:
                 print(f"[done] target reached at page {pages_read}", flush=True)
                 break
+
+        executor.shutdown(wait=False)
 
         print(
             f"[done] study complete pages={pages_read} visited={len(self.scheduler.visited)} "
