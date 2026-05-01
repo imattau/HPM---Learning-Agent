@@ -298,6 +298,36 @@ class SelfStudyAgent:
             return [clean]
         return windows
 
+    def _chunk_already_covered(self, tokens: List[int], threshold: float = -0.35, top_k: int = 5) -> bool:
+        """Return True if existing patterns already model this token sequence well.
+
+        Scores the top-K weighted hierarchical patterns against the token window.
+        If the best log-likelihood per token exceeds threshold, the chunk is
+        already represented in the library — skip training.
+        """
+        if not tokens or len(tokens) < 4:
+            return False
+        patterns = getattr(self.agent, "patterns", None)
+        if not patterns:
+            return False
+        hier = sorted(
+            [p for p in patterns if getattr(p, "latent_dim", 0) > 1],
+            key=lambda p: float(p.weight),
+            reverse=True,
+        )[:top_k]
+        if not hier:
+            return False
+        sample = tokens[:min(60, len(tokens))]
+        best_ll = float("-inf")
+        for p in hier:
+            try:
+                ll = float(p.log_likelihood(sample)) / max(1, len(sample))
+                if ll > best_ll:
+                    best_ll = ll
+            except Exception:
+                continue
+        return best_ll >= threshold
+
     def _warm_start_chunk(self, tokens: List[int], boost: float = 0.15, top_k: int = 5) -> None:
         """Boost weights of existing patterns most relevant to this token window.
 
@@ -378,17 +408,31 @@ class SelfStudyAgent:
                     )
                 continue
             chunk_start = time.perf_counter()
-            # Warm-start: boost relevant existing patterns before training
             adapter = getattr(self.agent, "_adapter", None)
-            if adapter is not None and novel_windows:
-                sample = novel_windows[0]
-                try:
-                    warm_tokens = [adapter.encode_char(c) for c in sample
-                                   if 32 <= ord(c) <= 127 or c == '\n']
-                    self._warm_start_chunk(warm_tokens)
-                except Exception:
-                    pass
             stats = {"target_chars": 0, "self_chars": 0, "token_agreement": 0.0, "plausibility": 0.0}
+            covered_windows = 0
+            filtered_windows: List[str] = []
+            for window in novel_windows:
+                if adapter is not None:
+                    try:
+                        wtokens = [adapter.encode_char(c) for c in window
+                                   if 32 <= ord(c) <= 127 or c == '\n']
+                        if self._chunk_already_covered(wtokens):
+                            covered_windows += 1
+                            continue
+                        self._warm_start_chunk(wtokens)
+                    except Exception:
+                        pass
+                filtered_windows.append(window)
+            if not filtered_windows:
+                if idx == 1 or idx == total_chunks or idx % 10 == 0:
+                    print(
+                        f"[train] {page.title} chunk {idx}/{total_chunks} "
+                        f"skipped pattern-covered ({covered_windows} windows)",
+                        flush=True,
+                    )
+                continue
+            novel_windows = filtered_windows
             for window in novel_windows:
                 window_stats = self.agent.observe_text(
                     window,
