@@ -10,7 +10,8 @@ import numpy as np
 from hpm_ai_v4.simulations.full_simulation import WikipediaStream
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.dictionary import NLTKWordList
-from hpm_ai_v4.tools.grammar import HeuristicGrammarLibrary
+from hpm_ai_v4.tools.dictionary import DictionaryValidator
+from hpm_ai_v4.tools.grammar import GrammarValidator, HeuristicGrammarLibrary
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.io.adapters import SentenceAdapter
 from hpm_ai_v4.tools.text_signals import TextSignalExtractor, TextSignalPack
@@ -473,8 +474,12 @@ class BasicChatSession:
         use_registry_scoring: Optional[bool] = None,
         use_coreference_scoring: Optional[bool] = None,
         use_property_scoring: Optional[bool] = None,
+        dictionary: Optional[DictionaryValidator] = None,
+        grammar: Optional[GrammarValidator] = None,
     ):
         self.agent = agent
+        self.dictionary = dictionary if dictionary is not None else getattr(agent, "dictionary", None)
+        self.grammar = grammar if grammar is not None else getattr(agent, "grammar", None)
         self.history_window = max(1, int(history_window))
         self.response_steps = max(1, int(response_steps))
         self.system_prompt = system_prompt.strip()
@@ -495,6 +500,63 @@ class BasicChatSession:
         self.history_cap = max(4, self.history_window * 4)
         self.discourse_state = DiscourseState()
         self.relational_state = RelationalState()
+
+    def _grammar_pos(self, word: str) -> str:
+        token = word.strip().lower()
+        if not token:
+            return ""
+        grammar = self.grammar
+        if grammar is not None:
+            try:
+                pos = str(grammar.get_pos(token)).upper()
+                if pos and pos != "NN":
+                    return pos
+            except Exception:
+                pass
+        if token in _DISCOURSE_PRONOUNS:
+            return "PR"
+        if token in _DISCOURSE_PREPOSITIONS:
+            return "IN"
+        if token in _DISCOURSE_AUXILIARIES:
+            return "VB"
+        return "NN"
+
+    def _grammar_lemma(self, word: str) -> str:
+        token = word.strip().lower()
+        if not token:
+            return ""
+        grammar = self.grammar
+        if grammar is not None:
+            lemma_fn = getattr(grammar, "normalize_lemma", None)
+            if callable(lemma_fn):
+                try:
+                    lemma = str(lemma_fn(token)).strip().lower()
+                    if lemma:
+                        return lemma
+                except Exception:
+                    pass
+        return _normalize_verb_lemma(token)
+
+    def _is_pronoun_token(self, word: str) -> bool:
+        return self._grammar_pos(word) == "PR"
+
+    def _is_preposition_token(self, word: str) -> bool:
+        return self._grammar_pos(word) == "IN"
+
+    def _is_auxiliary_token(self, word: str) -> bool:
+        token = word.strip().lower()
+        return self._grammar_pos(token) == "VB" and token in _DISCOURSE_AUXILIARIES
+
+    def _is_interrogative_token(self, word: str) -> bool:
+        return word.strip().lower() in _DISCOURSE_INTERROGATIVES
+
+    def _is_stopword_token(self, word: str) -> bool:
+        token = word.strip().lower()
+        return token in _DISCOURSE_STOPWORDS or self._is_pronoun_token(token)
+
+    def _is_possession_verb(self, word: str) -> bool:
+        token = self._grammar_lemma(word)
+        return token in {"have", "own", "possess", "contain", "hold", "carry"}
 
     def _relation_heuristic_scale(self) -> float:
         return 1.0 if self.use_relational_heuristics else 0.0
@@ -702,7 +764,7 @@ class BasicChatSession:
         if not lower:
             return ""
         words = re.findall(r"[A-Za-z']+", lower)
-        pronouns = {tok for tok in words if tok in _DISCOURSE_PRONOUNS}
+        pronouns = {tok for tok in words if self._is_pronoun_token(tok)}
         if pronouns and self._component_enabled("coreference"):
             if self.discourse_state.focus_stack:
                 return self.discourse_state.focus_stack[0]
@@ -917,12 +979,12 @@ class BasicChatSession:
         entry["stability_score"] = float(entry.get("stability_score", 0.0)) + (0.05 if add else -0.03)
 
     def _apply_action_schema_effects(self, frame: Dict[str, Any], text: str = "", raw_tokens: Optional[List[str]] = None) -> None:
-        predicate = _normalize_verb_lemma(str(frame.get("predicate", "")).strip().lower())
+        predicate = self._grammar_lemma(str(frame.get("predicate", "")).strip().lower())
         raw_tokens = list(raw_tokens or self._raw_tokens(text))
         content_tokens = self._semantic_tokens(raw_tokens)
         schema_key = predicate
         for tok in raw_tokens:
-            lemma = _normalize_verb_lemma(tok)
+            lemma = self._grammar_lemma(tok)
             if lemma in ACTION_SCHEMAS:
                 schema_key = lemma
                 break
@@ -948,7 +1010,7 @@ class BasicChatSession:
                     recipient = str(content_tokens[1]).strip().lower()
             if not recipient and len(raw_tokens) >= 3:
                 try:
-                    verb_index = next(i for i, tok in enumerate(raw_tokens) if _normalize_verb_lemma(tok) == "give")
+                    verb_index = next(i for i, tok in enumerate(raw_tokens) if self._grammar_lemma(tok) == "give")
                     tail_tokens = [tok for tok in self._semantic_tokens(raw_tokens[verb_index + 1:]) if tok]
                     if tail_tokens:
                         recipient = tail_tokens[0]
@@ -995,9 +1057,7 @@ class BasicChatSession:
         content_tokens = parsed.get("content_tokens", [])
         subject_hint = parsed.get("subject_hint", "")
         object_hint = parsed.get("object_hint", "")
-        possession_verbs = {"have", "has", "had", "own", "owns", "possess", "possesses", "contain", "contains", "hold", "holds"}
-
-        if lower.startswith("what") and any(tok in possession_verbs for tok in tokens):
+        if lower.startswith("what") and any(self._is_possession_verb(tok) for tok in tokens):
             possessor = subject_hint or (content_tokens[0] if content_tokens else "")
             possessions = self._entity_possessions(possessor)
             if possessions:
@@ -1009,7 +1069,7 @@ class BasicChatSession:
                     "possessor": possessor,
                 }
 
-        if lower.startswith(("does", "do", "did")) and any(tok in possession_verbs for tok in tokens):
+        if lower.startswith(("does", "do", "did")) and any(self._is_possession_verb(tok) for tok in tokens):
             possessor = subject_hint or (content_tokens[0] if content_tokens else "")
             held = self._entity_possessions(possessor)
             target = object_hint or (content_tokens[-1] if content_tokens else "")
@@ -1023,7 +1083,7 @@ class BasicChatSession:
                     "target": target,
                 }
 
-        if lower.startswith("who") and any(tok in possession_verbs for tok in tokens):
+        if lower.startswith("who") and any(self._is_possession_verb(tok) for tok in tokens):
             target = object_hint or (content_tokens[-1] if content_tokens else "")
             if target:
                 for entity, record in self.discourse_state.entity_registry.items():
@@ -1040,7 +1100,7 @@ class BasicChatSession:
     def _entity_registry_scores(self, question_text: str = "") -> Dict[str, float]:
         scores: Dict[str, float] = {}
         lower = question_text.lower()
-        pronouns = {tok.lower() for tok in self.agent._tokenize_words(question_text) if tok.lower() in _DISCOURSE_PRONOUNS}
+        pronouns = {tok.lower() for tok in self.agent._tokenize_words(question_text) if self._is_pronoun_token(tok)}
         for entity, record in self.discourse_state.entity_registry.items():
             if not entity:
                 continue
@@ -1229,7 +1289,7 @@ class BasicChatSession:
         subject_hint = ""
         object_hint = ""
         if lower.startswith("who"):
-            if any(tok in _DISCOURSE_AUXILIARIES for tok in tokens):
+            if any(self._is_auxiliary_token(tok) for tok in tokens):
                 if content_tokens:
                     predicate_hint = content_tokens[-1]
                 if len(content_tokens) >= 2:
@@ -1240,7 +1300,7 @@ class BasicChatSession:
             elif content_tokens:
                 predicate_hint = content_tokens[0]
         elif lower.startswith("what"):
-            if any(tok in _DISCOURSE_AUXILIARIES for tok in tokens) and content_tokens:
+            if any(self._is_auxiliary_token(tok) for tok in tokens) and content_tokens:
                 predicate_hint = content_tokens[-1]
                 if len(content_tokens) >= 2:
                     object_hint = content_tokens[0]
@@ -1272,7 +1332,7 @@ class BasicChatSession:
 
         property_hint = ""
         for tok in tokens[1:]:
-            if tok in _DISCOURSE_STOPWORDS or tok in _DISCOURSE_INTERROGATIVES or tok in _DISCOURSE_AUXILIARIES:
+            if tok in _DISCOURSE_STOPWORDS or tok in _DISCOURSE_INTERROGATIVES or self._is_auxiliary_token(tok):
                 continue
             property_hint = tok
             break
@@ -1345,9 +1405,15 @@ class BasicChatSession:
         } and len(raw_tokens) > 1:
             raw_tokens = raw_tokens[1:]
 
-        if raw_tokens and raw_tokens[-1] in _DISCOURSE_PREPOSITIONS:
+        if raw_tokens and self._is_preposition_token(raw_tokens[-1]):
             raw_tokens = raw_tokens[:-1]
-        raw_tokens = [tok for tok in raw_tokens if tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_AUXILIARIES and tok not in _DISCOURSE_PREPOSITIONS]
+        raw_tokens = [
+            tok
+            for tok in raw_tokens
+            if not self._is_stopword_token(tok)
+            and not self._is_auxiliary_token(tok)
+            and not self._is_preposition_token(tok)
+        ]
         if not raw_tokens:
             return {"subject_hint": "", "predicate_hint": "", "object_hint": "", "relation_kind": ""}
 
@@ -1784,7 +1850,7 @@ class BasicChatSession:
         tokens = []
         for tok in self.agent._tokenize_words(text):
             low = tok.lower()
-            if not low or low in _DISCOURSE_STOPWORDS or low in _DISCOURSE_PRONOUNS:
+            if not low or self._is_stopword_token(low):
                 continue
             if any(ch.isalpha() for ch in low):
                 tokens.append(low)
@@ -1795,7 +1861,7 @@ class BasicChatSession:
 
     def _first_meaningful_token(self, tokens: List[str]) -> str:
         for tok in tokens:
-            if tok and tok not in _DISCOURSE_STOPWORDS and tok not in _DISCOURSE_PRONOUNS and tok not in _DISCOURSE_INTERROGATIVES:
+            if tok and not self._is_stopword_token(tok) and not self._is_interrogative_token(tok):
                 return tok
         return ""
 
@@ -1804,9 +1870,9 @@ class BasicChatSession:
         for tok in tokens:
             if not tok or not any(ch.isalpha() for ch in tok):
                 continue
-            if tok in _DISCOURSE_STOPWORDS or tok in _DISCOURSE_PRONOUNS or tok in _DISCOURSE_INTERROGATIVES or tok in _DISCOURSE_AUXILIARIES:
+            if self._is_stopword_token(tok) or self._is_interrogative_token(tok) or self._is_auxiliary_token(tok):
                 continue
-            if not keep_prepositions and tok in _DISCOURSE_PREPOSITIONS:
+            if not keep_prepositions and self._is_preposition_token(tok):
                 continue
             semantic.append(tok)
         return semantic
@@ -1856,10 +1922,10 @@ class BasicChatSession:
             predicate_candidates = [
                 tok
                 for tok in before_by
-                if tok not in _DISCOURSE_STOPWORDS
-                and tok not in _DISCOURSE_PRONOUNS
-                and tok not in _DISCOURSE_AUXILIARIES
-                and tok not in _DISCOURSE_PREPOSITIONS
+                if not self._is_stopword_token(tok)
+                and not self._is_pronoun_token(tok)
+                and not self._is_auxiliary_token(tok)
+                and not self._is_preposition_token(tok)
             ]
             predicate = predicate_candidates[-1] if predicate_candidates else predicate
             obj = patient
@@ -1868,7 +1934,7 @@ class BasicChatSession:
             (
                 idx
                 for idx, tok in enumerate(raw_tokens)
-                if tok in _DISCOURSE_PREPOSITIONS and not (passive_aux and tok == "by")
+                if self._is_preposition_token(tok) and not (passive_aux and tok == "by")
             ),
             -1,
         )
@@ -1945,7 +2011,7 @@ class BasicChatSession:
         sentence_features: Optional[Dict[str, Any]] = None,
     ) -> None:
         tokens = self._content_tokens(text)
-        pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if tok.lower() in _DISCOURSE_PRONOUNS]
+        pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if self._is_pronoun_token(tok)]
         sentence_features = sentence_features or self._sentence_features(text)
         last_sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
         self._update_relational_state(text, tokens=tokens, pronouns=pronouns, role=role, dialogue_act=dialogue_act, sentence_features=sentence_features)
@@ -2292,7 +2358,7 @@ class BasicChatSession:
         parsed = self._parse_query_frame(question_text)
         question_tokens = parsed["tokens"]
         content_tokens = parsed["content_tokens"]
-        pronoun_tokens = [tok for tok in question_tokens if tok in _DISCOURSE_PRONOUNS]
+        pronoun_tokens = [tok for tok in question_tokens if self._is_pronoun_token(tok)]
         resolution_source = "registry"
         answer = ""
         chain_details: Dict[str, Any] = {"hops": 0}
@@ -2325,7 +2391,7 @@ class BasicChatSession:
                     answer = self.discourse_state.topic
                 resolution_source = "coreference"
             elif lower.startswith("what"):
-                copula_query = any(tok in _DISCOURSE_AUXILIARIES for tok in parsed["tokens"])
+                copula_query = any(self._is_auxiliary_token(tok) for tok in parsed["tokens"])
                 if copula_query:
                     answer = self._best_entity_by_property(parsed["content_tokens"])
                     resolution_source = "property" if answer else "relational_property"
@@ -2403,7 +2469,7 @@ class BasicChatSession:
         for tok in discourse_state.active_entities[:4]:
             if tok and tok in lower:
                 topic_hits += 1
-        if topic_hits == 0 and any(pron in user_text.lower().split() for pron in _DISCOURSE_PRONOUNS):
+        if topic_hits == 0 and any(self._is_pronoun_token(pron) for pron in user_text.lower().split()):
             # If the user is referring back with pronouns, prefer responses that keep the topic visible.
             if discourse_state.topic in lower or any(tok in lower for tok in discourse_state.focus_stack[:2]):
                 topic_hits += 1
@@ -2561,6 +2627,8 @@ class ReverseChatSession(BasicChatSession):
         reply_feedback_weight: float = 0.02,
         text_signals: Optional[TextSignalExtractor] = None,
         use_sentence_features: bool = True,
+        dictionary: Optional[DictionaryValidator] = None,
+        grammar: Optional[GrammarValidator] = None,
     ):
         super().__init__(
             agent=agent,
@@ -2573,6 +2641,8 @@ class ReverseChatSession(BasicChatSession):
             reply_feedback_weight=reply_feedback_weight,
             text_signals=text_signals,
             use_sentence_features=use_sentence_features,
+            dictionary=dictionary,
+            grammar=grammar,
         )
         self._question_history: List[str] = []
 
@@ -2850,6 +2920,8 @@ def run_basic_chat_simulation(
         history_window=history_window,
         response_steps=response_steps,
         use_constraints=use_dict,
+        dictionary=dictionary,
+        grammar=grammar,
     )
     prompts = prompts or [
         "Hello.",
@@ -2922,6 +2994,8 @@ def run_reverse_chat_simulation(
         history_window=history_window,
         response_steps=response_steps,
         use_constraints=use_dict,
+        dictionary=dictionary,
+        grammar=grammar,
     )
     answers = answers or [
         "I need a plan.",

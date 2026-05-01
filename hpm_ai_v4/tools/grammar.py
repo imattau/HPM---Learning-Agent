@@ -18,6 +18,10 @@ class GrammarValidator(ABC):
         """Return a basic Part-of-Speech category for a single word."""
         pass
 
+    def normalize_lemma(self, word: str) -> str:
+        """Return a normalized lexical form for a single word."""
+        return word.lower().strip()
+
 class HeuristicGrammarLibrary(GrammarValidator):
     """
     A rule-based grammar library that uses a hardcoded transition matrix
@@ -68,6 +72,38 @@ class HeuristicGrammarLibrary(GrammarValidator):
                     
         # Fallback to Noun
         return "NN"
+
+    def normalize_lemma(self, word: str) -> str:
+        word = word.lower().strip()
+        irregulars = {
+            "gave": "give",
+            "given": "give",
+            "gives": "give",
+            "bought": "buy",
+            "buys": "buy",
+            "broke": "break",
+            "broken": "break",
+            "receives": "receive",
+            "received": "receive",
+            "gets": "get",
+            "got": "get",
+            "having": "have",
+            "has": "have",
+            "had": "have",
+            "owns": "own",
+            "owned": "own",
+            "possesses": "possess",
+            "possessed": "possess",
+        }
+        if word in irregulars:
+            return irregulars[word]
+        if word.endswith("ing") and len(word) > 4:
+            return word[:-3]
+        if word.endswith("ed") and len(word) > 3:
+            return word[:-2]
+        if word.endswith("s") and len(word) > 3:
+            return word[:-1]
+        return word
 
     def is_valid_transition(self, prev_word: str, current_word: str) -> bool:
         tag1 = self.get_pos(prev_word)

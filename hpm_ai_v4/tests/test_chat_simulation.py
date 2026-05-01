@@ -16,6 +16,26 @@ def _warm_agent(agent: LayeredAgent, text: str) -> None:
             agent.perceive(raw)
 
 
+class _StubGrammar:
+    def __init__(self):
+        self._pos = {
+            "it": "PR",
+            "by": "IN",
+            "gave": "VB",
+            "gives": "VB",
+        }
+        self._lemma = {
+            "gave": "give",
+            "gives": "give",
+        }
+
+    def get_pos(self, word: str) -> str:
+        return self._pos.get(word.lower(), "NN")
+
+    def normalize_lemma(self, word: str) -> str:
+        return self._lemma.get(word.lower(), word.lower())
+
+
 def test_basic_chat_session_turn_updates_history():
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
@@ -88,6 +108,24 @@ def test_basic_chat_session_uses_content_seed_and_no_unsupervised_policy_update(
     assert "Assistant:" not in captured["generate_text"]["seed_text"]
     assert captured["generate_text"]["update_policy"] is False
     assert captured["generate_chars"]["update_policy"] is False
+
+
+def test_basic_chat_session_uses_supplied_grammar_for_pos_and_lemma():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(
+        agent,
+        history_window=2,
+        response_steps=16,
+        use_constraints=False,
+        grammar=_StubGrammar(),
+    )
+
+    assert session._is_pronoun_token("it")
+    assert session._is_preposition_token("by")
+    assert session._grammar_lemma("gave") == "give"
+    assert session._semantic_tokens(["it", "gave", "by", "book"]) == ["gave", "book"]
 
 
 def test_basic_chat_session_uses_text_signal_ranking(monkeypatch):
