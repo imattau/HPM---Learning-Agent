@@ -1,0 +1,381 @@
+"""Wikipedia self-study crawler for building an HPM library."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from hpm_ai_v4.evaluators.metrics import epistemic_score
+from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.tools.dictionary import DictionaryValidator, NLTKWordList
+from hpm_ai_v4.tools.grammar import GrammarValidator, HeuristicGrammarLibrary
+from hpm_ai_v4.tools.serializer import PatternSerializer
+
+
+WIKI_API = "https://en.wikipedia.org/w/api.php"
+
+
+@dataclass(frozen=True)
+class WikiPage:
+    title: str
+    text: str
+    links: List[str] = field(default_factory=list)
+    source_url: str = ""
+
+
+@dataclass
+class StudyResult:
+    pages_read: int
+    patterns_saved: int
+    output_path: str
+    visited: int
+    queued: int
+
+
+class WikiFetcher:
+    """Fetch Wikipedia page extracts and outbound links via the MediaWiki API."""
+
+    def __init__(self, api_url: str = WIKI_API, timeout: float = 20.0, user_agent: str = "HPM-Learning-Agent/1.0"):
+        self.api_url = api_url.rstrip("?")
+        self.timeout = float(timeout)
+        self.user_agent = user_agent
+
+    def _request_json(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        query = urllib.parse.urlencode(params)
+        url = f"{self.api_url}?{query}"
+        req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+        with urllib.request.urlopen(req, timeout=self.timeout) as response:  # nosec: trusted API endpoint
+            return json.loads(response.read().decode("utf-8"))
+
+    @staticmethod
+    def canonicalize_title(title: str) -> str:
+        text = str(title or "").strip()
+        text = text.replace(" ", "_")
+        text = re.sub(r"_+", "_", text)
+        return text
+
+    @staticmethod
+    def _is_mainspace_title(title: str) -> bool:
+        return bool(title) and ":" not in title and not title.startswith("#")
+
+    def fetch(self, title: str, max_links: int = 200) -> WikiPage:
+        canonical = self.canonicalize_title(title)
+        params = {
+            "action": "query",
+            "format": "json",
+            "redirects": 1,
+            "prop": "extracts|links",
+            "explaintext": 1,
+            "exsectionformat": "plain",
+            "plnamespace": 0,
+            "pllimit": "max",
+            "titles": canonical,
+        }
+
+        text = ""
+        links: List[str] = []
+        source_url = f"{self.api_url}?{urllib.parse.urlencode(params)}"
+        continuation: Dict[str, Any] = {}
+
+        while True:
+            payload = self._request_json({**params, **continuation})
+            query = payload.get("query", {})
+            pages = query.get("pages", {})
+            page = next(iter(pages.values()), {}) if isinstance(pages, dict) else {}
+            if not text:
+                text = str(page.get("extract", "") or "")
+                if not canonical or canonical == title:
+                    canonical = str(page.get("title", canonical) or canonical)
+            for link in page.get("links", []) or []:
+                link_title = str(link.get("title", "") or "").strip()
+                if self._is_mainspace_title(link_title):
+                    links.append(link_title)
+                    if len(links) >= max_links:
+                        break
+            if len(links) >= max_links:
+                break
+            cont = payload.get("continue")
+            if not cont:
+                break
+            continuation = {k: v for k, v in cont.items() if k != "continue"}
+
+        links = list(dict.fromkeys(links))
+        return WikiPage(title=canonical, text=text, links=links, source_url=source_url)
+
+
+class CuriosityScheduler:
+    """Priority queue over Wikipedia titles guided by epistemic uncertainty."""
+
+    def __init__(self, agent: Any):
+        self.agent = agent
+        self.queue: List[Tuple[float, str]] = []
+        self.visited: set[str] = set()
+        self.in_frontier: set[str] = set()
+        self.page_bonus: Dict[str, float] = {}
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        return WikiFetcher.canonicalize_title(title).strip()
+
+    def _surface_ids(self, title: str) -> List[int]:
+        if hasattr(self.agent, "_surface_ids_from_text"):
+            try:
+                return [int(v) for v in self.agent._surface_ids_from_text(title)]
+            except Exception:
+                pass
+        return [max(0, min(94, ord(ch) - 32)) for ch in title if 32 <= ord(ch) <= 126]
+
+    def score_link(self, title: str, *, source_title: str = "") -> float:
+        norm = self._normalize_title(title)
+        ids = self._surface_ids(norm)
+        if not ids:
+            return 0.0
+
+        reasoner = getattr(self.agent, "reasoner", None)
+        relevant = []
+        if reasoner is not None and hasattr(reasoner, "get_relevant_patterns"):
+            try:
+                relevant = reasoner.get_relevant_patterns(ids, top_k=3) or []
+            except Exception:
+                relevant = []
+        if not relevant:
+            score = 1.0
+        else:
+            scores = [float(epistemic_score(p)) for p in relevant]
+            score = 1.0 - float(np.mean(scores))
+
+        if source_title and source_title != norm:
+            score += 0.05
+        score += float(self.page_bonus.get(norm, 0.0))
+        return float(score)
+
+    def push(self, links: Iterable[str], *, source_title: str = "") -> None:
+        for title in links:
+            norm = self._normalize_title(title)
+            if not norm or norm in self.visited or norm in self.in_frontier:
+                continue
+            priority = self.score_link(norm, source_title=source_title)
+            self.queue.append((priority, norm))
+            self.in_frontier.add(norm)
+        self.queue.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+    def pop(self) -> Optional[str]:
+        while self.queue:
+            _, title = self.queue.pop(0)
+            self.in_frontier.discard(title)
+            if title in self.visited:
+                continue
+            self.visited.add(title)
+            return title
+        return None
+
+    def seed(self, titles: Iterable[str]) -> None:
+        self.push(titles)
+
+
+class SelfStudyAgent:
+    """Fetch Wikipedia pages, train on them, and follow links by curiosity."""
+
+    def __init__(
+        self,
+        seed_topics: Sequence[str],
+        output_library: str,
+        *,
+        steps_per_chunk: int = 500,
+        max_pages: int = 500,
+        target_patterns: int = 2000,
+        max_links_per_page: int = 50,
+        chunk_char_budget: int = 1800,
+        surface_mode: str = "word",
+        agent: Optional[LayeredAgent] = None,
+        fetcher: Optional[WikiFetcher] = None,
+        scheduler: Optional[CuriosityScheduler] = None,
+        dictionary: Optional[DictionaryValidator] = None,
+        grammar: Optional[GrammarValidator] = None,
+        sentence_features: bool = True,
+    ):
+        self.output_library = output_library
+        self.steps_per_chunk = max(1, int(steps_per_chunk))
+        self.max_pages = max(1, int(max_pages))
+        self.target_patterns = max(1, int(target_patterns))
+        self.max_links_per_page = max(1, int(max_links_per_page))
+        self.chunk_char_budget = max(200, int(chunk_char_budget))
+        self.fetcher = fetcher or WikiFetcher()
+        self.agent = agent or LayeredAgent(
+            num_workers=1,
+            dictionary=dictionary,
+            grammar=grammar or HeuristicGrammarLibrary(),
+            surface_mode=surface_mode,
+        )
+        self.scheduler = scheduler or CuriosityScheduler(self.agent)
+        self._seed_topics = [self.fetcher.canonicalize_title(topic) for topic in seed_topics if str(topic).strip()]
+        self.scheduler.seed(self._seed_topics)
+        self._read_pages: List[str] = []
+        self._sentence_features = bool(sentence_features)
+
+    def _chunk_page_text(self, text: str) -> List[str]:
+        clean = str(text or "").strip()
+        if not clean:
+            return []
+
+        # Prefer sentence-boundary chunking if available; otherwise fall back to character windows.
+        try:
+            from hpm_ai_v4.io.adapters import SentenceAdapter
+
+            adapter = SentenceAdapter(use_spacy=False)
+            sentences = [span.text.strip() for span in adapter.segment(clean) if span.text.strip()]
+        except Exception:
+            sentences = [piece.strip() for piece in re.split(r"(?<=[.!?])\s+|\n+", clean) if piece.strip()]
+
+        chunks: List[str] = []
+        current: List[str] = []
+        current_len = 0
+        for sentence in sentences:
+            sentence_len = len(sentence)
+            if current and current_len + sentence_len > self.chunk_char_budget:
+                chunks.append(" ".join(current).strip())
+                current = [sentence]
+                current_len = sentence_len
+            else:
+                current.append(sentence)
+                current_len += sentence_len + 1
+        if current:
+            chunks.append(" ".join(current).strip())
+        return [chunk for chunk in chunks if chunk]
+
+    def _train_on_page(self, page: WikiPage) -> Dict[str, Any]:
+        chunks = self._chunk_page_text(page.text)
+        if not chunks:
+            return {"chunks": 0, "chars": 0}
+
+        learned = 0
+        chars = 0
+        for chunk in chunks[: self.steps_per_chunk]:
+            stats = self.agent.observe_text(
+                chunk,
+                feedback_mode="target",
+                self_feedback_weight=0.0,
+            )
+            learned += int(stats.get("target_chars", 0))
+            chars += len(chunk)
+        return {"chunks": len(chunks), "chars": chars, "learned": learned}
+
+    def study(self) -> StudyResult:
+        pages_read = 0
+
+        while pages_read < self.max_pages:
+            title = self.scheduler.pop()
+            if title is None:
+                break
+
+            try:
+                page = self.fetcher.fetch(title, max_links=self.max_links_per_page)
+            except Exception as exc:
+                print(f"[skip] {title}: {exc}")
+                continue
+
+            if not page.text.strip():
+                continue
+
+            self._read_pages.append(page.title)
+            self._train_on_page(page)
+            pages_read += 1
+
+            pattern_count = len([p for p in self.agent.patterns if getattr(p, "latent_dim", 0) > 1])
+            print(f"[{pages_read}] {page.title} — {pattern_count} patterns")
+
+            self.scheduler.page_bonus[page.title] = max(
+                self.scheduler.page_bonus.get(page.title, 0.0) * 0.9,
+                0.05,
+            )
+            self.scheduler.push(page.links[: self.max_links_per_page], source_title=page.title)
+
+            if pages_read % 50 == 0:
+                ckpt_path = self.output_library.replace(".pkl", f"_ckpt{pages_read}.pkl")
+                PatternSerializer.save(self.agent.patterns, ckpt_path)
+
+            if pattern_count >= self.target_patterns:
+                print(f"[done] target reached at page {pages_read}")
+                break
+
+        PatternSerializer.save(self.agent.patterns, self.output_library)
+        return StudyResult(
+            pages_read=pages_read,
+            patterns_saved=len(self.agent.patterns),
+            output_path=self.output_library,
+            visited=len(self.scheduler.visited),
+            queued=len(self.scheduler.queue),
+        )
+
+
+def build_wikipedia_self_study(
+    seed_topics: Sequence[str],
+    output_library: str,
+    *,
+    steps_per_chunk: int = 500,
+    max_pages: int = 500,
+    target_patterns: int = 2000,
+    max_links_per_page: int = 50,
+    chunk_char_budget: int = 1800,
+    surface_mode: str = "word",
+    dictionary: Optional[DictionaryValidator] = None,
+    grammar: Optional[GrammarValidator] = None,
+) -> StudyResult:
+    agent = SelfStudyAgent(
+        seed_topics=seed_topics,
+        output_library=output_library,
+        steps_per_chunk=steps_per_chunk,
+        max_pages=max_pages,
+        target_patterns=target_patterns,
+        max_links_per_page=max_links_per_page,
+        chunk_char_budget=chunk_char_budget,
+        surface_mode=surface_mode,
+        dictionary=dictionary,
+        grammar=grammar,
+    )
+    return agent.study()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Wikipedia self-study crawler for HPM")
+    parser.add_argument("--seed", nargs="+", required=True, help="Seed Wikipedia topics")
+    parser.add_argument("--output", required=True, help="Output library path (.pkl base path)")
+    parser.add_argument("--steps-per-chunk", type=int, default=500, help="Chunk budget used during reading")
+    parser.add_argument("--max-pages", type=int, default=500, help="Maximum pages to read")
+    parser.add_argument("--target-patterns", type=int, default=2000, help="Stop once this many hierarchical patterns are retained")
+    parser.add_argument("--max-links-per-page", type=int, default=50, help="Maximum outbound links to queue per page")
+    parser.add_argument("--chunk-char-budget", type=int, default=1800, help="Maximum characters per training chunk")
+    parser.add_argument("--surface-mode", default="word", help="LayeredAgent surface mode")
+    parser.add_argument("--dict", action="store_true", help="Attach an NLTK dictionary and heuristic grammar")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    dictionary = NLTKWordList(download=False) if args.dict else None
+    grammar = HeuristicGrammarLibrary() if args.dict else None
+    result = build_wikipedia_self_study(
+        seed_topics=args.seed,
+        output_library=args.output,
+        steps_per_chunk=args.steps_per_chunk,
+        max_pages=args.max_pages,
+        target_patterns=args.target_patterns,
+        max_links_per_page=args.max_links_per_page,
+        chunk_char_budget=args.chunk_char_budget,
+        surface_mode=args.surface_mode,
+        dictionary=dictionary,
+        grammar=grammar,
+    )
+    print(f"[done] pages={result.pages_read} patterns={result.patterns_saved} output={result.output_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

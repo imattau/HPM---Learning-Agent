@@ -453,6 +453,39 @@ class RelationalState:
         self.binding_stack.clear()
 
 
+@dataclass
+class SituationState:
+    """Unified chat situation state spanning discourse, relation, and history."""
+
+    discourse: DiscourseState = field(default_factory=DiscourseState)
+    relational: RelationalState = field(default_factory=RelationalState)
+    history: List[ChatTurn] = field(default_factory=list)
+    response_mode: str = "answer"
+    dialogue_act: str = "default"
+    last_update_role: str = "unknown"
+    last_update_turn: int = 0
+
+    def reset(self) -> None:
+        self.discourse.reset()
+        self.relational.reset()
+        self.history.clear()
+        self.response_mode = "answer"
+        self.dialogue_act = "default"
+        self.last_update_role = "unknown"
+        self.last_update_turn = 0
+
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "discourse": self.discourse.to_dict(),
+            "relational": self.relational.to_dict(),
+            "history_size": len(self.history),
+            "response_mode": self.response_mode,
+            "dialogue_act": self.dialogue_act,
+            "last_update_role": self.last_update_role,
+            "last_update_turn": self.last_update_turn,
+        }
+
+
 class BasicChatSession:
     """Minimal dialogue wrapper over LayeredAgent."""
 
@@ -496,10 +529,11 @@ class BasicChatSession:
         self.use_registry_scoring = bool(use_relational_heuristics if use_registry_scoring is None else use_registry_scoring)
         self.use_coreference_scoring = bool(use_relational_heuristics if use_coreference_scoring is None else use_coreference_scoring)
         self.use_property_scoring = bool(use_relational_heuristics if use_property_scoring is None else use_property_scoring)
-        self.history: List[ChatTurn] = []
+        self.situation_state = SituationState()
+        self.history = self.situation_state.history
         self.history_cap = max(4, self.history_window * 4)
-        self.discourse_state = DiscourseState()
-        self.relational_state = RelationalState()
+        self.discourse_state = self.situation_state.discourse
+        self.relational_state = self.situation_state.relational
 
     def _grammar_pos(self, word: str) -> str:
         token = word.strip().lower()
@@ -558,6 +592,18 @@ class BasicChatSession:
         token = self._grammar_lemma(word)
         return token in {"have", "own", "possess", "contain", "hold", "carry"}
 
+    def _grammar_sentence_parse(self, text: str) -> Any:
+        grammar = self.grammar
+        if grammar is None:
+            return None
+        parse_fn = getattr(grammar, "parse_sentence", None)
+        if not callable(parse_fn):
+            return None
+        try:
+            return parse_fn(text)
+        except Exception:
+            return None
+
     def _relation_heuristic_scale(self) -> float:
         return 1.0 if self.use_relational_heuristics else 0.0
 
@@ -587,10 +633,28 @@ class BasicChatSession:
             return "request"
         return "default"
 
+    def _select_response_mode(self, user_text: str, dialogue_act: str) -> str:
+        lower = user_text.strip().lower()
+        relation_conf = float(self.relational_state.confidence)
+        topic_conf = float(self.discourse_state.topic_confidence)
+        if dialogue_act in {"greeting", "closing"}:
+            return "acknowledge"
+        if dialogue_act == "clarification":
+            return "clarify"
+        if dialogue_act == "question":
+            if relation_conf < 0.2 and (not lower or lower.endswith("?")):
+                return "clarify"
+            if topic_conf < 0.15 and not self.discourse_state.active_entities:
+                return "defer"
+            return "answer"
+        if dialogue_act == "request":
+            return "answer"
+        if any(self._is_pronoun_token(tok) for tok in re.findall(r"[A-Za-z']+", lower)):
+            return "answer" if self.discourse_state.topic != "unknown" else "clarify"
+        return "answer" if relation_conf >= 0.15 or topic_conf >= 0.15 else "acknowledge"
+
     def reset(self) -> None:
-        self.history.clear()
-        self.discourse_state.reset()
-        self.relational_state.reset()
+        self.situation_state.reset()
 
     def chat(self, user_text: str, target_reply: str | None = None) -> str:
         return self.chat_turn(user_text, target_reply=target_reply).response_text
@@ -670,6 +734,9 @@ class BasicChatSession:
 
         prior_texts = [turn.text for turn in self._recent_turns() if turn.text.strip()]
         dialogue_act = self._dialogue_act(user_text)
+        response_mode = self._select_response_mode(user_text, dialogue_act)
+        self.situation_state.dialogue_act = dialogue_act
+        self.situation_state.response_mode = response_mode
 
         self._append("user", user_text)
         # Process user text (includes prediction, discourse update, learning, evaluation)
@@ -682,6 +749,7 @@ class BasicChatSession:
 
         prompt_text = self._build_prompt()
         discourse_features = self._discourse_context_features()
+        discourse_features["response_mode"] = response_mode
         response_text = self._generate_response(
             prompt_text,
             user_text=user_text,
@@ -719,6 +787,7 @@ class BasicChatSession:
         if target_reply:
             eval_stats = self.agent.evaluate_generated_text(response_text, target_reply)
             response_stats.update(eval_stats)
+        response_stats["response_mode"] = response_mode
 
         return ChatResult(
             user_text=user_text,
@@ -2010,8 +2079,12 @@ class BasicChatSession:
         dialogue_act: str,
         sentence_features: Optional[Dict[str, Any]] = None,
     ) -> None:
+        grammar_parse = self._grammar_sentence_parse(text)
         tokens = self._content_tokens(text)
-        pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if self._is_pronoun_token(tok)]
+        parsed_tokens = list(getattr(grammar_parse, "tokens", []) or [])
+        pronouns = [tok.lower() for tok in parsed_tokens if self._is_pronoun_token(tok)]
+        if not pronouns:
+            pronouns = [tok.lower() for tok in self.agent._tokenize_words(text) if self._is_pronoun_token(tok)]
         sentence_features = sentence_features or self._sentence_features(text)
         last_sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
         self._update_relational_state(text, tokens=tokens, pronouns=pronouns, role=role, dialogue_act=dialogue_act, sentence_features=sentence_features)
@@ -2056,6 +2129,8 @@ class BasicChatSession:
         self.discourse_state.focus_stack = self.discourse_state.active_entities[:3]
         self.discourse_state.turn_index += 1
         self.discourse_state.discourse_summary = self._format_discourse_summary()
+        self.situation_state.last_update_role = role
+        self.situation_state.last_update_turn = self.discourse_state.turn_index
 
     def _update_relational_state(
         self,
@@ -2068,6 +2143,7 @@ class BasicChatSession:
         sentence_features: Optional[Dict[str, Any]] = None,
     ) -> None:
         raw_tokens = self._raw_tokens(text)
+        grammar_parse = self._grammar_sentence_parse(text)
         tokens = list(tokens or self._content_tokens(text))
         pronouns = list(pronouns or [])
         sentence_features = sentence_features or self._sentence_features(text)
@@ -2117,6 +2193,49 @@ class BasicChatSession:
             sentence_features=sentence_features,
             fallback_subject=inherited_subject,
         )
+        grammar_svo: Dict[str, Any] = {}
+        grammar_extract = getattr(self.grammar, "extract_svo", None)
+        if callable(grammar_extract):
+            try:
+                grammar_svo = dict(grammar_extract(text) or {})
+            except Exception:
+                grammar_svo = {}
+        elif grammar_parse is not None:
+            parsed_tokens = list(getattr(grammar_parse, "tokens", []) or [])
+            parsed_pos = list(getattr(grammar_parse, "pos_tags", []) or [])
+            parsed_lemmas = list(getattr(grammar_parse, "lemmas", []) or [])
+            if parsed_tokens and parsed_pos and parsed_lemmas:
+                try:
+                    subject = next((tok for tok, pos in zip(parsed_tokens, parsed_pos) if pos in {"PR", "NN", "NNP"}), "")
+                    predicate_idx = next((i for i, pos in enumerate(parsed_pos) if pos == "VB"), -1)
+                    obj = ""
+                    for tok, pos in zip(reversed(parsed_tokens), reversed(parsed_pos)):
+                        if pos in {"NN", "NNP", "PR"}:
+                            obj = tok
+                            break
+                    grammar_svo = {
+                        "subject": subject,
+                        "predicate": parsed_lemmas[predicate_idx] if predicate_idx >= 0 else "",
+                        "object": obj,
+                        "voice": "active",
+                    }
+                except Exception:
+                    grammar_svo = {}
+        if grammar_svo:
+            if grammar_svo.get("subject") and current["subject"] == "unknown":
+                current["subject"] = str(grammar_svo.get("subject", "")).strip().lower()
+                current["agent"] = current["subject"]
+                current["role_bindings"]["subject"] = current["subject"]
+                current["role_bindings"]["agent"] = current["subject"]
+            if grammar_svo.get("predicate") and current["predicate"] == "unknown":
+                current["predicate"] = str(grammar_svo.get("predicate", "")).strip().lower()
+                current["role_bindings"]["predicate"] = current["predicate"]
+            if grammar_svo.get("object") and current["object"] == "unknown":
+                current["object"] = str(grammar_svo.get("object", "")).strip().lower()
+                current["role_bindings"]["object"] = current["object"]
+            if grammar_svo.get("voice") and current["voice"] == "active":
+                current["voice"] = str(grammar_svo.get("voice", "active")).strip().lower()
+                current["role_bindings"]["voice"] = current["voice"]
         if use_clause and frames:
             if frames[0]["voice"] == "passive":
                 current = frames[0]

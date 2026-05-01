@@ -1,6 +1,26 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Set, Tuple, Optional
+from dataclasses import dataclass
+from typing import List, Dict, Set, Tuple, Optional, Sequence
 import numpy as np
+
+
+@dataclass(frozen=True)
+class ParsedSentence:
+    text: str
+    tokens: Tuple[str, ...]
+    pos_tags: Tuple[str, ...]
+    lemmas: Tuple[str, ...]
+    dependencies: Tuple[Tuple[str, str, str], ...] = ()
+
+    def token_data(self) -> List[Dict[str, str]]:
+        return [
+            {
+                "text": token,
+                "pos": pos,
+                "lemma": lemma,
+            }
+            for token, pos, lemma in zip(self.tokens, self.pos_tags, self.lemmas)
+        ]
 
 class GrammarValidator(ABC):
     @abstractmethod
@@ -21,6 +41,14 @@ class GrammarValidator(ABC):
     def normalize_lemma(self, word: str) -> str:
         """Return a normalized lexical form for a single word."""
         return word.lower().strip()
+
+    def parse_sentence(self, sentence: str) -> Optional[ParsedSentence]:
+        """Return a cached sentence-level parse when the implementation supports it."""
+        return None
+
+    def extract_svo(self, sentence: str) -> Dict[str, str]:
+        """Return a light subject/verb/object frame for the sentence."""
+        return {"subject": "", "predicate": "", "object": "", "voice": "active"}
 
 class HeuristicGrammarLibrary(GrammarValidator):
     """
@@ -57,6 +85,7 @@ class HeuristicGrammarLibrary(GrammarValidator):
             "RB": {"VB": 0.8, "JJ": 0.7, "RB": 0.5},
             "CC": {"DT": 0.7, "NN": 0.7, "VB": 0.7, "PR": 0.7}
         }
+        self._sentence_cache: Dict[str, ParsedSentence] = {}
 
     def get_pos(self, word: str) -> str:
         word = word.lower()
@@ -105,6 +134,42 @@ class HeuristicGrammarLibrary(GrammarValidator):
             return word[:-1]
         return word
 
+    def parse_sentence(self, sentence: str) -> Optional[ParsedSentence]:
+        text = (sentence or "").strip()
+        if not text:
+            return ParsedSentence(text="", tokens=(), pos_tags=(), lemmas=(), dependencies=())
+        cached = self._sentence_cache.get(text)
+        if cached is not None:
+            return cached
+        tokens = tuple(w.lower() for w in text.split() if w.strip())
+        pos_tags = tuple(self.get_pos(tok) for tok in tokens)
+        lemmas = tuple(self.normalize_lemma(tok) for tok in tokens)
+        parsed = ParsedSentence(text=text, tokens=tokens, pos_tags=pos_tags, lemmas=lemmas, dependencies=())
+        self._sentence_cache[text] = parsed
+        return parsed
+
+    def extract_svo(self, sentence: str) -> Dict[str, str]:
+        parsed = self.parse_sentence(sentence)
+        if parsed is None or not parsed.tokens:
+            return super().extract_svo(sentence)
+        subject = ""
+        predicate = ""
+        obj = ""
+        canonical_verbs = {"give", "buy", "receive", "get", "have", "own", "possess", "contain", "hold", "carry", "break"}
+        for idx, (tok, pos) in enumerate(zip(parsed.tokens, parsed.pos_tags)):
+            if not subject and pos in {"PR", "NN", "NNP"}:
+                subject = tok
+            if not predicate and (pos == "VB" or parsed.lemmas[idx] in canonical_verbs):
+                predicate = parsed.lemmas[idx]
+            if pos in {"NN", "NNP", "PR"}:
+                obj = tok
+        return {
+            "subject": subject,
+            "predicate": predicate,
+            "object": obj,
+            "voice": "active",
+        }
+
     def is_valid_transition(self, prev_word: str, current_word: str) -> bool:
         tag1 = self.get_pos(prev_word)
         tag2 = self.get_pos(current_word)
@@ -135,3 +200,89 @@ class NLTKGrammarLibrary(HeuristicGrammarLibrary):
         # In a real environment, we'd try NLTK here.
         # Given the persistent timeouts, we stick to the heuristic for robustness.
         print("[grammar] Using Heuristic Grammar Library (NLTK fallback enabled).")
+
+
+class SpacyGrammarLibrary(GrammarValidator):
+    """Optional spaCy-backed grammar validator with sentence-level caching."""
+
+    def __init__(self, model: str = "en_core_web_sm", fallback: Optional[GrammarValidator] = None):
+        self._fallback = fallback or HeuristicGrammarLibrary()
+        self._nlp = None
+        self._sentence_cache: Dict[str, ParsedSentence] = {}
+        try:
+            import spacy  # type: ignore
+
+            self._nlp = spacy.load(model, disable=["ner"])
+        except Exception:
+            self._nlp = None
+
+    def score_sequence(self, words: List[str]) -> float:
+        return self._fallback.score_sequence(words)
+
+    def is_valid_transition(self, prev_word: str, current_word: str) -> bool:
+        return self._fallback.is_valid_transition(prev_word, current_word)
+
+    def get_pos(self, word: str) -> str:
+        if self._nlp is None:
+            return self._fallback.get_pos(word)
+        parsed = self.parse_sentence(word)
+        if parsed and parsed.pos_tags:
+            return parsed.pos_tags[0]
+        return self._fallback.get_pos(word)
+
+    def normalize_lemma(self, word: str) -> str:
+        if self._nlp is None:
+            return self._fallback.normalize_lemma(word)
+        parsed = self.parse_sentence(word)
+        if parsed and parsed.lemmas:
+            return parsed.lemmas[0]
+        return self._fallback.normalize_lemma(word)
+
+    def parse_sentence(self, sentence: str) -> Optional[ParsedSentence]:
+        text = (sentence or "").strip()
+        if not text:
+            return ParsedSentence(text="", tokens=(), pos_tags=(), lemmas=(), dependencies=())
+        cached = self._sentence_cache.get(text)
+        if cached is not None:
+            return cached
+        if self._nlp is None:
+            parsed = self._fallback.parse_sentence(text)
+            if parsed is None:
+                parsed = ParsedSentence(text=text, tokens=(), pos_tags=(), lemmas=(), dependencies=())
+            self._sentence_cache[text] = parsed
+            return parsed
+
+        doc = self._nlp(text)
+        tokens = tuple(token.text.lower() for token in doc)
+        pos_tags = tuple(token.pos_ for token in doc)
+        lemmas = tuple((token.lemma_ or token.text).lower() for token in doc)
+        dependencies = tuple((token.text.lower(), token.dep_, token.head.text.lower()) for token in doc)
+        parsed = ParsedSentence(text=text, tokens=tokens, pos_tags=pos_tags, lemmas=lemmas, dependencies=dependencies)
+        self._sentence_cache[text] = parsed
+        return parsed
+
+    def extract_svo(self, sentence: str) -> Dict[str, str]:
+        parsed = self.parse_sentence(sentence)
+        if parsed is None or not parsed.tokens:
+            return {"subject": "", "predicate": "", "object": "", "voice": "active"}
+        if self._nlp is None:
+            return self._fallback.extract_svo(sentence)
+        subject = ""
+        predicate = ""
+        obj = ""
+        voice = "active"
+        for token, dep, _ in parsed.dependencies:
+            if dep in {"nsubj", "nsubjpass"} and not subject:
+                subject = token
+                if dep == "nsubjpass":
+                    voice = "passive"
+            elif dep == "ROOT" and not predicate:
+                predicate = parsed.lemmas[parsed.tokens.index(token)]
+            elif dep in {"dobj", "obj", "attr"} and not obj:
+                obj = token
+        return {
+            "subject": subject,
+            "predicate": predicate,
+            "object": obj,
+            "voice": voice,
+        }

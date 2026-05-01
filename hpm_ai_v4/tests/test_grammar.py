@@ -1,5 +1,5 @@
 import pytest
-from hpm_ai_v4.tools.grammar import NLTKGrammarLibrary
+from hpm_ai_v4.tools.grammar import NLTKGrammarLibrary, HeuristicGrammarLibrary, SpacyGrammarLibrary
 
 @pytest.fixture(scope="module")
 def grammar():
@@ -30,3 +30,24 @@ def test_grammar_sequence_scoring(grammar):
 
 def test_empty_sequence(grammar):
     assert grammar.score_sequence([]) == 0.0
+
+
+def test_sentence_parse_is_cached_and_structured():
+    grammar = HeuristicGrammarLibrary()
+    parsed = grammar.parse_sentence("John gave Mary the book.")
+    cached = grammar.parse_sentence("John gave Mary the book.")
+
+    assert parsed is cached
+    assert parsed.tokens[0] == "john"
+    assert "give" in parsed.lemmas
+    assert len(parsed.pos_tags) == len(parsed.tokens)
+    assert grammar.extract_svo("John gave Mary the book.")["predicate"] == "give"
+
+
+def test_spacy_grammar_falls_back_when_unavailable():
+    grammar = SpacyGrammarLibrary()
+    parsed = grammar.parse_sentence("John gave Mary the book.")
+
+    assert parsed is not None
+    assert parsed.tokens
+    assert grammar.score_sequence(["the", "cat", "runs"]) >= 0.0

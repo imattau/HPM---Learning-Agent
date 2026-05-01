@@ -367,6 +367,7 @@ def test_basic_chat_session_discourse_state_persists_across_pronouns(monkeypatch
     assert session.discourse_state.active_entities
     assert any(call["context_features"]["discourse_topic"] == first_topic for call in captured)
     assert any("discourse_summary" in call["context_features"] for call in captured)
+    assert session.situation_state.snapshot()["discourse"]["topic"] == first_topic
 
 
 def test_reverse_chat_session_discourse_state_persists(monkeypatch):
@@ -555,6 +556,21 @@ def test_basic_chat_session_world_model_tracks_break_state():
 
     vase_record = session.discourse_state.entity_registry["vase"]
     assert vase_record.get("states", {}).get("condition") == "broken"
+
+
+def test_basic_chat_session_tracks_unified_situation_snapshot():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.chat_turn("The cat chased the dog.")
+
+    snapshot = session.situation_state.snapshot()
+
+    assert snapshot["history_size"] >= 2
+    assert snapshot["discourse"]["topic"] != "unknown"
+    assert snapshot["relational"]["subject"] == "cat"
+    assert snapshot["response_mode"] in {"answer", "clarify", "acknowledge", "defer"}
 
 
 def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
