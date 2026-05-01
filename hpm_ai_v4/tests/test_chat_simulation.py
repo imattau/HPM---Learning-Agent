@@ -490,6 +490,35 @@ def test_basic_chat_session_query_chain_supports_three_hops():
     assert result["pivot_source"] in {"by_chain", "clause", "relation"}
 
 
+def test_basic_chat_session_world_model_tracks_transfer_possession():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.observe_text("John gave Mary the book.", role="user", feedback_mode="target")
+
+    mary_record = session.discourse_state.entity_registry["mary"]
+    john_record = session.discourse_state.entity_registry["john"]
+
+    assert "book" in mary_record.get("possessions", [])
+    assert "book" not in john_record.get("possessions", [])
+
+    assert session.query("What does Mary have?")["answer"] == "book"
+    assert session.query("Does Mary have the book?")["answer"] == "yes"
+    assert session.query("Who has the book?")["answer"] == "mary"
+
+
+def test_basic_chat_session_world_model_tracks_break_state():
+    agent = LayeredAgent(num_workers=1)
+    _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)
+
+    session = BasicChatSession(agent, history_window=2, response_steps=16, use_constraints=False)
+    session.observe_text("The vase broke.", role="user", feedback_mode="target")
+
+    vase_record = session.discourse_state.entity_registry["vase"]
+    assert vase_record.get("states", {}).get("condition") == "broken"
+
+
 def test_basic_chat_session_query_uses_entity_registry_after_pruning(monkeypatch):
     agent = LayeredAgent(num_workers=1)
     _warm_agent(agent, "the quick brown fox jumps over the lazy dog. " * 4)

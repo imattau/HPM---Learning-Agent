@@ -204,6 +204,103 @@ _DISCOURSE_STOPWORDS = {
     "your",
 }
 
+ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "give": {
+        "category": "transfer",
+        "effects": {
+            "recipient_has_object": True,
+            "agent_has_object": False,
+        },
+    },
+    "buy": {
+        "category": "transfer",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "receive": {
+        "category": "transfer",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "get": {
+        "category": "transfer",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "have": {
+        "category": "possession",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "own": {
+        "category": "possession",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "possess": {
+        "category": "possession",
+        "effects": {
+            "agent_has_object": True,
+        },
+    },
+    "break": {
+        "category": "state",
+        "effects": {
+            "object_state": "broken",
+        },
+    },
+}
+
+
+def _normalize_verb_lemma(token: str) -> str:
+    tok = token.strip().lower()
+    if tok in ACTION_SCHEMAS:
+        return tok
+    irregular = {
+        "gave": "give",
+        "given": "give",
+        "gives": "give",
+        "bought": "buy",
+        "buys": "buy",
+        "broke": "break",
+        "broken": "break",
+        "receives": "receive",
+        "received": "receive",
+        "gets": "get",
+        "got": "get",
+        "having": "have",
+        "has": "have",
+        "had": "have",
+        "owns": "own",
+        "owned": "own",
+        "possesses": "possess",
+        "possessed": "possess",
+    }
+    if tok in irregular:
+        return irregular[tok]
+    if tok.endswith("ied") and len(tok) > 4:
+        return tok[:-3] + "y"
+    if tok.endswith("ed") and len(tok) > 4:
+        base = tok[:-2]
+        if base.endswith(base[-1:]) and len(base) > 2:
+            base = base[:-1]
+        return base
+    if tok.endswith("ing") and len(tok) > 5:
+        base = tok[:-3]
+        if base.endswith(base[-1:]) and len(base) > 2:
+            base = base[:-1]
+        return base
+    if tok.endswith("es") and len(tok) > 3:
+        return tok[:-2]
+    if tok.endswith("s") and len(tok) > 3:
+        return tok[:-1]
+    return tok
+
 
 def _resolve_registered_chat_library() -> Optional[str]:
     for registry_path in CHAT_REGISTRY_CANDIDATES:
@@ -772,6 +869,173 @@ class BasicChatSession:
             entry["salience"] = max(float(entry.get("salience", 0.0)) * 0.88, current_salience)
             if sentence_features:
                 entry["sentence_confidence"] = float(sentence_features.get("sentence_confidence", 0.0))
+
+    def _ensure_entity_record(self, entity: str) -> Dict[str, Any]:
+        entity = entity.strip().lower()
+        if not entity:
+            return {}
+        entry = self.discourse_state.entity_registry.setdefault(
+            entity,
+            {
+                "entity": entity,
+                "first_seen_turn": self.discourse_state.turn_index,
+                "last_turn": self.discourse_state.turn_index,
+                "last_role": "unknown",
+                "last_dialogue_act": "default",
+                "last_sentence_type": "fragment",
+                "last_subject": "unknown",
+                "last_predicate": "unknown",
+                "last_object": "unknown",
+                "mention_count": 0,
+                "salience": 0.0,
+                "binding_confidence": 0.0,
+                "stability_score": 0.0,
+                "prediction_hits": 0,
+                "prediction_misses": 0,
+                "last_position": 0,
+                "possessions": [],
+                "states": {},
+            },
+        )
+        entry.setdefault("possessions", [])
+        entry.setdefault("states", {})
+        return entry
+
+    def _update_possession(self, possessor: str, item: str, *, add: bool = True) -> None:
+        possessor = possessor.strip().lower()
+        item = item.strip().lower()
+        if not possessor or not item:
+            return
+        entry = self._ensure_entity_record(possessor)
+        possessions = list(entry.get("possessions", []))
+        if add and item not in possessions:
+            possessions.append(item)
+        elif not add:
+            possessions = [obj for obj in possessions if obj != item]
+        entry["possessions"] = possessions
+        entry["last_turn"] = self.discourse_state.turn_index
+        entry["stability_score"] = float(entry.get("stability_score", 0.0)) + (0.05 if add else -0.03)
+
+    def _apply_action_schema_effects(self, frame: Dict[str, Any], text: str = "", raw_tokens: Optional[List[str]] = None) -> None:
+        predicate = _normalize_verb_lemma(str(frame.get("predicate", "")).strip().lower())
+        raw_tokens = list(raw_tokens or self._raw_tokens(text))
+        content_tokens = self._semantic_tokens(raw_tokens)
+        schema_key = predicate
+        for tok in raw_tokens:
+            lemma = _normalize_verb_lemma(tok)
+            if lemma in ACTION_SCHEMAS:
+                schema_key = lemma
+                break
+        schema = ACTION_SCHEMAS.get(schema_key)
+        if not schema:
+            return
+
+        def _known(value: Any) -> str:
+            text_value = str(value).strip().lower()
+            return text_value if text_value and text_value != "unknown" else ""
+
+        subject = str(frame.get("subject", "")).strip().lower()
+        agent = _known(frame.get("agent", "")) or subject
+        obj = _known(frame.get("object", ""))
+        patient = _known(frame.get("patient", ""))
+
+        if schema_key == "give":
+            recipient = patient
+            if not recipient:
+                if frame.get("voice") == "active" and len(content_tokens) >= 4:
+                    recipient = str(content_tokens[2]).strip().lower()
+                elif len(content_tokens) >= 3:
+                    recipient = str(content_tokens[1]).strip().lower()
+            if not recipient and len(raw_tokens) >= 3:
+                try:
+                    verb_index = next(i for i, tok in enumerate(raw_tokens) if _normalize_verb_lemma(tok) == "give")
+                    tail_tokens = [tok for tok in self._semantic_tokens(raw_tokens[verb_index + 1:]) if tok]
+                    if tail_tokens:
+                        recipient = tail_tokens[0]
+                except StopIteration:
+                    pass
+            if recipient and recipient == agent and len(content_tokens) >= 3:
+                recipient = str(content_tokens[1]).strip().lower()
+            if recipient and recipient != "unknown" and obj:
+                self._update_possession(recipient, obj, add=True)
+                if agent and agent != "unknown":
+                    self._update_possession(agent, obj, add=False)
+        elif schema_key in {"buy", "receive", "get", "have", "own", "possess"} or schema.get("category") == "transfer":
+            if agent and agent != "unknown" and obj:
+                self._update_possession(agent, obj, add=True)
+        elif schema_key == "break" or schema.get("category") == "state":
+            target = obj or subject or patient
+            if target:
+                entry = self._ensure_entity_record(target)
+                states = dict(entry.get("states", {}))
+                states["condition"] = "broken"
+                entry["states"] = states
+                entry["last_turn"] = self.discourse_state.turn_index
+        elif schema.get("category") == "possession":
+            if agent and agent != "unknown" and obj:
+                self._update_possession(agent, obj, add=True)
+
+        if subject and subject != "unknown":
+            self._ensure_entity_record(subject)
+        if agent and agent != "unknown":
+            self._ensure_entity_record(agent)
+        if patient and patient != "unknown":
+            self._ensure_entity_record(patient)
+        if obj:
+            self._ensure_entity_record(obj)
+
+    def _entity_possessions(self, entity: str) -> List[str]:
+        record = self.discourse_state.entity_registry.get(entity.strip().lower(), {})
+        possessions = record.get("possessions", [])
+        return [str(item).strip().lower() for item in possessions if item]
+
+    def _resolve_possession_query(self, question_text: str, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        lower = question_text.strip().lower()
+        tokens = parsed.get("tokens", [])
+        content_tokens = parsed.get("content_tokens", [])
+        subject_hint = parsed.get("subject_hint", "")
+        object_hint = parsed.get("object_hint", "")
+        possession_verbs = {"have", "has", "had", "own", "owns", "possess", "possesses", "contain", "contains", "hold", "holds"}
+
+        if lower.startswith("what") and any(tok in possession_verbs for tok in tokens):
+            possessor = subject_hint or (content_tokens[0] if content_tokens else "")
+            possessions = self._entity_possessions(possessor)
+            if possessions:
+                answer = possessions[0] if len(possessions) == 1 else ", ".join(possessions)
+                return {
+                    "matched": True,
+                    "answer": answer,
+                    "source": "world_model_possession_list",
+                    "possessor": possessor,
+                }
+
+        if lower.startswith(("does", "do", "did")) and any(tok in possession_verbs for tok in tokens):
+            possessor = subject_hint or (content_tokens[0] if content_tokens else "")
+            held = self._entity_possessions(possessor)
+            target = object_hint or (content_tokens[-1] if content_tokens else "")
+            if possessor and target:
+                matched = target in held
+                return {
+                    "matched": True,
+                    "answer": "yes" if matched else "no",
+                    "source": "world_model_possession_check",
+                    "possessor": possessor,
+                    "target": target,
+                }
+
+        if lower.startswith("who") and any(tok in possession_verbs for tok in tokens):
+            target = object_hint or (content_tokens[-1] if content_tokens else "")
+            if target:
+                for entity, record in self.discourse_state.entity_registry.items():
+                    possessions = [str(item).strip().lower() for item in record.get("possessions", [])]
+                    if target in possessions:
+                        return {
+                            "matched": True,
+                            "answer": entity,
+                            "source": "world_model_possession_owner",
+                            "target": target,
+                        }
+        return {"matched": False}
 
     def _entity_registry_scores(self, question_text: str = "") -> Dict[str, float]:
         scores: Dict[str, float] = {}
@@ -1828,6 +2092,8 @@ class BasicChatSession:
         else:
             self.relational_state.confidence = max(0.0, self.relational_state.confidence * 0.90)
 
+        self._apply_action_schema_effects(current, text=text, raw_tokens=raw_tokens)
+
     def _format_discourse_summary(self) -> str:
         parts: List[str] = []
         if self.discourse_state.topic != "unknown":
@@ -2034,45 +2300,50 @@ class BasicChatSession:
         if parsed["negated"]:
             answer = "unknown"
             resolution_source = "negated_query"
-        elif lower.startswith("who"):
-            predicate_hint = parsed["predicate_hint"]
-            subject_hint = parsed["subject_hint"]
-            object_hint = parsed["object_hint"]
-            if subject_hint:
-                answer = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
-                resolution_source = "registry_object" if answer else "relational_object"
-                if self._component_enabled("registry") and not answer and self.relational_state.object != "unknown":
-                    answer = self.relational_state.object
-            else:
-                answer = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=object_hint)
-                resolution_source = "registry_subject" if answer else "relational_subject"
-                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
-                    answer = self.relational_state.subject
-        elif pronoun_tokens:
-            answer = self._best_entity_from_registry(question_text)
-            if self._component_enabled("coreference") and not answer:
-                answer = self.discourse_state.topic
-            resolution_source = "coreference"
-        elif lower.startswith("what"):
-            copula_query = any(tok in _DISCOURSE_AUXILIARIES for tok in parsed["tokens"])
-            if copula_query:
-                answer = self._best_entity_by_property(parsed["content_tokens"])
-                resolution_source = "property" if answer else "relational_property"
-                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
-                    answer = self.relational_state.subject
-            else:
-                answer = self._best_subject_for_query(predicate_hint=parsed["predicate_hint"], object_hint=parsed["object_hint"])
-                resolution_source = "registry_subject" if answer else "relational_subject"
-                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
-                    answer = self.relational_state.subject
-        elif any(phrase in lower for phrase in ("what is the topic", "what are we talking about", "what is this about")):
-            answer = self.discourse_state.topic
-            resolution_source = "topic"
-        elif self._component_enabled("registry") and self.relational_state.proposition:
-            answer = self.relational_state.proposition
-            resolution_source = "proposition"
         else:
-            answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
+            possession_result = self._resolve_possession_query(question_text, parsed)
+            if possession_result.get("matched"):
+                answer = str(possession_result.get("answer", "")).strip().lower()
+                resolution_source = str(possession_result.get("source", "world_model"))
+            elif lower.startswith("who"):
+                predicate_hint = parsed["predicate_hint"]
+                subject_hint = parsed["subject_hint"]
+                object_hint = parsed["object_hint"]
+                if subject_hint:
+                    answer = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
+                    resolution_source = "registry_object" if answer else "relational_object"
+                    if self._component_enabled("registry") and not answer and self.relational_state.object != "unknown":
+                        answer = self.relational_state.object
+                else:
+                    answer = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=object_hint)
+                    resolution_source = "registry_subject" if answer else "relational_subject"
+                    if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
+                        answer = self.relational_state.subject
+            elif pronoun_tokens:
+                answer = self._best_entity_from_registry(question_text)
+                if self._component_enabled("coreference") and not answer:
+                    answer = self.discourse_state.topic
+                resolution_source = "coreference"
+            elif lower.startswith("what"):
+                copula_query = any(tok in _DISCOURSE_AUXILIARIES for tok in parsed["tokens"])
+                if copula_query:
+                    answer = self._best_entity_by_property(parsed["content_tokens"])
+                    resolution_source = "property" if answer else "relational_property"
+                    if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
+                        answer = self.relational_state.subject
+                else:
+                    answer = self._best_subject_for_query(predicate_hint=parsed["predicate_hint"], object_hint=parsed["object_hint"])
+                    resolution_source = "registry_subject" if answer else "relational_subject"
+                    if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
+                        answer = self.relational_state.subject
+            elif any(phrase in lower for phrase in ("what is the topic", "what are we talking about", "what is this about")):
+                answer = self.discourse_state.topic
+                resolution_source = "topic"
+            elif self._component_enabled("registry") and self.relational_state.proposition:
+                answer = self.relational_state.proposition
+                resolution_source = "proposition"
+            else:
+                answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
 
         chain_frame = self._parse_chain_query_frame(question_text)
         if chain_frame.get("matched"):
