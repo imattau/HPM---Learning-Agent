@@ -353,8 +353,9 @@ class HPMAgent:
         if len(self.obs_buffer) > cap:
             self.obs_buffer = self.obs_buffer[-cap:]
 
-        # Reasoning feedback: update per-pattern loss based on prediction error
-        self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
+        # Reasoning feedback: update per-pattern loss based on prediction error (every 10 steps)
+        if self.step_counter % 10 == 0:
+            self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
 
         # 1. Parallel per-pattern update + score computation
         field_freq = dict(self.field.frequencies)
@@ -365,14 +366,22 @@ class HPMAgent:
             'beta_aff': self.beta_aff,
             'gamma_soc': self.gamma_soc,
             'external_soc_map': self.external_social_scores,
-            'do_param_update': (self.step_counter % 5 == 0),
+            'do_param_update': (self.step_counter % max(5, min(20, len(self.patterns))) == 0),
         }
         worker_params = self._feedback_worker_params(worker_params, feedback)
 
         if self._pool.num_workers == 1:
             results = []
+            # Compute weight floor: only top patterns get full Baum-Welch updates.
+            # Patterns below 5% of mean weight skip expensive param updates.
+            weights = np.array([float(p.weight) for p in self.patterns])
+            weight_floor = float(weights.mean()) * 0.05 if len(weights) > 0 else 0.0
+            base_do_update = bool(worker_params.get('do_param_update', False))
             for p in self.patterns:
-                result = update_pattern_resident(p, self.obs_buffer, field_freq, worker_params)
+                p_params = dict(worker_params)
+                if base_do_update and float(p.weight) < weight_floor:
+                    p_params['do_param_update'] = False
+                result = update_pattern_resident(p, self.obs_buffer, field_freq, p_params)
                 result['pattern_id'] = p.id
                 result['complexity'] = p.complexity
                 result['latent_dim'] = p.latent_dim
@@ -409,7 +418,8 @@ class HPMAgent:
             mean_running_loss = float(np.mean(running_losses))
 
         # 3. Update Social Context (Pattern Field) using post-update generalisation stats.
-        field_freq = self.field.update(self.patterns, episode_stats=self._field_episode_stats())
+        ep_stats = self._field_episode_stats() if self.step_counter % 50 == 0 else {}
+        field_freq = self.field.update(self.patterns, episode_stats=ep_stats)
 
         totals = self._apply_topdown_suppression(totals, result_by_id, feedback)
 
