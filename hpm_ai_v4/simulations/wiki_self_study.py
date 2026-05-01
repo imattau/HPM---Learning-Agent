@@ -298,6 +298,44 @@ class SelfStudyAgent:
             return [clean]
         return windows
 
+    def _warm_start_chunk(self, tokens: List[int], boost: float = 0.15, top_k: int = 5) -> None:
+        """Boost weights of existing patterns most relevant to this token window.
+
+        Patterns that already encode structure relevant to the incoming chunk
+        get a weight nudge before training begins, so learning builds on prior
+        knowledge rather than re-discovering it from scratch.
+        """
+        if not hasattr(self.agent, "reasoner") or not hasattr(self.agent, "patterns"):
+            return
+        try:
+            relevant = self.agent.reasoner.get_relevant_patterns(tokens, top_k=top_k)
+            if not relevant:
+                return
+            total_w = sum(float(p.weight) for p in self.agent.patterns) + 1e-12
+            for p in relevant:
+                p.weight = float(np.clip(p.weight + boost / max(1, len(relevant)), 0.0, 1.0))
+            # Re-normalise so total weight stays stable
+            new_total = sum(float(p.weight) for p in self.agent.patterns) + 1e-12
+            scale = total_w / new_total
+            for p in self.agent.patterns:
+                p.weight = float(np.clip(p.weight * scale, 1e-6, 1.0))
+        except Exception:
+            pass
+
+    def _consolidate_patterns(self, sim_threshold: float = 0.97) -> int:
+        """Remove near-duplicate patterns after a page training pass."""
+        patterns = getattr(self.agent, "patterns", None)
+        if not patterns or len(patterns) < 10:
+            return 0
+        try:
+            from hpm_ai_v4.simulations.build_large_nlp_library import deduplicate
+            before = len(patterns)
+            deduped = deduplicate(patterns, sim_threshold=sim_threshold)
+            self.agent.patterns = deduped
+            return before - len(deduped)
+        except Exception:
+            return 0
+
     def _train_on_page(self, page: WikiPage) -> Dict[str, Any]:
         chunks = self._chunk_page_text(page.text)
         if not chunks:
@@ -340,6 +378,16 @@ class SelfStudyAgent:
                     )
                 continue
             chunk_start = time.perf_counter()
+            # Warm-start: boost relevant existing patterns before training
+            adapter = getattr(self.agent, "_adapter", None)
+            if adapter is not None and novel_windows:
+                sample = novel_windows[0]
+                try:
+                    warm_tokens = [adapter.encode_char(c) for c in sample
+                                   if 32 <= ord(c) <= 127 or c == '\n']
+                    self._warm_start_chunk(warm_tokens)
+                except Exception:
+                    pass
             stats = {"target_chars": 0, "self_chars": 0, "token_agreement": 0.0, "plausibility": 0.0}
             for window in novel_windows:
                 window_stats = self.agent.observe_text(
@@ -363,6 +411,9 @@ class SelfStudyAgent:
                     f"elapsed={chunk_elapsed:.2f}s",
                     flush=True,
                 )
+        removed = self._consolidate_patterns()
+        if removed:
+            print(f"[consolidate] {page.title} removed {removed} near-duplicate patterns", flush=True)
         return {"chunks": len(chunks), "chars": chars, "learned": learned, "windows_seen": windows_seen, "windows_novel": windows_novel}
 
     def study(self) -> StudyResult:
