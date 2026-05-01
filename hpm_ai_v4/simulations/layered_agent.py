@@ -227,9 +227,29 @@ class LayeredAgent:
         posterior = self._best_pattern_posterior(self.l2)
         return self._soft_state_code(posterior)
 
+    def l3_state_distribution(self) -> np.ndarray:
+        """Soft summary of L3 over the current population."""
+        if not self.l3.patterns:
+            return np.ones(self.l3.obs_dim, dtype=np.float32) / float(self.l3.obs_dim)
+
+        obs_seq = list(self.l3.obs_buffer[-20:]) if self.l3.obs_buffer else []
+        dist = np.zeros(self.l3.obs_dim, dtype=np.float32)
+        total_w = 0.0
+        for p in self.l3.patterns:
+            w = float(max(0.0, p.weight))
+            if w <= 0.0:
+                continue
+            dist += w * p.predict_next_distribution(obs_seq)
+            total_w += w
+        if total_w <= 0.0:
+            return np.ones(self.l3.obs_dim, dtype=np.float32) / float(self.l3.obs_dim)
+        dist /= total_w
+        dist /= dist.sum() + 1e-12
+        return dist.astype(np.float32)
+
     def l3_soft_state(self) -> int:
         """Encode L3 posterior state + confidence into a discrete symbol for L4/Binding."""
-        posterior = self._best_pattern_posterior(self.l3)
+        posterior = self.l3_state_distribution()
         return self._soft_state_code(posterior)
 
     def generate(self, steps: int = 20) -> str:

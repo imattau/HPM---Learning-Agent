@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+from collections import deque
 from hpm_ai_v4.pattern import HierarchicalPattern
 
 def compute_conflict_matrix(patterns):
@@ -35,7 +36,53 @@ def compute_conflict_matrix(patterns):
     np.fill_diagonal(k_mat, 0.0)
     return k_mat
 
-def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, decay=0.01):
+def _update_density_weight(
+    density_weight: float,
+    density_state: dict | None,
+    mean_running_loss: float | None,
+) -> float:
+    """Adapt density pressure from the recent loss trend.
+
+    The density prior should become stickier only when it is helping the
+    population reduce loss over time. If the recent trend moves the wrong way,
+    the pressure is softened.
+    """
+    if density_state is None:
+        return float(density_weight)
+
+    recent = density_state.setdefault("recent_mean_loss", deque(maxlen=8))
+    current = float(density_state.get("density_weight", density_weight))
+
+    if mean_running_loss is not None and np.isfinite(float(mean_running_loss)):
+        recent.append(float(mean_running_loss))
+
+    if len(recent) >= 4:
+        recent_list = list(recent)
+        midpoint = max(1, len(recent_list) // 2)
+        early = float(np.mean(recent_list[:midpoint]))
+        late = float(np.mean(recent_list[midpoint:]))
+        trend = late - early
+        density_state["recent_loss_trend"] = float(trend)
+        if trend > 0:
+            current = max(0.05, current - 0.01)
+        elif trend < 0:
+            current = min(0.4, current + 0.005)
+
+    density_state["density_weight"] = float(current)
+    return float(current)
+
+
+def meta_pattern_update(
+    patterns,
+    totals,
+    eta=0.1,
+    beta_c=0.05,
+    k_matrix=None,
+    decay=0.01,
+    density_weight=0.1,
+    density_state=None,
+    mean_running_loss=None,
+):
     """
     Update pattern weights using replicator dynamics with inhibition and decay (Vectorized).
     """
@@ -43,6 +90,7 @@ def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, d
 
     weights = np.array([p.weight for p in patterns], dtype=np.float32)
     total_vec = np.array([totals.get(p.id, 0.0) for p in patterns], dtype=np.float32)
+    density_weight = _update_density_weight(density_weight, density_state, mean_running_loss)
     density_prior = np.array([
         float(getattr(p, "compression", lambda: 0.0)()) * max(0.1, float(getattr(p, "density_at_save", 0.1)))
         if getattr(p, "latent_dim", 1) > 1 else 0.05
@@ -50,7 +98,7 @@ def meta_pattern_update(patterns, totals, eta=0.1, beta_c=0.05, k_matrix=None, d
     ], dtype=np.float32)
     if density_prior.size:
         density_prior = density_prior / (density_prior.sum() + 1e-12)
-        effective_fitness = 0.75 * total_vec + 0.25 * (density_prior * len(patterns))
+        effective_fitness = (1.0 - density_weight) * total_vec + density_weight * (density_prior * len(patterns))
     else:
         effective_fitness = total_vec
     

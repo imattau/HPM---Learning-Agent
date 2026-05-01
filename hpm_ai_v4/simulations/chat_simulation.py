@@ -370,6 +370,12 @@ class BasicChatSession:
         reply_feedback_weight: float = 0.02,
         text_signals: Optional[TextSignalExtractor] = None,
         use_sentence_features: bool = True,
+        use_relational_heuristics: bool = True,
+        use_passive_normalization: Optional[bool] = None,
+        use_clause_stack: Optional[bool] = None,
+        use_registry_scoring: Optional[bool] = None,
+        use_coreference_scoring: Optional[bool] = None,
+        use_property_scoring: Optional[bool] = None,
     ):
         self.agent = agent
         self.history_window = max(1, int(history_window))
@@ -382,10 +388,29 @@ class BasicChatSession:
         self.text_signals = text_signals or TextSignalExtractor()
         self.sentence_adapter = SentenceAdapter()
         self.use_sentence_features = bool(use_sentence_features)
+        self.use_relational_heuristics = bool(use_relational_heuristics)
+        self.use_passive_normalization = bool(use_relational_heuristics if use_passive_normalization is None else use_passive_normalization)
+        self.use_clause_stack = bool(use_relational_heuristics if use_clause_stack is None else use_clause_stack)
+        self.use_registry_scoring = bool(use_relational_heuristics if use_registry_scoring is None else use_registry_scoring)
+        self.use_coreference_scoring = bool(use_relational_heuristics if use_coreference_scoring is None else use_coreference_scoring)
+        self.use_property_scoring = bool(use_relational_heuristics if use_property_scoring is None else use_property_scoring)
         self.history: List[ChatTurn] = []
         self.history_cap = max(4, self.history_window * 4)
         self.discourse_state = DiscourseState()
         self.relational_state = RelationalState()
+
+    def _relation_heuristic_scale(self) -> float:
+        return 1.0 if self.use_relational_heuristics else 0.0
+
+    def _component_enabled(self, component: str) -> bool:
+        component = str(component).strip().lower()
+        return {
+            "passive": self.use_passive_normalization,
+            "clause": self.use_clause_stack,
+            "registry": self.use_registry_scoring,
+            "coreference": self.use_coreference_scoring,
+            "property": self.use_property_scoring,
+        }.get(component, self.use_relational_heuristics)
 
     def _dialogue_act(self, user_text: str) -> str:
         text = user_text.strip().lower()
@@ -581,17 +606,17 @@ class BasicChatSession:
             return ""
         words = re.findall(r"[A-Za-z']+", lower)
         pronouns = {tok for tok in words if tok in _DISCOURSE_PRONOUNS}
-        if pronouns:
+        if pronouns and self._component_enabled("coreference"):
             if self.discourse_state.focus_stack:
                 return self.discourse_state.focus_stack[0]
             if self.discourse_state.topic != "unknown":
                 return self.discourse_state.topic
-        if lower.startswith("who") and self.relational_state.subject != "unknown":
+        if lower.startswith("who") and self._component_enabled("registry") and self.relational_state.subject != "unknown":
             return self.relational_state.subject
-        if any(phrase in lower for phrase in ("what about it", "what about them", "what about this", "what about that")):
+        if self._component_enabled("coreference") and any(phrase in lower for phrase in ("what about it", "what about them", "what about this", "what about that")):
             if self.discourse_state.focus_stack:
                 return self.discourse_state.focus_stack[0]
-        if self.discourse_state.active_entities:
+        if self._component_enabled("coreference") and self.discourse_state.active_entities:
             return self.discourse_state.active_entities[0]
         return self.discourse_state.topic if self.discourse_state.topic != "unknown" else ""
 
@@ -599,9 +624,9 @@ class BasicChatSession:
         lower = text.strip().lower()
         if not lower:
             return ""
-        if self.relational_state.subject != "unknown":
+        if self._component_enabled("registry") and self.relational_state.subject != "unknown":
             return self.relational_state.subject
-        if self.discourse_state.active_entities:
+        if self._component_enabled("coreference") and self.discourse_state.active_entities:
             return self.discourse_state.active_entities[0]
         return self.discourse_state.topic if self.discourse_state.topic != "unknown" else ""
 
@@ -789,6 +814,7 @@ class BasicChatSession:
     def _best_subject_for_query(self, predicate_hint: str = "", object_hint: str = "") -> str:
         predicate_hint = predicate_hint.strip().lower()
         object_hint = object_hint.strip().lower()
+        use_registry = self._component_enabled("registry")
         candidates = list(self.discourse_state.entity_registry.items())
         if predicate_hint:
             matching = [
@@ -803,24 +829,24 @@ class BasicChatSession:
         best_score = -1e9
         for entity, record in candidates:
             score = float(record.get("salience", 0.0))
-            if predicate_hint:
+            if use_registry and predicate_hint:
                 if record.get("last_predicate") == predicate_hint:
                     score += 1.25
                 else:
                     score -= 0.85
-            if object_hint and record.get("last_object") == object_hint:
+            if use_registry and object_hint and record.get("last_object") == object_hint:
                 score += 0.12
-            if object_hint and entity == object_hint:
+            if use_registry and object_hint and entity == object_hint:
                 score -= 0.95
-            if record.get("last_role") == "subject":
+            if use_registry and record.get("last_role") == "subject":
                 score += 0.34
-            elif record.get("last_role") == "object":
+            elif use_registry and record.get("last_role") == "object":
                 score -= 0.18
-            if entity == self.discourse_state.topic:
+            if use_registry and entity == self.discourse_state.topic:
                 score += 0.10 * max(0.2, float(self.discourse_state.topic_confidence))
-            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+            if use_registry and int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
                 score += 0.08
-            if entity in self.discourse_state.active_entities[:2]:
+            if use_registry and entity in self.discourse_state.active_entities[:2]:
                 score += 0.10
             if score > best_score:
                 best_score = score
@@ -830,6 +856,7 @@ class BasicChatSession:
     def _best_object_for_query(self, subject_hint: str = "", predicate_hint: str = "") -> str:
         subject_hint = subject_hint.strip().lower()
         predicate_hint = predicate_hint.strip().lower()
+        use_registry = self._component_enabled("registry")
         candidates = list(self.discourse_state.entity_registry.items())
         if subject_hint:
             matching = [
@@ -845,26 +872,26 @@ class BasicChatSession:
         for entity, record in candidates:
             score = float(record.get("salience", 0.0))
             candidate_value = entity
-            if predicate_hint:
+            if use_registry and predicate_hint:
                 if record.get("last_predicate") == predicate_hint:
                     score += 1.22
                     if record.get("last_object") not in {"", "unknown"}:
                         candidate_value = str(record.get("last_object")).strip().lower() or candidate_value
                 else:
                     score -= 0.65
-            if subject_hint and record.get("last_subject") == subject_hint:
+            if use_registry and subject_hint and record.get("last_subject") == subject_hint:
                 score += 0.90
                 if record.get("last_object") not in {"", "unknown"}:
                     candidate_value = str(record.get("last_object")).strip().lower() or candidate_value
-            if record.get("last_role") == "object":
+            if use_registry and record.get("last_role") == "object":
                 score += 0.28
-            elif record.get("last_role") == "subject":
+            elif use_registry and record.get("last_role") == "subject":
                 score -= 0.08
-            if entity == self.discourse_state.topic:
+            if use_registry and entity == self.discourse_state.topic:
                 score += 0.08 * max(0.2, float(self.discourse_state.topic_confidence))
-            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+            if use_registry and int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
                 score += 0.08
-            if entity in self.discourse_state.active_entities[:2]:
+            if use_registry and entity in self.discourse_state.active_entities[:2]:
                 score += 0.08
             if score > best_score:
                 best_score = score
@@ -875,7 +902,28 @@ class BasicChatSession:
         hints = {hint.strip().lower() for hint in property_hints if hint}
         if not hints:
             return ""
+        use_property = self._component_enabled("property")
+        use_registry = self._component_enabled("registry")
         copulas = {"is", "are", "was", "were", "be", "been"}
+        direct_matches = sorted(
+            self.discourse_state.entity_registry.items(),
+            key=lambda item: (
+                int(item[1].get("last_turn", -1)),
+                float(item[1].get("binding_confidence", 0.0)),
+                float(item[1].get("salience", 0.0)),
+            ),
+            reverse=True,
+        )
+        for candidate, record in direct_matches:
+            predicate = str(record.get("last_predicate", "unknown")).lower()
+            role_predicate = str(record.get("role_bindings", {}).get("predicate", "unknown")).lower()
+            obj = str(record.get("last_object", "unknown")).lower()
+            if use_registry and candidate in hints:
+                continue
+            if use_registry and (predicate in hints or role_predicate in hints or (predicate in copulas and obj in hints)) and (
+                record.get("last_role") == "subject" or str(record.get("last_subject", "")).lower() == candidate
+            ):
+                return candidate
         best_entity = ""
         best_score = -1e9
         for entity, record in self.discourse_state.entity_registry.items():
@@ -885,21 +933,23 @@ class BasicChatSession:
             predicate = str(record.get("last_predicate", "unknown")).lower()
             obj = str(record.get("last_object", "unknown")).lower()
             role_predicate = str(record.get("role_bindings", {}).get("predicate", "unknown")).lower()
-            if predicate in hints or role_predicate in hints:
+            if use_registry and (predicate in hints or role_predicate in hints):
                 score += 1.20
-            if obj in hints:
+            if use_property and obj in hints:
                 score += 1.28
                 if predicate in copulas:
                     score += 0.22
-            if entity in hints:
+                if use_property and entity in hints:
+                    score -= 1.10
+            if use_property and entity in hints:
                 score += 0.08
-            if subject == entity:
+            if use_registry and subject == entity:
                 score += 0.12
-            if record.get("last_role") == "subject":
+            if use_registry and record.get("last_role") == "subject":
                 score += 0.10
-            elif record.get("last_role") == "object":
+            elif use_registry and record.get("last_role") == "object":
                 score -= 0.05
-            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
+            if use_registry and int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 3):
                 score += 0.05
             if score > best_score:
                 best_score = score
@@ -967,6 +1017,9 @@ class BasicChatSession:
             return {"matched": False}
         pivot_phrase = lower[copula_match.end():].strip(" ?.")
         if not pivot_phrase:
+            return {"matched": False}
+        pivot_tokens = [tok for tok in re.findall(r"[A-Za-z']+", pivot_phrase) if tok]
+        if len(pivot_tokens) < 2 and not any(marker in pivot_phrase for marker in (" by ", " that ", " which ", " who ", " whom ", " whose ")):
             return {"matched": False}
 
         return {
@@ -1515,6 +1568,7 @@ class BasicChatSession:
         dialogue_act: str,
         sentence_features: Dict[str, Any],
         fallback_subject: str = "unknown",
+        normalize_passive: bool = True,
     ) -> Dict[str, Any]:
         content_tokens = self._semantic_tokens(raw_tokens)
         subject = self._first_meaningful_token(content_tokens)
@@ -1526,7 +1580,7 @@ class BasicChatSession:
         patient = obj
 
         by_index = raw_tokens.index("by") if "by" in raw_tokens else -1
-        passive_aux = any(tok in {"was", "were", "been"} for tok in raw_tokens) and by_index >= 0
+        passive_aux = normalize_passive and any(tok in {"was", "were", "been"} for tok in raw_tokens) and by_index >= 0
         if passive_aux:
             voice = "passive"
             before_by = raw_tokens[:by_index]
@@ -1688,9 +1742,12 @@ class BasicChatSession:
         pronouns = list(pronouns or [])
         sentence_features = sentence_features or self._sentence_features(text)
         sentence_type = str(sentence_features.get("dominant_sentence_type", "fragment"))
-        segments = self._split_clause_segments(raw_tokens) or [raw_tokens]
+        segments = self._split_clause_segments(raw_tokens) if self._component_enabled("clause") else [raw_tokens]
+        segments = segments or [raw_tokens]
         frames: List[Dict[str, Any]] = []
         inherited_subject = self.relational_state.subject if self.relational_state.subject != "unknown" else self.discourse_state.topic
+        use_passive = self._component_enabled("passive")
+        use_clause = self._component_enabled("clause")
         for segment in segments:
             frame = self._infer_clause_frame(
                 segment,
@@ -1698,13 +1755,14 @@ class BasicChatSession:
                 dialogue_act=dialogue_act,
                 sentence_features=sentence_features,
                 fallback_subject=inherited_subject,
+                normalize_passive=use_passive,
             )
-            if frame["subject"] == "unknown" and self.discourse_state.active_entities:
+            if self._component_enabled("coreference") and frame["subject"] == "unknown" and self.discourse_state.active_entities:
                 frame["subject"] = self.discourse_state.active_entities[0]
                 frame["agent"] = frame["subject"]
                 frame["role_bindings"]["subject"] = frame["subject"]
                 frame["role_bindings"]["agent"] = frame["subject"]
-            if frame["subject"] == "unknown" and role == "assistant" and self.relational_state.subject != "unknown":
+            if self._component_enabled("registry") and frame["subject"] == "unknown" and role == "assistant" and self.relational_state.subject != "unknown":
                 frame["subject"] = self.relational_state.subject
                 frame["agent"] = frame["subject"]
                 frame["role_bindings"]["subject"] = frame["subject"]
@@ -1712,13 +1770,13 @@ class BasicChatSession:
             frames.append(frame)
             inherited_subject = frame["subject"] if frame["subject"] != "unknown" else inherited_subject
 
-        if pronouns and self.discourse_state.active_entities and frames:
+        if self._component_enabled("coreference") and pronouns and self.discourse_state.active_entities and frames:
             frames[-1]["subject"] = self.discourse_state.active_entities[0]
             frames[-1]["agent"] = frames[-1]["subject"]
             frames[-1]["role_bindings"]["subject"] = frames[-1]["subject"]
             frames[-1]["role_bindings"]["agent"] = frames[-1]["subject"]
 
-        if frames:
+        if use_clause and frames:
             self.relational_state.binding_stack.extend(frames)
             self.relational_state.binding_stack = self.relational_state.binding_stack[-4:]
 
@@ -1729,7 +1787,7 @@ class BasicChatSession:
             sentence_features=sentence_features,
             fallback_subject=inherited_subject,
         )
-        if frames:
+        if use_clause and frames:
             if frames[0]["voice"] == "passive":
                 current = frames[0]
             elif len(frames) > 1 and frames[0]["subject"] != "unknown" and frames[-1]["predicate"] != "unknown":
@@ -1760,10 +1818,10 @@ class BasicChatSession:
             self.relational_state.proposition_history.append(current["proposition"])
         else:
             self.relational_state.proposition = ""
-        if len(frames) > 1:
+        if use_clause and len(frames) > 1:
             self.relational_state.role_bindings["main_subject"] = frames[0]["subject"]
             self.relational_state.role_bindings["clause_count"] = str(len(frames))
-        if dialogue_act in {"question", "clarification"} and pronouns:
+        if self._component_enabled("coreference") and dialogue_act in {"question", "clarification"} and pronouns:
             self.relational_state.confidence = min(1.0, self.relational_state.confidence + 0.08)
         elif tokens:
             self.relational_state.confidence = min(1.0, 0.68 * self.relational_state.confidence + 0.12)
@@ -1819,20 +1877,21 @@ class BasicChatSession:
     def _lookup_entity_by_relation(self, subject_hint: str = "", predicate_hint: str = "") -> str:
         subject_hint = subject_hint.strip().lower()
         predicate_hint = predicate_hint.strip().lower()
+        heuristic_scale = self._relation_heuristic_scale()
         best_entity = ""
         best_score = -1e9
         for entity, record in self.discourse_state.entity_registry.items():
             score = float(record.get("binding_confidence", 0.0)) + float(record.get("salience", 0.0))
-            if subject_hint and (
+            if heuristic_scale > 0.0 and subject_hint and (
                 record.get("last_subject") == subject_hint
                 or record.get("role_bindings", {}).get("subject") == subject_hint
             ):
                 score += 1.0
-            if predicate_hint and record.get("last_predicate") == predicate_hint:
+            if heuristic_scale > 0.0 and predicate_hint and record.get("last_predicate") == predicate_hint:
                 score += 1.0
-            if predicate_hint and record.get("role_bindings", {}).get("predicate") == predicate_hint:
+            if heuristic_scale > 0.0 and predicate_hint and record.get("role_bindings", {}).get("predicate") == predicate_hint:
                 score += 0.7
-            if int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 4):
+            if heuristic_scale > 0.0 and int(record.get("last_turn", -1)) >= max(0, self.discourse_state.turn_index - 4):
                 score += 0.08
             if score > best_score:
                 best_score = score
@@ -1844,6 +1903,7 @@ class BasicChatSession:
         hints = {hint.strip().lower() for hint in property_hints if hint}
         if not entity or not hints:
             return ""
+        heuristic_scale = self._relation_heuristic_scale()
         copulas = {"is", "are", "was", "were", "be", "been"}
         direct_record = self.discourse_state.entity_registry.get(entity)
         if direct_record is not None:
@@ -1879,19 +1939,19 @@ class BasicChatSession:
         for candidate, record in self.discourse_state.entity_registry.items():
             score = float(record.get("binding_confidence", 0.0)) + float(record.get("salience", 0.0))
             candidate_value = candidate
-            if record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity:
+            if heuristic_scale > 0.0 and (record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity):
                 score += 0.8
-            if record.get("last_object") == entity or record.get("role_bindings", {}).get("object") == entity:
+            if heuristic_scale > 0.0 and (record.get("last_object") == entity or record.get("role_bindings", {}).get("object") == entity):
                 score += 0.45
             predicate = str(record.get("last_predicate", "unknown")).lower()
-            if predicate in hints or record.get("role_bindings", {}).get("predicate") in hints:
+            if heuristic_scale > 0.0 and (predicate in hints or record.get("role_bindings", {}).get("predicate") in hints):
                 score += 1.0
-            if hints.intersection({"color", "colour"}) and predicate in copulas and candidate != entity:
+            if heuristic_scale > 0.0 and hints.intersection({"color", "colour"}) and predicate in copulas and candidate != entity:
                 score += 0.55
                 if record.get("last_subject") == entity or record.get("role_bindings", {}).get("subject") == entity:
                     candidate_value = str(record.get("last_object", candidate)).strip().lower() or candidate_value
                     score += 0.35
-            if candidate in hints:
+            if heuristic_scale > 0.0 and candidate in hints:
                 score += 0.25
             if score > best_score:
                 best_score = score
@@ -1981,32 +2041,34 @@ class BasicChatSession:
             if subject_hint:
                 answer = self._best_object_for_query(subject_hint=subject_hint, predicate_hint=predicate_hint)
                 resolution_source = "registry_object" if answer else "relational_object"
-                if not answer and self.relational_state.object != "unknown":
+                if self._component_enabled("registry") and not answer and self.relational_state.object != "unknown":
                     answer = self.relational_state.object
             else:
                 answer = self._best_subject_for_query(predicate_hint=predicate_hint, object_hint=object_hint)
                 resolution_source = "registry_subject" if answer else "relational_subject"
-                if not answer and self.relational_state.subject != "unknown":
+                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
                     answer = self.relational_state.subject
         elif pronoun_tokens:
-            answer = self._best_entity_from_registry(question_text) or self.discourse_state.topic
+            answer = self._best_entity_from_registry(question_text)
+            if self._component_enabled("coreference") and not answer:
+                answer = self.discourse_state.topic
             resolution_source = "coreference"
         elif lower.startswith("what"):
             copula_query = any(tok in _DISCOURSE_AUXILIARIES for tok in parsed["tokens"])
             if copula_query:
                 answer = self._best_entity_by_property(parsed["content_tokens"])
                 resolution_source = "property" if answer else "relational_property"
-                if not answer and self.relational_state.subject != "unknown":
+                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
                     answer = self.relational_state.subject
             else:
                 answer = self._best_subject_for_query(predicate_hint=parsed["predicate_hint"], object_hint=parsed["object_hint"])
                 resolution_source = "registry_subject" if answer else "relational_subject"
-                if not answer and self.relational_state.subject != "unknown":
+                if self._component_enabled("registry") and not answer and self.relational_state.subject != "unknown":
                     answer = self.relational_state.subject
         elif any(phrase in lower for phrase in ("what is the topic", "what are we talking about", "what is this about")):
             answer = self.discourse_state.topic
             resolution_source = "topic"
-        elif self.relational_state.proposition:
+        elif self._component_enabled("registry") and self.relational_state.proposition:
             answer = self.relational_state.proposition
             resolution_source = "proposition"
         else:
@@ -2700,6 +2762,131 @@ HARD_BINDING_BENCHMARK_CASES: List[Dict[str, Any]] = [
 ]
 
 
+RELATIONAL_EMERGENCE_BENCHMARK_CASES: List[Dict[str, Any]] = [
+    {
+        "statements": ["The dog chased the cat."],
+        "question": "Who chased the cat?",
+        "expected": "dog",
+        "relation_class": "active",
+    },
+    {
+        "statements": ["The cat was chased by the dog."],
+        "question": "Who chased the cat?",
+        "expected": "dog",
+        "relation_class": "passive",
+    },
+    {
+        "statements": ["The robot moved toward the mat."],
+        "question": "What moved toward the mat?",
+        "expected": "robot",
+        "relation_class": "active",
+    },
+    {
+        "statements": ["The mat was approached by the robot."],
+        "question": "What was approached by the robot?",
+        "expected": "mat",
+        "relation_class": "passive",
+    },
+    {
+        "statements": ["The cat that the dog chased sat on the mat."],
+        "question": "Who sat on the mat?",
+        "expected": "cat",
+        "relation_class": "nested_active",
+    },
+    {
+        "statements": ["The mat was sat on by the cat that the dog chased."],
+        "question": "What was sat on by the cat that the dog chased?",
+        "expected": "mat",
+        "relation_class": "nested_passive",
+    },
+]
+
+RELATIONAL_EMERGENCE_CORPUS_SPEC: Dict[str, Any] = {
+    "name": "relational_emergence",
+    "surface_mode": "word",
+    "heuristic_ablation": ["heuristics_on", "heuristics_off"],
+    "train_scale_hint": "50k+ relational sentences",
+    "families": [
+        {"name": "active_voice", "role_pattern": "subject-verb-object"},
+        {"name": "passive_voice", "role_pattern": "patient-be-by-agent"},
+        {"name": "nested_clause", "role_pattern": "main-clause-with-relative-clause"},
+    ],
+    "probe_families": [
+        "active",
+        "passive",
+        "nested_active",
+        "nested_passive",
+    ],
+    "latent_probe": {
+        "layer": "l3",
+        "latent_width": 8,
+        "soft_state_bins": 8,
+        "soft_state_codes": 16,
+    },
+}
+
+RELATIONAL_COMPONENT_CONFIGS: List[Dict[str, Any]] = [
+    {
+        "name": "full",
+        "use_relational_heuristics": True,
+        "use_passive_normalization": True,
+        "use_clause_stack": True,
+        "use_registry_scoring": True,
+        "use_coreference_scoring": True,
+        "use_property_scoring": True,
+    },
+    {
+        "name": "no_passive",
+        "use_relational_heuristics": True,
+        "use_passive_normalization": False,
+        "use_clause_stack": True,
+        "use_registry_scoring": True,
+        "use_coreference_scoring": True,
+        "use_property_scoring": True,
+    },
+    {
+        "name": "no_clause",
+        "use_relational_heuristics": True,
+        "use_passive_normalization": True,
+        "use_clause_stack": False,
+        "use_registry_scoring": True,
+        "use_coreference_scoring": True,
+        "use_property_scoring": True,
+    },
+    {
+        "name": "no_registry",
+        "use_relational_heuristics": True,
+        "use_passive_normalization": True,
+        "use_clause_stack": True,
+        "use_registry_scoring": False,
+        "use_coreference_scoring": True,
+        "use_property_scoring": True,
+    },
+    {
+        "name": "all_off",
+        "use_relational_heuristics": False,
+        "use_passive_normalization": False,
+        "use_clause_stack": False,
+        "use_registry_scoring": False,
+        "use_coreference_scoring": False,
+        "use_property_scoring": False,
+    },
+]
+
+
+def _relational_probe_kind(question: str) -> str:
+    lower = question.strip().lower()
+    if not lower:
+        return "unknown"
+    if "what colour" in lower or "what color" in lower or "what shape" in lower:
+        return "property"
+    if "who" in lower:
+        return "role"
+    if "what" in lower:
+        return "role_or_property"
+    return "other"
+
+
 def run_binding_evaluator_benchmark(
     corpus_path: str,
     cases: Optional[List[Dict[str, Any]]] = None,
@@ -2874,6 +3061,407 @@ def run_binding_width_sweep_benchmark(
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, sort_keys=True)
     print(f"Binding width sweep benchmark written: {out_path}")
+    return report
+
+
+def _safe_cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+    a = np.asarray(a, dtype=np.float32).ravel()
+    b = np.asarray(b, dtype=np.float32).ravel()
+    if a.size == 0 or b.size == 0:
+        return 0.0
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    if denom <= 1e-12:
+        return 0.0
+    cosine = float(np.dot(a, b) / denom)
+    return float(max(0.0, 1.0 - cosine))
+
+
+def _class_distribution_separation(vectors_by_label: Dict[str, List[np.ndarray]]) -> Dict[str, Any]:
+    class_means: Dict[str, np.ndarray] = {}
+    within: Dict[str, float] = {}
+    counts: Dict[str, int] = {}
+    for label, vectors in vectors_by_label.items():
+        if not vectors:
+            continue
+        stacked = np.vstack([np.asarray(vec, dtype=np.float32).ravel() for vec in vectors])
+        mean_vec = stacked.mean(axis=0)
+        mean_vec = mean_vec / (mean_vec.sum() + 1e-12)
+        class_means[label] = mean_vec
+        counts[label] = len(vectors)
+        within[label] = float(np.mean([_safe_cosine_distance(vec, mean_vec) for vec in stacked])) if len(vectors) > 1 else 0.0
+
+    labels = sorted(class_means)
+    between: Dict[str, float] = {}
+    for idx, left in enumerate(labels):
+        for right in labels[idx + 1:]:
+            between[f"{left}_vs_{right}"] = _safe_cosine_distance(class_means[left], class_means[right])
+
+    avg_within = float(np.mean(list(within.values()))) if within else 0.0
+    avg_between = float(np.mean(list(between.values()))) if between else 0.0
+    separation_ratio = float(avg_between / max(1e-12, avg_within)) if between else 0.0
+    return {
+        "class_means": {label: vec.tolist() for label, vec in class_means.items()},
+        "counts": counts,
+        "within": within,
+        "between": between,
+        "avg_within": avg_within,
+        "avg_between": avg_between,
+        "separation_ratio": separation_ratio,
+    }
+
+
+def run_relational_emergence_benchmark(
+    corpus_path: str,
+    cases: Optional[List[Dict[str, Any]]] = None,
+    warmup_chars: int = 256,
+    history_window: int = 2,
+    response_steps: int = 16,
+    num_workers: int = 1,
+    use_dict: bool = False,
+    surface_mode: str = "word",
+    layer_latent_dims: Optional[Dict[str, int]] = None,
+    library_path: Optional[str] = None,
+    checkpoint_dir: str = ".",
+    seed_corpus_path: Optional[str] = CHAT_SEED_CORPUS,
+    report_path: Optional[str] = None,
+    compare_ablation: bool = True,
+    session_kwargs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Measure whether relation structure survives without heuristic binding shortcuts."""
+    dictionary = NLTKWordList(download=False) if use_dict else None
+    grammar = HeuristicGrammarLibrary() if use_dict else None
+    benchmark_cases = cases or RELATIONAL_EMERGENCE_BENCHMARK_CASES
+
+    arm_specs = [("heuristics_on", True)]
+    if compare_ablation:
+        arm_specs.append(("heuristics_off", False))
+    session_kwargs = dict(session_kwargs or {})
+    if "use_relational_heuristics" in session_kwargs:
+        compare_ablation = False
+
+    arms: List[Dict[str, Any]] = []
+    matrix: List[Dict[str, Any]] = []
+    for arm_name, use_relational_heuristics in arm_specs:
+        session_kwargs_for_arm = dict(session_kwargs)
+        if "use_relational_heuristics" in session_kwargs_for_arm:
+            use_relational_heuristics = bool(session_kwargs_for_arm.pop("use_relational_heuristics"))
+        layered = LayeredAgent(
+            num_workers=num_workers,
+            dictionary=dictionary,
+            grammar=grammar,
+            surface_mode=surface_mode,
+            layer_latent_dims=layer_latent_dims,
+        )
+
+        resolved_library_path = _resolve_chat_library_path(library_path)
+        if resolved_library_path:
+            loaded = _load_chat_library(layered, resolved_library_path)
+            print(f"Loaded library from {resolved_library_path} ({loaded} bundle parts)")
+
+        seed_source = seed_corpus_path if seed_corpus_path and os.path.exists(seed_corpus_path) else corpus_path
+        stream = WikipediaStream(seed_source)
+        stream_iter = iter(stream)
+        raw_ids = [next(stream_iter) for _ in range(max(warmup_chars, 1))]
+        warmup_text = "".join(chr(v + 32) for v in raw_ids if 0 <= v <= 94)
+        if warmup_text:
+            layered.observe_text(warmup_text, feedback_mode="target")
+
+        case_reports: List[Dict[str, Any]] = []
+        voice_vectors: Dict[str, List[np.ndarray]] = {"active": [], "passive": []}
+        class_vectors: Dict[str, List[np.ndarray]] = {}
+
+        for idx, case in enumerate(benchmark_cases, start=1):
+            session = BasicChatSession(
+                layered,
+                history_window=history_window,
+                response_steps=response_steps,
+                use_constraints=use_dict,
+                use_relational_heuristics=use_relational_heuristics,
+                **session_kwargs_for_arm,
+            )
+            statement_reports: List[Dict[str, Any]] = []
+            for statement in case.get("statements", []):
+                stats = session.observe_text(statement, role="user", feedback_mode="target")
+                statement_reports.append({
+                    "statement": statement,
+                    "binding_predictions": int(stats.get("binding_predictions", 0)),
+                    "binding_prediction_hits": int(stats.get("binding_prediction_hits", 0)),
+                    "binding_prediction_misses": int(stats.get("binding_prediction_misses", 0)),
+                })
+
+            l3_distribution = layered.l3_state_distribution()
+            l3_soft_state = int(layered.l3_soft_state())
+            relation_class = str(case.get("relation_class", "unknown"))
+            class_vectors.setdefault(relation_class, []).append(np.asarray(l3_distribution, dtype=np.float32))
+            voice_key = "passive" if "passive" in relation_class else "active"
+            voice_vectors.setdefault(voice_key, []).append(np.asarray(l3_distribution, dtype=np.float32))
+
+            query_result = session.query(str(case.get("question", "")))
+            expected = str(case.get("expected", "")).strip().lower()
+            answer = str(query_result.get("answer", "")).strip().lower()
+            answer_correct = bool(expected and answer == expected)
+
+            total_predictions = sum(item["binding_predictions"] for item in statement_reports)
+            total_hits = sum(item["binding_prediction_hits"] for item in statement_reports)
+            total_misses = sum(item["binding_prediction_misses"] for item in statement_reports)
+            prediction_accuracy = float(total_hits / max(1, total_predictions))
+
+            case_reports.append({
+                "case": idx,
+                "relation_class": relation_class,
+                "question": case.get("question", ""),
+                "expected": case.get("expected", ""),
+                "answer": query_result.get("answer", "unknown"),
+                "answer_correct": answer_correct,
+                "source": query_result.get("source", ""),
+                "confidence": float(query_result.get("confidence", 0.0)),
+                "predicted_entity": query_result.get("predicted_entity", ""),
+                "prediction_matched": bool(query_result.get("prediction_matched", False)),
+                "binding_predictions": total_predictions,
+                "binding_prediction_hits": total_hits,
+                "binding_prediction_misses": total_misses,
+                "binding_prediction_accuracy": prediction_accuracy,
+                "l3_soft_state": l3_soft_state,
+                "l3_distribution": [float(v) for v in np.asarray(l3_distribution, dtype=np.float32).ravel().tolist()],
+                "statement_reports": statement_reports,
+            })
+            matrix.append({
+                "arm": arm_name,
+                "use_relational_heuristics": use_relational_heuristics,
+                "case": idx,
+                "relation_class": relation_class,
+                "probe_kind": _relational_probe_kind(str(case.get("question", ""))),
+                "expected": case.get("expected", ""),
+                "answer": query_result.get("answer", "unknown"),
+                "answer_correct": answer_correct,
+                "l3_soft_state": l3_soft_state,
+                "binding_prediction_accuracy": prediction_accuracy,
+            })
+
+        voice_separation = _class_distribution_separation(voice_vectors)
+        class_separation = _class_distribution_separation(class_vectors)
+
+        aggregate = {
+            "case_count": len(case_reports),
+            "avg_answer_accuracy": float(sum(1.0 if row["answer_correct"] else 0.0 for row in case_reports) / max(1, len(case_reports))),
+            "avg_binding_prediction_accuracy": float(sum(row["binding_prediction_accuracy"] for row in case_reports) / max(1, len(case_reports))),
+            "avg_confidence": float(sum(float(row["confidence"]) for row in case_reports) / max(1, len(case_reports))),
+            "avg_prediction_matched_rate": float(sum(1.0 if row["prediction_matched"] else 0.0 for row in case_reports) / max(1, len(case_reports))),
+            "binding_prediction_hits": int(sum(int(row["binding_prediction_hits"]) for row in case_reports)),
+            "binding_prediction_misses": int(sum(int(row["binding_prediction_misses"]) for row in case_reports)),
+            "binding_predictions": int(sum(int(row["binding_predictions"]) for row in case_reports)),
+            "active_passive_avg_between": float(voice_separation.get("avg_between", 0.0)),
+            "active_passive_avg_within": float(voice_separation.get("avg_within", 0.0)),
+            "active_passive_separation_ratio": float(voice_separation.get("separation_ratio", 0.0)),
+        }
+
+        arms.append({
+            "arm": arm_name,
+            "use_relational_heuristics": use_relational_heuristics,
+            "aggregate": aggregate,
+            "cases": case_reports,
+            "active_passive_separation": voice_separation,
+            "class_separation": class_separation,
+        })
+
+    baseline = arms[0]["aggregate"] if arms else {}
+    comparison: List[Dict[str, Any]] = []
+    for arm in arms:
+        agg = arm["aggregate"]
+        comparison.append({
+            "arm": arm["arm"],
+            "use_relational_heuristics": bool(arm["use_relational_heuristics"]),
+            "avg_answer_accuracy": float(agg.get("avg_answer_accuracy", 0.0)),
+            "avg_binding_prediction_accuracy": float(agg.get("avg_binding_prediction_accuracy", 0.0)),
+            "active_passive_separation_ratio": float(agg.get("active_passive_separation_ratio", 0.0)),
+            "delta_answer_accuracy": float(agg.get("avg_answer_accuracy", 0.0) - float(baseline.get("avg_answer_accuracy", 0.0))),
+            "delta_binding_prediction_accuracy": float(agg.get("avg_binding_prediction_accuracy", 0.0) - float(baseline.get("avg_binding_prediction_accuracy", 0.0))),
+            "delta_active_passive_separation_ratio": float(agg.get("active_passive_separation_ratio", 0.0) - float(baseline.get("active_passive_separation_ratio", 0.0))),
+        })
+
+    report = {
+        "corpus_spec": RELATIONAL_EMERGENCE_CORPUS_SPEC,
+        "baseline_arm": arms[0]["arm"] if arms else "",
+        "arms": arms,
+        "comparison": comparison,
+        "matrix": matrix,
+        "surface_mode": surface_mode,
+        "library_path": _resolve_chat_library_path(library_path),
+        "layer_latent_dims": dict(layer_latent_dims or {}),
+    }
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    out_path = report_path or os.path.join(checkpoint_dir, "relational_emergence_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, sort_keys=True)
+    print(f"Relational emergence benchmark written: {out_path}")
+    return report
+
+
+def run_relational_emergence_sweep_benchmark(
+    corpus_path: str,
+    sentence_counts: Optional[List[int]] = None,
+    corpus_modes: Optional[List[str]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Run the relational-emergence benchmark at increasing corpus sizes."""
+    from hpm_ai_v4.simulations.build_relational_corpus import build_relational_corpus
+    from hpm_ai_v4.simulations.build_relational_mixed_corpus import build_relational_mixed_corpus
+
+    sweep_counts = list(sentence_counts or [5000, 10000, 50000])
+    if not sweep_counts:
+        raise ValueError("sentence_counts must contain at least one size")
+    sweep_modes = list(corpus_modes or ["focused", "mixed"])
+    if not sweep_modes:
+        raise ValueError("corpus_modes must contain at least one mode")
+
+    benchmark_kwargs = dict(kwargs)
+    cases = benchmark_kwargs.pop("cases", None)
+    checkpoint_dir = str(benchmark_kwargs.get("checkpoint_dir", "."))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    arms: List[Dict[str, Any]] = []
+    for mode in sweep_modes:
+        for count in sweep_counts:
+            scale_corpus_path = os.path.join(checkpoint_dir, f"relational_{mode}_corpus_{int(count)}.txt")
+            if mode == "mixed":
+                corpus_result = build_relational_mixed_corpus(scale_corpus_path, sentence_count=int(count))
+            else:
+                corpus_result = build_relational_corpus(scale_corpus_path, sentence_count=int(count))
+            report = run_relational_emergence_benchmark(
+                corpus_path=corpus_result.corpus_path,
+                cases=cases,
+                **benchmark_kwargs,
+            )
+            arms.append({
+                "corpus_mode": mode,
+                "sentence_count": int(count),
+                "corpus_path": corpus_result.corpus_path,
+                "family_counts": corpus_result.family_counts,
+                "report": report,
+            })
+
+    baseline = arms[0]["report"]["arms"][0]["aggregate"] if arms else {}
+    comparison: List[Dict[str, Any]] = []
+    for arm in arms:
+        heuristic_on = arm["report"]["arms"][0]["aggregate"]
+        heuristic_off = arm["report"]["arms"][1]["aggregate"] if len(arm["report"]["arms"]) > 1 else {}
+        comparison.append({
+            "corpus_mode": arm["corpus_mode"],
+            "sentence_count": arm["sentence_count"],
+            "heuristics_on_answer_accuracy": float(heuristic_on.get("avg_answer_accuracy", 0.0)),
+            "heuristics_off_answer_accuracy": float(heuristic_off.get("avg_answer_accuracy", 0.0)),
+            "heuristics_on_binding_accuracy": float(heuristic_on.get("avg_binding_prediction_accuracy", 0.0)),
+            "heuristics_off_binding_accuracy": float(heuristic_off.get("avg_binding_prediction_accuracy", 0.0)),
+            "heuristics_on_separation_ratio": float(heuristic_on.get("active_passive_separation_ratio", 0.0)),
+            "heuristics_off_separation_ratio": float(heuristic_off.get("active_passive_separation_ratio", 0.0)),
+            "delta_answer_accuracy": float(heuristic_on.get("avg_answer_accuracy", 0.0) - float(baseline.get("avg_answer_accuracy", 0.0))),
+            "delta_binding_accuracy": float(heuristic_on.get("avg_binding_prediction_accuracy", 0.0) - float(baseline.get("avg_binding_prediction_accuracy", 0.0))),
+            "delta_separation_ratio": float(heuristic_on.get("active_passive_separation_ratio", 0.0) - float(baseline.get("active_passive_separation_ratio", 0.0))),
+        })
+
+    report = {
+        "baseline_sentence_count": arms[0]["sentence_count"] if arms else 0,
+        "baseline_corpus_mode": arms[0]["corpus_mode"] if arms else "",
+        "arms": arms,
+        "comparison": comparison,
+        "corpus_path": corpus_path,
+        "corpus_modes": sweep_modes,
+    }
+
+    out_path = benchmark_kwargs.get("report_path") or os.path.join(checkpoint_dir, "relational_emergence_sweep_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, sort_keys=True)
+    print(f"Relational emergence sweep benchmark written: {out_path}")
+    return report
+
+
+def run_relational_component_sweep_benchmark(
+    corpus_path: str,
+    sentence_counts: Optional[List[int]] = None,
+    corpus_modes: Optional[List[str]] = None,
+    configs: Optional[List[Dict[str, Any]]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Run the relational benchmark across corpus modes and heuristic-component configs."""
+    from hpm_ai_v4.simulations.build_relational_corpus import build_relational_corpus
+    from hpm_ai_v4.simulations.build_relational_mixed_corpus import build_relational_mixed_corpus
+
+    sweep_counts = list(sentence_counts or [5000, 10000, 50000])
+    sweep_modes = list(corpus_modes or ["focused", "mixed"])
+    sweep_configs = list(configs or RELATIONAL_COMPONENT_CONFIGS)
+    if not sweep_counts:
+        raise ValueError("sentence_counts must contain at least one size")
+    if not sweep_modes:
+        raise ValueError("corpus_modes must contain at least one mode")
+    if not sweep_configs:
+        raise ValueError("configs must contain at least one configuration")
+
+    benchmark_kwargs = dict(kwargs)
+    cases = benchmark_kwargs.pop("cases", None)
+    checkpoint_dir = str(benchmark_kwargs.get("checkpoint_dir", "."))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    arms: List[Dict[str, Any]] = []
+    matrix: List[Dict[str, Any]] = []
+
+    for mode in sweep_modes:
+        for count in sweep_counts:
+            if mode == "mixed":
+                corpus_result = build_relational_mixed_corpus(os.path.join(checkpoint_dir, f"relational_mixed_{int(count)}.txt"), sentence_count=int(count))
+            else:
+                corpus_result = build_relational_corpus(os.path.join(checkpoint_dir, f"relational_focused_{int(count)}.txt"), sentence_count=int(count))
+
+            for config in sweep_configs:
+                session_kwargs = {
+                    key: value
+                    for key, value in config.items()
+                    if key not in {"name"}
+                }
+                report = run_relational_emergence_benchmark(
+                    corpus_path=corpus_result.corpus_path,
+                    cases=cases,
+                    compare_ablation=False,
+                    session_kwargs=session_kwargs,
+                    **benchmark_kwargs,
+                )
+                arm = {
+                    "corpus_mode": mode,
+                    "sentence_count": int(count),
+                    "config": str(config.get("name", "config")),
+                    "config_spec": dict(config),
+                    "corpus_path": corpus_result.corpus_path,
+                    "family_counts": corpus_result.family_counts,
+                    "report": report,
+                }
+                arms.append(arm)
+                aggregate = report["arms"][0]["aggregate"] if report.get("arms") else {}
+                matrix.append({
+                    "corpus_mode": mode,
+                    "sentence_count": int(count),
+                    "config": str(config.get("name", "config")),
+                    "answer_accuracy": float(aggregate.get("avg_answer_accuracy", 0.0)),
+                    "binding_accuracy": float(aggregate.get("avg_binding_prediction_accuracy", 0.0)),
+                    "separation_ratio": float(aggregate.get("active_passive_separation_ratio", 0.0)),
+                    "case_count": int(aggregate.get("case_count", 0)),
+                })
+
+    report = {
+        "baseline_sentence_count": arms[0]["sentence_count"] if arms else 0,
+        "baseline_corpus_mode": arms[0]["corpus_mode"] if arms else "",
+        "baseline_config": arms[0]["config"] if arms else "",
+        "arms": arms,
+        "matrix": matrix,
+        "corpus_path": corpus_path,
+        "corpus_modes": sweep_modes,
+        "configs": [dict(cfg) for cfg in sweep_configs],
+        "sentence_counts": sweep_counts,
+    }
+
+    out_path = benchmark_kwargs.get("report_path") or os.path.join(checkpoint_dir, "relational_component_sweep_benchmark.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, sort_keys=True)
+    print(f"Relational component sweep benchmark written: {out_path}")
     return report
 
 

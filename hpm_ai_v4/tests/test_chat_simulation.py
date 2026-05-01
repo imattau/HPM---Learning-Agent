@@ -1,7 +1,10 @@
 import os
+import numpy as np
 
-from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, run_binding_evaluator_benchmark, run_binding_width_sweep_benchmark, _resolve_chat_library_path
+from hpm_ai_v4.simulations.chat_simulation import BasicChatSession, ReverseChatSession, run_basic_chat_simulation, run_reverse_chat_simulation, run_binding_evaluator_benchmark, run_binding_width_sweep_benchmark, run_relational_emergence_benchmark, run_relational_emergence_sweep_benchmark, run_relational_component_sweep_benchmark, _resolve_chat_library_path
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.simulations.build_relational_corpus import build_relational_corpus
+from hpm_ai_v4.simulations.build_relational_mixed_corpus import build_relational_mixed_corpus
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.text_signals import TextSignalPack, TextSignalExtractor
 
@@ -837,6 +840,196 @@ def test_run_binding_width_sweep_benchmark_reports_comparison(tmp_path, monkeypa
     assert len(report["arms"]) == 2
     assert report["comparison"][1]["delta_answer_accuracy"] > 0.0
     assert (tmp_path / "binding_width_sweep_benchmark.json").exists()
+
+
+def test_run_relational_emergence_benchmark_reports_ablation(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text(
+        "The dog chased the cat. The cat was chased by the dog. "
+        "The robot moved toward the mat. The mat was approached by the robot. "
+        "The cat that the dog chased sat on the mat. The mat was sat on by the cat that the dog chased. "
+        * 4
+    )
+
+    class FakeStream:
+        def __init__(self, path):
+            self.path = path
+
+        def __iter__(self):
+            return iter([1] * 256)
+
+    class FakeLayeredAgent:
+        def __init__(self, *args, **kwargs):
+            self.dictionary = None
+            self.grammar = None
+            self._last_text = ""
+
+        def _tokenize_words(self, text):
+            import re
+            return re.findall(r"[A-Za-z']+", text)
+
+        def observe_text(self, text, **kwargs):
+            self._last_text = text.lower()
+            return {
+                "binding_predictions": 1,
+                "binding_prediction_hits": 1,
+                "binding_prediction_misses": 0,
+            }
+
+        def load_bundle(self, *args, **kwargs):
+            return 0
+
+        def l3_state_distribution(self):
+            vec = np.zeros(8, dtype=np.float32)
+            idx = 1 if (" was " in f" {self._last_text} " or " by " in f" {self._last_text} ") else 0
+            vec[idx] = 1.0
+            return vec
+
+        def l3_soft_state(self):
+            return int(np.argmax(self.l3_state_distribution()))
+
+    from pytest import MonkeyPatch
+    monkeypatch = MonkeyPatch()
+    try:
+        monkeypatch.setattr("hpm_ai_v4.simulations.chat_simulation.LayeredAgent", FakeLayeredAgent)
+        monkeypatch.setattr("hpm_ai_v4.simulations.chat_simulation.WikipediaStream", FakeStream)
+
+        report = run_relational_emergence_benchmark(
+            corpus_path=str(corpus),
+            warmup_chars=32,
+            history_window=2,
+            response_steps=8,
+            num_workers=1,
+            use_dict=False,
+            checkpoint_dir=str(tmp_path),
+        )
+
+        assert report["baseline_arm"] == "heuristics_on"
+        assert len(report["arms"]) == 2
+        assert report["arms"][0]["aggregate"]["case_count"] == 6
+        assert report["arms"][1]["use_relational_heuristics"] is False
+        assert "active_passive_separation_ratio" in report["arms"][0]["aggregate"]
+        assert report["arms"][0]["active_passive_separation"]["avg_between"] >= 0.0
+        assert report["corpus_spec"]["latent_probe"]["layer"] == "l3"
+        assert len(report["matrix"]) == 12
+        assert {row["arm"] for row in report["matrix"]} == {"heuristics_on", "heuristics_off"}
+        assert (tmp_path / "relational_emergence_benchmark.json").exists()
+    finally:
+        monkeypatch.undo()
+
+
+def test_build_relational_corpus_balances_families(tmp_path):
+    corpus_path = tmp_path / "relational.txt"
+    result = build_relational_corpus(str(corpus_path), sentence_count=20)
+
+    assert result.corpus_path == str(corpus_path)
+    assert result.lines_written == 20
+    assert sum(result.family_counts.values()) == 20
+    assert corpus_path.exists()
+    text = corpus_path.read_text()
+    assert "was chased by" in text
+    assert "that" in text
+
+
+def test_build_relational_mixed_corpus_includes_transfer_and_report_forms(tmp_path):
+    corpus_path = tmp_path / "relational_mixed.txt"
+    result = build_relational_mixed_corpus(str(corpus_path), sentence_count=21)
+
+    assert result.corpus_path == str(corpus_path)
+    assert result.lines_written == 21
+    assert sum(result.family_counts.values()) == 21
+    text = corpus_path.read_text()
+    assert "gave the" in text
+    assert "said the" in text
+
+
+def test_run_relational_emergence_sweep_benchmark_reports_scales(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_build_relational_corpus(output_path, *, sentence_count=50000, **kwargs):
+        path = tmp_path / f"corpus_{sentence_count}.txt"
+        path.write_text(f"size {sentence_count}\n")
+        return type("R", (), {
+            "corpus_path": str(path),
+            "lines_written": sentence_count,
+            "family_counts": {"active": sentence_count // 2, "passive": sentence_count // 2},
+        })()
+
+    def fake_run_relational_emergence_benchmark(*, corpus_path, **kwargs):
+        calls.append((corpus_path, kwargs.get("checkpoint_dir", "")))
+        return {
+            "arms": [
+                {"aggregate": {"avg_answer_accuracy": 0.40, "avg_binding_prediction_accuracy": 0.50, "active_passive_separation_ratio": 1.0}},
+                {"aggregate": {"avg_answer_accuracy": 0.10, "avg_binding_prediction_accuracy": 0.20, "active_passive_separation_ratio": 0.4}},
+            ]
+        }
+
+    monkeypatch.setattr("hpm_ai_v4.simulations.build_relational_corpus.build_relational_corpus", fake_build_relational_corpus)
+    monkeypatch.setattr("hpm_ai_v4.simulations.build_relational_mixed_corpus.build_relational_mixed_corpus", fake_build_relational_corpus)
+    monkeypatch.setattr("hpm_ai_v4.simulations.chat_simulation.run_relational_emergence_benchmark", fake_run_relational_emergence_benchmark)
+
+    report = run_relational_emergence_sweep_benchmark(
+        corpus_path=str(tmp_path / "unused.txt"),
+        sentence_counts=[10, 20],
+        corpus_modes=["focused", "mixed"],
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert len(calls) == 4
+    assert report["baseline_sentence_count"] == 10
+    assert report["baseline_corpus_mode"] == "focused"
+    assert [row["sentence_count"] for row in report["comparison"]] == [10, 20, 10, 20]
+    assert [row["corpus_mode"] for row in report["comparison"]] == ["focused", "focused", "mixed", "mixed"]
+    assert report["comparison"][0]["heuristics_on_answer_accuracy"] == 0.40
+    assert (tmp_path / "relational_emergence_sweep_benchmark.json").exists()
+
+
+def test_run_relational_component_sweep_benchmark_reports_matrix(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_build(output_path, *, sentence_count=50000, **kwargs):
+        path = tmp_path / f"built_{sentence_count}_{os.path.basename(output_path)}"
+        path.write_text(f"size {sentence_count}\n")
+        return type("R", (), {
+            "corpus_path": str(path),
+            "lines_written": sentence_count,
+            "family_counts": {"active": sentence_count // 2, "passive": sentence_count // 2},
+        })()
+
+    def fake_run_relational_emergence_benchmark(*, corpus_path, session_kwargs=None, **kwargs):
+        calls.append((corpus_path, dict(session_kwargs or {})))
+        config_name = str((session_kwargs or {}).get("name", "config"))
+        score = {
+            "full": 0.60,
+            "no_passive": 0.55,
+            "no_clause": 0.52,
+            "no_registry": 0.48,
+            "all_off": 0.30,
+        }.get(config_name, 0.40)
+        return {
+            "arms": [
+                {"aggregate": {"avg_answer_accuracy": score, "avg_binding_prediction_accuracy": score / 2.0, "active_passive_separation_ratio": score + 0.1}}
+            ]
+        }
+
+    monkeypatch.setattr("hpm_ai_v4.simulations.build_relational_corpus.build_relational_corpus", fake_build)
+    monkeypatch.setattr("hpm_ai_v4.simulations.build_relational_mixed_corpus.build_relational_mixed_corpus", fake_build)
+    monkeypatch.setattr("hpm_ai_v4.simulations.chat_simulation.run_relational_emergence_benchmark", fake_run_relational_emergence_benchmark)
+
+    report = run_relational_component_sweep_benchmark(
+        corpus_path=str(tmp_path / "unused.txt"),
+        sentence_counts=[10],
+        corpus_modes=["focused", "mixed"],
+        checkpoint_dir=str(tmp_path),
+    )
+
+    assert len(calls) == 10
+    assert report["baseline_config"] == "full"
+    assert report["baseline_corpus_mode"] == "focused"
+    assert len(report["matrix"]) == 10
+    assert {row["config"] for row in report["matrix"]} == {"full", "no_passive", "no_clause", "no_registry", "all_off"}
+    assert {row["corpus_mode"] for row in report["matrix"]} == {"focused", "mixed"}
+    assert (tmp_path / "relational_component_sweep_benchmark.json").exists()
 
 
 def test_chat_response_score_penalizes_recent_echo():

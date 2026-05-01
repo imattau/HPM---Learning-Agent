@@ -1,10 +1,11 @@
 import numpy as np
 import copy
+from collections import deque
 from typing import List, Dict, Any, Optional
 
 from hpm_ai_v4.pattern import HierarchicalPattern, FlatPattern
 from hpm_ai_v4.operators.parallel import ParallelPatternPool, update_pattern_resident
-from hpm_ai_v4.evaluators.metrics import total_score
+from hpm_ai_v4.evaluators.metrics import total_score, epistemic_score, compression_gate
 from hpm_ai_v4.operators.dynamics import compute_conflict_matrix, meta_pattern_update, recombine
 from hpm_ai_v4.field import PatternField, InstitutionalField
 from hpm_ai_v4.tools.substrate import ExternalSubstrate
@@ -19,29 +20,85 @@ class DevelopmentalStage:
     def __init__(self, agent: 'HPMAgent'):
         self.agent = agent
         self.level_idx = 0   # start at surface level
+        self._recent_signals = deque(maxlen=8)
+        self._min_observation_steps = 20
+        self._min_hier_patterns = 5
+        self._stage_targets = [
+            {"mean_ep": -0.30, "var_ep": 0.02, "mean_gate": 0.35, "mean_comp": 0.02},
+            {"mean_ep": -0.25, "var_ep": 0.02, "mean_gate": 0.40, "mean_comp": 0.03},
+            {"mean_ep": -0.22, "var_ep": 0.018, "mean_gate": 0.45, "mean_comp": 0.04},
+            {"mean_ep": -0.18, "var_ep": 0.015, "mean_gate": 0.50, "mean_comp": 0.05},
+            {"mean_ep": -0.15, "var_ep": 0.012, "mean_gate": 0.55, "mean_comp": 0.06},
+        ]
 
     @property
     def level(self) -> str:
         return self.LEVELS[self.level_idx]
 
+    def _hierarchical_signals(self, patterns: List[HierarchicalPattern]) -> Optional[Dict[str, float]]:
+        hier = [p for p in patterns if p.latent_dim > 1]
+        if len(hier) < self._min_hier_patterns:
+            return None
+
+        ep_scores = np.array([epistemic_score(p) for p in hier], dtype=np.float32)
+        gates = np.array([compression_gate(p) for p in hier], dtype=np.float32)
+        compressions = np.array([p.compression() for p in hier], dtype=np.float32)
+        weights = np.array([max(0.0, float(p.weight)) for p in hier], dtype=np.float32)
+        if float(weights.sum()) > 0.0:
+            weights = weights / (weights.sum() + 1e-12)
+            mean_ep = float(np.sum(weights * ep_scores))
+            mean_gate = float(np.sum(weights * gates))
+            mean_comp = float(np.sum(weights * compressions))
+        else:
+            mean_ep = float(np.mean(ep_scores))
+            mean_gate = float(np.mean(gates))
+            mean_comp = float(np.mean(compressions))
+
+        return {
+            "mean_ep": mean_ep,
+            "var_ep": float(np.var(ep_scores)),
+            "mean_gate": mean_gate,
+            "mean_comp": mean_comp,
+            "count": float(len(hier)),
+        }
+
+    def _should_advance_stage(self, patterns: List[HierarchicalPattern], global_step: int) -> bool:
+        if global_step < self._min_observation_steps:
+            return False
+
+        signal = self._hierarchical_signals(patterns)
+        if signal is None:
+            return False
+
+        self._recent_signals.append(signal)
+        if len(self._recent_signals) < 4:
+            return False
+
+        window = list(self._recent_signals)[-4:]
+        mean_ep = float(np.mean([s["mean_ep"] for s in window]))
+        var_ep = float(np.var([s["mean_ep"] for s in window]))
+        mean_gate = float(np.mean([s["mean_gate"] for s in window]))
+        mean_comp = float(np.mean([s["mean_comp"] for s in window]))
+
+        target_idx = min(self.level_idx, len(self._stage_targets) - 1)
+        target = self._stage_targets[target_idx]
+        return (
+            mean_ep >= target["mean_ep"]
+            and var_ep <= target["var_ep"]
+            and mean_gate >= target["mean_gate"]
+            and mean_comp >= target["mean_comp"]
+            and signal["var_ep"] <= target["var_ep"] * 1.5
+        )
+
     def update(self, patterns: List[HierarchicalPattern], global_step: int):
-        # Determine average complexity in current population, weighted by replicator weight
-        if not patterns: return
-        
-        weights = np.array([p.weight for p in patterns])
-        complexities = np.array([p.complexity for p in patterns])
-        avg_complexity = np.sum(weights * complexities) / (np.sum(weights) + 1e-12)
-        
-        # Progression logic: advance level as complexity grows
-        if avg_complexity > 1.5 and self.level_idx < 1:
-            self.level_idx = 1   # local structural
-        if avg_complexity > 2.0 and self.level_idx < 2:
-            self.level_idx = 2   # relational
-        if avg_complexity > 2.5 and self.level_idx < 3:
-            self.level_idx = 3   # abstract
-        if avg_complexity > 2.8 and self.level_idx < 4:
-            self.level_idx = 4   # generative
-            
+        if not patterns:
+            return
+
+        # Progression logic: advance only when the current evaluator signal has
+        # stabilised, not when a hard-coded complexity threshold is crossed.
+        if self.level_idx < len(self.LEVELS) - 1 and self._should_advance_stage(patterns, global_step):
+            self.level_idx += 1
+       
         # Modulate evaluator weightings based on developmental stage
         # (Following Section 7.4 of the framework)
         if self.level_idx == 0:
@@ -85,6 +142,7 @@ class HPMAgent:
         self.step_counter = 0
         self.obs_buffer = []
         self.external_social_scores = {} # pattern_id -> reliability score [0, 1]
+        self._density_state: Dict[str, Any] = {"density_weight": 0.1}
         
         # Default evaluator weights (will be modulated by development)
         self.beta_aff = 0.4
@@ -250,6 +308,8 @@ class HPMAgent:
         # 3. Write updated state back into pattern objects and collect totals
         result_by_id = {r['pattern_id']: r for r in results}
         totals = {}
+        mean_running_loss = None
+        running_losses = []
         for p in self.patterns:
             r = result_by_id[p.id]
             if p.complexity >= 2:
@@ -259,14 +319,19 @@ class HPMAgent:
             else:
                 p.B = r['B']
             p.running_loss = r['running_loss']
+            running_losses.append(float(p.running_loss))
             totals[p.id] = r['total_score']
+        if running_losses:
+            mean_running_loss = float(np.mean(running_losses))
 
         totals = self._apply_topdown_suppression(totals, result_by_id, feedback)
 
         # 4. Meta Pattern Update (Replicator Dynamics with Conflict)
         k_mat = compute_conflict_matrix(self.patterns)
         meta_pattern_update(self.patterns, totals, eta=0.1, beta_c=0.03,
-                            k_matrix=k_mat, decay=0.005)
+                            k_matrix=k_mat, decay=0.005,
+                            density_state=self._density_state,
+                            mean_running_loss=mean_running_loss)
 
         # 5. Population Pruning
         self.patterns = [p for p in self.patterns if p.weight > 1e-4]

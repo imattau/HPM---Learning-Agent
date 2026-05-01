@@ -234,6 +234,16 @@ def test_l2_soft_state_returns_valid_symbol():
     assert len(dist) == agent.l2.obs_dim
 
 
+def test_l3_state_distribution_returns_normalized_vector():
+    agent = LayeredAgent(num_workers=1)
+    for i in range(120):
+        agent.perceive(i % 95)
+    dist = agent.l3_state_distribution()
+    assert len(dist) == agent.l3.obs_dim
+    assert abs(float(dist.sum()) - 1.0) < 1e-6
+    assert 0 <= agent.l3_soft_state() < agent.SOFT_STATE_OBS_DIM
+
+
 def test_l1_state_distribution_preserves_latent_uncertainty():
     agent = LayeredAgent(num_workers=1)
     for i in range(80):
