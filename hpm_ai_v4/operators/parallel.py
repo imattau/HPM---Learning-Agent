@@ -96,7 +96,14 @@ def update_pattern_resident(pattern, obs_buffer: list,
                 else:
                     ll = pattern.log_likelihood(obs_buffer[-30:])
         if ll is None:
-            ll = pattern.log_likelihood(obs_buffer[-30:])
+            # Recompute LL every 10 steps; use cached value otherwise
+            step = params.get('step_counter', 0)
+            cached_ll = getattr(pattern, '_cached_ll', None)
+            if cached_ll is None or step % 10 == 0:
+                ll = pattern.log_likelihood(obs_buffer[-30:])
+                pattern._cached_ll = ll
+            else:
+                ll = cached_ll
         pattern.update_running_loss(obs_buffer, ll=ll)
 
     ep = epistemic_score(pattern)

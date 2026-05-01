@@ -367,6 +367,7 @@ class HPMAgent:
             'gamma_soc': self.gamma_soc,
             'external_soc_map': self.external_social_scores,
             'do_param_update': (self.step_counter % max(5, min(20, len(self.patterns))) == 0),
+            'step_counter': self.step_counter,
         }
         worker_params = self._feedback_worker_params(worker_params, feedback)
 
