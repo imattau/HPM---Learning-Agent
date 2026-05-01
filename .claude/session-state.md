@@ -1,44 +1,44 @@
 # Session State Checkpoint
-Generated: 2026-04-25
+Generated: 2026-05-01
 Reason: Context threshold exceeded (95%+)
 
 ## Execution Mode
-**Mode**: unattended
-**Auto-Continue**: true
+**Mode**: interactive
+**Auto-Continue**: false
 
 ## Current Task
-Build a large NLP pattern library (2000+ patterns) using HuggingFace datasets.
+Iterative comprehension gap analysis of hpm_ai_v4 codebase against HPM framework principles.
 
 ## Progress Summary
-- Fixed `trust_remote_code=True` deprecation in `hpm_ai_v4/simulations/build_large_nlp_library.py` (completed)
-- All performance fixes from prior session are in place (beam search, Baum-Welch throttle, compression cache, weight floor for HierarchicalPatterns)
+- NLP library build completed (user ran independently with NLTK corpora)
+- library_quality.py tool created and committed
+- All comprehension seams implemented: binding evaluator, relational state, entity registry, clause stack, chained queries, passive voice, simulate_continuation, metacognitive policy
+- All 9 HPM structural principles satisfied per prior review
+- Most recent gap analysis (fresh subagent read) identified 5 remaining gaps
 
-## Remaining Work
+## Most Recent Gap Analysis (2026-05-01)
 
-### IMMEDIATE: Launch the library build
-```bash
-cd /home/mattthomson/workspace/HPM---Learning-Agent
-mkdir -p library_bootstrap
-python3 -u -m hpm_ai_v4.simulations.build_large_nlp_library \
-    --output library_bootstrap/nlp_large.pkl \
-    --target 2000 \
-    --steps-per-chunk 8000 \
-    --workers 4
-```
-Run in background and monitor output.
+**Critical (architectural change needed):**
+- `reasoning.py`: Planning modes are hardcoded enums, not pattern-derived
+- `adapters.py`: Substrate tokens static — no learned token merging
+- `field.py`: Pattern field is storage-only, not active evaluator
 
-### AFTER build launches:
-1. Fix compression gate: `target_loss=0.9` is too high in layered_agent.py — lower to ~0.5
-2. Raise decoder policy exploration weight from 0.03 to ~0.1 in layered_agent.py
-3. Implement frozen library inference mode: `LayeredAgent.from_library(path, frozen=True)`
+**Critical (within-architecture fix):**
+- `agent.py`: Developmental stage progression uses fixed thresholds, not evaluator-driven
+
+**Medium:**
+- `dynamics.py`: Conflict resolution weights (0.75/0.25) fixed, not adaptive
+
+**Core diagnosis:** System implements HPM infrastructure but not HPM discovery. Semantic hierarchy is imposed via constraints, not discovered from pattern learning.
 
 ## Active Files
-- `hpm_ai_v4/simulations/build_large_nlp_library.py` - trust_remote_code fix applied
-- `hpm_ai_v4/simulations/layered_agent.py` - needs compression gate + decoder fixes
-- `library_bootstrap/nlp_large.pkl` - output target (doesn't exist yet)
+- `hpm_ai_v4/simulations/chat_simulation.py`
+- `hpm_ai_v4/simulations/layered_agent.py`
+- `hpm_ai_v4/agents/reasoning.py`
+- `hpm_ai_v4/agents/agent.py`
+- `hpm_ai_v4/io/adapters.py`
+- `hpm_ai_v4/operators/dynamics.py`
+- `hpm_ai_v4/agents/meta_decoder_policy.py`
 
-## Key Context
-- Working directory: `/home/mattthomson/workspace/HPM---Learning-Agent`
-- Branch: `hpm-ai-v3-dev`
-- Workers=4 for parallel chunk training
-- Checkpoints saved every 500 patterns to `library_bootstrap/nlp_large_ckptN.pkl`
+## Next Steps (if user continues)
+Most tractable: replace fixed developmental stage thresholds in agent.py with evaluator-driven emergence metrics. This is within-architecture and directly addresses HPM's "progressive discovery" principle.
