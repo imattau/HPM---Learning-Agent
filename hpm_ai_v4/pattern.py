@@ -105,6 +105,40 @@ class HierarchicalPattern:
 
         return gamma, xi
 
+    def viterbi_path(self, obs_seq):
+        """Most likely latent-state path for an observation sequence."""
+        if len(obs_seq) == 0:
+            return []
+
+        obs = [int(o) % self.obs_dim for o in obs_seq]
+        T, K = len(obs), self.latent_dim
+        log_delta = np.full((T, K), -np.inf, dtype=np.float32)
+        psi = np.zeros((T, K), dtype=np.int32)
+
+        log_pi = np.log(self.pi + 1e-12)
+        logA = self.logA
+        logB = self.logB
+
+        log_delta[0] = log_pi + logB[:, obs[0]]
+        if not np.isfinite(log_delta[0]).any():
+            log_delta[0] = np.log(np.ones(K, dtype=np.float32) / K)
+
+        for t in range(1, T):
+            obs_t = obs[t]
+            for j in range(K):
+                candidates = log_delta[t - 1] + logA[:, j]
+                best_prev = int(np.argmax(candidates))
+                psi[t, j] = best_prev
+                log_delta[t, j] = candidates[best_prev] + logB[j, obs_t]
+            if not np.isfinite(log_delta[t]).any():
+                log_delta[t] = np.log(np.ones(K, dtype=np.float32) / K)
+
+        path = np.zeros(T, dtype=np.int32)
+        path[-1] = int(np.argmax(log_delta[-1]))
+        for t in range(T - 2, -1, -1):
+            path[t] = int(psi[t + 1, path[t + 1]])
+        return path.tolist()
+
     def log_likelihood(self, obs_seq):
         """Compute log p(x_{1:T}) via scaled forward algorithm."""
         if len(obs_seq) == 0:

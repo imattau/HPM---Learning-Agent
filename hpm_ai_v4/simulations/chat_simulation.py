@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 from hpm_ai_v4.simulations.full_simulation import WikipediaStream
@@ -3110,6 +3110,90 @@ def _class_distribution_separation(vectors_by_label: Dict[str, List[np.ndarray]]
     }
 
 
+RELATIONAL_SEGMENTATION_CUES = {
+    "was",
+    "were",
+    "been",
+    "by",
+    "that",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "chased",
+    "chase",
+    "sat",
+    "gave",
+    "give",
+    "said",
+    "say",
+    "moved",
+    "move",
+    "approached",
+    "approach",
+    "looked",
+    "look",
+    "saw",
+    "see",
+    "told",
+    "tell",
+}
+
+
+def _token_char_spans(text: str) -> List[Tuple[str, int, int]]:
+    spans: List[Tuple[str, int, int]] = []
+    for match in re.finditer(r"[A-Za-z']+", text):
+        spans.append((match.group(0).lower(), match.start(), match.end()))
+    return spans
+
+
+def _role_segmentation_alignment(path: Sequence[int], text: str) -> Dict[str, Any]:
+    spans = _token_char_spans(text)
+    if not spans or not path:
+        return {
+            "boundary_rate": 0.0,
+            "background_rate": 0.0,
+            "alignment_ratio": 0.0,
+            "boundary_markers": 0,
+            "background_tokens": 0,
+        }
+
+    path_arr = np.asarray(list(path), dtype=np.int32).ravel()
+    path_len = min(len(path_arr), len(text))
+    if path_len <= 1:
+        return {
+            "boundary_rate": 0.0,
+            "background_rate": 0.0,
+            "alignment_ratio": 0.0,
+            "boundary_markers": 0,
+            "background_tokens": 0,
+        }
+
+    marker_positions: List[int] = []
+    background_positions: List[int] = []
+    for token, start, _ in spans:
+        if token in RELATIONAL_SEGMENTATION_CUES:
+            marker_positions.append(start)
+        else:
+            background_positions.append(start)
+
+    def _change_at(pos: int) -> float:
+        if pos <= 0 or pos >= path_len:
+            return 0.0
+        return 1.0 if path_arr[pos] != path_arr[pos - 1] else 0.0
+
+    boundary_rate = float(np.mean([_change_at(pos) for pos in marker_positions])) if marker_positions else 0.0
+    background_positions = [pos for pos in background_positions if 0 < pos < path_len]
+    background_rate = float(np.mean([_change_at(pos) for pos in background_positions])) if background_positions else 0.0
+    return {
+        "boundary_rate": boundary_rate,
+        "background_rate": background_rate,
+        "alignment_ratio": float(boundary_rate / max(1e-12, background_rate)) if marker_positions else 0.0,
+        "boundary_markers": len(marker_positions),
+        "background_tokens": len(background_positions),
+    }
+
+
 def run_relational_emergence_benchmark(
     corpus_path: str,
     cases: Optional[List[Dict[str, Any]]] = None,
@@ -3181,12 +3265,20 @@ def run_relational_emergence_benchmark(
             )
             statement_reports: List[Dict[str, Any]] = []
             for statement in case.get("statements", []):
+                l2_start = len(getattr(layered, "_l2_state_history", []))
                 stats = session.observe_text(statement, role="user", feedback_mode="target")
+                l2_slice = list(getattr(layered, "_l2_state_history", [])[l2_start:])
+                l3_path = layered.l3_viterbi_path(l2_slice)
+                role_alignment = _role_segmentation_alignment(l3_path, statement)
                 statement_reports.append({
                     "statement": statement,
                     "binding_predictions": int(stats.get("binding_predictions", 0)),
                     "binding_prediction_hits": int(stats.get("binding_prediction_hits", 0)),
                     "binding_prediction_misses": int(stats.get("binding_prediction_misses", 0)),
+                    "role_segmentation_boundary_rate": float(role_alignment.get("boundary_rate", 0.0)),
+                    "role_segmentation_background_rate": float(role_alignment.get("background_rate", 0.0)),
+                    "role_segmentation_alignment_ratio": float(role_alignment.get("alignment_ratio", 0.0)),
+                    "role_segmentation_boundary_markers": int(role_alignment.get("boundary_markers", 0)),
                 })
 
             l3_distribution = layered.l3_state_distribution()
@@ -3223,6 +3315,9 @@ def run_relational_emergence_benchmark(
                 "binding_prediction_accuracy": prediction_accuracy,
                 "l3_soft_state": l3_soft_state,
                 "l3_distribution": [float(v) for v in np.asarray(l3_distribution, dtype=np.float32).ravel().tolist()],
+                "role_segmentation_boundary_rate": float(np.mean([float(item["role_segmentation_boundary_rate"]) for item in statement_reports]) if statement_reports else 0.0),
+                "role_segmentation_background_rate": float(np.mean([float(item["role_segmentation_background_rate"]) for item in statement_reports]) if statement_reports else 0.0),
+                "role_segmentation_alignment_ratio": float(np.mean([float(item["role_segmentation_alignment_ratio"]) for item in statement_reports]) if statement_reports else 0.0),
                 "statement_reports": statement_reports,
             })
             matrix.append({
@@ -3236,6 +3331,7 @@ def run_relational_emergence_benchmark(
                 "answer_correct": answer_correct,
                 "l3_soft_state": l3_soft_state,
                 "binding_prediction_accuracy": prediction_accuracy,
+                "role_segmentation_alignment_ratio": float(np.mean([float(item["role_segmentation_alignment_ratio"]) for item in statement_reports]) if statement_reports else 0.0),
             })
 
         voice_separation = _class_distribution_separation(voice_vectors)
@@ -3250,6 +3346,9 @@ def run_relational_emergence_benchmark(
             "binding_prediction_hits": int(sum(int(row["binding_prediction_hits"]) for row in case_reports)),
             "binding_prediction_misses": int(sum(int(row["binding_prediction_misses"]) for row in case_reports)),
             "binding_predictions": int(sum(int(row["binding_predictions"]) for row in case_reports)),
+            "avg_role_segmentation_boundary_rate": float(sum(float(row["role_segmentation_boundary_rate"]) for row in case_reports) / max(1, len(case_reports))),
+            "avg_role_segmentation_background_rate": float(sum(float(row["role_segmentation_background_rate"]) for row in case_reports) / max(1, len(case_reports))),
+            "avg_role_segmentation_alignment_ratio": float(sum(float(row["role_segmentation_alignment_ratio"]) for row in case_reports) / max(1, len(case_reports))),
             "active_passive_avg_between": float(voice_separation.get("avg_between", 0.0)),
             "active_passive_avg_within": float(voice_separation.get("avg_within", 0.0)),
             "active_passive_separation_ratio": float(voice_separation.get("separation_ratio", 0.0)),

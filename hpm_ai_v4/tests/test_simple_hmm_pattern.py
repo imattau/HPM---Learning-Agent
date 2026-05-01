@@ -111,3 +111,11 @@ def test_predictive_entropy_finite():
     h = p.predictive_entropy([0, 1, 2])
     assert np.isfinite(h)
     assert h >= 0
+
+
+def test_viterbi_path_returns_latent_length_sequence():
+    p = HierarchicalPattern(1, latent_dim=3, obs_dim=6)
+    path = p.viterbi_path([0, 1, 2, 1, 0])
+    assert isinstance(path, list)
+    assert len(path) == 5
+    assert all(0 <= state < 3 for state in path)

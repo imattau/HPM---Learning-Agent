@@ -265,6 +265,18 @@ class LayeredAgent:
         dist /= dist.sum() + 1e-12
         return dist.astype(np.float32)
 
+    def l3_viterbi_path(self, obs_seq: Optional[List[int]] = None) -> List[int]:
+        """Most likely latent path for the best L3 pattern."""
+        if not self.l3.patterns:
+            return []
+
+        context = list(obs_seq or self.l3.obs_buffer[-20:])
+        if not context:
+            return [0]
+
+        best = max(self.l3.patterns, key=lambda p: p.weight)
+        return [int(v) for v in best.viterbi_path(context)]
+
     def l3_soft_state(self) -> int:
         """Encode L3 posterior state + confidence into a discrete symbol for L4/Binding."""
         posterior = self.l3_state_distribution()

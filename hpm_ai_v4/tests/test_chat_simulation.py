@@ -863,6 +863,7 @@ def test_run_relational_emergence_benchmark_reports_ablation(tmp_path):
             self.dictionary = None
             self.grammar = None
             self._last_text = ""
+            self._l2_state_history = []
 
         def _tokenize_words(self, text):
             import re
@@ -870,6 +871,7 @@ def test_run_relational_emergence_benchmark_reports_ablation(tmp_path):
 
         def observe_text(self, text, **kwargs):
             self._last_text = text.lower()
+            self._l2_state_history.extend([0] * max(1, len(text)))
             return {
                 "binding_predictions": 1,
                 "binding_prediction_hits": 1,
@@ -884,6 +886,27 @@ def test_run_relational_emergence_benchmark_reports_ablation(tmp_path):
             idx = 1 if (" was " in f" {self._last_text} " or " by " in f" {self._last_text} ") else 0
             vec[idx] = 1.0
             return vec
+
+        def l3_viterbi_path(self, obs_seq):
+            import re
+            markers = ["was", "were", "been", "by", "that", "which", "who", "chased", "sat", "gave", "said", "moved", "approached"]
+            path = [0] * max(1, len(obs_seq))
+            cue_positions = []
+            for marker in markers:
+                for match in re.finditer(rf"\b{re.escape(marker)}\b", self._last_text):
+                    cue_positions.append(match.start())
+            cue_positions = sorted({pos for pos in cue_positions if pos < len(path)})
+            state = 0
+            prev = 0
+            for pos in cue_positions:
+                state = 1 - state
+                for idx in range(prev, pos):
+                    if idx < len(path):
+                        path[idx] = state
+                prev = pos
+            for idx in range(prev, len(path)):
+                path[idx] = state
+            return path
 
         def l3_soft_state(self):
             return int(np.argmax(self.l3_state_distribution()))
@@ -911,6 +934,8 @@ def test_run_relational_emergence_benchmark_reports_ablation(tmp_path):
         assert "active_passive_separation_ratio" in report["arms"][0]["aggregate"]
         assert report["arms"][0]["active_passive_separation"]["avg_between"] >= 0.0
         assert report["corpus_spec"]["latent_probe"]["layer"] == "l3"
+        assert "avg_role_segmentation_alignment_ratio" in report["arms"][0]["aggregate"]
+        assert report["arms"][0]["aggregate"]["avg_role_segmentation_alignment_ratio"] >= 0.0
         assert len(report["matrix"]) == 12
         assert {row["arm"] for row in report["matrix"]} == {"heuristics_on", "heuristics_off"}
         assert (tmp_path / "relational_emergence_benchmark.json").exists()
