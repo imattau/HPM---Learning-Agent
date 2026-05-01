@@ -165,6 +165,28 @@ class TestPlan:
         assert frames[0].sequence == [1]
         assert frames[0].score >= frames[-1].score
 
+    def test_mode_outcome_ema_biases_and_prunes_poor_modes(self, reasoner, monkeypatch):
+        monkeypatch.setattr(reasoner, "plan", lambda *args, **kwargs: [1])
+
+        baseline_modes = reasoner._hypothesis_modes({}, True, True, False)
+        baseline_biases = {item["mode"]: item["mode_bias"] for item in baseline_modes}
+
+        for _ in range(100):
+            reasoner.record_mode_outcome("continue", 0.92)
+            reasoner.record_mode_outcome("repair", 0.86)
+            reasoner.record_mode_outcome("constrain", 0.83)
+            reasoner.record_mode_outcome("explore", 0.10)
+            reasoner.record_mode_outcome("predict", 0.78)
+
+        modes = reasoner._hypothesis_modes({}, True, True, False)
+        mode_biases = {item["mode"]: item["mode_bias"] for item in modes}
+
+        assert "explore" not in mode_biases
+        assert mode_biases["continue"] > baseline_biases["continue"]
+        assert mode_biases["repair"] > baseline_biases["repair"]
+        assert mode_biases["constrain"] > baseline_biases["constrain"]
+        assert mode_biases["predict"] >= baseline_biases["predict"]
+
 
 # ---------------------------------------------------------------------------
 # 4. counterfactual

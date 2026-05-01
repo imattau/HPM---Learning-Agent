@@ -755,6 +755,8 @@ class Reasoner:
         self.polygraph = EpisodicPolygraph(capacity=self.memory_capacity, window=self.memory_window)
         self._mode_reward_ema: Dict[str, float] = {}
         self._mode_selection_counts: Dict[str, int] = {}
+        self._mode_ema: Dict[str, float] = {}
+        self._mode_ema_alpha = 0.05
 
     @property
     def memory_size(self) -> int:
@@ -1286,7 +1288,15 @@ class Reasoner:
             prior_bonus = mode_prior.get(item["mode"], 0.0)
             if desired_mode and item["mode"] == desired_mode:
                 prior_bonus += 0.25
-            item["mode_bias"] += 0.12 * prior_bonus
+            ema = self._mode_ema.get(item["mode"], 0.0)
+            item["mode_bias"] += 0.12 * prior_bonus + 0.08 * ema
+
+        if len(self._mode_ema) >= 3:
+            mean_ema = float(np.mean(list(self._mode_ema.values())))
+            modes = [
+                m for m in modes
+                if self._mode_ema.get(m["mode"], mean_ema) >= mean_ema - 0.3
+            ]
         return modes
 
     def _mode_expected_reward(self, mode: str, feature_pack: Dict[str, Any], score: float) -> float:
@@ -1700,6 +1710,8 @@ class Reasoner:
             "polygraph": self.polygraph.state_dict(),
             "mode_reward_ema": dict(self._mode_reward_ema),
             "mode_selection_counts": dict(self._mode_selection_counts),
+            "mode_ema": dict(self._mode_ema),
+            "mode_ema_alpha": float(self._mode_ema_alpha),
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
@@ -1720,6 +1732,8 @@ class Reasoner:
         self.polygraph._rebuild_indices()
         self._mode_reward_ema = dict(state.get("mode_reward_ema", {}))
         self._mode_selection_counts = dict(state.get("mode_selection_counts", {}))
+        self._mode_ema = dict(state.get("mode_ema", {}))
+        self._mode_ema_alpha = float(state.get("mode_ema_alpha", self._mode_ema_alpha))
 
     def _current_control_signature(self) -> Tuple[Optional[str], Optional[str]]:
         stage = getattr(getattr(self.agent, "development", None), "level", None)
@@ -1768,6 +1782,13 @@ class Reasoner:
         mode = str(mode)
         self._mode_selection_counts[mode] = self._mode_selection_counts.get(mode, 0) + 1
         self._mode_reward_ema[mode] = 0.85 * self._mode_reward_ema.get(mode, 0.0) + 0.15 * float(reward)
+        self.record_mode_outcome(mode, reward)
+
+    def record_mode_outcome(self, mode: str, reward: float) -> None:
+        mode = str(mode)
+        prev = float(self._mode_ema.get(mode, 0.0))
+        alpha = float(self._mode_ema_alpha)
+        self._mode_ema[mode] = (1.0 - alpha) * prev + alpha * float(reward)
 
     def _mode_prior(self) -> Dict[str, float]:
         if not self._mode_reward_ema:
