@@ -183,13 +183,8 @@ class HPMAgent:
         if len(self.obs_buffer) < 16:
             return {}
 
-        chunk = max(8, min(32, self.reasoner.context_window // 2 if self.reasoner.context_window else 16))
-        if len(self.obs_buffer) < chunk * 2:
-            return {}
-
-        train_chunk = self.obs_buffer[-chunk:]
-        holdout_chunk = self.obs_buffer[-(2 * chunk):-chunk]
-        if not train_chunk or not holdout_chunk:
+        holdout = self.obs_buffer[:max(1, len(self.obs_buffer) // 5)]
+        if len(holdout) < 4:
             return {}
 
         stats: Dict[int, Dict[str, float]] = {}
@@ -197,9 +192,9 @@ class HPMAgent:
             if pattern.latent_dim <= 1:
                 continue
             stats[int(pattern.id)] = {
-                "train_ll": float(pattern.log_likelihood(train_chunk)),
-                "holdout_ll": float(pattern.log_likelihood(holdout_chunk)),
-                "chunk_size": float(chunk),
+                "train_ll": float(-pattern.running_loss),
+                "holdout_ll": float(pattern.log_likelihood(holdout) / max(1, len(holdout))),
+                "chunk_size": float(len(holdout)),
             }
         return stats
 
@@ -322,10 +317,8 @@ class HPMAgent:
         # Reasoning feedback: update per-pattern loss based on prediction error
         self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
 
-        # 1. Update Social Context (Pattern Field) - Move up for workers
-        field_freq = self.field.update(self.patterns, episode_stats=self._field_episode_stats())
-
-        # 2. Parallel per-pattern update + score computation
+        # 1. Parallel per-pattern update + score computation
+        field_freq = dict(self.field.frequencies)
         worker_params = {
             'learning_rate': 0.02,
             'lambda_l': 0.1,
@@ -353,11 +346,11 @@ class HPMAgent:
                     result['pi'] = p.pi.copy()
                 results.append(result)
         else:
-            results = self._pool.map_patterns(
-                self.patterns, self.obs_buffer, field_freq, worker_params
-            )
+                results = self._pool.map_patterns(
+                    self.patterns, self.obs_buffer, field_freq, worker_params
+                )
 
-        # 3. Write updated state back into pattern objects and collect totals
+        # 2. Write updated state back into pattern objects and collect totals
         result_by_id = {r['pattern_id']: r for r in results}
         totals = {}
         mean_running_loss = None
@@ -375,6 +368,9 @@ class HPMAgent:
             totals[p.id] = r['total_score']
         if running_losses:
             mean_running_loss = float(np.mean(running_losses))
+
+        # 3. Update Social Context (Pattern Field) using post-update generalisation stats.
+        field_freq = self.field.update(self.patterns, episode_stats=self._field_episode_stats())
 
         totals = self._apply_topdown_suppression(totals, result_by_id, feedback)
 

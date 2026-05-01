@@ -212,3 +212,26 @@ def test_pattern_field_biases_toward_generalising_patterns():
 
     assert field.affinity_for(generalising) > field.affinity_for(overfit)
     assert field.frequencies[1] > field.frequencies[2]
+
+
+def test_agent_passes_episode_stats_into_field_update(monkeypatch):
+    agent = HPMAgent(num_initial_patterns=3, obs_dim=2)
+    for i in range(24):
+        agent.obs_buffer.append(i % 2)
+
+    captured = {}
+
+    def fake_update(patterns, episode_stats=None):
+        captured["episode_stats"] = episode_stats
+        return {p.id: 1.0 / max(1, len(patterns)) for p in patterns}
+
+    monkeypatch.setattr(agent.field, "update", fake_update)
+    monkeypatch.setattr(agent.reasoner, "observe_outcome", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent, "_apply_topdown_suppression", lambda totals, results, feedback=None: totals)
+    monkeypatch.setattr(agent, "_feedback_worker_params", lambda base, feedback=None: base)
+
+    agent.perceive_and_learn(1)
+
+    episode_stats = captured.get("episode_stats")
+    assert episode_stats
+    assert all("train_ll" in stats and "holdout_ll" in stats for stats in episode_stats.values())
