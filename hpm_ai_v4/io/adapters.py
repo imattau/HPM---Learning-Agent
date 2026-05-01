@@ -3,7 +3,8 @@ import re
 from dataclasses import dataclass
 import numpy as np
 from PIL import Image
-from typing import List, Any, Union, Optional, Sequence, Dict
+from collections import Counter, defaultdict
+from typing import List, Any, Union, Optional, Sequence, Dict, Tuple
 import matplotlib.pyplot as plt
 
 try:
@@ -1195,6 +1196,213 @@ class AsciiCharAdapter:
 
     def bucket_for_token(self, token_id: int) -> str:
         return self.decode_class(int(token_id))
+
+
+@dataclass(frozen=True)
+class SubstrateMergeRule:
+    token: str
+    latent_state: int
+    support: int
+    purity: float
+    span: int
+
+
+class LearnedSubstrateAdapter(InputAdapter):
+    """ASCII surface adapter with an optional learned merge vocabulary.
+
+    The adapter starts from the fixed 95-slot ASCII substrate and can merge
+    stable character n-grams into new token ids after an alignment pass. This
+    keeps the HMM core unchanged while letting the surface grow into learned
+    multi-character units when the data supports them.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_adapter: Optional[AsciiCharAdapter] = None,
+        max_merges: int = 64,
+        lowercase: bool = True,
+    ):
+        self._base = base_adapter or AsciiCharAdapter()
+        self._max_merges = max(0, int(max_merges))
+        self.lowercase = bool(lowercase)
+        self._merge_rules: Dict[str, SubstrateMergeRule] = {}
+        self._token_to_id: Dict[str, int] = {}
+        self._id_to_token: Dict[int, str] = {}
+        self._refresh_merge_vocab()
+
+    @property
+    def obs_dim(self) -> int:
+        return self._base.obs_dim + len(self._merge_rules)
+
+    def _canonical_text(self, text: str) -> str:
+        text = str(text or "")
+        return text.lower() if self.lowercase else text
+
+    def _refresh_merge_vocab(self) -> None:
+        self._token_to_id = {}
+        self._id_to_token = {}
+        next_id = self._base.obs_dim
+        for token in sorted(self._merge_rules.keys(), key=lambda tok: (-len(tok), tok)):
+            self._token_to_id[token] = next_id
+            self._id_to_token[next_id] = token
+            next_id += 1
+
+    def fit_merges(
+        self,
+        texts: Sequence[str],
+        latent_paths: Sequence[Sequence[int]],
+        *,
+        min_support: int = 5,
+        purity_threshold: float = 0.95,
+        max_ngram: int = 4,
+    ) -> int:
+        """Learn stable character n-grams from aligned latent-state traces."""
+        if not texts or not latent_paths:
+            return 0
+
+        span_counts: Dict[str, Counter] = defaultdict(Counter)
+        span_support: Counter = Counter()
+        span_state_totals: Dict[str, Counter] = defaultdict(Counter)
+
+        for text, path in zip(texts, latent_paths):
+            canon = self._canonical_text(text)
+            chars = list(canon)
+            states = [int(s) for s in path]
+            limit = min(len(chars), len(states))
+            if limit < 2:
+                continue
+            chars = chars[:limit]
+            states = states[:limit]
+            for start in range(limit):
+                if chars[start].isspace():
+                    continue
+                for span in range(2, min(max_ngram, limit - start) + 1):
+                    piece = "".join(chars[start:start + span])
+                    if any(ch.isspace() for ch in piece):
+                        break
+                    span_support[piece] += 1
+                    span_state_totals[piece][states[start]] += 1
+                    if len(set(states[start:start + span])) == 1:
+                        span_counts[piece][states[start]] += 1
+
+        candidates: List[SubstrateMergeRule] = []
+        for token, total in span_support.items():
+            if total < max(2, int(min_support)) or len(token) < 2:
+                continue
+            dominant_state, dominant_count = span_counts[token].most_common(1)[0] if span_counts[token] else (None, 0)
+            if dominant_state is None:
+                continue
+            purity = dominant_count / float(total)
+            if purity < float(purity_threshold):
+                continue
+            candidates.append(
+                SubstrateMergeRule(
+                    token=token,
+                    latent_state=int(dominant_state),
+                    support=int(total),
+                    purity=float(purity),
+                    span=len(token),
+                )
+            )
+
+        candidates.sort(key=lambda rule: (-rule.span, -rule.support, rule.token))
+        kept: Dict[str, SubstrateMergeRule] = dict(self._merge_rules)
+        for rule in candidates:
+            if len(kept) >= self._max_merges:
+                break
+            prev = kept.get(rule.token)
+            if prev is None or (rule.support > prev.support and rule.purity >= prev.purity):
+                kept[rule.token] = rule
+
+        self._merge_rules = dict(sorted(kept.items(), key=lambda item: (-len(item[0]), item[0])))
+        self._refresh_merge_vocab()
+        return len(self._merge_rules)
+
+    def merge_rules(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            token: {
+                "latent_state": rule.latent_state,
+                "support": rule.support,
+                "purity": rule.purity,
+                "span": rule.span,
+            }
+            for token, rule in self._merge_rules.items()
+        }
+
+    def tokenize(self, text: str) -> List[str]:
+        canon = self._canonical_text(text)
+        if not canon:
+            return []
+        tokens: List[str] = []
+        merge_order = sorted(self._merge_rules.keys(), key=lambda tok: (-len(tok), tok))
+        i = 0
+        while i < len(canon):
+            ch = canon[i]
+            if ch == "\n":
+                tokens.append("\n")
+                i += 1
+                continue
+            matched = None
+            for token in merge_order:
+                if canon.startswith(token, i):
+                    matched = token
+                    break
+            if matched:
+                tokens.append(matched)
+                i += len(matched)
+                continue
+            tokens.append(ch)
+            i += 1
+        return tokens
+
+    def encode_token(self, token: str) -> int:
+        tok = self._canonical_text(token)
+        if tok == "\n":
+            return self._base.encode_char("\n")
+        if tok in self._token_to_id:
+            return self._token_to_id[tok]
+        if len(tok) == 1:
+            return self._base.encode_char(tok)
+        if tok in self._merge_rules:
+            return self._token_to_id[tok]
+        if tok:
+            return self._base.encode_char(tok[0])
+        return self._base.encode_char("?")
+
+    def decode_token(self, token_id: int) -> str:
+        idx = int(token_id)
+        if idx in self._id_to_token:
+            return self._id_to_token[idx]
+        if idx == self._base.NEWLINE_ID:
+            return "\n"
+        if 0 <= idx < self._base.obs_dim:
+            return chr(idx + 32)
+        return "?"
+
+    def to_observations(self, raw_input: Any, max_length: int = 100) -> List[int]:
+        tokens = [self.encode_token(tok) for tok in self.tokenize(str(raw_input or ""))]
+        return tokens[:max_length]
+
+    def from_observations(self, tokens: Sequence[int]) -> str:
+        pieces: List[str] = []
+        for token_id in tokens:
+            tok = self.decode_token(int(token_id))
+            if tok == "\n":
+                pieces.append("\n")
+                continue
+            if not pieces:
+                pieces.append(tok)
+            elif tok in {".", ",", ";", ":", "!", "?", ")", "]", "}"}:
+                pieces[-1] = pieces[-1].rstrip() + tok
+            elif pieces[-1] in {"(", "[", "{"}:
+                pieces.append(tok)
+            else:
+                pieces.append(tok if len(tok) > 1 else " " + tok)
+        return "".join(pieces).strip()
+
+    def bucket_for_token(self, token_id: int) -> str:
+        return self._base.bucket_for_token(int(token_id) if int(token_id) < self._base.obs_dim else self._base.NEWLINE_ID)
 
 
 class EnvironmentStateAdapter(InputAdapter):

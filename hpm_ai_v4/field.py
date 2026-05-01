@@ -1,14 +1,55 @@
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, deque
+from typing import Dict, Any, Optional
 
 class PatternField:
     """Represents the social/population field: frequencies of patterns in the environment."""
     def __init__(self):
         self.frequencies = {}
+        self.community_affinity: Dict[int, float] = {}
+        self.generalization_history: Dict[int, deque] = defaultdict(lambda: deque(maxlen=8))
+        self.generalization_margin: Dict[int, float] = {}
 
-    def update(self, patterns):
-        total = sum(p.weight for p in patterns) + 1e-12
-        self.frequencies = {p.id: p.weight / total for p in patterns}
+    def record_generalization(self, pattern_id: int, train_ll: float, holdout_ll: float, chunk_size: Optional[int] = None) -> float:
+        """Record whether a pattern generalised beyond its training chunk."""
+        margin = float(holdout_ll) - float(train_ll)
+        scale = max(1.0, float(chunk_size or 1))
+        score = float(1.0 / (1.0 + np.exp(-(margin / np.sqrt(scale)))))
+        history = self.generalization_history[int(pattern_id)]
+        history.append(score)
+        if history:
+            affinity = float(np.mean(history))
+        else:
+            affinity = 0.5
+        self.community_affinity[int(pattern_id)] = affinity
+        self.generalization_margin[int(pattern_id)] = margin
+        return affinity
+
+    def affinity_for(self, pattern_or_id: Any) -> float:
+        pattern_id = int(getattr(pattern_or_id, "id", pattern_or_id))
+        return float(self.community_affinity.get(pattern_id, 0.5))
+
+    def update(self, patterns, episode_stats: Optional[Dict[int, Dict[str, float]]] = None):
+        if episode_stats:
+            for pattern_id, stats in episode_stats.items():
+                train_ll = stats.get("train_ll")
+                holdout_ll = stats.get("holdout_ll")
+                if train_ll is None or holdout_ll is None:
+                    continue
+                self.record_generalization(
+                    int(pattern_id),
+                    train_ll=float(train_ll),
+                    holdout_ll=float(holdout_ll),
+                    chunk_size=stats.get("chunk_size"),
+                )
+
+        weighted = []
+        for p in patterns:
+            affinity = self.affinity_for(p)
+            weighted.append((p.id, float(p.weight) * (0.5 + affinity)))
+
+        total = sum(weight for _, weight in weighted) + 1e-12
+        self.frequencies = {pattern_id: weight / total for pattern_id, weight in weighted}
         return self.frequencies
 
 from typing import Optional, List

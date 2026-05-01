@@ -3,6 +3,7 @@ import pytest
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.pattern import HierarchicalPattern
 from hpm_ai_v4.evaluators.metrics import compression_gate
+from hpm_ai_v4.field import PatternField
 from hpm_ai_v4.operators.dynamics import meta_pattern_update
 
 class FixedEnvironment:
@@ -192,3 +193,22 @@ def test_density_weight_adapts_to_loss_trend():
 
     assert rising_state["density_weight"] < 0.2
     assert falling_state["density_weight"] > 0.2
+
+
+def test_pattern_field_biases_toward_generalising_patterns():
+    field = PatternField()
+    generalising = HierarchicalPattern(pattern_id=1, latent_dim=2, obs_dim=2)
+    overfit = HierarchicalPattern(pattern_id=2, latent_dim=2, obs_dim=2)
+    generalising.weight = 0.5
+    overfit.weight = 0.5
+
+    field.update(
+        [generalising, overfit],
+        episode_stats={
+            1: {"train_ll": -8.0, "holdout_ll": -2.0, "chunk_size": 8},
+            2: {"train_ll": -2.0, "holdout_ll": -8.0, "chunk_size": 8},
+        },
+    )
+
+    assert field.affinity_for(generalising) > field.affinity_for(overfit)
+    assert field.frequencies[1] > field.frequencies[2]

@@ -179,6 +179,30 @@ class HPMAgent:
         self._pending_feedback: Dict[str, Any] = {}
         self._pool = ParallelPatternPool(num_workers=num_workers)
 
+    def _field_episode_stats(self) -> Dict[int, Dict[str, float]]:
+        if len(self.obs_buffer) < 16:
+            return {}
+
+        chunk = max(8, min(32, self.reasoner.context_window // 2 if self.reasoner.context_window else 16))
+        if len(self.obs_buffer) < chunk * 2:
+            return {}
+
+        train_chunk = self.obs_buffer[-chunk:]
+        holdout_chunk = self.obs_buffer[-(2 * chunk):-chunk]
+        if not train_chunk or not holdout_chunk:
+            return {}
+
+        stats: Dict[int, Dict[str, float]] = {}
+        for pattern in self.patterns:
+            if pattern.latent_dim <= 1:
+                continue
+            stats[int(pattern.id)] = {
+                "train_ll": float(pattern.log_likelihood(train_chunk)),
+                "holdout_ll": float(pattern.log_likelihood(holdout_chunk)),
+                "chunk_size": float(chunk),
+            }
+        return stats
+
     def gossip_with_substrate(self, substrate: ExternalSubstrate):
         """Retrieve a random pattern from the collective substrate and inject it into the local population."""
         other = substrate.get_random_pattern()
@@ -299,7 +323,7 @@ class HPMAgent:
         self.reasoner.observe_outcome(obs, context_before, metadata=feedback)
 
         # 1. Update Social Context (Pattern Field) - Move up for workers
-        field_freq = self.field.update(self.patterns)
+        field_freq = self.field.update(self.patterns, episode_stats=self._field_episode_stats())
 
         # 2. Parallel per-pattern update + score computation
         worker_params = {

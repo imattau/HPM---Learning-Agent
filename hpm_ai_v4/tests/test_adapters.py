@@ -2,6 +2,7 @@ import pytest
 from hpm_ai_v4.io.adapters import (
     CharClassAdapter,
     AsciiCharAdapter,
+    LearnedSubstrateAdapter,
     CodeDSLAdapter,
     EpisodeBundleAdapter,
     CurriculumAdapter,
@@ -100,6 +101,26 @@ def test_ascii_char_adapter_preserves_surface_tokens():
     assert a.encode_char(' ') != a.encode_char('a')
     assert a.encode_char('\n') == 94
     assert a.bucket_for_token(a.encode_char('a')) == "letter"
+
+
+def test_learned_substrate_adapter_discovers_stable_merges():
+    adapter = LearnedSubstrateAdapter(max_merges=8, lowercase=True)
+    texts = ["the cat", "the dog", "the bat"]
+    latent_paths = [
+        [1, 1, 1, 0, 2, 2, 2],
+        [1, 1, 1, 0, 2, 2, 2],
+        [1, 1, 1, 0, 2, 2, 2],
+    ]
+
+    learned = adapter.fit_merges(texts, latent_paths, min_support=3, purity_threshold=1.0, max_ngram=3)
+
+    assert learned >= 1
+    assert adapter.obs_dim > 95
+    tokens = adapter.to_observations("the cat")
+    decoded = [adapter.decode_token(tok) for tok in tokens]
+    assert "the" in decoded
+    assert adapter.encode_token("the") >= 95
+    assert "the" in adapter.from_observations(tokens)
 
 
 def test_word_adapter_round_trip_and_vocab_growth():
