@@ -26,6 +26,7 @@ class LibraryEntry:
     pattern_count: int = 0
     created_at: str = ""
     notes: str = ""
+    ingest_state: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -48,6 +49,7 @@ class LibraryEntry:
             pattern_count=int(data.get("pattern_count", 0)),
             created_at=str(data.get("created_at", "")),
             notes=str(data.get("notes", "")),
+            ingest_state=dict(data.get("ingest_state", {}) or {}),
         )
 
 
@@ -81,6 +83,7 @@ class LibraryRegistry:
         pattern_count: int = 0,
         created_at: str = "",
         notes: str = "",
+        ingest_state: Optional[Dict[str, Any]] = None,
     ) -> LibraryEntry:
         entry = LibraryEntry(
             name=name,
@@ -98,6 +101,7 @@ class LibraryRegistry:
             pattern_count=pattern_count,
             created_at=created_at,
             notes=notes,
+            ingest_state=dict(ingest_state or {}),
         )
         return self.register(entry)
 
@@ -161,6 +165,12 @@ class LibraryRegistry:
 
     def describe(self) -> List[Dict[str, Any]]:
         return [entry.to_dict() for entry in self.list()]
+
+    def ingest_gate(self, name: str, *, adapter: Any = None, lowercase: bool = True):
+        from hpm_ai_v4.tools.ingest import TextIngestGate
+
+        entry = self.require(name)
+        return TextIngestGate.from_snapshot(entry.ingest_state, adapter=adapter, lowercase=lowercase)
 
     def resolve_bundle(
         self,

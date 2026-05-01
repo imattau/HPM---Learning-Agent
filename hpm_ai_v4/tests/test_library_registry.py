@@ -41,6 +41,7 @@ def test_library_registry_round_trip(tmp_path):
             source="synthetic",
             density_mean=0.6,
             pattern_count=8,
+            ingest_state={"seen_text_signatures": ["abc"], "seen_pattern_signatures": ["def"]},
         )
     )
 
@@ -49,6 +50,9 @@ def test_library_registry_round_trip(tmp_path):
     assert entry.domain == "code"
     assert entry.status == "validated"
     assert entry.pattern_count == 8
+    assert entry.ingest_state["seen_text_signatures"] == ["abc"]
+    gate = reloaded.ingest_gate("code_dsl_seed")
+    assert gate.register_text("hello world") is True
 
 
 def test_bundle_resolver_prefers_stacked_chat_bundle(tmp_path):

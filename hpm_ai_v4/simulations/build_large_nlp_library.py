@@ -11,6 +11,7 @@ Usage:
         --workers 4
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -23,6 +24,7 @@ from datetime import datetime, timezone
 from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.io.adapters import CharClassAdapter
 from hpm_ai_v4.evaluators.metrics import epistemic_score, affective_score, social_score, pattern_density
+from hpm_ai_v4.tools.ingest import TextIngestGate
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.serializer import PatternSerializer
 from hpm_ai_v4.pattern import HierarchicalPattern
@@ -109,6 +111,10 @@ def load_nltk_chunks(target_chars: int = 5_000_000) -> List[str]:
 def load_hf_chunks(target_chars: int = 5_000_000) -> List[str]:
     """Load text chunks using NLTK corpora (no network auth required)."""
     return load_nltk_chunks(target_chars)
+
+
+def _ingest_path(output: str) -> str:
+    return output[:-4] + ".ingest.json" if output.endswith(".pkl") else output + ".ingest.json"
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +216,7 @@ def build_large_library(
         print("[error] No data available.")
         return 1
 
+    ingest_gate = TextIngestGate.load_snapshot_from_path(_ingest_path(output), adapter=CharClassAdapter())
     all_patterns: List[HierarchicalPattern] = []
     chunk_idx = 0
     t_start = time.perf_counter()
@@ -219,11 +226,16 @@ def build_large_library(
 
     while len(all_patterns) < target and chunk_idx < len(chunks):
         batch_size = min(num_workers * 4, len(chunks) - chunk_idx, 32)
-        batch = [
-            (chunks[chunk_idx + i], steps_per_chunk, min_density, chunk_idx + i, keep_top_k)
-            for i in range(batch_size)
-        ]
-        chunk_idx += batch_size
+        batch = []
+        while chunk_idx < len(chunks) and len(batch) < batch_size:
+            chunk_text = chunks[chunk_idx]
+            current_idx = chunk_idx
+            chunk_idx += 1
+            if not ingest_gate.register_text(chunk_text):
+                continue
+            batch.append((chunk_text, steps_per_chunk, min_density, current_idx, keep_top_k))
+        if not batch:
+            continue
 
         if num_workers > 1:
             with Pool(processes=num_workers) as pool:
@@ -232,6 +244,7 @@ def build_large_library(
             results = [_train_chunk(b) for b in batch]
 
         new_patterns = [p for result in results for p in result]
+        new_patterns = ingest_gate.filter_new_patterns(new_patterns)
         all_patterns.extend(new_patterns)
         all_patterns = deduplicate(all_patterns, sim_threshold=dedup_threshold)
 
@@ -283,9 +296,13 @@ def build_large_library(
             pattern_count=result.pattern_count,
             created_at=datetime.now(timezone.utc).isoformat(),
             notes=f"built from {result.chunk_count} chunks; base text library",
+            ingest_state=ingest_gate.snapshot(),
         )
         result.registry_name = entry_name
         print(f"[registry] registered {entry_name!r} ({entry_status}) in {registry_path}")
+
+    with open(_ingest_path(output), "w", encoding="utf-8") as f:
+        json.dump(ingest_gate.snapshot(), f, sort_keys=True)
 
     return result
 

@@ -25,6 +25,7 @@ from hpm_ai_v4.agents.agent import HPMAgent
 from hpm_ai_v4.evaluators.metrics import affective_score, epistemic_score, pattern_density, social_score
 from hpm_ai_v4.io.adapters import WordAdapter
 from hpm_ai_v4.pattern import HierarchicalPattern
+from hpm_ai_v4.tools.ingest import TextIngestGate
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.serializer import PatternSerializer
 
@@ -62,6 +63,10 @@ def _weighted_jaccard(a: Counter[str], b: Counter[str], limit: int = 12) -> floa
     intersection = sum(min(top_a.get(key, 0), top_b.get(key, 0)) for key in keys)
     union = sum(max(top_a.get(key, 0), top_b.get(key, 0)) for key in keys)
     return float(intersection / max(1, union))
+
+
+def _ingest_path(base: str) -> str:
+    return base[:-4] + ".ingest.json" if base.endswith(".pkl") else base + ".ingest.json"
 
 
 def _content_neighbors(counter: Counter[str]) -> Counter[str]:
@@ -419,6 +424,7 @@ def build_large_word_library(
         vocab=vocab,
         canonical_aliases=merged_aliases,
     )
+    ingest_gate = TextIngestGate.load_snapshot_from_path(_ingest_path(base), adapter=adapter, lowercase=lowercase)
     print(f"[data] {len(chunks)} chunks ready | vocab={len(vocab)}")
 
     all_patterns: List[HierarchicalPattern] = []
@@ -431,11 +437,18 @@ def build_large_word_library(
 
     while len(all_patterns) < target and chunk_idx < len(chunks):
         batch_size = min(num_workers * 4, len(chunks) - chunk_idx, 32)
-        batch = [
-            (chunks[chunk_idx + i], steps_per_chunk, min_density, chunk_idx + i, keep_top_k, vocab, len(vocab), lowercase)
-            for i in range(batch_size)
-        ]
-        chunk_idx += batch_size
+        batch = []
+        while chunk_idx < len(chunks) and len(batch) < batch_size:
+            chunk_text = chunks[chunk_idx]
+            current_idx = chunk_idx
+            chunk_idx += 1
+            if not ingest_gate.register_text(chunk_text):
+                continue
+            batch.append(
+                (chunk_text, steps_per_chunk, min_density, current_idx, keep_top_k, vocab, len(vocab), lowercase)
+            )
+        if not batch:
+            continue
 
         if num_workers > 1:
             with Pool(processes=num_workers) as pool:
@@ -444,6 +457,7 @@ def build_large_word_library(
             results = [_train_chunk(b) for b in batch]
 
         new_patterns = [p for result in results for p in result]
+        new_patterns = ingest_gate.filter_new_patterns(new_patterns)
         all_patterns.extend(new_patterns)
         all_patterns = deduplicate(all_patterns, sim_threshold=dedup_threshold)
 
@@ -472,9 +486,12 @@ def build_large_word_library(
         "canonical_aliases": dict(adapter._canonical_aliases),
         "derived_corpus_aliases": dict(corpus_aliases),
         "vocab_contract": WordAdapter.vocab_contract(),
+        "ingest": ingest_gate.snapshot(),
     }
     with open(base + ".surface.json", "w", encoding="utf-8") as f:
         json.dump(surface_state, f)
+    with open(_ingest_path(base), "w", encoding="utf-8") as f:
+        json.dump(ingest_gate.snapshot(), f, sort_keys=True)
 
     elapsed = time.perf_counter() - t_start
     print(f"\n[done] {len(all_patterns)} patterns saved to {base} ({elapsed:.0f}s)")
@@ -508,6 +525,7 @@ def build_large_word_library(
             pattern_count=result.pattern_count,
             created_at=datetime.now(timezone.utc).isoformat(),
             notes=f"built from {result.chunk_count} chunks; word-level library",
+            ingest_state=ingest_gate.snapshot(),
         )
         result.registry_name = entry_name
         print(f"[registry] registered {entry_name!r} ({entry_status}) in {registry_path}")

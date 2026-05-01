@@ -28,6 +28,7 @@ from hpm_ai_v4.io.adapters import AsciiCharAdapter, LearnedSubstrateAdapter, Sub
 from hpm_ai_v4.pattern import HierarchicalPattern
 from hpm_ai_v4.simulations.build_large_word_library import deduplicate, load_local_corpus_chunks
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.tools.ingest import TextIngestGate
 from hpm_ai_v4.tools.library_registry import LibraryRegistry
 from hpm_ai_v4.tools.serializer import PatternSerializer
 
@@ -171,13 +172,17 @@ def build_learned_substrate_library(
 
     print(f"[data] {len(chunks)} chunks ready | merges={merge_count} | obs_dim={adapter.obs_dim}")
 
+    ingest_gate = TextIngestGate.load_snapshot_from_path(base + ".ingest.json", adapter=adapter, lowercase=True)
     all_patterns: List[HierarchicalPattern] = []
     chunk_idx = 0
     t_start = time.perf_counter()
     while len(all_patterns) < target and chunk_idx < len(chunks):
         chunk = _project_ascii(chunks[chunk_idx])
         chunk_idx += 1
+        if not ingest_gate.register_text(chunk):
+            continue
         new_patterns = _train_chunk(chunk, steps_per_chunk, adapter, chunk_idx, min_density, keep_top_k)
+        new_patterns = ingest_gate.filter_new_patterns(new_patterns)
         all_patterns.extend(new_patterns)
         all_patterns = deduplicate(all_patterns, sim_threshold=dedup_threshold)
         elapsed = time.perf_counter() - t_start
@@ -202,9 +207,12 @@ def build_learned_substrate_library(
             "token_merge_mode": "char_ngram_to_surface_tokens",
             "bundle_keys": ["merge_max_merges", "merge_rules", "surface_mode"],
         },
+        "ingest": ingest_gate.snapshot(),
     }
     with open(base + ".surface.json", "w", encoding="utf-8") as f:
         json.dump(surface_state, f)
+    with open(base + ".ingest.json", "w", encoding="utf-8") as f:
+        json.dump(ingest_gate.snapshot(), f, sort_keys=True)
 
     elapsed = time.perf_counter() - t_start
     print(f"\n[done] {len(all_patterns)} patterns saved to {base} ({elapsed:.0f}s)")
@@ -237,6 +245,7 @@ def build_learned_substrate_library(
             pattern_count=result.pattern_count,
             created_at=datetime.now(timezone.utc).isoformat(),
             notes=f"built from {result.chunk_count} chunks; merged substrate with {merge_count} merge rules",
+            ingest_state=ingest_gate.snapshot(),
         )
         result = LearnedSubstrateLibraryBuildResult(
             output=result.output,

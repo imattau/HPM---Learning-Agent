@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ import numpy as np
 
 from hpm_ai_v4.evaluators.metrics import epistemic_score
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
+from hpm_ai_v4.tools.ingest import TextIngestGate
 from hpm_ai_v4.tools.dictionary import DictionaryValidator, NLTKWordList
 from hpm_ai_v4.tools.grammar import GrammarValidator, HeuristicGrammarLibrary
 from hpm_ai_v4.tools.serializer import PatternSerializer
@@ -219,6 +221,16 @@ class SelfStudyAgent:
         self.scheduler.seed(self._seed_topics)
         self._read_pages: List[str] = []
         self._sentence_features = bool(sentence_features)
+        ingest_path = self._ingest_path(self.output_library)
+        self._ingest_gate = TextIngestGate.load_snapshot_from_path(
+            ingest_path,
+            adapter=getattr(self.agent, "_adapter", None),
+            lowercase=bool(getattr(getattr(self.agent, "_adapter", None), "lowercase", True)),
+        )
+
+    @staticmethod
+    def _ingest_path(path: str) -> str:
+        return path[:-4] + ".ingest.json" if path.endswith(".pkl") else path + ".ingest.json"
 
     def _training_patterns(self) -> List[Any]:
         patterns = getattr(self.agent, "patterns", None)
@@ -232,8 +244,14 @@ class SelfStudyAgent:
         if hasattr(self.agent, "save_bundle"):
             base = path[:-4] if path.endswith(".pkl") else path
             self.agent.save_bundle(base)
+            ingest_path = self._ingest_path(base)
+            with open(ingest_path, "w", encoding="utf-8") as f:
+                json.dump(self._ingest_gate.snapshot(), f, sort_keys=True)
             return
         PatternSerializer.save(self._training_patterns(), path)
+        ingest_path = self._ingest_path(path)
+        with open(ingest_path, "w", encoding="utf-8") as f:
+            json.dump(self._ingest_gate.snapshot(), f, sort_keys=True)
 
     def _chunk_page_text(self, text: str) -> List[str]:
         clean = str(text or "").strip()
@@ -265,6 +283,21 @@ class SelfStudyAgent:
             chunks.append(" ".join(current).strip())
         return [chunk for chunk in chunks if chunk]
 
+    def _split_chunk_windows(self, chunk: str) -> List[str]:
+        clean = str(chunk or "").strip()
+        if not clean:
+            return []
+        try:
+            from hpm_ai_v4.io.adapters import SentenceAdapter
+
+            adapter = SentenceAdapter(use_spacy=False)
+            windows = [span.text.strip() for span in adapter.segment(clean) if span.text.strip()]
+        except Exception:
+            windows = [piece.strip() for piece in re.split(r"(?<=[.!?])\s+", clean) if piece.strip()]
+        if len(windows) <= 1:
+            return [clean]
+        return windows
+
     def _train_on_page(self, page: WikiPage) -> Dict[str, Any]:
         chunks = self._chunk_page_text(page.text)
         if not chunks:
@@ -272,15 +305,65 @@ class SelfStudyAgent:
 
         learned = 0
         chars = 0
-        for chunk in chunks[: self.steps_per_chunk]:
-            stats = self.agent.observe_text(
-                chunk,
-                feedback_mode="target",
-                self_feedback_weight=0.0,
-            )
+        windows_seen = 0
+        windows_novel = 0
+        selected_chunks = chunks[: self.steps_per_chunk]
+        total_chunks = len(selected_chunks)
+        for idx, chunk in enumerate(selected_chunks, start=1):
+            if not self._ingest_gate.register_text(chunk):
+                if idx == 1 or idx == total_chunks or idx % 10 == 0:
+                    print(
+                        f"[train] {page.title} chunk {idx}/{total_chunks} skipped duplicate",
+                        flush=True,
+                    )
+                continue
+            chunk_windows = self._split_chunk_windows(chunk)
+            novel_windows: List[str] = []
+            near_windows = 0
+            for window in chunk_windows:
+                windows_seen += 1
+                state, score = self._ingest_gate.match_window(window)
+                if state == "known":
+                    continue
+                if state == "near":
+                    near_windows += 1
+                    self._ingest_gate.near_duplicate_windows += 1
+                    continue
+                if self._ingest_gate.register_window(window):
+                    novel_windows.append(window)
+                    windows_novel += 1
+            if not novel_windows:
+                if idx == 1 or idx == total_chunks or idx % 10 == 0:
+                    print(
+                        f"[train] {page.title} chunk {idx}/{total_chunks} skipped window-reuse",
+                        flush=True,
+                    )
+                continue
+            chunk_start = time.perf_counter()
+            stats = {"target_chars": 0, "self_chars": 0, "token_agreement": 0.0, "plausibility": 0.0}
+            for window in novel_windows:
+                window_stats = self.agent.observe_text(
+                    window,
+                    feedback_mode="target",
+                    self_feedback_weight=0.0,
+                )
+                stats["target_chars"] += int(window_stats.get("target_chars", 0))
+                stats["self_chars"] += int(window_stats.get("self_chars", 0))
+                stats["token_agreement"] = max(float(stats["token_agreement"]), float(window_stats.get("token_agreement", 0.0)))
+                stats["plausibility"] = max(float(stats["plausibility"]), float(window_stats.get("plausibility", 0.0)))
+            chunk_elapsed = time.perf_counter() - chunk_start
             learned += int(stats.get("target_chars", 0))
-            chars += len(chunk)
-        return {"chunks": len(chunks), "chars": chars, "learned": learned}
+            chars += sum(len(window) for window in novel_windows)
+            if idx == 1 or idx == total_chunks or idx % 10 == 0:
+                print(
+                    f"[train] {page.title} chunk {idx}/{total_chunks} "
+                    f"windows={len(novel_windows)}/{len(chunk_windows)} "
+                    f"near={near_windows} "
+                    f"chars={sum(len(window) for window in novel_windows)} learned={int(stats.get('target_chars', 0))} "
+                    f"elapsed={chunk_elapsed:.2f}s",
+                    flush=True,
+                )
+        return {"chunks": len(chunks), "chars": chars, "learned": learned, "windows_seen": windows_seen, "windows_novel": windows_novel}
 
     def study(self) -> StudyResult:
         pages_read = 0
@@ -290,21 +373,30 @@ class SelfStudyAgent:
             if title is None:
                 break
 
+            fetch_start = time.perf_counter()
             try:
                 page = self.fetcher.fetch(title, max_links=self.max_links_per_page)
             except Exception as exc:
-                print(f"[skip] {title}: {exc}")
+                print(f"[skip] {title}: {exc}", flush=True)
                 continue
+            fetch_elapsed = time.perf_counter() - fetch_start
 
             if not page.text.strip():
                 continue
 
             self._read_pages.append(page.title)
-            self._train_on_page(page)
+            train_start = time.perf_counter()
+            train_stats = self._train_on_page(page)
+            train_elapsed = time.perf_counter() - train_start
             pages_read += 1
 
             pattern_count = len([p for p in self._training_patterns() if getattr(p, "latent_dim", 0) > 1])
-            print(f"[{pages_read}] {page.title} — {pattern_count} patterns")
+            print(
+                f"[{pages_read}] {page.title} — {pattern_count} patterns "
+                f"(fetch={fetch_elapsed:.2f}s train={train_elapsed:.2f}s "
+                f"chunks={train_stats.get('chunks', 0)} chars={train_stats.get('chars', 0)})",
+                flush=True,
+            )
 
             self.scheduler.page_bonus[page.title] = max(
                 self.scheduler.page_bonus.get(page.title, 0.0) * 0.9,
@@ -314,12 +406,18 @@ class SelfStudyAgent:
 
             if pages_read % 50 == 0:
                 ckpt_path = self.output_library.replace(".pkl", f"_ckpt{pages_read}.pkl")
+                print(f"[checkpoint] saving {ckpt_path}", flush=True)
                 self._save_library(ckpt_path)
 
             if pattern_count >= self.target_patterns:
-                print(f"[done] target reached at page {pages_read}")
+                print(f"[done] target reached at page {pages_read}", flush=True)
                 break
 
+        print(
+            f"[done] study complete pages={pages_read} visited={len(self.scheduler.visited)} "
+            f"queued={len(self.scheduler.queue)}",
+            flush=True,
+        )
         self._save_library(self.output_library)
         return StudyResult(
             pages_read=pages_read,
