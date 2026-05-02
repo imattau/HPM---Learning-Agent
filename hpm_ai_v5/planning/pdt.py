@@ -75,7 +75,8 @@ class PrefixDisambiguationTask:
 
     def _reset_short_term_memory(self) -> None:
         if self.prefix_buffer is not None:
-            self.prefix_buffer.history = []
+            from collections import deque
+            self.prefix_buffer.history = deque(maxlen=self.prefix_buffer.buffer_size)
 
     def _engine_for_state(self, state: State) -> PatternEngine:
         if self.prefix_buffer is None:

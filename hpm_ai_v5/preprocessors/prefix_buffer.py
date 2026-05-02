@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict, deque
 from numbers import Real
 from typing import Any
 
@@ -33,9 +34,9 @@ class PrefixBufferPreprocessor:
         self.value_mode = value_mode
         self.code_base = code_base
         self.include_history_context = include_history_context
-        self.history: list[float] = []
+        self.history: deque[float] = deque(maxlen=buffer_size)
         self._prefix_ids: dict[tuple[float, ...], int] = {}
-        self.transition_memory: dict[tuple[float, ...], float] = {}
+        self.transition_memory: defaultdict[tuple[float, ...], Counter] = defaultdict(Counter)
 
     def _encode_code(self, values: list[float]) -> float:
         code = 0
@@ -50,8 +51,6 @@ class PrefixBufferPreprocessor:
 
         value = float(raw)
         self.history.append(value)
-        if len(self.history) > self.buffer_size:
-            self.history.pop(0)
 
         padded = [self.default] * (self.buffer_size - len(self.history)) + list(self.history)
         prefix_key = tuple(padded)
@@ -92,24 +91,37 @@ class PrefixBufferPreprocessor:
         return PreprocessedInput(state=state, context=dict(state.context), raw=raw, packet=packet)
 
     def record_transition(self, history_window: Any, next_value: Any) -> None:
-        if isinstance(history_window, tuple):
-            key = tuple(float(item) for item in history_window if isinstance(item, Real))
-        elif isinstance(history_window, list):
-            key = tuple(float(item) for item in history_window if isinstance(item, Real))
-        else:
+        key = _to_float_tuple(history_window)
+        if key is None:
             return
-        if not key or not isinstance(next_value, Real):
-            return
-        self.transition_memory[key] = float(next_value)
+        self.transition_memory[key][next_value] += 1
 
-    def predict_transition(self, history_window: Any) -> float | None:
-        if isinstance(history_window, tuple):
-            key = tuple(float(item) for item in history_window if isinstance(item, Real))
-        elif isinstance(history_window, list):
-            key = tuple(float(item) for item in history_window if isinstance(item, Real))
-        else:
+    def predict_transition(self, history_window: Any) -> Any | None:
+        key = _to_float_tuple(history_window)
+        if key is None:
             return None
-        return self.transition_memory.get(key)
+        counter = self.transition_memory.get(key)
+        if not counter:
+            return None
+        return counter.most_common(1)[0][0]
+
+    def prediction_confidence(self, history_window: Any) -> float:
+        """Fraction of observations that agree with the top prediction (0 if unseen)."""
+        key = _to_float_tuple(history_window)
+        if key is None:
+            return 0.0
+        counter = self.transition_memory.get(key)
+        if not counter:
+            return 0.0
+        top_count = counter.most_common(1)[0][1]
+        return top_count / counter.total()
+
+
+def _to_float_tuple(window: Any) -> tuple[float, ...] | None:
+    if isinstance(window, (tuple, list)):
+        key = tuple(float(item) for item in window if isinstance(item, Real))
+        return key if key else None
+    return None
 
 
 # Backward-compatible alias for adapter-centric language.

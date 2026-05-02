@@ -70,6 +70,10 @@ The canonical shared context lives in `packet.context`.
 
 Meta-patterns are deferred until this level is stable.
 
+Automatic adapter composition is also deferred to the agent layer. The core
+does not choose preprocessing paths; it only consumes the structure provided
+by the chosen adapter pipeline.
+
 ## Core rules
 
 - Learn from deltas, not full replay.
@@ -209,6 +213,11 @@ can utility be accumulated from reward feedback without injecting a utility
 weight into the goal? In v5 that learning happens at the agent layer by keeping
 a small context-conditioned utility memory over the core patterns.
 
+Automatic Adapter Composition checks the adjacent question for preprocessing:
+can the agent learn which adapter composition best fits a task family and then
+reuse that composition on a held-out variant? The core stays unchanged; the
+agent learns the pipeline profile.
+
 Triple Sequence Discovery checks the adjacent question:
 
 - can the core discover a length-3 repeating sequence
@@ -223,6 +232,33 @@ Current status: the benchmark now passes with generalized sequence discovery
 and explicit macro execution. It shows the right boundary: the core can learn
 the reusable chunk, while the caller decides whether to replay it as a macro or
 step through it one element at a time.
+
+Polygraph Agreement Benchmark checks the neighboring boundary:
+
+- the core can score views and produce actions per view
+- the surrounding agent or pipeline can fuse those actions with agreement
+- unreliable views should lose influence without changing the core API
+- the benchmark measures clean-view selection, not a new core-side fusion rule
+
+That keeps polygraph consensus as an integration concern, not a core concern.
+
+Scoring Weight Adaptation is another agent-side boundary:
+
+- the core keeps a fixed, interpretable scoring formula
+- the agent learns which weight configuration to provide per environment
+- weight adaptation is meta-learning over the core, not a change to the core
+
+That preserves the core API while still letting the system self-tune its
+selection bias over time.
+
+Online Meta-Pattern Discovery is the next boundary:
+
+- the core learns concrete reusable patterns and sequences
+- the agent canonicalises repeated structure across tasks
+- the agent stores abstract templates that can be instantiated on new tasks
+
+That keeps meta-patterns out of the core until the structure is stable enough
+to justify promotion into the lower levels of the hierarchy.
 
 The nested prerequisite maze benchmark extends this idea to multiple delayed prerequisites,
 decoy rewards, trap states, and strategy reuse across layouts with the same dependency chain.

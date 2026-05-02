@@ -16,4 +16,4 @@ def test_objective_evaluation_includes_expected_benchmarks() -> None:
     report = V5ObjectiveEvaluator().evaluate()
     names = {benchmark.name for benchmark in report.benchmarks}
 
-    assert {"core_reasoning", "agent_pipeline", "nested_prerequisite_planning", "ctw_rule_discovery", "delayed_consequence_maze", "prefix_disambiguation_task", "learned_utility_benchmark", "triple_sequence_discovery", "arc_subset"} <= names
+    assert {"core_reasoning", "agent_pipeline", "nested_prerequisite_planning", "ctw_rule_discovery", "delayed_consequence_maze", "prefix_disambiguation_task", "learned_utility_benchmark", "polygraph_agreement_benchmark", "scoring_weight_adaptation_benchmark", "online_meta_pattern_discovery_benchmark", "automatic_adapter_composition_benchmark", "triple_sequence_discovery", "arc_subset"} <= names

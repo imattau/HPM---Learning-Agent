@@ -13,7 +13,24 @@ benchmarks into comparable numeric scores.
 - rule discovery and reuse
 - learned utility from reward feedback
 - triple sequence discovery and macro reuse
+- polygraph agreement over multiple views
+- scoring weight adaptation across environments
+- online meta-pattern discovery across structurally similar tasks
+- automatic adapter composition across preprocessing pipelines
 - ARC transformation solving
+
+Polygraph agreement is scored as a separate benchmark that measures whether the
+stack prefers the clean views over the noisy one when multiple structural
+representations are available.
+
+Scoring weight adaptation is scored separately as agent-side meta-learning over
+the core's fixed `α, β, γ, δ` formula.
+
+Online meta-pattern discovery is scored separately as agent-side structural
+abstraction and zero-shot transfer across similar tasks.
+
+Automatic adapter composition is scored separately as agent-side pipeline
+selection and reuse over held-out task variants.
 
 ## Design rule
 

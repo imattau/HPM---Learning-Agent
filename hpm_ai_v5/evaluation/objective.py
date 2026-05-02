@@ -10,11 +10,15 @@ from ..agents import AgentInput, BaseAgent
 from ..arc import ArcSolver
 from ..core import Pattern, PatternEngine, PatternSequence, State
 from ..planning import (
+    AutomaticAdapterCompositionBenchmark,
     CompositionalTransformationWorldPlanner,
     DelayedConsequenceMazeBenchmark,
     LearnedUtilityBenchmark,
     NestedPrerequisiteMazePlanner,
+    OnlineMetaPatternDiscoveryBenchmark,
+    PolygraphAgreementBenchmark,
     PrefixDisambiguationTask,
+    ScoringWeightAdaptationBenchmark,
     TripleSequenceDiscoveryBenchmark,
 )
 from ..preprocessors.numeric import NumericPreprocessor
@@ -262,6 +266,134 @@ class V5ObjectiveEvaluator:
             },
         )
 
+    def evaluate_pab(self) -> BenchmarkScore:
+        benchmark = PolygraphAgreementBenchmark().run()
+        agreement_advantage = max(0.0, benchmark.agreement_accuracy - benchmark.noisy_accuracy)
+        metrics = {
+            "success": 1.0 if benchmark.result == "success" else 0.0,
+            "agreement_accuracy": benchmark.agreement_accuracy,
+            "noisy_accuracy": benchmark.noisy_accuracy,
+            "exact_accuracy": benchmark.exact_accuracy,
+            "consensus_rate": benchmark.consensus_rate,
+            "agreement_advantage": agreement_advantage,
+            "view_gap": min(1.0, benchmark.view_gap / 10.0),
+        }
+        score = fmean(metrics.values())
+        metrics["score"] = score
+        return BenchmarkScore(
+            name="polygraph_agreement_benchmark",
+            score=score,
+            metrics=metrics,
+            passed=benchmark.result == "success",
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "agreement_accuracy": benchmark.agreement_accuracy,
+                "noisy_accuracy": benchmark.noisy_accuracy,
+                "exact_accuracy": benchmark.exact_accuracy,
+                "consensus_rate": benchmark.consensus_rate,
+                "view_gap": benchmark.view_gap,
+                "steps": [step.reasoning_trace for step in benchmark.steps[:6]],
+            },
+        )
+
+    def evaluate_ompd(self) -> BenchmarkScore:
+        benchmark = OnlineMetaPatternDiscoveryBenchmark().run()
+        metrics = {
+            "success": 1.0 if benchmark.result == "success" else 0.0,
+            "training_mean_ratio": benchmark.training_mean_ratio,
+            "test_ratio": benchmark.test_ratio,
+            "meta_pattern_count": min(1.0, benchmark.meta_pattern_count / 1.0),
+        }
+        score = fmean(metrics.values())
+        metrics["score"] = score
+        return BenchmarkScore(
+            name="online_meta_pattern_discovery_benchmark",
+            score=score,
+            metrics=metrics,
+            passed=benchmark.result == "success",
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "meta_pattern_count": benchmark.meta_pattern_count,
+                "training_mean_ratio": benchmark.training_mean_ratio,
+                "test_ratio": benchmark.test_ratio,
+                "tasks": [result.trace for result in benchmark.task_results],
+            },
+        )
+
+    def evaluate_aac(self) -> BenchmarkScore:
+        benchmark = AutomaticAdapterCompositionBenchmark().run()
+        metrics = {
+            "success": 1.0 if benchmark.result == "success" else 0.0,
+            "training_mean_accuracy": benchmark.training_mean_accuracy,
+            "test_mean_accuracy": benchmark.test_mean_accuracy,
+            "learned_profiles": min(1.0, benchmark.learned_profiles / 3.0),
+        }
+        score = fmean(metrics.values())
+        metrics["score"] = score
+        return BenchmarkScore(
+            name="automatic_adapter_composition_benchmark",
+            score=score,
+            metrics=metrics,
+            passed=benchmark.result == "success",
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "learned_profiles": benchmark.learned_profiles,
+                "training_mean_accuracy": benchmark.training_mean_accuracy,
+                "test_mean_accuracy": benchmark.test_mean_accuracy,
+                "tasks": [
+                    {
+                        "name": result.name,
+                        "family": result.family,
+                        "selected_pipeline": result.selected_pipeline,
+                        "optimal_pipeline": result.optimal_pipeline,
+                        "calibration_accuracy": result.calibration_accuracy,
+                        "evaluation_accuracy": result.evaluation_accuracy,
+                        "matched": result.matched,
+                        "profile_reused": result.profile_reused,
+                    }
+                    for result in benchmark.task_results
+                ],
+            },
+        )
+
+    def evaluate_swa(self) -> BenchmarkScore:
+        benchmark = ScoringWeightAdaptationBenchmark().run()
+        ratios = [result.learned_ratio for result in benchmark.environment_results]
+        baselines = [result.baseline_ratio for result in benchmark.environment_results]
+        metrics = {
+            "success": 1.0 if benchmark.result == "success" else 0.0,
+            "mean_learned_ratio": fmean(ratios) if ratios else 0.0,
+            "mean_baseline_ratio": fmean(baselines) if baselines else 0.0,
+            "ratio_gap": max(0.0, (fmean(ratios) if ratios else 0.0) - (fmean(baselines) if baselines else 0.0)),
+        }
+        score = fmean(metrics.values())
+        metrics["score"] = score
+        return BenchmarkScore(
+            name="scoring_weight_adaptation_benchmark",
+            score=score,
+            metrics=metrics,
+            passed=benchmark.result == "success",
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "environments": [
+                    {
+                        "environment": result.environment,
+                        "optimal_reward": result.optimal_reward,
+                        "learned_reward": result.learned_reward,
+                        "baseline_reward": result.baseline_reward,
+                        "learned_ratio": result.learned_ratio,
+                        "baseline_ratio": result.baseline_ratio,
+                        "learned_weights": result.learned_weights,
+                    }
+                    for result in benchmark.environment_results
+                ],
+            },
+        )
+
     def evaluate_tsd(self) -> BenchmarkScore:
         benchmark = TripleSequenceDiscoveryBenchmark().run()
         macro_reward = benchmark.macro_reward
@@ -355,6 +487,10 @@ class V5ObjectiveEvaluator:
             self.evaluate_dcm(),
             self.evaluate_pdt(),
             self.evaluate_lub(),
+            self.evaluate_pab(),
+            self.evaluate_swa(),
+            self.evaluate_ompd(),
+            self.evaluate_aac(),
             self.evaluate_tsd(),
             self.evaluate_arc(),
         )

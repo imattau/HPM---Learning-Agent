@@ -116,6 +116,64 @@ The benchmark accepts any reusable chunk of length at least three, because the
 selected trace can include extra bookkeeping states even when the useful macro
 is the triple itself.
 
+## Next benchmark: PAB
+
+Polygraph Agreement Benchmark checks whether the system can use multiple views
+of the same numeric stream and downweight an unreliable one:
+
+- generate exact, noisy, and trend views from the same input
+- score each view with `PolygraphEvaluator`
+- combine actions with polygraph agreement
+- prefer the clean views over the noisy one
+- outperform the noisy view alone
+
+This benchmark is intentionally agent-oriented. The core already exposes
+polygraph scoring and agreement helpers; the benchmark verifies that the
+surrounding stack actually uses them.
+
+## Next benchmark: SWA
+
+Scoring Weight Adaptation checks whether the agent can learn which scoring
+weights work best in different environments:
+
+- noisy environments should downweight density
+- stable repeating environments should favor density
+- context-switching environments should favor context and utility
+- weights are learned from reward feedback, not hand-tuned
+
+This is agent-side meta-learning over the core's fixed scoring formula. The core
+still computes scores; the agent learns which `α, β, γ, δ` to provide.
+
+## Next benchmark: OMPD
+
+Online Meta-Pattern Discovery checks whether the agent can abstract reusable
+structure from several similar tasks and transfer it to a novel task:
+
+- learn a canonical dependency-chain signature from training tasks
+- store the abstract meta-pattern, not just the concrete task names
+- match a new task to the stored structure zero-shot
+- instantiate the template into concrete actions without exploration
+
+This is model-extending behavior at the agent layer. The core still handles
+patterns and sequences; the agent now learns higher-level reusable templates
+from them.
+
+## Next benchmark: AAC
+
+Automatic Adapter Composition checks whether the agent can discover which
+preprocessing pipeline a new task needs and reuse that pipeline on a held-out
+variant:
+
+- compare a small set of candidate adapter pipelines on a calibration prefix
+- store the best pipeline as a reusable structural profile
+- reuse the learned profile on a new task with the same structure but different
+  surface values
+- prefer the pipeline that produces the most stable downstream predictions
+
+This stays agent-side. The core still receives normalized structures, but the
+agent now learns which adapter composition turns raw input into the right
+structure for that task family.
+
 ## Next benchmark: CTW
 
 The next benchmark is Compositional Transformation World.
