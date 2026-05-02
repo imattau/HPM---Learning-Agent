@@ -202,6 +202,7 @@ class SelfStudyAgent:
         dictionary: Optional[DictionaryValidator] = None,
         grammar: Optional[GrammarValidator] = None,
         sentence_features: bool = True,
+        resume_library: Optional[str] = None,
     ):
         self.output_library = output_library
         self.steps_per_chunk = max(1, int(steps_per_chunk))
@@ -227,6 +228,10 @@ class SelfStudyAgent:
             adapter=getattr(self.agent, "_adapter", None),
             lowercase=bool(getattr(getattr(self.agent, "_adapter", None), "lowercase", True)),
         )
+        # Auto-resume: reload previously learned patterns from resume_library or output_library
+        _resume = resume_library if resume_library is not None else self.output_library
+        if _resume and os.path.exists(_resume):
+            self._load_library(_resume)
 
     @staticmethod
     def _ingest_path(path: str) -> str:
@@ -239,6 +244,22 @@ class SelfStudyAgent:
         if hasattr(self.agent, "l1") and getattr(self.agent.l1, "patterns", None) is not None:
             return list(self.agent.l1.patterns)
         return []
+
+    def _load_library(self, path: str) -> int:
+        """Load patterns from a previously saved library into the agent. Returns count loaded."""
+        if not os.path.exists(path):
+            return 0
+        try:
+            patterns = PatternSerializer.load(path)
+            if hasattr(self.agent, "l1"):
+                self.agent.l1.patterns = patterns
+            elif hasattr(self.agent, "patterns"):
+                self.agent.patterns = patterns
+            print(f"[resume] loaded {len(patterns)} patterns from {path}", flush=True)
+            return len(patterns)
+        except Exception as exc:
+            print(f"[resume] failed to load {path}: {exc}", flush=True)
+            return 0
 
     def _save_library(self, path: str) -> None:
         if hasattr(self.agent, "save_bundle"):
@@ -563,6 +584,7 @@ def build_wikipedia_self_study(
     surface_mode: str = "word",
     dictionary: Optional[DictionaryValidator] = None,
     grammar: Optional[GrammarValidator] = None,
+    resume_library: Optional[str] = None,
 ) -> StudyResult:
     agent = SelfStudyAgent(
         seed_topics=seed_topics,
@@ -575,6 +597,7 @@ def build_wikipedia_self_study(
         surface_mode=surface_mode,
         dictionary=dictionary,
         grammar=grammar,
+        resume_library=resume_library,
     )
     return agent.study()
 
@@ -583,6 +606,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Wikipedia self-study crawler for HPM")
     parser.add_argument("--seed", nargs="+", required=True, help="Seed Wikipedia topics")
     parser.add_argument("--output", required=True, help="Output library path (.pkl base path)")
+    parser.add_argument("--resume", default=None, help="Load patterns from this library before starting (defaults to --output if it exists)")
     parser.add_argument("--steps-per-chunk", type=int, default=500, help="Chunk budget used during reading")
     parser.add_argument("--max-pages", type=int, default=500, help="Maximum pages to read")
     parser.add_argument("--target-patterns", type=int, default=2000, help="Stop once this many hierarchical patterns are retained")
@@ -608,6 +632,7 @@ def main() -> int:
         surface_mode=args.surface_mode,
         dictionary=dictionary,
         grammar=grammar,
+        resume_library=args.resume,
     )
     print(f"[done] pages={result.pages_read} patterns={result.patterns_saved} output={result.output_path}")
     return 0
