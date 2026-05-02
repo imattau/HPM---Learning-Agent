@@ -8,8 +8,7 @@ from typing import Any, Callable, Sequence
 
 from ..adapter import AdapterPacket, AdapterRegistry
 from ..core import PatternEngine
-from ..preprocessors import NumericPreprocessor, PrefixBufferPreprocessor
-from ..preprocessors.state_fusion import StateFusionPreprocessor
+from ..adapter.feature_adapters import NumericAdapter, PrefixBufferAdapter, StateFusionAdapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,19 +64,19 @@ class AutomaticAdapterComposer:
     def default_pipeline_specs() -> tuple[AACPipelineSpec, ...]:
         def numeric_registry() -> AdapterRegistry:
             registry = AdapterRegistry()
-            registry.register(NumericPreprocessor())
+            registry.register(NumericAdapter())
             return registry
 
         def prefix_registry() -> AdapterRegistry:
             registry = AdapterRegistry()
-            registry.register(PrefixBufferPreprocessor(buffer_size=2, value_mode="tuple", include_history_context=True))
+            registry.register(PrefixBufferAdapter(buffer_size=2, value_mode="tuple", include_history_context=True))
             return registry
 
         def fused_registry() -> AdapterRegistry:
             registry = AdapterRegistry()
-            registry.register(NumericPreprocessor())
-            registry.register(PrefixBufferPreprocessor(buffer_size=3, value_mode="tuple", include_history_context=True))
-            registry.register(StateFusionPreprocessor())
+            registry.register(NumericAdapter())
+            registry.register(PrefixBufferAdapter(buffer_size=3, value_mode="tuple", include_history_context=True))
+            registry.register(StateFusionAdapter())
             return registry
 
         return (

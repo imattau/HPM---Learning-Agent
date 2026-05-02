@@ -2,6 +2,14 @@
 
 from .base import Agent, AgentInput, AgentOutput, BaseAgent
 from .adapter_composition import AACResult, AACTaskResult, AutomaticAdapterComposer
+from .open_adapter_discovery import (
+    OpenAdapterDiscoveryAgent,
+    OpenAdapterDiscoveryResult,
+    OpenAdapterPipelineSpec,
+    OpenAdapterTask,
+    OpenAdapterTaskResult,
+    OpenAdapterExample,
+)
 from .meta_pattern import MetaPattern, MetaPatternDecision, MetaPatternDiscoveryAgent
 from .packet import AgentPacket
 from .pipeline import AgentPipeline
@@ -18,6 +26,12 @@ __all__ = [
     "AgentPipeline",
     "BaseAgent",
     "AutomaticAdapterComposer",
+    "OpenAdapterDiscoveryAgent",
+    "OpenAdapterDiscoveryResult",
+    "OpenAdapterPipelineSpec",
+    "OpenAdapterTask",
+    "OpenAdapterTaskResult",
+    "OpenAdapterExample",
     "MetaPattern",
     "MetaPatternDecision",
     "MetaPatternDiscoveryAgent",

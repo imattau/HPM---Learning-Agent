@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ..adapter import AdapterPacket, AdapterRegistry
-from ..preprocessors import (
-    NormalisationPreprocessor,
-    NumericPreprocessor,
-    PrefixBufferPreprocessor,
-    SymbolicDiscretiser,
-)
+from ..adapter.feature_adapters import NormalisationAdapter, NumericAdapter, PrefixBufferAdapter, SymbolicAdapter
 from ..preprocessors.prefix_buffer import _to_float_tuple
 
 
@@ -96,22 +91,22 @@ class SGBResult:
 
 def _numeric_pipeline() -> tuple[AdapterRegistry, Any]:
     registry = AdapterRegistry()
-    adapter = NumericPreprocessor()
+    adapter = NumericAdapter()
     registry.register(adapter)
     return registry, adapter
 
 
 def _prefix_pipeline() -> tuple[AdapterRegistry, Any]:
     registry = AdapterRegistry()
-    adapter = PrefixBufferPreprocessor(buffer_size=2, value_mode="tuple", include_history_context=True)
+    adapter = PrefixBufferAdapter(buffer_size=2, value_mode="tuple", include_history_context=True)
     registry.register(adapter)
     return registry, adapter
 
 
 def _symbolic_pipeline() -> tuple[AdapterRegistry, _SymbolicPrefixAdapter]:
     registry = AdapterRegistry()
-    norm = NormalisationPreprocessor(mode="zscore", window_size=8)
-    disc = SymbolicDiscretiser(mode="quantile", n_symbols=4, window_size=8)
+    norm = NormalisationAdapter(mode="zscore", window_size=8)
+    disc = SymbolicAdapter(mode="quantile", n_symbols=4, window_size=8)
     sym_prefix = _SymbolicPrefixAdapter(buffer_size=2)
     registry.register(norm)
     registry.register(disc)

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from ..core import CoreConfig, PatternEngine, State
-from ..preprocessors import PrefixBufferPreprocessor
+from ..adapter.feature_adapters import PrefixBufferAdapter
 
 
 Symbol = float
@@ -44,12 +44,12 @@ class PrefixDisambiguationTask:
     use_prefix_buffer: bool = False
     config: CoreConfig = field(default_factory=lambda: CoreConfig(near_threshold=0.0, history_limit=6))
     engine: PatternEngine = field(init=False)
-    prefix_buffer: PrefixBufferPreprocessor | None = field(init=False, default=None)
+    prefix_buffer: PrefixBufferAdapter | None = field(init=False, default=None)
     prefix_engines: dict[tuple[Any, ...], PatternEngine] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         self.engine = PatternEngine(config=self.config)
-        self.prefix_buffer = PrefixBufferPreprocessor(
+        self.prefix_buffer = PrefixBufferAdapter(
             buffer_size=3,
             value_mode="tuple",
             include_history_context=True,

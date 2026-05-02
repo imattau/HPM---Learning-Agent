@@ -1,4 +1,8 @@
-"""Preprocessing adapters for v5."""
+"""Legacy preprocessing namespace for v5.
+
+Adapter-composition code should prefer the adapter-layer exports. This package
+remains as a compatibility surface for older imports.
+"""
 
 from .autocorrelation import AutocorrelationPreprocessor
 from .base import Preprocessor, PreprocessedInput

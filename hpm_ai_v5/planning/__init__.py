@@ -2,6 +2,7 @@
 
 from .candidate_generation import CandidateGenerationAgent
 from .aac import AACResult, AACBenchmarkTaskResult, AutomaticAdapterCompositionBenchmark
+from .open_adapter_discovery import OpenAdapterDiscoveryBenchmark, OpenAdapterDiscoveryBenchmarkResult
 from .dcm import DCMResult, DCMEpisodeResult, DelayedConsequenceMaze, DelayedConsequenceMazeBenchmark
 from .ctw import CTWDiscoveryAgent, CTWDiscoveryResult, CTWRule, CompositionalTransformationWorldPlanner
 from .grid_world import GridWorldPlanner, GridWorldProblem, PlanningResult
@@ -14,12 +15,15 @@ from .swa import SWAEnvironmentResult, SWAResult, ScoringWeightAdaptationBenchma
 from .tsd import TSDResult, TSDStepResult, TripleSequenceDiscoveryBenchmark
 from .rsg import RSGPhaseResult, RSGResult, RotatingSequenceGeneralizationBenchmark
 from .sgb import SGBResult, SGBTaskResult, SymbolicGeneralisationBenchmark
+from .melb import MELBEpisodeResult, MELBResult, MultiEpisodeLifecycleBenchmark
 
 __all__ = [
     "CandidateGenerationAgent",
     "AACResult",
     "AACBenchmarkTaskResult",
     "AutomaticAdapterCompositionBenchmark",
+    "OpenAdapterDiscoveryBenchmark",
+    "OpenAdapterDiscoveryBenchmarkResult",
     "DCMEpisodeResult",
     "DCMResult",
     "CTWDiscoveryAgent",
@@ -59,4 +63,7 @@ __all__ = [
     "SGBResult",
     "SGBTaskResult",
     "SymbolicGeneralisationBenchmark",
+    "MELBEpisodeResult",
+    "MELBResult",
+    "MultiEpisodeLifecycleBenchmark",
 ]
