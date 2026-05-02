@@ -127,6 +127,8 @@ class BaseAgent:
         """Adapter-style agent step for agent pipelines."""
 
         packet.agent_trace.append(self.name)
+        if packet.goal is not None:
+            self.state["active_goal"] = packet.goal
         self.observe(AgentInput(raw=packet.raw_input, context=dict(packet.context)))
         decision = self.decide()
         output = self.act()
@@ -134,5 +136,5 @@ class BaseAgent:
         packet.final_output = output.content
         packet.candidate_outputs.append(output)
         packet.core_actions.append(decision["decision"])
-        packet.log(self.name, {"action_type": output.action_type, "confidence": output.confidence})
+        packet.log(self.name, {"action_type": output.action_type, "confidence": output.confidence}, role="agent")
         return packet

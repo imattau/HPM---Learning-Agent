@@ -20,8 +20,8 @@ class NumericPostprocessor:
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         if not isinstance(packet.core_action, Action):
             raise TypeError("NumericPostprocessor expects a core Action in packet.core_action")
-        packet.validated_output = self.postprocess(packet.core_action, context=packet.draft_output or {})
-        packet.log(self.name, {"validated_output": packet.validated_output})
+        packet.validated_output = self.postprocess(packet.core_action, context=packet.context or {})
+        packet.log(self.name, {"validated_output": packet.validated_output}, role="adapter")
         return packet
 
     def postprocess(self, action: Action, *, context: dict[str, Any] | None = None) -> float:

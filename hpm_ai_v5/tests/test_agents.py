@@ -44,3 +44,21 @@ def test_base_agent_step_packet_composes_with_agent_pipeline_shape() -> None:
     assert updated.core_actions
     assert updated.agent_trace == ["NumericAgent"]
     assert updated.trace and updated.trace[-1]["agent"] == "NumericAgent"
+
+
+def test_agent_pipeline_dispatches_base_agent_step_packet() -> None:
+    agent = BaseAgent(
+        name="NumericAgent",
+        core=PatternEngine(),
+        preprocessors=[NumericPreprocessor()],
+        postprocessors=[NumericPostprocessor()],
+    )
+    pipeline = AgentPipeline(agents=[agent])
+    packet = AgentPacket(raw_input=1.0, context={"minimum": 0.0, "maximum": 10.0})
+
+    updated = pipeline.run(packet)
+
+    assert updated.agent_trace == ["NumericAgent"]
+    assert updated.candidate_outputs
+    assert updated.core_actions
+    assert updated.trace and updated.trace[-1]["role"] == "agent"

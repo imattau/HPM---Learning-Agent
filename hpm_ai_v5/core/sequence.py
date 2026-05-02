@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import log1p
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
+from .state import State
 from .pattern import canonicalize_sequence
 
 
@@ -28,6 +29,12 @@ class PatternSequence:
             return 0.0
         return self.context_memory.get(context_signature, 0.0)
 
+    def _cap_context_memory(self, limit: int) -> None:
+        if limit <= 0 or len(self.context_memory) <= limit:
+            return
+        ordered = sorted(self.context_memory.items(), key=lambda item: item[1], reverse=True)
+        self.context_memory = dict(ordered[:limit])
+
     def score(self, *, context_signature: str | None = None, goal: Mapping[str, float] | None = None) -> float:
         goal = goal or {}
         alpha = goal.get("alpha", 1.0)
@@ -37,12 +44,57 @@ class PatternSequence:
         accuracy = 1.0 / (1.0 + self.last_error)
         density = log1p(max(0.0, self.density))
         context_match = self.context_score(context_signature)
-        goal_utility = goal.get("utility", self.utility)
+        goal_utility = self.utility + float(goal.get("utility", 0.0))
         return (alpha * accuracy) + (beta * density) + (gamma * context_match) + (delta * goal_utility)
 
     def reinforce(self, context_signature: str | None = None, *, density_boost: float = 1.0, context_boost: float = 1.0) -> None:
-        self.support += 1
         self.density += max(0.0, density_boost)
         if context_signature:
             self.context_memory[context_signature] = self.context_memory.get(context_signature, 0.0) + max(0.0, context_boost)
 
+    def reward(self, utility_boost: float = 0.0) -> None:
+        self.utility += max(0.0, utility_boost)
+
+    def decay(
+        self,
+        *,
+        density_decay: float = 0.0,
+        utility_decay: float = 0.0,
+        context_decay: float = 1.0,
+        context_memory_limit: int = 0,
+    ) -> None:
+        if density_decay > 0.0:
+            self.density = max(0.0, self.density * (1.0 - density_decay))
+        if utility_decay > 0.0:
+            self.utility = max(0.0, self.utility * (1.0 - utility_decay))
+        if 0.0 < context_decay < 1.0 and self.context_memory:
+            self.context_memory = {key: max(0.0, value * context_decay) for key, value in self.context_memory.items()}
+        self._cap_context_memory(context_memory_limit)
+
+    def observe_support(self) -> None:
+        """Record a reuse event without changing structure."""
+
+        self.support += 1
+
+    def simulate(
+        self,
+        state: State,
+        horizon: int = 1,
+        *,
+        resolver: Callable[[str], Any | None] | None = None,
+        start_offset: int = 0,
+    ) -> list[State]:
+        """Simulate a short continuation by replaying the pattern order."""
+
+        if resolver is None or not self.pattern_names:
+            return [state]
+
+        current = state
+        path: list[State] = []
+        for index in range(max(0, horizon)):
+            pattern = resolver(self.pattern_names[(start_offset + index) % len(self.pattern_names)])
+            if pattern is None:
+                break
+            current = pattern.predict(current)
+            path.append(current)
+        return path

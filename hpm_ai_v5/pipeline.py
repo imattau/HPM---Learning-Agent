@@ -54,7 +54,7 @@ class HPMPipeline:
         self.postprocessing_pipeline.register(adapter)
 
     def step(self, raw: Any, *, goal: dict[str, float] | None = None, context: dict[str, Any] | None = None) -> PipelineResult:
-        packet = AdapterPacket(raw=raw, draft_output=dict(context or {}))
+        packet = AdapterPacket(raw=raw, goal=goal, context=dict(context or {}))
         packet = self.preprocessing_pipeline.run(packet, target_outputs=[self.preprocessor.name])
         if not packet.states:
             raise ValueError("Preprocessing pipeline produced no state")
@@ -140,7 +140,7 @@ class HPMPipeline:
 
         output = None
         if action.action_type == "apply_delta":
-            post_packet = AdapterPacket(raw=raw, draft_output=dict(preprocessed.context), core_action=action)
+            post_packet = AdapterPacket(raw=raw, goal=goal, context=dict(preprocessed.context), core_action=action)
             post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=[self.postprocessor.name])
             output = post_packet.validated_output
 

@@ -11,14 +11,16 @@ from .delta import Delta, _as_tuple, _is_sequence
 from .state import State
 
 
-def _mean_abs_error(left: Sequence[Any], right: Sequence[Any]) -> float:
+def _mean_abs_error(left: Sequence[Any], right: Sequence[Any], *, scale: float = 1.0) -> float:
     limit = min(len(left), len(right))
     if not limit:
-        return float(abs(len(left) - len(right)))
+        return float(abs(len(left) - len(right))) / max(1.0, max(len(left), len(right)))
     total = 0.0
     for index in range(limit):
         total += abs(float(left[index]) - float(right[index]))
-    return total / limit + abs(len(left) - len(right))
+    scale = max(1.0, float(scale))
+    length_penalty = abs(len(left) - len(right)) / max(1.0, max(len(left), len(right)))
+    return (total / limit) / scale + length_penalty
 
 
 def _canonical_rotation(sequence: Sequence[Any]) -> tuple[Any, ...]:
@@ -39,9 +41,13 @@ def _smallest_repeat_unit(sequence: Sequence[Any]) -> tuple[Any, ...]:
     return values
 
 
-def canonicalize_sequence(sequence: Sequence[Any]) -> tuple[Any, ...]:
+def canonicalize_sequence(sequence: Sequence[Any], *, mode: str = "rotation_compression") -> tuple[Any, ...]:
     """Return a compact canonical form for a sequence."""
 
+    if mode == "strict":
+        return tuple(sequence)
+    if mode == "rotation":
+        return _canonical_rotation(sequence)
     return _smallest_repeat_unit(_canonical_rotation(sequence))
 
 
@@ -57,16 +63,26 @@ class Pattern:
     last_error: float = 0.0
     context_memory: dict[str, float] = field(default_factory=dict)
 
-    def canonical_template(self) -> tuple[float, ...]:
-        return tuple(float(item) for item in canonicalize_sequence(self.template))
+    def canonical_template(self, *, canonicalization_mode: str = "rotation_compression") -> tuple[float, ...]:
+        return tuple(float(item) for item in canonicalize_sequence(self.template, mode=canonicalization_mode))
 
-    def distance(self, observation: Any) -> float:
+    def distance(
+        self,
+        observation: Any,
+        *,
+        canonicalization_mode: str = "rotation_compression",
+        distance_scale: float = 1.0,
+    ) -> float:
         candidate = _as_tuple(observation)
         if not self.template:
             return float(len(candidate))
         if all(isinstance(item, Real) for item in candidate + self.template):
-            return _mean_abs_error(self.canonical_template(), tuple(float(item) for item in canonicalize_sequence(candidate)))
-        return 1.0 if canonicalize_sequence(candidate) != canonicalize_sequence(self.template) else 0.0
+            return _mean_abs_error(
+                self.canonical_template(canonicalization_mode=canonicalization_mode),
+                tuple(float(item) for item in canonicalize_sequence(candidate, mode=canonicalization_mode)),
+                scale=distance_scale,
+            )
+        return 1.0 if canonicalize_sequence(candidate, mode=canonicalization_mode) != canonicalize_sequence(self.template, mode=canonicalization_mode) else 0.0
 
     def predict(self, state: State) -> State:
         """Predict a one-step continuation."""
@@ -75,10 +91,15 @@ class Pattern:
             return state
 
         if isinstance(state.value, Real):
-            return state.evolve(float(state.value) + self.template[-1])
+            index = state.step % len(self.template)
+            return state.evolve(float(state.value) + self.template[index])
 
         if _is_sequence(state.value):
-            return state.evolve(tuple(state.value) + (self.template[-1],))
+            values = tuple(float(item) for item in state.value if isinstance(item, Real))
+            if len(values) == len(self.template):
+                return state.evolve(tuple(values[index] + self.template[index] for index in range(len(self.template))))
+            index = state.step % len(self.template)
+            return state.evolve(tuple(state.value) + (self.template[index],))
 
         return state
 
@@ -97,6 +118,12 @@ class Pattern:
             return 0.0
         return self.context_memory.get(context_signature, 0.0)
 
+    def _cap_context_memory(self, limit: int) -> None:
+        if limit <= 0 or len(self.context_memory) <= limit:
+            return
+        ordered = sorted(self.context_memory.items(), key=lambda item: item[1], reverse=True)
+        self.context_memory = dict(ordered[:limit])
+
     def score(
         self,
         context_signature: str | None = None,
@@ -112,13 +139,12 @@ class Pattern:
         accuracy = 1.0 / (1.0 + self.last_error)
         density = log1p(max(0.0, self.density))
         context_match = self.context_score(context_signature)
-        goal_utility = goal.get("utility", self.utility)
+        goal_utility = self.utility + float(goal.get("utility", 0.0))
         return (alpha * accuracy) + (beta * density) + (gamma * context_match) + (delta * goal_utility)
 
     def update(self, observation: Delta) -> None:
         """Lightweight pattern update on the delta."""
 
-        self.support += 1
         candidate = _as_tuple(observation.value)
         if candidate and all(isinstance(item, Real) for item in candidate):
             if not self.template:
@@ -142,3 +168,31 @@ class Pattern:
         self.density += max(0.0, density_boost)
         if context_signature:
             self.context_memory[context_signature] = self.context_memory.get(context_signature, 0.0) + max(0.0, context_boost)
+
+    def reward(self, utility_boost: float = 0.0) -> None:
+        """Update intrinsic utility from a positive outcome signal."""
+
+        self.utility += max(0.0, utility_boost)
+
+    def decay(
+        self,
+        *,
+        density_decay: float = 0.0,
+        utility_decay: float = 0.0,
+        context_decay: float = 1.0,
+        context_memory_limit: int = 0,
+    ) -> None:
+        """Apply gentle forgetting to stale weights."""
+
+        if density_decay > 0.0:
+            self.density = max(0.0, self.density * (1.0 - density_decay))
+        if utility_decay > 0.0:
+            self.utility = max(0.0, self.utility * (1.0 - utility_decay))
+        if 0.0 < context_decay < 1.0 and self.context_memory:
+            self.context_memory = {key: max(0.0, value * context_decay) for key, value in self.context_memory.items()}
+        self._cap_context_memory(context_memory_limit)
+
+    def observe_support(self) -> None:
+        """Record a reuse event without changing structure."""
+
+        self.support += 1

@@ -40,5 +40,5 @@ class AdapterRegistry:
     def run(self, packet: AdapterPacket, target_outputs: list[str]) -> AdapterPacket:
         for adapter in self.resolve(target_outputs):
             packet = adapter.run(packet)
-            packet.log(adapter.name, {"provides": list(adapter.provides), "requires": list(adapter.requires)})
+            packet.log(adapter.name, {"provides": list(adapter.provides), "requires": list(adapter.requires)}, role="adapter")
         return packet

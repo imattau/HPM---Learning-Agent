@@ -23,8 +23,12 @@ class AgentPipeline:
 
     def run(self, packet: AgentPacket) -> AgentPacket:
         for agent in self.agents:
-            packet = agent.step(packet)
+            step = getattr(agent, "step_packet", None)
+            if callable(step):
+                packet = step(packet)
+            else:
+                packet = agent.step(packet)
             if not packet.agent_trace or packet.agent_trace[-1] != agent.name:
                 packet.agent_trace.append(agent.name)
-            packet.log(agent.name, {"stage": "agent_step"})
+            packet.log(agent.name, {"stage": "agent_step"}, role="agent")
         return packet

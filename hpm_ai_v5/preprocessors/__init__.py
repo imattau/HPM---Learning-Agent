@@ -2,5 +2,12 @@
 
 from .base import Preprocessor, PreprocessedInput
 from .numeric import NumericPreprocessor
+from .prefix_buffer import PrefixBufferAdapter, PrefixBufferPreprocessor
 
-__all__ = ["NumericPreprocessor", "PreprocessedInput", "Preprocessor"]
+__all__ = [
+    "NumericPreprocessor",
+    "PrefixBufferAdapter",
+    "PrefixBufferPreprocessor",
+    "PreprocessedInput",
+    "Preprocessor",
+]

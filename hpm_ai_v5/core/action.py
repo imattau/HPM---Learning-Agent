@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .pattern import Pattern
+from .reasoning import ReasoningTrace
 from .sequence import PatternSequence
 from .state import State
 
@@ -20,5 +21,6 @@ class Action:
     selected_pattern: Pattern | None = None
     selected_sequence: PatternSequence | None = None
     selected_view: str | None = None
+    reasoning_trace: ReasoningTrace | None = None
     trace: dict[str, Any] = field(default_factory=dict)
     forecast: State | None = None

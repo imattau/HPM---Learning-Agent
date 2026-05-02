@@ -1,6 +1,6 @@
 from hpm_ai_v5 import AgentInput, BaseAgent, HPMPipeline
 from hpm_ai_v5.adapter import AdapterPacket, AdapterRegistry
-from hpm_ai_v5.core import Delta, Pattern, PatternEngine, PatternStore, State
+from hpm_ai_v5.core import CoreConfig, Delta, Pattern, PatternEngine, PatternSequence, PatternStore, State
 from hpm_ai_v5.core.action import Action
 from hpm_ai_v5.core.evaluator import PolygraphEvaluator
 from hpm_ai_v5.postprocessors.numeric import NumericPostprocessor
@@ -41,12 +41,56 @@ def test_canonical_rotation_matches_reversed_order() -> None:
     assert pattern.distance((2.0, 1.0)) == 0.0
 
 
+def test_strict_canonicalization_preserves_order() -> None:
+    pattern = Pattern(name="cycle", template=(1.0, 2.0))
+
+    assert pattern.distance((2.0, 1.0), canonicalization_mode="strict") > 0.0
+
+
+def test_distance_scale_changes_matching_range() -> None:
+    store = PatternStore(config=CoreConfig(distance_scale=10.0, near_threshold=0.5))
+    store.add(Pattern(name="rise", template=(1.0, 2.0)))
+
+    near = store.match((1.0, 6.0))
+
+    assert near.status == "near"
+
+
 def test_repeated_sequence_learns_compact_template() -> None:
     store = PatternStore()
 
     pattern = store.learn((1.0, 2.0, 1.0, 2.0, 1.0, 2.0))
 
     assert pattern.template == (1.0, 2.0)
+
+
+def test_pattern_simulate_cycles_through_template() -> None:
+    pattern = Pattern(name="cycle", template=(1.0, 2.0))
+
+    path = pattern.simulate(State(value=0.0), horizon=3)
+
+    assert [state.value for state in path] == [1.0, 3.0, 4.0]
+
+
+def test_sequence_simulate_uses_phase_offset() -> None:
+    engine = PatternEngine()
+    first = Pattern(name="first", template=(1.0,))
+    second = Pattern(name="second", template=(2.0,))
+    third = Pattern(name="third", template=(3.0,))
+    engine.store.add(first)
+    engine.store.add(second)
+    engine.store.add(third)
+    sequence = PatternSequence(pattern_names=("first", "second", "third"))
+
+    state = State(value=0.0, context={"phase": 1, "position": 0})
+    path = sequence.simulate(
+        state,
+        horizon=3,
+        resolver=engine.store.get,
+        start_offset=engine._sequence_offset(state, 3),
+    )
+
+    assert [state.value for state in path] == [2.0, 5.0, 6.0]
 
 
 def test_engine_learns_and_reuses_pattern() -> None:
@@ -71,6 +115,57 @@ def test_engine_learns_and_reuses_pattern() -> None:
     assert action.action_type == "apply_delta"
     assert action.selected_pattern is not None
     assert action.forecast.value == 9.0
+    assert action.reasoning_trace is not None
+    assert action.reasoning_trace.selected_action["action_type"] == "apply_delta"
+    assert action.reasoning_trace.validation["status"] == "accepted"
+    assert action.reasoning_trace.candidate_patterns
+
+
+def test_engine_history_is_bounded() -> None:
+    engine = PatternEngine(config=CoreConfig(history_limit=3))
+
+    for value in (0.0, 1.0, 2.0, 3.0, 4.0):
+        engine.observe(State(value=value))
+
+    assert len(engine.history) == 3
+    assert [state.value for state in engine.history] == [2.0, 3.0, 4.0]
+
+
+def test_pattern_decay_caps_context_memory() -> None:
+    pattern = Pattern(
+        name="aging",
+        template=(1.0,),
+        density=8.0,
+        utility=4.0,
+        context_memory={f"ctx{i}": float(i + 1) for i in range(12)},
+    )
+
+    pattern.decay(density_decay=0.5, utility_decay=0.5, context_decay=0.5, context_memory_limit=4)
+
+    assert pattern.density == 4.0
+    assert pattern.utility == 2.0
+    assert len(pattern.context_memory) == 4
+    assert list(pattern.context_memory.values()) == sorted(pattern.context_memory.values(), reverse=True)
+
+
+def test_fresh_pattern_can_overtake_stale_high_density_pattern() -> None:
+    engine = PatternEngine(config=CoreConfig(density_decay=0.25, utility_decay=0.25))
+    stale = Pattern(name="stale", template=(1.0,), density=12.0, utility=12.0)
+    fresh = Pattern(name="fresh", template=(1.0,), density=1.0, utility=1.0)
+
+    engine.store.add(stale)
+    engine.store.add(fresh)
+    engine.current_state = State(value=0.0)
+    engine.history = [State(value=0.0)]
+
+    assert engine.select(goal={"beta": 1.0, "delta": 1.0}) is stale
+
+    for _ in range(10):
+        stale.decay(density_decay=0.25, utility_decay=0.25)
+        fresh.reinforce(density_boost=0.75)
+        fresh.reward(utility_boost=0.75)
+
+    assert engine.select(goal={"beta": 1.0, "delta": 1.0}) is fresh
 
 
 def test_context_memory_can_override_density() -> None:
@@ -269,3 +364,87 @@ def test_repeating_pattern_order_promotes_sequence() -> None:
 
     assert len(engine.sequences) == 1
     assert engine.sequences[0].pattern_names == ("p1", "p2")
+
+
+def test_engine_uses_sequence_forecast_when_sequence_scores_higher() -> None:
+    engine = PatternEngine()
+    first = Pattern(name="p1", template=(1.0,), support=1, density=0.0)
+    second = Pattern(name="p2", template=(5.0,), support=1, density=0.0)
+    engine.store.add(first)
+    engine.store.add(second)
+    promoted = PatternSequence(pattern_names=("p1", "p2"), support=3, density=10.0)
+    engine.sequences = [promoted]
+    engine.current_state = State(value=0.0)
+    engine.history = [State(value=0.0)]
+
+    action = engine.act(goal={"utility": 0.0}, horizon=2)
+
+    assert action.trace["forecast_source"] == "sequence"
+    assert action.selected_sequence is promoted
+    assert action.forecast.value == 6.0
+
+
+def test_engine_prefers_better_trajectory_over_better_next_step() -> None:
+    engine = PatternEngine()
+    greedy = Pattern(name="greedy", template=(1.0,), support=1, density=6.0)
+    step_a = Pattern(name="step_a", template=(1.0,), support=1, density=0.0)
+    step_b = Pattern(name="step_b", template=(4.0,), support=1, density=0.0)
+    engine.store.add(greedy)
+    engine.store.add(step_a)
+    engine.store.add(step_b)
+    engine.sequences = [PatternSequence(pattern_names=("step_a", "step_b"), support=2, density=0.0)]
+    engine.current_state = State(value=0.0)
+    engine.history = [State(value=0.0)]
+
+    action = engine.act(goal={"target": 5.0, "utility": 0.0}, horizon=2)
+
+    assert action.reasoning_trace is not None
+    assert action.reasoning_trace.selected_action["trajectory_mode"] == "full"
+    assert action.reasoning_trace.score_trace["sequence_trajectory_score"] >= action.reasoning_trace.score_trace["pattern_trajectory_score"]
+    assert action.selected_sequence is not None
+    assert action.selected_sequence.pattern_names == ("step_a", "step_b")
+    assert action.forecast.value == 5.0
+
+
+def test_engine_changes_selection_with_context_and_goal() -> None:
+    engine = PatternEngine()
+    context_sensitive = Pattern(name="contextual", template=(4.0,), support=1, density=1.0, utility=0.5)
+    utility_sensitive = Pattern(name="goal", template=(9.0,), support=1, density=0.5, utility=4.0)
+    dense_but_generic = Pattern(name="dense", template=(1.0,), support=1, density=6.0, utility=0.0)
+
+    context_signature = engine.store.context_signature({"mode": "fast"})
+    context_sensitive.context_memory[context_signature] = 5.0
+
+    engine.store.add(context_sensitive)
+    engine.store.add(utility_sensitive)
+    engine.store.add(dense_but_generic)
+
+    engine.current_state = State(value=0.0, context={"mode": "fast"})
+    engine.history = [State(value=0.0, context={"mode": "fast"})]
+
+    contextual_action = engine.act(goal={"beta": 0.5, "gamma": 3.0, "delta": 0.1}, horizon=1)
+    assert contextual_action.selected_pattern is context_sensitive
+    assert contextual_action.forecast.value == 4.0
+
+    engine.current_state = State(value=0.0, context={"mode": "slow"})
+    engine.history = [State(value=0.0, context={"mode": "slow"})]
+
+    goal_action = engine.act(goal={"beta": 0.1, "gamma": 0.0, "delta": 3.0}, horizon=1)
+    assert goal_action.selected_pattern is utility_sensitive
+    assert goal_action.forecast.value == 9.0
+
+
+def test_reasoning_trace_exposes_observations_and_rejections() -> None:
+    engine = PatternEngine()
+    engine.store.add(Pattern(name="short", template=(1.0,), support=1, density=0.5))
+    engine.store.add(Pattern(name="long", template=(2.0,), support=1, density=0.25))
+    engine.current_state = State(value=1.0, context={"mode": "trace"})
+    engine.history = [State(value=0.0, context={"mode": "trace"}), State(value=1.0, context={"mode": "trace"})]
+
+    action = engine.act(goal={"utility": 0.0}, horizon=1)
+
+    assert action.reasoning_trace is not None
+    assert action.reasoning_trace.observations == [0.0, 1.0]
+    assert any(key.startswith("pattern:") for key in action.reasoning_trace.rejected_candidates)
+    assert action.reasoning_trace.forecast is not None
+    assert action.reasoning_trace.score_trace["confidence"] == action.confidence

@@ -41,6 +41,8 @@ Adapters communicate through a shared packet:
 ```python
 packet = {
   "raw": raw_input,
+  "goal": None,
+  "context": {},
   "clean": None,
   "tokens": None,
   "entities": None,
@@ -49,13 +51,13 @@ packet = {
   "deltas": [],
   "views": [],
   "core_action": None,
-  "draft_output": None,
   "validated_output": None,
   "trace": []
 }
 ```
 
 Each adapter reads fields and writes new fields.
+The canonical shared context lives in `packet.context`.
 
 ## Shallow hierarchy
 
@@ -64,6 +66,7 @@ Each adapter reads fields and writes new fields.
 - `Pattern`
 - `PatternSequence`
 - `Action`
+- `ReasoningTrace`
 
 Meta-patterns are deferred until this level is stable.
 
@@ -82,10 +85,14 @@ Meta-patterns are deferred until this level is stable.
 
 - `hpm_ai_v5/adapter/`
   - shared packet model and dependency-aware registry
+- `hpm_ai_v5/schemas/`
+  - typed packet, action, and output schemas
 - `hpm_ai_v5/preprocessors/`
   - domain-specific adapters that populate `State`, `Delta`, and context
 - `hpm_ai_v5/polygraphs/`
   - multi-view adapters that generate alternative structural views
+- `hpm_ai_v5/pipelines/`
+  - wrapper modules for adapter and agent pipelines
 - `hpm_ai_v5/core/`
   - pattern learning, retrieval, scoring, selection, simulation
 - `hpm_ai_v5/postprocessors/`
@@ -131,15 +138,202 @@ Patterns and sequences are scored by the same small weighted sum:
 score = α * accuracy + β * density + γ * context_match + δ * goal_utility
 ```
 
+Intrinsic utility is additive with the goal utility supplied at decision time.
+That lets promoted sequences carry reusable-strategy weight without ignoring the
+current goal.
+
 Polygraph scores can be added as a small bias on top of pattern-level selection.
 
 Longer-horizon planning should use agreement across polygraphs, not a single-view score.
+
+## Sequence execution
+
+`PatternSequence` is not just a label. When a sequence scores higher than an individual pattern, the engine uses the sequence to generate the forecast by replaying its constituent patterns in order.
+
+When macro execution is explicitly enabled, the engine can also emit an
+`execute_sequence` action so an agent or benchmark can replay the selected
+sequence as a chunk instead of asking the core for a new step after every
+element.
+
+## Deep planning
+
+When `horizon > 1`, the engine scores full trajectories rather than only the next step.
+
+- simulate the pattern trajectory
+- simulate the sequence trajectory
+- score both trajectories
+- select the better plan
+
+This is still shallow planning, but it is the right step between step reasoning and full search.
+
+## Rotating sequence generalization
+
+The current sequence promotion rule now looks for any repeated suffix period in the
+recent pattern trace, not just pairs. That makes periodic pattern discovery work
+for length-3 and length-4 blocks as long as the trace contains enough evidence.
+
+Because the core learns from transitions, periodic discovery needs one extra
+anchor state beyond `2L` observations in order to see the full repeated block.
+For an `L`-length period, the benchmark therefore uses `2L+1` states for the
+training prefix before testing phase-aware forecasts.
+
+Promoted sequences also receive a small reusable-strategy utility bonus so that
+trajectory selection can prefer the discovered periodic block over a single
+pattern when the longer sequence is the better explanation.
+
+The RSG benchmark exercises this by feeding the engine phase-shifted periodic
+delta streams and checking that the same repeating block is discovered across
+phases.
+
+## Triple sequence discovery
+
+The TSD benchmark closes the remaining sequence gap by checking that the core
+can discover a repeating length-3 block and expose it as a macro action when
+sequence execution is enabled. That keeps the core small while still letting a
+caller consume the discovered sequence as an atomic chunk.
+
+The benchmark now checks that the core can identify the periodic block and
+forecast phase-shifted horizons consistently across phases.
+
+The next benchmark, DCM, checks delayed credit assignment:
+
+- reward appears only after a 3-step action sequence
+- the winning strategy should absorb utility after the delayed consequence
+- old context should not dominate newer episodes
+- the selected 3-step trajectory should remain inspectable through the reasoning
+  trace
+- the engine should complete the delayed third action after a learned prefix
+
+The Learned Utility Benchmark sits next to DCM and checks a narrower question:
+can utility be accumulated from reward feedback without injecting a utility
+weight into the goal? In v5 that learning happens at the agent layer by keeping
+a small context-conditioned utility memory over the core patterns.
+
+Triple Sequence Discovery checks the adjacent question:
+
+- can the core discover a length-3 repeating sequence
+- can an agent-side macro executor replay that sequence as a chunk
+- does chunked execution outperform stepwise replanning on the benchmark
+
+The core still emits a stepwise forecast. The benchmark adds the smallest
+chunking layer above it so the discovered sequence can be reused without
+changing the core API.
+
+Current status: the benchmark now passes with generalized sequence discovery
+and explicit macro execution. It shows the right boundary: the core can learn
+the reusable chunk, while the caller decides whether to replay it as a macro or
+step through it one element at a time.
+
+The nested prerequisite maze benchmark extends this idea to multiple delayed prerequisites,
+decoy rewards, trap states, and strategy reuse across layouts with the same dependency chain.
+
+Strategy discovery is handled before scoring by a small candidate-generation layer that
+extracts objects, infers affordances from layout cues, builds a dependency graph from the
+relative order of discovered milestones, and generates candidate strategies from that graph.
+
+The next benchmark, CTW, pushes this further by requiring the system to discover hidden
+interaction evidence from structure, then compose those interactions into rules and a plan.
+
+## Next benchmark: PDT
+
+Prefix Disambiguation Task isolates the short-term memory gap:
+
+- the same visible `A, B` prefix leads to different next symbols
+- the disambiguating information is two steps back
+- the current core uses immediate delta plus shallow history in selection
+- the benchmark now passes only when an explicit memory adapter enriches state
+
+This keeps the failure mode honest. The core remains unchanged; the missing
+structure is exposed in the benchmark instead of being patched around.
+
+The adapter-side fix is a `PrefixBufferPreprocessor` that feeds the last two
+raw symbols into the state before the core sees it. In v5 it also keeps a small
+transition memory keyed by the buffered history, which lets the benchmark
+distinguish ambiguous prefixes without changing the core.
+
+## Reasoning contract
+
+The core shows reasoning as selection under competing pressures:
+
+- the same input can resolve to different patterns under different contexts
+- the same input can resolve to different patterns under different goal weights
+- the selected pattern or sequence drives the forecast
+
+That is the intended minimal reasoning loop for v5.
+
+The core does not expose free-form chain-of-thought. It exposes an explicit reasoning trace:
+
+- observations
+- candidate patterns
+- candidate sequences
+- rejected alternatives
+- score trace
+- selected action
+- forecast
+- validation
+
+This keeps reasoning inspectable without making the core depend on generated prose.
+
+## Support policy
+
+Support is an explicit reuse count.
+
+- Novel patterns start with support from their first learned observation.
+- Exact and near matches increment support through an explicit reuse step.
+- Structural updates change the template but do not silently change support.
+
+This keeps reuse accounting consistent across exact, near, and novel paths.
+
+## Weight dynamics
+
+The core treats weights as explicit, inspectable signals rather than opaque
+learned parameters.
+
+- `density` and `utility` decay gently over time when patterns are not reinforced.
+- `context_memory` is bounded so stale contexts do not accumulate forever.
+- `support` remains a reuse counter.
+- `last_error` tracks prediction error from the latest structural update.
+
+This keeps the score meaningful for long-running systems instead of letting old
+patterns dominate forever.
 
 ## Reliability rules
 
 - Low confidence can defer action.
 - Every action keeps traceability.
 - Postprocessing validates output before it escapes the pipeline.
+- Core history is kept as a short bounded window because only recent states
+  are needed for the reasoning trace.
+
+## Configuration
+
+`CoreConfig` is the minimal tuning object for the core.
+
+- `canonicalization_mode`
+- `distance_scale`
+- `history_limit`
+- `exact_threshold`
+- `near_threshold`
+- `max_patterns`
+- `density_decay`
+- `utility_decay`
+- `context_memory_limit`
+
+## Objective evaluation
+
+The v5 system should be judged by a deterministic evaluation report, not only by
+benchmarks embedded in prose.
+
+The report should score:
+
+- core reasoning
+- agent flow
+- delayed-reward planning
+- rule discovery
+- ARC subset solving
+
+The goal is to produce comparable numeric scores across revisions while still
+keeping the reasoning trace inspectable.
 
 ## Minimal fixes in scope
 
@@ -147,12 +341,16 @@ Longer-horizon planning should use agreement across polygraphs, not a single-vie
 - Canonical rotation-based comparison to reduce duplicate equivalents.
 - Compact repeat-unit learning for repeated sequences.
 - A shallow `PatternSequence` layer over pattern names.
+- Sequence-aware forecasting when a sequence wins selection.
 - A polygraph layer with independent views and simple view scoring.
 - Agreement-based selection for longer-horizon planning.
 - A light pruning rule based on density and support.
 - Derived context keys such as delta kind and delta shape.
+- A central `CoreConfig` for thresholds, distance scaling, canonicalization,
+  and bounded history.
 - A dependency-aware adapter registry and shared packet model.
 - A thin pipeline wrapper that connects preprocessing, polygraphs, core, and postprocessing.
+- Canonicalisation is currently rotation-plus-compression; strict modes can be added later if a domain needs phase-sensitive comparisons.
 
 ## What this version does not include
 
@@ -170,6 +368,7 @@ Longer-horizon planning should use agreement across polygraphs, not a single-vie
   - orchestrates preprocessing, core decisions, and postprocessing
   - keeps specialised behaviour out of `PatternEngine`
   - can compose fixed or routed agent pipelines
+  - may consume the shared packet directly through `step_packet()`
 
 The agent owns:
 
