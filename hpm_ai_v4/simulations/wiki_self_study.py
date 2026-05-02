@@ -495,11 +495,16 @@ class SelfStudyAgent:
             title = prefetch_title
             page, fetch_elapsed = prefetch_future.result()
 
+            if page is None or not page.text.strip():
+                # Still need to advance the prefetch
+                prefetch_title, prefetch_future = _next_fetch()
+                continue
+
+            # Push links before kicking off next prefetch so single-seed runs work
+            self.scheduler.push(page.links[: self.max_links_per_page], source_title=page.title)
+
             # Immediately kick off next prefetch while we train
             prefetch_title, prefetch_future = _next_fetch()
-
-            if page is None or not page.text.strip():
-                continue
 
             self._read_pages.append(page.title)
             train_start = time.perf_counter()
@@ -519,7 +524,6 @@ class SelfStudyAgent:
                 self.scheduler.page_bonus.get(page.title, 0.0) * 0.9,
                 0.05,
             )
-            self.scheduler.push(page.links[: self.max_links_per_page], source_title=page.title)
 
             if pages_read % 50 == 0:
                 ckpt_path = self.output_library.replace(".pkl", f"_ckpt{pages_read}.pkl")
