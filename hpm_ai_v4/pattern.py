@@ -146,6 +146,36 @@ class HierarchicalPattern:
         _, scales = self._forward(obs_seq)
         return float(np.sum(np.log(scales + 1e-12)))
 
+    def surprisal_profile(self, obs_seq):
+        """Per-step surprisal profile for an observation sequence."""
+        if len(obs_seq) == 0:
+            return np.zeros(0, dtype=np.float32)
+        _, scales = self._forward(obs_seq)
+        surprisal = -np.log(scales + 1e-12)
+        surprisal = np.nan_to_num(surprisal, nan=0.0, posinf=0.0, neginf=0.0)
+        return surprisal.astype(np.float32)
+
+    def residual_observations(self, obs_seq, *, min_residual: int = 4, keep_fraction: float = 0.35):
+        """Return the most novel subsequence of obs_seq.
+
+        This keeps the update path reuse-first:
+        exact/low-novelty windows still inform scores, but expensive EM is
+        driven by a short trailing residual subsequence.
+        """
+        if len(obs_seq) == 0:
+            return []
+        if len(obs_seq) <= min_residual:
+            return list(obs_seq)
+
+        uncertainty = float(np.clip(self.running_loss, 0.0, 1.0))
+        effective_keep_fraction = float(keep_fraction) + 0.35 * uncertainty
+        effective_keep_fraction = float(np.clip(effective_keep_fraction, keep_fraction, 0.75))
+        keep_count = max(min_residual, int(np.ceil(len(obs_seq) * effective_keep_fraction)))
+        keep_count = min(len(obs_seq), keep_count)
+        if keep_count >= len(obs_seq):
+            return list(obs_seq)
+        return list(obs_seq[-keep_count:])
+
     def update_parameters_online(self, obs_seq, window_size=100):
         """Windowed Baum-Welch EM update with exponential smoothing."""
         if len(obs_seq) < 5:
@@ -266,6 +296,29 @@ class FlatPattern(HierarchicalPattern):
         # Use B[0, obs] as the probability of observation
         log_probs = [np.log(self.B[0, int(o) % self.obs_dim] + 1e-12) for o in obs_seq]
         return float(np.sum(log_probs))
+
+    def surprisal_profile(self, obs_seq):
+        if len(obs_seq) == 0:
+            return np.zeros(0, dtype=np.float32)
+        probs = np.array([self.B[0, int(o) % self.obs_dim] for o in obs_seq], dtype=np.float32)
+        surprisal = -np.log(probs + 1e-12)
+        surprisal = np.nan_to_num(surprisal, nan=0.0, posinf=0.0, neginf=0.0)
+        return surprisal.astype(np.float32)
+
+    def residual_observations(self, obs_seq, *, min_residual: int = 4, keep_fraction: float = 0.35):
+        if len(obs_seq) == 0:
+            return []
+        if len(obs_seq) <= min_residual:
+            return list(obs_seq)
+
+        uncertainty = float(np.clip(self.running_loss, 0.0, 1.0))
+        effective_keep_fraction = float(keep_fraction) + 0.35 * uncertainty
+        effective_keep_fraction = float(np.clip(effective_keep_fraction, keep_fraction, 0.75))
+        keep_count = max(min_residual, int(np.ceil(len(obs_seq) * effective_keep_fraction)))
+        keep_count = min(len(obs_seq), keep_count)
+        if keep_count >= len(obs_seq):
+            return list(obs_seq)
+        return list(obs_seq[-keep_count:])
 
     def update_running_loss(self, obs_seq, lambda_l=0.1, ll: float | None = None):
         if ll is None:

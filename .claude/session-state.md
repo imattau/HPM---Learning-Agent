@@ -1,44 +1,42 @@
 # Session State Checkpoint
 Generated: 2026-05-01
-Reason: Context threshold exceeded (95%+)
+Reason: Context threshold exceeded (95%)
 
 ## Execution Mode
+
 **Mode**: interactive
 **Auto-Continue**: false
 
 ## Current Task
-Iterative comprehension gap analysis of hpm_ai_v4 codebase against HPM framework principles.
+
+User stopped previous wiki crawler runs and wants to restart with the new code.
+
+Command to run:
+```bash
+cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m hpm_ai_v4.simulations.wiki_self_study --seed "Learning" --max-pages 10
+```
 
 ## Progress Summary
-- NLP library build completed (user ran independently with NLTK corpora)
-- library_quality.py tool created and committed
-- All comprehension seams implemented: binding evaluator, relational state, entity registry, clause stack, chained queries, passive voice, simulate_continuation, metacognitive policy
-- All 9 HPM structural principles satisfied per prior review
-- Most recent gap analysis (fresh subagent read) identified 5 remaining gaps
 
-## Most Recent Gap Analysis (2026-05-01)
+Previous session implemented these optimizations to wiki_self_study.py:
+1. Pattern coverage gate — skips training if top-5 patterns already model the window (LL/token ≥ -0.35)
+2. Warm-start — boosts relevant pattern weights before training
+3. Async prefetch — ThreadPoolExecutor overlapping Wikipedia fetch with training  
+4. LL caching in parallel.py — recompute every 10 steps instead of every step
+5. Rate-limiting expensive ops in agent.py — field_episode_stats ÷50, observe_outcome ÷10
 
-**Critical (architectural change needed):**
-- `reasoning.py`: Planning modes are hardcoded enums, not pattern-derived
-- `adapters.py`: Substrate tokens static — no learned token merging
-- `field.py`: Pattern field is storage-only, not active evaluator
+Relevant files:
+- `hpm_ai_v4/simulations/wiki_self_study.py` — main crawler
+- `hpm_ai_v4/agents/agent.py` — HPMAgent with rate-limiting
+- `hpm_ai_v4/operators/parallel.py` — LL caching
 
-**Critical (within-architecture fix):**
-- `agent.py`: Developmental stage progression uses fixed thresholds, not evaluator-driven
+## Continuation Instructions
 
-**Medium:**
-- `dynamics.py`: Conflict resolution weights (0.75/0.25) fixed, not adaptive
+The user said "I stopped the previous runs. Restart with the new code."
 
-**Core diagnosis:** System implements HPM infrastructure but not HPM discovery. Semantic hierarchy is imposed via constraints, not discovered from pattern learning.
+Start a fresh wiki crawler run using the background Task tool:
+```bash
+cd /home/mattthomson/workspace/HPM---Learning-Agent && python -m hpm_ai_v4.simulations.wiki_self_study --seed "Learning" --max-pages 10 2>&1
+```
 
-## Active Files
-- `hpm_ai_v4/simulations/chat_simulation.py`
-- `hpm_ai_v4/simulations/layered_agent.py`
-- `hpm_ai_v4/agents/reasoning.py`
-- `hpm_ai_v4/agents/agent.py`
-- `hpm_ai_v4/io/adapters.py`
-- `hpm_ai_v4/operators/dynamics.py`
-- `hpm_ai_v4/agents/meta_decoder_policy.py`
-
-## Next Steps (if user continues)
-Most tractable: replace fixed developmental stage thresholds in agent.py with evaluator-driven emergence metrics. This is within-architecture and directly addresses HPM's "progressive discovery" principle.
+Monitor progress and report timing per page compared to baseline (previous best was ~50s/page growing to 103s by page 4).

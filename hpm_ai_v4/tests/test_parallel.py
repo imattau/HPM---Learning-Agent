@@ -133,6 +133,105 @@ def test_pool_map_truncates_obs_buffer(monkeypatch):
     assert seen["len"] == 30
     pool.close()
 
+
+def test_worker_trains_on_residual_window_not_full_buffer(monkeypatch):
+    import hpm_ai_v4.operators.parallel as parallel_module
+    from hpm_ai_v4.pattern import HierarchicalPattern
+    from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
+
+    np.random.seed(21)
+    state = make_state_dict(complexity=2, latent_dim=2, obs_dim=3)
+    state["B"] = np.array([[0.88, 0.10, 0.02], [0.12, 0.82, 0.06]], dtype=np.float32)
+    state["A"] = np.array([[0.85, 0.15], [0.18, 0.82]], dtype=np.float32)
+    state["pi"] = np.array([0.75, 0.25], dtype=np.float32)
+    obs_buffer = [0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1]
+    field_freq = {0: 0.1}
+    params = {'learning_rate': 0.02, 'lambda_l': 0.1, 'adapt_window': 20,
+              'beta_aff': 0.4, 'gamma_soc': 0.3, 'residual_keep_fraction': 0.35}
+
+    seen = {}
+    def fake_update(self, obs_seq, window_size=100):
+        seen["len"] = len(obs_seq)
+        seen["seq"] = list(obs_seq)
+        return 0.0
+
+    monkeypatch.setattr(HierarchicalPattern, "update_parameters_online", fake_update)
+    result = parallel_module.pattern_worker(state, obs_buffer, field_freq, params)
+
+    assert result["pattern_id"] == 0
+    assert seen["len"] < len(obs_buffer)
+    assert seen["len"] >= 5
+    assert 2 in seen["seq"]
+
+
+def test_worker_skips_update_on_exact_equivalence(monkeypatch):
+    import hpm_ai_v4.operators.parallel as parallel_module
+    from hpm_ai_v4.pattern import HierarchicalPattern
+    from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
+
+    np.random.seed(22)
+    state = make_state_dict(complexity=2, latent_dim=2, obs_dim=3)
+    state["B"] = np.array([[0.88, 0.10, 0.02], [0.12, 0.82, 0.06]], dtype=np.float32)
+    state["A"] = np.array([[0.85, 0.15], [0.18, 0.82]], dtype=np.float32)
+    state["pi"] = np.array([0.75, 0.25], dtype=np.float32)
+    obs_buffer = [0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1]
+    field_freq = {0: 0.1}
+    params = {'learning_rate': 0.02, 'lambda_l': 0.1, 'adapt_window': 20,
+              'beta_aff': 0.4, 'gamma_soc': 0.3, 'residual_keep_fraction': 0.35,
+              'equivalence_index': PatternEquivalenceIndex()}
+    params["equivalence_index"].register_sequence(obs_buffer[-20:])
+
+    calls = {"n": 0}
+
+    def fake_update(self, obs_seq, window_size=100):
+        calls["n"] += 1
+        return 0.0
+
+    monkeypatch.setattr(HierarchicalPattern, "update_parameters_online", fake_update)
+    result = parallel_module.pattern_worker(state, obs_buffer, field_freq, params)
+
+    assert result["equivalence_status"] == "exact"
+    assert calls["n"] == 0
+
+
+def test_worker_skips_update_on_composed_sequence(monkeypatch):
+    import hpm_ai_v4.operators.parallel as parallel_module
+    from hpm_ai_v4.pattern import HierarchicalPattern
+    from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
+
+    np.random.seed(23)
+    state = make_state_dict(complexity=2, latent_dim=2, obs_dim=4)
+    state["B"] = np.array([[0.7, 0.1, 0.1, 0.1], [0.1, 0.7, 0.1, 0.1]], dtype=np.float32)
+    state["A"] = np.array([[0.8, 0.2], [0.2, 0.8]], dtype=np.float32)
+    state["pi"] = np.array([0.6, 0.4], dtype=np.float32)
+    obs_buffer = [1, 2, 3]
+    field_freq = {0: 0.1}
+    params = {
+        'learning_rate': 0.02,
+        'lambda_l': 0.1,
+        'adapt_window': 20,
+        'beta_aff': 0.4,
+        'gamma_soc': 0.3,
+        'residual_keep_fraction': 0.35,
+        'equivalence_index': PatternEquivalenceIndex(),
+    }
+    params["equivalence_index"].register_sequence([1])
+    params["equivalence_index"].register_sequence([2])
+    params["equivalence_index"].register_sequence([3])
+
+    calls = {"n": 0}
+
+    def fake_update(self, obs_seq, window_size=100):
+        calls["n"] += 1
+        return 0.0
+
+    monkeypatch.setattr(HierarchicalPattern, "update_parameters_online", fake_update)
+    result = parallel_module.pattern_worker(state, obs_buffer, field_freq, params)
+
+    assert result["equivalence_status"] == "composed"
+    assert result["equivalence_composition_coverage"] == 1.0
+    assert calls["n"] == 0
+
 from hpm_ai_v4.agents.agent import HPMAgent
 
 def test_agent_parallel_no_error():

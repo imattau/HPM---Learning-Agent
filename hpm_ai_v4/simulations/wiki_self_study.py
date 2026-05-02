@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from hpm_ai_v4.config import DEFAULT_LIBRARY_PATH
 from hpm_ai_v4.evaluators.metrics import epistemic_score
 from hpm_ai_v4.simulations.layered_agent import LayeredAgent
 from hpm_ai_v4.tools.ingest import TextIngestGate
@@ -606,8 +607,7 @@ def build_wikipedia_self_study(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Wikipedia self-study crawler for HPM")
     parser.add_argument("--seed", nargs="+", required=True, help="Seed Wikipedia topics")
-    _default_library = os.path.join(os.path.expanduser("~"), ".hpm", "library.pkl")
-    parser.add_argument("--output", default=_default_library, help="Output library path (.pkl base path)")
+    parser.add_argument("--output", default=DEFAULT_LIBRARY_PATH, help="Output library path (.pkl base path)")
     parser.add_argument("--resume", default=None, help="Load patterns from this library before starting (defaults to --output if it exists)")
     parser.add_argument("--steps-per-chunk", type=int, default=500, help="Chunk budget used during reading")
     parser.add_argument("--max-pages", type=int, default=500, help="Maximum pages to read")

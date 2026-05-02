@@ -9,6 +9,7 @@ from hpm_ai_v4.social import SocialNetwork
 from hpm_ai_v4.reflection import ReflectionEngine
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
+from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
 
 class MetaReasoner:
     """Reflection and multi-agent coordination layer."""
@@ -35,10 +36,12 @@ class AgentPool:
     """Manages a population of HPM agents."""
     def __init__(self, num_agents: int = 5, external_substrate: Optional[ExternalSubstrate] = None,
                  obs_dim: int = 2, dictionary: Optional[DictionaryValidator] = None,
-                 grammar: Optional[GrammarValidator] = None):
+                 grammar: Optional[GrammarValidator] = None,
+                 equivalence_index: Optional[PatternEquivalenceIndex] = None):
         self.substrate = external_substrate if external_substrate else ExternalSubstrate()
         self.agents = [HPMAgent(external_substrate=self.substrate, obs_dim=obs_dim, 
-                                dictionary=dictionary, grammar=grammar) for _ in range(num_agents)]
+                                dictionary=dictionary, grammar=grammar,
+                                equivalence_index=equivalence_index) for _ in range(num_agents)]
 
     def step(self, observation: int):
         """Synchronized step for all agents in the pool."""
@@ -54,10 +57,12 @@ class HPMMetaLayer:
                  grammar: Optional[GrammarValidator] = None):
         self.env = env # Still needed for curriculum/reflection to know context, but not for stepping
         self.substrate = ExternalSubstrate()
+        self.equivalence_index = PatternEquivalenceIndex()
         self.agent_pool = AgentPool(num_agents=num_agents, external_substrate=self.substrate, 
-                                    obs_dim=obs_dim, dictionary=dictionary, grammar=grammar)
+                                    obs_dim=obs_dim, dictionary=dictionary, grammar=grammar,
+                                    equivalence_index=self.equivalence_index)
         
-        self.repository = PatternRepository()
+        self.repository = PatternRepository(equivalence_index=self.equivalence_index)
         self.institution = InstitutionalField(dictionary=dictionary, grammar=grammar)
         self.curriculum = CurriculumScheduler(env)
         self.social_network = SocialNetwork()

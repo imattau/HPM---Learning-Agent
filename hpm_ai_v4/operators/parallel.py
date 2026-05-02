@@ -7,6 +7,8 @@ import numpy as np
 from multiprocessing import Pool
 from typing import List, Dict, Any
 
+from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
+
 
 # ---------------------------------------------------------------------------
 # Helpers: pattern state serialisation
@@ -86,25 +88,61 @@ def update_pattern_resident(pattern, obs_buffer: list,
     )
 
     ll = None
+    equivalence_index = params.get("equivalence_index")
+    if equivalence_index is None:
+        equivalence_index = PatternEquivalenceIndex()
     if obs_buffer:
+        window = _worker_context_window(obs_buffer, params)
+        min_residual = int(params.get("min_residual_window", 5))
+        keep_fraction = float(params.get("residual_keep_fraction", 0.35))
+        match = equivalence_index.classify(
+            pattern,
+            window,
+            min_residual=min_residual,
+            keep_fraction=keep_fraction,
+        )
         if params.get('do_param_update', True):
-            if pattern.complexity >= 2 or pattern.latent_dim > 1:
-                ll = pattern.update_parameters_online(obs_buffer, window_size=params.get('adapt_window', 100))
-            else:
-                if hasattr(pattern, "observe"):
-                    pattern.observe(obs_buffer[-1], learning_rate=params['learning_rate'])
+            train_seq = list(match.residual_sequence) if match.residual_sequence else list(window)
+            if match.status == "composed":
+                train_seq = []
+            if not match.exact_match and train_seq:
+                if pattern.complexity >= 2 or pattern.latent_dim > 1:
+                    if len(train_seq) >= 5:
+                        ll = pattern.update_parameters_online(train_seq, window_size=params.get('adapt_window', 100))
                 else:
-                    ll = pattern.log_likelihood(obs_buffer[-30:])
+                    if hasattr(pattern, "observe"):
+                        if train_seq:
+                            pattern.observe(train_seq[-1], learning_rate=params['learning_rate'])
+                    else:
+                        ll = pattern.log_likelihood(train_seq[-30:] if train_seq else window[-30:])
         if ll is None:
             # Recompute LL every 10 steps; use cached value otherwise
             step = params.get('step_counter', 0)
             cached_ll = getattr(pattern, '_cached_ll', None)
             if cached_ll is None or step % 10 == 0:
-                ll = pattern.log_likelihood(obs_buffer[-30:])
+                eval_seq = list(match.residual_sequence) if match.residual_sequence else list(window)
+                if match.exact_match:
+                    eval_seq = list(window)
+                elif match.status == "composed" and not eval_seq:
+                    eval_seq = list(window)
+                if not eval_seq:
+                    eval_seq = window[-30:]
+                ll = pattern.log_likelihood(eval_seq[-30:])
                 pattern._cached_ll = ll
             else:
                 ll = cached_ll
-        pattern.update_running_loss(obs_buffer, ll=ll)
+        loss_seq = list(match.residual_sequence) if match.residual_sequence else list(window)
+        if match.exact_match:
+            loss_seq = list(window)
+        elif match.status == "composed" and not loss_seq:
+            loss_seq = list(window)
+        if not loss_seq:
+            loss_seq = window
+        pattern.update_running_loss(loss_seq, ll=ll)
+        if hasattr(equivalence_index, "register_sequence"):
+            equivalence_index.register_sequence(window if (match.exact_match or match.status == "composed") else loss_seq)
+        if hasattr(equivalence_index, "register_pattern"):
+            equivalence_index.register_pattern(pattern)
 
     ep = epistemic_score(pattern)
     aff = affective_score(pattern, obs_buffer)
@@ -117,6 +155,11 @@ def update_pattern_resident(pattern, obs_buffer: list,
     )
 
     return {
+        'equivalence_status': str(match.status) if obs_buffer else "novel",
+        'equivalence_similarity': float(match.similarity) if obs_buffer else 0.0,
+        'equivalence_alignment': float(match.alignment_score) if obs_buffer else 0.0,
+        'equivalence_composition_coverage': float(match.composition_coverage) if obs_buffer else 0.0,
+        'equivalence_residual_fraction': float(match.residual_fraction) if obs_buffer else 1.0,
         'ep_score': float(ep),
         'aff_score': float(aff),
         'soc_score': float(soc),

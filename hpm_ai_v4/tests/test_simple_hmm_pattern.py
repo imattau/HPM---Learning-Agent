@@ -85,19 +85,19 @@ def test_update_running_loss():
     assert p.running_loss > 0
 
 
-def test_warns_if_k_gt_4():
+def test_warns_if_k_gt_16():
     import warnings
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        HierarchicalPattern(0, latent_dim=5, obs_dim=6)
+        HierarchicalPattern(0, latent_dim=17, obs_dim=6)
         assert len(w) == 1
 
 
-def test_no_warn_k_eq_4():
+def test_no_warn_k_eq_16():
     import warnings
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        HierarchicalPattern(0, latent_dim=4, obs_dim=6)
+        HierarchicalPattern(0, latent_dim=16, obs_dim=6)
         assert len(w) == 0
 
 

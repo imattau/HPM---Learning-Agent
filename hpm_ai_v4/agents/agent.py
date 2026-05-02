@@ -12,6 +12,8 @@ from hpm_ai_v4.tools.substrate import ExternalSubstrate
 from hpm_ai_v4.agents.reasoning import Reasoner
 from hpm_ai_v4.tools.dictionary import DictionaryValidator
 from hpm_ai_v4.tools.grammar import GrammarValidator
+from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
+from hpm_ai_v4.tools.pattern_equivalence import PatternEquivalenceIndex
 
 class DevelopmentalStage:
     """Modulates evaluator focus based on current population complexity."""
@@ -186,7 +188,8 @@ class HPMAgent:
     def __init__(self, num_initial_patterns: int = 5, external_substrate: Optional[ExternalSubstrate] = None,
                  obs_dim: int = 2, num_workers: int = 1, 
                  dictionary: Optional[DictionaryValidator] = None,
-                 grammar: Optional[GrammarValidator] = None):
+                 grammar: Optional[GrammarValidator] = None,
+                 equivalence_index: Optional[PatternEquivalenceIndex] = None):
         self.obs_dim = obs_dim
         self.dictionary = dictionary
         self.grammar = grammar
@@ -210,6 +213,7 @@ class HPMAgent:
         self.obs_buffer = []
         self.external_social_scores = {} # pattern_id -> reliability score [0, 1]
         self._density_state: Dict[str, Any] = {"density_weight": 0.1}
+        self._equivalence_index = equivalence_index or PatternEquivalenceIndex()
         
         # Default evaluator weights (will be modulated by development)
         self.beta_aff = 0.4
@@ -366,6 +370,7 @@ class HPMAgent:
             'beta_aff': self.beta_aff,
             'gamma_soc': self.gamma_soc,
             'external_soc_map': self.external_social_scores,
+            'equivalence_index': self._equivalence_index,
             'do_param_update': (self.step_counter % max(5, min(20, len(self.patterns))) == 0),
             'step_counter': self.step_counter,
         }

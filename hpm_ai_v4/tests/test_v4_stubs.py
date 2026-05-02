@@ -94,5 +94,29 @@ def test_reflection_stagnation_intervention():
             
     assert agent.beta_aff > initial_beta, "Curiosity (beta_aff) should increase on stagnation"
 
+
+def test_repository_reuses_equivalent_patterns():
+    from hpm_ai_v4.meta import AgentPool
+    from hpm_ai_v4.repository import PatternRepository
+
+    substrate = ExternalSubstrate()
+    pool = AgentPool(num_agents=1, external_substrate=substrate)
+    repo = PatternRepository(density_threshold=-1.0)
+
+    agent = pool.agents[0]
+    p1 = HierarchicalPattern(pattern_id=7, latent_dim=2, obs_dim=2)
+    p1.A = np.array([[0.9, 0.1], [0.1, 0.9]], dtype=np.float32)
+    p1.B = np.array([[0.7, 0.3], [0.3, 0.7]], dtype=np.float32)
+    p1.pi = np.array([0.6, 0.4], dtype=np.float32)
+    p1._refresh_log_cache()
+    p2 = copy.deepcopy(p1)
+    p2.id = 8
+    agent.patterns = [p1, p2]
+
+    repo.update(pool)
+
+    assert len(repo.stored_patterns) == 1
+    assert repo.stored_patterns[0][1] == 2
+
 if __name__ == "__main__":
     pytest.main([__file__])
