@@ -55,16 +55,13 @@ class CartpoleForecastPostprocessor:
     def postprocess(self, action: Action, *, context: dict[str, Any] | None = None) -> float:
         context = context or {}
 
-        # Always compute the PD heuristic as the stable baseline.
-        # Includes cart position/velocity to handle the position boundary (±2.4m)
-        # as well as the pole angle limit.
+        # Weak baseline: sign(angle) only — ~40 steps alone.
+        # The engine must learn angular velocity and position corrections
+        # to extend beyond this floor. Using the full PD controller as the
+        # baseline makes the benchmark trivial (heuristic alone scores 500/500).
         raw_obs = context.get("raw_observation", {})
         angle = float(raw_obs.get("angle", context.get("angle", 0.0)))
-        ang_vel = float(raw_obs.get("angular_velocity", context.get("angular_velocity", 0.0)))
-        position = float(raw_obs.get("position", context.get("position", 0.0)))
-        velocity = float(raw_obs.get("velocity", context.get("velocity", 0.0)))
-        signal = angle + 0.3 * ang_vel + 0.05 * position + 0.02 * velocity
-        heuristic_action = 1.0 if signal > 0 else -1.0
+        heuristic_action = 1.0 if angle > 0 else -1.0
 
         # Attempt to extract and de-normalise the engine's forecast action.
         engine_action: float | None = None
@@ -74,22 +71,27 @@ class CartpoleForecastPostprocessor:
             and action.forecast.value is not None
         ):
             fv = action.forecast.value
-            if isinstance(fv, (tuple, list, np.ndarray)) and len(fv) > self.action_index:
-                raw_val = float(fv[self.action_index])
-                # De-normalise: RunningNormaliserAdapter stores mean/scale in context
-                means = context.get("normalisation_mean", [])
-                scales = context.get("normalisation_scale", [])
-                if (
-                    isinstance(means, (list, tuple))
-                    and isinstance(scales, (list, tuple))
-                    and len(means) > self.action_index
-                    and len(scales) > self.action_index
-                ):
-                    scale = float(scales[self.action_index])
-                    mean = float(means[self.action_index])
-                    if scale > 1e-8:
-                        raw_val = raw_val * scale + mean
-                engine_action = float(np.clip(raw_val, -1.0, 1.0))
+            if isinstance(fv, (tuple, list, np.ndarray)) and len(fv) > 0:
+                if len(fv) <= 4:
+                    # Short action polygraph view — fv[0] is last_action or action_angle_product
+                    raw_val = float(np.sign(fv[0])) if fv[0] != 0.0 else 1.0
+                    engine_action = float(np.clip(raw_val, -1.0, 1.0))
+                elif len(fv) > self.action_index:
+                    raw_val = float(fv[self.action_index])
+                    # De-normalise: RunningNormaliserAdapter stores mean/scale in context
+                    means = context.get("normalisation_mean", [])
+                    scales = context.get("normalisation_scale", [])
+                    if (
+                        isinstance(means, (list, tuple))
+                        and isinstance(scales, (list, tuple))
+                        and len(means) > self.action_index
+                        and len(scales) > self.action_index
+                    ):
+                        scale = float(scales[self.action_index])
+                        mean = float(means[self.action_index])
+                        if scale > 1e-8:
+                            raw_val = raw_val * scale + mean
+                    engine_action = float(np.clip(raw_val, -1.0, 1.0))
 
         # Blend engine action in when confidence is sufficient.
         confidence = action.confidence
@@ -101,3 +103,33 @@ class CartpoleForecastPostprocessor:
             result = heuristic_action
 
         return result
+
+
+class BinaryExplorationPostprocessor:
+    """Randomly flip the action sign to create exploration diversity.
+
+    Unlike Gaussian noise, binary flipping produces clear differential signals:
+    the action polygraph engines see both action=+1 and action=-1 in similar
+    states, enabling reward-based discrimination between correct and incorrect
+    actions. Epsilon decays across episodes as the engine accumulates policy.
+    """
+
+    name: str = "binary_exploration"
+    requires: list[str] = ["cartpole_forecast"]
+    provides: list[str] = ["validated_output"]
+
+    def __init__(self, epsilon: float = 0.3) -> None:
+        self.epsilon = epsilon
+
+    def run(self, packet: "AdapterPacket") -> "AdapterPacket":
+        if packet.validated_output is None:
+            return packet
+        action = float(packet.validated_output)
+        if np.random.random() < self.epsilon:
+            action = -action
+        packet.validated_output = action
+        packet.log(self.name, {"action": action, "epsilon": self.epsilon}, role="adapter")
+        return packet
+
+    def postprocess(self, action: "Action", *, context: Any | None = None) -> float:
+        return float(action.value) if action.value is not None else 0.0

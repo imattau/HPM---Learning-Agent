@@ -1,5 +1,6 @@
 """Polygraph generators for v5."""
 
+from .action_policy import ActionPolygraphGenerator
 from .audio import AudioPolygraphGenerator
 from .base import PolygraphGenerator, PolygraphView
 from .graph import GraphPolygraphGenerator
@@ -9,6 +10,7 @@ from .text import TextPolygraphGenerator
 from .timeseries import TimeSeriesPolygraphGenerator
 
 __all__ = [
+    "ActionPolygraphGenerator",
     "AudioPolygraphGenerator",
     "GraphPolygraphGenerator",
     "GridPolygraphGenerator",

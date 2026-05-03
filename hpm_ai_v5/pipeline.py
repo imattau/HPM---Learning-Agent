@@ -179,7 +179,7 @@ class HPMPipeline:
         output = None
         if action.action_type == "apply_delta":
             post_packet = AdapterPacket(raw=raw, goal=packet.goal, context=dict(preprocessed.context), core_action=action)
-            post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=[self.postprocessor.name])
+            post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=list(self.postprocessing_pipeline.adapters.keys()))
             output = post_packet.validated_output
 
         return PipelineResult(
