@@ -55,14 +55,23 @@ class HPMPipeline:
 
     def step(self, raw: Any, *, goal: dict[str, float] | None = None, context: dict[str, Any] | None = None) -> PipelineResult:
         packet = AdapterPacket(raw=raw, goal=goal, context=dict(context or {}))
-        packet = self.preprocessing_pipeline.run(packet, target_outputs=[self.preprocessor.name])
+        packet = self.preprocessing_pipeline.run(
+            packet,
+            target_outputs=list(self.preprocessing_pipeline.adapters.keys())
+        )
         if not packet.states:
             raise ValueError("Preprocessing pipeline produced no state")
         preprocessed_state = packet.states[-1]
+        
+        # Use goal from packet as it might have been modified by adapters (e.g., RewardToGoalAdapter)
+        active_goal = packet.goal or {}
+        
         preprocessed = PreprocessedInput(state=preprocessed_state, context=dict(preprocessed_state.context), raw=raw, packet=packet)
+        plan_horizon = int(active_goal.get("plan_horizon", 1))
+        
         if self.polygraph_generator is None:
             self.engine.observe(preprocessed.state)
-            action = self.engine.act(goal=goal or {})
+            action = self.engine.act(goal=active_goal, horizon=plan_horizon)
             polygraph_scores = None
         else:
             views = self.polygraph_generator.generate(raw, context=preprocessed.context)
@@ -72,11 +81,10 @@ class HPMPipeline:
                 engine = self.view_engines.setdefault(view.name, PatternEngine())
                 engine.observe(view.state)
                 polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
-                view_actions[view.name] = engine.act(goal=goal or {})
+                view_actions[view.name] = engine.act(goal=active_goal, horizon=plan_horizon)
 
             selected_view = self.polygraph_evaluator.select_view(polygraph_scores)
-            plan_horizon = float((goal or {}).get("plan_horizon", 1.0))
-            long_horizon = plan_horizon > 1.0 or bool((goal or {}).get("planning_mode") == "long")
+            long_horizon = plan_horizon > 1 or bool(active_goal.get("planning_mode") == "long")
             polygraph_agreement = None
 
             if long_horizon:
@@ -89,10 +97,10 @@ class HPMPipeline:
                             break
                     else:
                         selected_view = selected_view or (views[0].name if views else None)
-                        action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=goal or {})
+                        action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
                 else:
                     selected_view = selected_view or (views[0].name if views else None)
-                    action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=goal or {})
+                    action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
                 action = Action(
                     action_type=action.action_type,
                     value=action.value,
@@ -118,7 +126,7 @@ class HPMPipeline:
             else:
                 if selected_view is None:
                     selected_view = views[0].name if views else None
-                action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=goal or {})
+                action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
                 selected_polygraph_score = polygraph_scores.get(selected_view) if selected_view is not None else None
                 polygraph_bias = 0.05 * selected_polygraph_score.score if selected_polygraph_score is not None else 0.0
                 confidence = max(0.0, min(1.0, action.confidence + polygraph_bias))
@@ -140,7 +148,7 @@ class HPMPipeline:
 
         output = None
         if action.action_type == "apply_delta":
-            post_packet = AdapterPacket(raw=raw, goal=goal, context=dict(preprocessed.context), core_action=action)
+            post_packet = AdapterPacket(raw=raw, goal=packet.goal, context=dict(preprocessed.context), core_action=action)
             post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=[self.postprocessor.name])
             output = post_packet.validated_output
 

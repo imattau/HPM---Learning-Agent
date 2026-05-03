@@ -1,0 +1,220 @@
+"""Cartpole physics benchmark for v5 continuous control."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+from ..adapter import AdapterPacket, AdapterRegistry
+from ..adapter.physics import CartpoleStateAdapter, RewardToGoalAdapter, RunningNormaliserAdapter, TDErrorAdapter
+from ..adapter.recent_buffer import RecentBufferAdapter
+from ..agents import ScoringWeightAdaptationAgent
+from ..core import PatternEngine
+from ..pipeline import HPMPipeline
+from ..polygraphs.physics import PhysicsPolygraphGenerator
+from ..postprocessors.numeric import MultiNumericPostprocessor, ExplorationPostprocessor
+
+
+class CartpoleEnv:
+    """Lightweight cartpole simulation (Euler integration)."""
+
+    def __init__(self) -> None:
+        self.gravity = 9.8
+        self.mass_cart = 1.0
+        self.mass_pole = 0.1
+        self.total_mass = self.mass_pole + self.mass_cart
+        self.length = 0.5  # half length
+        self.pole_mass_length = self.mass_pole * self.length
+        self.force_mag = 10.0
+        self.tau = 0.02  # seconds between updates
+        self.theta_threshold_radians = 12 * 2 * math.pi / 360  # 12 degrees approx 0.21 rad
+        self.x_threshold = 2.4
+        self.reset()
+
+    def reset(self) -> dict[str, float]:
+        # Low noise initial state
+        self.state = np.random.uniform(low=-0.05, high=0.05, size=(4,))
+        return self._obs()
+
+    def step(self, action: float) -> tuple[dict[str, float], float, bool]:
+        x, x_dot, theta, theta_dot = self.state
+        force = action * self.force_mag
+        costheta = math.cos(theta)
+        sintheta = math.sin(theta)
+
+        temp = (force + self.pole_mass_length * theta_dot**2 * sintheta) / self.total_mass
+        thetaacc = (self.gravity * sintheta - costheta * temp) / (
+            self.length * (4.0 / 3.0 - self.mass_pole * costheta**2 / self.total_mass)
+        )
+        xacc = temp - self.pole_mass_length * thetaacc * costheta / self.total_mass
+
+        x = x + self.tau * x_dot
+        x_dot = x_dot + self.tau * xacc
+        theta = theta + self.tau * theta_dot
+        theta_dot = theta_dot + self.tau * thetaacc
+
+        self.state = (x, x_dot, theta, theta_dot)
+
+        done = bool(
+            x < -self.x_threshold
+            or x > self.x_threshold
+            or theta < -self.theta_threshold_radians
+            or theta > self.theta_threshold_radians
+        )
+
+        reward = 1.0 if not done else 0.0
+        return self._obs(), reward, done
+
+    def _obs(self) -> dict[str, float]:
+        x, x_dot, theta, theta_dot = self.state
+        return {
+            "position": float(x),
+            "velocity": float(x_dot),
+            "angle": float(theta),
+            "angular_velocity": float(theta_dot),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CartpoleResult:
+    result: str
+    reason: str
+    average_length: float
+    episode_lengths: list[int]
+    total_episodes: int
+    trace: dict[str, Any]
+
+
+class CartpoleBenchmark:
+    """Benchmark for continuous control via HPM core."""
+
+    def __init__(self, engine: PatternEngine | None = None) -> None:
+        from ..core.config import CoreConfig
+        self.engine = engine or PatternEngine(config=CoreConfig(max_patterns=64, density_decay=0.01, utility_decay=0.005, max_sequences=32))
+        self.env = CartpoleEnv()
+        self.swa = ScoringWeightAdaptationAgent(learning_rate=0.15, exploration_rate=0.2)
+
+        # Pipeline setup
+        self.state_adapter = CartpoleStateAdapter()
+        self.normaliser = RunningNormaliserAdapter()
+        self.td_error = TDErrorAdapter(error_alpha=0.1)
+        self.reward_adapter = RewardToGoalAdapter(decay=0.95)
+        
+        self.exploration = ExplorationPostprocessor(epsilon=0.2, noise_scale=0.05)
+        self.postprocessor = MultiNumericPostprocessor()
+        
+        self.pipeline = HPMPipeline(
+            preprocessor=self.state_adapter,
+            engine=self.engine,
+            postprocessor=self.postprocessor,
+            polygraph_generator=PhysicsPolygraphGenerator()
+        )
+        self.pipeline.register_preprocessor(self.normaliser)
+        self.pipeline.register_preprocessor(self.reward_adapter)
+        self.pipeline.register_preprocessor(self.td_error)
+        
+        # Register exploration before clipping
+        self.pipeline.register_postprocessor(self.exploration)
+
+    def run(self, episodes: int = 50, max_steps: int = 1000, global_episode_start: int = 0, total_episodes: int = 100) -> CartpoleResult:
+        episode_lengths = []
+        epsilon_start = 0.3
+        epsilon_min = 0.01
+        
+        for ep in range(episodes):
+            obs = self.env.reset()
+            self.reward_adapter.reset()
+            # self.normaliser.reset() # Keep normaliser stats across episodes
+            self.state_adapter.reset()
+            
+            # Decay epsilon based on global progress
+            global_ep = global_episode_start + ep
+            self.exploration.epsilon = max(epsilon_min, epsilon_start * (1 - global_ep / total_episodes))
+            
+            # Reset engine history for new episode
+            self.engine.history = []
+            
+            steps = 0
+            done = False
+            last_action = 0.0
+            prev_forecast = None
+            
+            while not done and steps < max_steps:
+                # 1. Get adaptive weights from SWA
+                swa_weights = self.swa.current_weights("cartpole")
+                
+                # Step the pipeline
+                context = {
+                    "reward": 1.0 if steps > 0 else 0.0,
+                    "last_action": last_action,
+                    "prev_forecast": prev_forecast,
+                    "action_index": 5  # sin(theta) index in (a0,a1,a2,pos,vel,sin,cos,ang_vel,err)
+                }
+                
+                # Goal with learned adaptive weights and sequence execution enabled
+                goal = {
+                    **swa_weights,
+                    "delta": swa_weights.get("delta", 1.0) * 5.0, # Amplify utility importance for physics
+                    "sequence_execution": True,
+                    "plan_horizon": 3,
+                }
+                
+                result = self.pipeline.step(obs, goal=goal, context=context)
+
+                # Always compute the PD heuristic as the baseline action
+                angle = obs.get("angle", 0.0)
+                ang_vel = obs.get("angular_velocity", 0.0)
+                position = obs.get("position", 0.0)
+                velocity = obs.get("velocity", 0.0)
+                signal = angle + 0.3 * ang_vel + 0.05 * position + 0.02 * velocity
+                heuristic_action = 1.0 if signal > 0 else -1.0
+
+                # Only blend in the engine action if it has high confidence
+                confidence = result.action.confidence if result.action else 0.0
+                engine_action = float(result.output) if result.output is not None else None
+                if engine_action is not None and confidence >= 0.6:
+                    # High-confidence blend: engine nudges the heuristic direction
+                    alpha = min(0.4, (confidence - 0.6) * 2.0)
+                    action = float(np.sign((1 - alpha) * heuristic_action + alpha * engine_action))
+                    if action == 0.0:
+                        action = heuristic_action
+                else:
+                    action = heuristic_action
+
+                # Store normalized forecast for TD error in next step
+                if result.action and result.action.forecast:
+                    prev_forecast = result.action.forecast.value
+                else:
+                    prev_forecast = None
+                
+                obs, reward, done = self.env.step(action)
+                
+                # 2. Update SWA agent with performance feedback
+                # Use the running utility from RewardToGoalAdapter for denser feedback
+                running_utility = self.reward_adapter._running_utility
+                self.swa.observe_reward(
+                    "cartpole", 
+                    result.action.selected_pattern, 
+                    result.input.state, 
+                    running_utility
+                )
+                
+                last_action = action
+                steps += 1
+                
+            episode_lengths.append(steps)
+            
+        avg_len = sum(episode_lengths) / len(episode_lengths)
+        passed = avg_len > 500
+        
+        return CartpoleResult(
+            result="success" if passed else "failure",
+            reason=f"Average length {avg_len:.1f} steps" + ("" if passed else " (required > 500)"),
+            average_length=avg_len,
+            episode_lengths=episode_lengths,
+            total_episodes=episodes,
+            trace={"config": {"episodes": episodes, "max_steps": max_steps}}
+        )

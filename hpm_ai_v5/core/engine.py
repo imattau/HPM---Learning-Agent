@@ -153,6 +153,9 @@ class PatternEngine:
         canonical_tail = tuple(tail)
         if any(sequence.canonical_names() == canonical_tail for sequence in self.sequences):
             return
+        if len(self.sequences) >= self.config.max_sequences:
+            self.sequences.sort(key=lambda s: s.utility)
+            self.sequences = self.sequences[len(self.sequences) // 4:]
         sequence = PatternSequence(pattern_names=canonical_tail, utility=0.5 * len(canonical_tail))
         sequence.observe_support()
         sequence.reinforce(context_signature, density_boost=1.0, context_boost=1.0)
