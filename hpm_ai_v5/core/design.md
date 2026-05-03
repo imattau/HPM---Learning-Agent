@@ -489,3 +489,35 @@ decisively to the correction direction.
 
 With these fixes: average 500/500 steps across 20 episodes (was ~40 before).
 64 patterns, 25 sequences — a compact, stable pattern library.
+
+## Pattern engine boundary: temporal learning vs policy learning
+
+The CartPole investigation exposed a fundamental boundary in what the HPM PatternEngine can and cannot learn.
+
+**What the engine does well**: temporal structure discovery — detecting repeating patterns in state sequences, forecasting what state comes next, building sequences from periodic delta streams.
+
+**What it cannot do directly**: control policy learning — learning which action leads to the best outcome in a given state. This requires credit assignment across (state, action, reward) triples, not just state transition patterns.
+
+### Why the action polygraph doesn't converge
+
+The action polygraph generates compact views in action-state space. The view engines accumulate patterns quickly (filling the 32-pattern cap with diverse transitions from binary exploration). But the patterns represent TRANSITION DYNAMICS within the compact view, not action VALUES. The engine learns "after seeing state X, state Y follows" — not "action +1 in state X leads to reward 1.0".
+
+Even with retroactive pattern reinforcement and binary exploration generating differential reward signals, the pattern engine does not converge on a useful policy within practical episode budgets (~40 episodes × 40 steps). The patterns fill with noisy diverse transitions before any one (state, action) combination accumulates enough support to generate confident forecasts.
+
+### The right architecture boundary
+
+The PatternEngine belongs at the STATE RECOGNITION layer, not the action selection layer:
+
+1. Engine observes states → learns compact state regions (patterns)
+2. Agent layer maintains a Q-table: `(pattern_name, action) → value`
+3. Q-table is updated from reward feedback (standard RL update)
+4. Action selection: look up best action for the current matched pattern
+
+The engine provides REGION IDENTIFICATION; Q-learning provides POLICY IMPROVEMENT. These are complementary and neither should absorb the other's role.
+
+### Configuration notes for physics benchmarks
+
+- `max_sequences=32`: prevents sequence explosion in high-dimensional state spaces
+- `polygraph_every_n_steps=1`, `polygraph_confidence_skip=0.99`: primary engine confidence hits 0.9+ quickly; the skip threshold must be near-1.0 for the polygraph to actually run
+- `polygraph_min_patterns=0`: use 0 not 2+; even 1 episode can give enough patterns
+- Binary exploration (sign-flip) is more useful than Gaussian noise for discrete control: it creates clear differential reward signals
