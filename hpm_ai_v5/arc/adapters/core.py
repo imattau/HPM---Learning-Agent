@@ -158,17 +158,18 @@ class ExamplePairAdapter:
     provides: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        self.requires = ["arc_delta"]
+        self.requires = ["arc_line_extension", "arc_structural_delta"]
         self.provides = ["arc_examples"]
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         task: ArcTask = _arc(packet)["task"]
         arc = _arc(packet)
+        deltas = packet.deltas or arc.get("structural_deltas", [])
         arc["examples"] = [
             {
                 "input": example.input_grid,
                 "output": example.output_grid,
-                "delta": None if index >= len(packet.deltas) else packet.deltas[index],
+                "delta": None if index >= len(deltas) else deltas[index],
             }
             for index, example in enumerate(task.train)
         ]

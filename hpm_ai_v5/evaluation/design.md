@@ -17,6 +17,7 @@ benchmarks into comparable numeric scores.
 - scoring weight adaptation across environments
 - online meta-pattern discovery across structurally similar tasks
 - automatic adapter composition across preprocessing pipelines
+- open adapter discovery with explicit defer on unsupported structure
 - ARC transformation solving
 
 Polygraph agreement is scored as a separate benchmark that measures whether the
@@ -31,6 +32,13 @@ abstraction and zero-shot transfer across similar tasks.
 
 Automatic adapter composition is scored separately as agent-side pipeline
 selection and reuse over held-out task variants.
+
+Open adapter discovery is scored separately as agent-side adapter selection
+and calibration over known numeric and grid families, plus a held-out graph
+family that must be deferred.
+
+Those pipelines are now treated as adapter compositions rather than a separate
+preprocessing tier.
 
 ## Design rule
 

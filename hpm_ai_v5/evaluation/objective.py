@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from statistics import fmean
 from typing import Any
 
 from ..agents import AgentInput, BaseAgent
 from ..arc import ArcSolver
+from ..arc.benchmark import ArcFullBenchmark
 from ..core import Pattern, PatternEngine, PatternSequence, State
 from ..planning import (
     AutomaticAdapterCompositionBenchmark,
     CompositionalTransformationWorldPlanner,
     DelayedConsequenceMazeBenchmark,
     LearnedUtilityBenchmark,
+    OpenAdapterDiscoveryBenchmark,
     NestedPrerequisiteMazePlanner,
     OnlineMetaPatternDiscoveryBenchmark,
     PolygraphAgreementBenchmark,
@@ -61,6 +64,10 @@ class EvaluationReport:
 
 class V5ObjectiveEvaluator:
     """Run a compact, numeric evaluation across the v5 stack."""
+
+    def __init__(self, *, include_full_arc: bool = False, arc_timeout_seconds: float = 2.0) -> None:
+        self.include_full_arc = include_full_arc
+        self.arc_timeout_seconds = arc_timeout_seconds
 
     def evaluate_core(self) -> BenchmarkScore:
         engine = PatternEngine()
@@ -359,6 +366,45 @@ class V5ObjectiveEvaluator:
             },
         )
 
+    def evaluate_open_adapter_discovery(self) -> BenchmarkScore:
+        benchmark = OpenAdapterDiscoveryBenchmark().run()
+        metrics = {
+            "success": 1.0 if benchmark.result == "success" else 0.0,
+            "support_mean_accuracy": benchmark.support_mean_accuracy,
+            "query_mean_accuracy": benchmark.query_mean_accuracy,
+            "learned_profiles": min(1.0, benchmark.learned_profiles / 3.0),
+        }
+        score = fmean(metrics.values())
+        metrics["score"] = score
+        return BenchmarkScore(
+            name="open_adapter_discovery",
+            score=score,
+            metrics=metrics,
+            passed=benchmark.result == "success",
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "learned_profiles": benchmark.learned_profiles,
+                "support_mean_accuracy": benchmark.support_mean_accuracy,
+                "query_mean_accuracy": benchmark.query_mean_accuracy,
+                "tasks": [
+                    {
+                        "name": result.name,
+                        "kind": result.kind,
+                        "selected_pipeline": result.selected_pipeline,
+                        "optimal_pipeline": result.optimal_pipeline,
+                        "support_accuracy": result.support_accuracy,
+                        "query_accuracy": result.query_accuracy,
+                        "confidence": result.confidence,
+                        "deferred": result.deferred,
+                        "profile_reused": result.profile_reused,
+                        "matched": result.matched,
+                    }
+                    for result in benchmark.task_results
+                ],
+            },
+        )
+
     def evaluate_swa(self) -> BenchmarkScore:
         benchmark = ScoringWeightAdaptationBenchmark().run()
         ratios = [result.learned_ratio for result in benchmark.environment_results]
@@ -478,8 +524,48 @@ class V5ObjectiveEvaluator:
             trace={"tasks": traces},
         )
 
+    def evaluate_arc_full(self) -> BenchmarkScore:
+        benchmark = ArcFullBenchmark().run(timeout_seconds=self.arc_timeout_seconds)
+        metrics = {
+            "task_count": float(benchmark.task_count),
+            "solved_count": float(benchmark.solved_count),
+            "accepted_count": float(benchmark.accepted_count),
+            "accuracy": benchmark.accuracy,
+            "acceptance_rate": benchmark.acceptance_rate,
+            "failure_count": float(benchmark.failure_count),
+            "score": benchmark.accuracy,
+        }
+        return BenchmarkScore(
+            name="arc_full",
+            score=benchmark.accuracy,
+            metrics=metrics,
+            passed=benchmark.failure_count == 0,
+            trace={
+                "result": benchmark.result,
+                "reason": benchmark.reason,
+                "task_count": benchmark.task_count,
+                "solved_count": benchmark.solved_count,
+                "accepted_count": benchmark.accepted_count,
+                "accuracy": benchmark.accuracy,
+                "acceptance_rate": benchmark.acceptance_rate,
+                "failure_count": benchmark.failure_count,
+                "sample_tasks": [
+                    {
+                        "task_id": result.task_id,
+                        "route": result.route,
+                        "accepted": result.accepted,
+                        "correct": result.correct,
+                        "test_count": result.test_count,
+                        "final_output_shape": result.final_output_shape,
+                        "timed_out": result.timed_out,
+                    }
+                    for result in benchmark.task_results[:8]
+                ],
+            },
+        )
+
     def evaluate(self) -> EvaluationReport:
-        benchmarks = (
+        benchmarks = [
             self.evaluate_core(),
             self.evaluate_agent(),
             self.evaluate_planning(),
@@ -491,9 +577,13 @@ class V5ObjectiveEvaluator:
             self.evaluate_swa(),
             self.evaluate_ompd(),
             self.evaluate_aac(),
+            self.evaluate_open_adapter_discovery(),
             self.evaluate_tsd(),
             self.evaluate_arc(),
-        )
+        ]
+        if self.include_full_arc or os.getenv("HPM_RUN_FULL_ARC") == "1":
+            benchmarks.append(self.evaluate_arc_full())
+        benchmarks = tuple(benchmarks)
         overall_score = fmean(benchmark.score for benchmark in benchmarks)
         summary = {
             "benchmark_names": [benchmark.name for benchmark in benchmarks],

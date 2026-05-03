@@ -21,20 +21,34 @@ class ArcRouterAgent:
         arc = _arc(packet)
         task: ArcTask = arc["task"]
         route = "unknown"
-        kinds = {
-            candidate.kind
-            for candidate in (infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None)
-            if candidate is not None
-        }
-        labels = {
-            candidate.label
-            for candidate in (infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None)
-            if candidate is not None
-        }
-        if len(kinds) == 1:
-            route = next(iter(labels)) if len(labels) == 1 else next(iter(kinds))
-        elif len(kinds) > 1:
-            route = "mixed_transform"
+        candidate = arc.get("candidate")
+        if candidate is None:
+            hypothesis_candidates = arc.get("hypothesis_candidates", [])
+            if hypothesis_candidates:
+                candidate = merge_transformations(hypothesis_candidates)
+                if candidate is not None:
+                    arc["candidate"] = candidate
+        if candidate is None:
+            kinds = {
+                candidate.kind
+                for candidate in (infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None)
+                if candidate is not None
+            }
+            labels = {
+                candidate.label
+                for candidate in (infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None)
+                if candidate is not None
+            }
+            if len(kinds) == 1:
+                route = next(iter(labels)) if len(labels) == 1 else next(iter(kinds))
+            elif len(kinds) > 1:
+                route = "mixed_transform"
+        else:
+            route = candidate.label if candidate.label else candidate.kind
+        if route == "unknown" and "hypothesis_candidates" in arc:
+            route = "hypothesis_driven"
+        if route == "unknown" and candidate is not None:
+            route = candidate.label if candidate.label else candidate.kind
         arc["route"] = route
         packet.log(self.name, {"route": route}, role="agent")
         return packet
@@ -50,12 +64,22 @@ class ArcHypothesisAgent:
     def step_packet(self, packet: Packet) -> Packet:
         arc = _arc(packet)
         task: ArcTask = arc["task"]
-        candidates = [infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None]
-        merged = merge_transformations(candidates)
-        arc["candidates"] = [candidate for candidate in candidates if candidate is not None]
+        candidate_pool = list(arc.get("hypothesis_candidates", []))
+        if not candidate_pool:
+            candidate_pool = [
+                candidate
+                for candidate in (infer_transformation(example.input_grid, example.output_grid) for example in task.train if example.output_grid is not None)
+                if candidate is not None
+            ]
+        merged = merge_transformations(candidate_pool)
+        arc["candidates"] = candidate_pool
         arc["candidate"] = merged
         packet.candidate_outputs.append(None if merged is None else merged.describe())
-        packet.log(self.name, {"candidates": len(arc["candidates"]), "selected": None if merged is None else merged.describe()}, role="agent")
+        packet.log(
+            self.name,
+            {"candidates": len(arc["candidates"]), "selected": None if merged is None else merged.describe()},
+            role="agent",
+        )
         return packet
 
     def step(self, packet: Packet) -> Packet:

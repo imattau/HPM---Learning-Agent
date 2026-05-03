@@ -7,9 +7,26 @@ from dataclasses import dataclass, field
 from ..adapter import AdapterRegistry
 from ..agents import AgentPipeline
 from ..schemas.packet import Packet
-from .adapters import ColourMapAdapter, DeltaAdapter, ExamplePairAdapter, GeometryAdapter, GridAdapter, ObjectExtractionAdapter, TaskAdapter
+from .adapters import (
+    ArcHypothesisAdapter,
+    ColorDeltaAdapter,
+    ColorMapperAdapter,
+    EdgeListAdapter,
+    ExamplePairAdapter,
+    GridAdapter,
+    GridDeltaAdapter,
+    LineExtensionAdapter,
+    ObjectDetectorAdapter,
+    ObjectDeltaAdapter,
+    PatternMinerAdapter,
+    ShapeDefinerAdapter,
+    SpatialRelationAdapter,
+    SymmetryCompletionAdapter,
+    StructuralDeltaAdapter,
+    TaskAdapter,
+)
 from .agents import ArcCriticAgent, ArcHypothesisAgent, ArcOutputAgent, ArcRouterAgent, ArcSimulationAgent
-from .polygraphs import ColourPolygraph, GeometryPolygraph, ObjectPolygraph, PixelPolygraph
+from .polygraphs import ColourPolygraph, GeometryPolygraph, ImagePolygraph, ObjectPolygraph, TransformationPolygraph
 
 
 def _preprocessing_registry() -> AdapterRegistry:
@@ -17,10 +34,19 @@ def _preprocessing_registry() -> AdapterRegistry:
     for adapter in (
         TaskAdapter(),
         GridAdapter(),
-        ObjectExtractionAdapter(),
-        ColourMapAdapter(),
-        GeometryAdapter(),
-        DeltaAdapter(),
+        EdgeListAdapter(),
+        ObjectDetectorAdapter(),
+        ShapeDefinerAdapter(),
+        SpatialRelationAdapter(),
+        ArcHypothesisAdapter(),
+        SymmetryCompletionAdapter(),
+        LineExtensionAdapter(),
+        ColorMapperAdapter(),
+        PatternMinerAdapter(),
+        GridDeltaAdapter(),
+        ObjectDeltaAdapter(),
+        ColorDeltaAdapter(),
+        StructuralDeltaAdapter(),
         ExamplePairAdapter(),
     ):
         registry.register(adapter)
@@ -30,8 +56,9 @@ def _preprocessing_registry() -> AdapterRegistry:
 def _polygraph_registry() -> AdapterRegistry:
     registry = AdapterRegistry()
     for adapter in (
-        PixelPolygraph(),
+        ImagePolygraph(),
         ObjectPolygraph(),
+        TransformationPolygraph(),
         ColourPolygraph(),
         GeometryPolygraph(),
     ):

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
+
+import numpy as np
+from scipy import ndimage as ndi
 
 
 Grid = tuple[tuple[int, ...], ...]
@@ -79,47 +82,40 @@ class ArcTask:
         return cls(train=train, test_inputs=tuple(tests), task_id=raw.get("task_id"))
 
 
-def connected_components(grid: Grid, background: int | None = None) -> list[ArcObject]:
+def connected_components(grid: Grid, background: int | None = None, connectivity: int = 4) -> list[ArcObject]:
     grid = normalize_grid(grid)
     if background is None:
         background = most_common_colour(grid)
     height = len(grid)
     width = len(grid[0]) if grid else 0
-    seen: set[tuple[int, int]] = set()
     components: list[ArcObject] = []
 
-    for row in range(height):
-        for col in range(width):
-            if (row, col) in seen or grid[row][col] == background:
+    if height == 0 or width == 0:
+        return components
+
+    structure = np.ones((3, 3), dtype=int) if connectivity == 8 else np.array(
+        [[0, 1, 0],
+         [1, 1, 1],
+         [0, 1, 0]],
+        dtype=int,
+    )
+    arr = np.array(grid, dtype=int)
+    colours = [colour for colour in sorted(set(arr.flatten().tolist())) if colour != background]
+
+    for colour in colours:
+        labels, count = ndi.label(arr == colour, structure=structure)
+        for label_index in range(1, count + 1):
+            coords = np.argwhere(labels == label_index)
+            if coords.size == 0:
                 continue
-            colour = grid[row][col]
-            queue = deque([(row, col)])
-            seen.add((row, col))
-            cells: list[tuple[int, int]] = []
-
-            while queue:
-                current_row, current_col = queue.popleft()
-                cells.append((current_row, current_col))
-                for next_row, next_col in (
-                    (current_row - 1, current_col),
-                    (current_row + 1, current_col),
-                    (current_row, current_col - 1),
-                    (current_row, current_col + 1),
-                ):
-                    if not (0 <= next_row < height and 0 <= next_col < width):
-                        continue
-                    if (next_row, next_col) in seen or grid[next_row][next_col] != colour:
-                        continue
-                    seen.add((next_row, next_col))
-                    queue.append((next_row, next_col))
-
-            rows = [cell[0] for cell in cells]
-            cols = [cell[1] for cell in cells]
-            bbox = (min(rows), min(cols), max(rows), max(cols))
-            centroid = (sum(rows) / len(cells), sum(cols) / len(cells))
+            cells = tuple((int(row), int(col)) for row, col in coords.tolist())
+            rows = coords[:, 0]
+            cols = coords[:, 1]
+            bbox = (int(rows.min()), int(cols.min()), int(rows.max()), int(cols.max()))
+            centroid = (float(rows.mean()), float(cols.mean()))
             components.append(
                 ArcObject(
-                    colour=colour,
+                    colour=int(colour),
                     cells=tuple(sorted(cells)),
                     bbox=bbox,
                     size=len(cells),
@@ -165,6 +161,10 @@ def _line_points(axis: str, index: int, length: int) -> list[tuple[int, int]]:
 
 def _crop(grid: Grid, bbox: tuple[int, int, int, int]) -> Grid:
     top, left, bottom, right = bbox
+    height = len(grid)
+    width = len(grid[0]) if grid else 0
+    if top < 0 or left < 0 or bottom >= height or right >= width or top > bottom or left > right:
+        return tuple()
     return tuple(tuple(grid[row][col] for col in range(left, right + 1)) for row in range(top, bottom + 1))
 
 
@@ -174,6 +174,7 @@ class ArcTransformation:
     axis: str | None = None
     line_index: int = 0
     crop_bbox: tuple[int, int, int, int] | None = None
+    preserve_canvas: bool = False
     dx: int = 0
     dy: int = 0
     colour_map: dict[int, int] = field(default_factory=dict)
@@ -198,10 +199,18 @@ class ArcTransformation:
             cropped = _crop(grid, self.crop_bbox)
             crop_height = len(cropped)
             crop_width = len(cropped[0]) if cropped else 0
-            output = [[background for _ in range(crop_width)] for _ in range(crop_height)]
-            for row_index, row in enumerate(cropped):
-                for col_index, colour in enumerate(row):
-                    output[row_index][col_index] = self.colour_map.get(colour, colour)
+            if self.preserve_canvas:
+                for row_index, row in enumerate(cropped):
+                    for col_index, colour in enumerate(row):
+                        target_row = self.crop_bbox[0] + row_index
+                        target_col = self.crop_bbox[1] + col_index
+                        if 0 <= target_row < height and 0 <= target_col < width:
+                            output[target_row][target_col] = self.colour_map.get(colour, colour)
+            else:
+                output = [[background for _ in range(crop_width)] for _ in range(crop_height)]
+                for row_index, row in enumerate(cropped):
+                    for col_index, colour in enumerate(row):
+                        output[row_index][col_index] = self.colour_map.get(colour, colour)
             return normalize_grid(output)
         if self.kind == "extend_line" and self.axis is not None:
             for row_index, row in enumerate(grid):
@@ -236,6 +245,7 @@ class ArcTransformation:
             "dy": self.dy,
             "colour_map": dict(self.colour_map),
             "background": self.background,
+            "preserve_canvas": self.preserve_canvas,
             "axis": self.axis,
             "line_index": self.line_index,
             "crop_bbox": self.crop_bbox,
@@ -334,6 +344,32 @@ def infer_transformation(input_grid: Sequence[Sequence[int]] | Grid, output_grid
     input_object = largest_object(input_grid, background=input_background)
     if input_object is not None:
         cropped = _crop(input_grid, input_object.bbox)
+        preserve_canvas = len(output_grid) == len(input_grid) and len(output_grid[0]) == len(input_grid[0])
+        if preserve_canvas:
+            if len(output_grid) == len(input_grid) and len(output_grid[0]) == len(input_grid[0]):
+                colour_map: dict[int, int] = {}
+                valid = True
+                for row_index, row in enumerate(cropped):
+                    for col_index, colour in enumerate(row):
+                        output_row = input_object.bbox[0] + row_index
+                        output_col = input_object.bbox[1] + col_index
+                        output_colour = output_grid[output_row][output_col]
+                        existing = colour_map.get(colour)
+                        if existing is not None and existing != output_colour:
+                            valid = False
+                            break
+                        colour_map[colour] = output_colour
+                    if not valid:
+                        break
+                if valid:
+                    return ArcTransformation(
+                        kind="crop_object",
+                        crop_bbox=input_object.bbox,
+                        preserve_canvas=True,
+                        colour_map=colour_map,
+                        background=output_background,
+                        label="crop_object",
+                    )
         if len(cropped) == len(output_grid) and len(cropped[0]) == len(output_grid[0]):
             colour_map: dict[int, int] = {}
             valid = True
@@ -353,6 +389,7 @@ def infer_transformation(input_grid: Sequence[Sequence[int]] | Grid, output_grid
                 return ArcTransformation(
                     kind="crop_object",
                     crop_bbox=input_object.bbox,
+                    preserve_canvas=False,
                     colour_map=colour_map,
                     background=output_background,
                     label="crop_object",
@@ -392,7 +429,15 @@ def merge_transformations(transformations: Iterable[ArcTransformation | None]) -
 
 
 def score_transformation(transformation: ArcTransformation, examples: Sequence[ArcExample]) -> dict[str, float]:
-    exact = sum(1 for example in examples if example.output_grid is not None and transformation.matches(example.input_grid, example.output_grid))
+    exact = 0
+    for example in examples:
+        if example.output_grid is None:
+            continue
+        try:
+            if transformation.matches(example.input_grid, example.output_grid):
+                exact += 1
+        except (IndexError, ValueError):
+            continue
     train_accuracy = exact / max(1, len(examples))
     simplicity = 1.0 / (1.0 + transformation.complexity())
     consistency = 1.0 if exact == len(examples) else train_accuracy

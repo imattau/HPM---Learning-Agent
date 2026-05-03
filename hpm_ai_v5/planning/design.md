@@ -174,6 +174,20 @@ This stays agent-side. The core still receives normalized structures, but the
 agent now learns which adapter composition turns raw input into the right
 structure for that task family.
 
+## Next benchmark: Open Adapter Discovery
+
+Open Adapter Discovery pushes AAC one step further:
+
+- compare candidate adapter compositions on a support set
+- reuse a learned adapter profile on a held-out query task
+- defer cleanly when the adapter library cannot represent the task
+- separate solvable numeric/grid families from an unsupported graph family
+
+This is the first benchmark that tests the boundary of the adapter catalog
+itself. It checks whether the system can choose among known adapter
+compositions and still refuse unsupported structure instead of forcing a bad
+representation.
+
 ## Next benchmark: CTW
 
 The next benchmark is Compositional Transformation World.
@@ -204,7 +218,7 @@ The benchmark is intentionally simple:
 - different next symbol
 - score only on the ambiguous `B` positions
 
-The fix is a `PrefixBufferPreprocessor`:
+The fix is a `PrefixBufferAdapter`:
 
 - maintain the last two raw symbols
 - expose them as structured state before the core
@@ -214,3 +228,24 @@ The fix is a `PrefixBufferPreprocessor`:
 
 The adapter is in place and the buffered benchmark now passes by using that
 history window as short-term memory. The core remains unchanged.
+
+More generally, the newer numeric transforms belong in the adapter layer:
+
+- `PrefixBufferAdapter`
+- `StateFusionAdapter`
+- `NormalisationAdapter`
+- `DifferencingAdapter`
+- `RollingStatsAdapter`
+- `AutocorrelationAdapter`
+- `EntropyAdapter`
+- `SymbolicAdapter`
+
+The high-value canonical adapter set also includes:
+
+- `RecentBufferAdapter`
+- `DeltaBufferAdapter`
+- `FlattenGridAdapter`
+- `ConnectedComponentsAdapter`
+- `GridPostprocessor`
+- `ActionSequenceUnpacker`
+- `ValidationOnlyAdapter`

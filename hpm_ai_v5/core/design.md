@@ -282,10 +282,21 @@ Prefix Disambiguation Task isolates the short-term memory gap:
 This keeps the failure mode honest. The core remains unchanged; the missing
 structure is exposed in the benchmark instead of being patched around.
 
-The adapter-side fix is a `PrefixBufferPreprocessor` that feeds the last two
+The adapter-side fix is a `PrefixBufferAdapter` that feeds the last two
 raw symbols into the state before the core sees it. In v5 it also keeps a small
 transition memory keyed by the buffered history, which lets the benchmark
 distinguish ambiguous prefixes without changing the core.
+
+The adapter layer now also owns the canonical structural transforms used by the
+benchmarks:
+
+- recent-history buffers
+- delta buffers
+- grid flattening
+- connected-component extraction
+- grid reconstruction
+- macro-action unpacking
+- validation-only output checks
 
 ## Reasoning contract
 
