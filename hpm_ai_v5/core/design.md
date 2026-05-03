@@ -521,3 +521,35 @@ The engine provides REGION IDENTIFICATION; Q-learning provides POLICY IMPROVEMEN
 - `polygraph_every_n_steps=1`, `polygraph_confidence_skip=0.99`: primary engine confidence hits 0.9+ quickly; the skip threshold must be near-1.0 for the polygraph to actually run
 - `polygraph_min_patterns=0`: use 0 not 2+; even 1 episode can give enough patterns
 - Binary exploration (sign-flip) is more useful than Gaussian noise for discrete control: it creates clear differential reward signals
+
+## Q-table-as-postprocessor: architecture and findings
+
+### The feedback loop
+
+The postprocessor is the right place for policy learning because it has access at every step to:
+- `packet.context["reward"]` — the actual env reward from the previous step (via carry_context)
+- `action.selected_pattern` — which state region the engine matched
+- `packet.context["raw_observation"]` — full current state
+- `packet.context["last_action"]` — what was executed
+
+This means the postprocessor can maintain a Q-table and update it at each step without a separate agent layer. The carry_context mechanism (`PipelineResult.carry_context`) threads postprocessor outputs back into the next preprocessing cycle, closing the loop:
+
+```
+preprocess → engine → postprocess → [carry_context]
+     ↑                                      ↓
+     └──────────────────────────────────────┘
+```
+
+### Key engineering lessons
+
+**Terminal reward must be carried forward**: `context["reward"]` is always 1.0 during an episode. When `env.step()` returns `reward=0.0` (done=True), the episode resets and carry is cleared — the terminal penalty never reaches the Q-update. Fix: initialise `carry = {"reward": 0.0}` at episode start, merge actual reward into carry after `env.step()`.
+
+**Absolute Q-diff, not relative confidence**: when Q-values saturate near 10 (common with gamma=0.9 and step rewards of 1.0), the relative difference `|q_pos - q_neg| / (q_pos + q_neg)` ≈ 0.01 even when discrimination is meaningful. Use absolute `|q_pos - q_neg| > threshold` as the gate.
+
+**State resolution determines Q-table utility**: a 2-bit `(sign_angle, sign_ang_vel)` Q-table (4 states) learns correct policy for 3 of 4 quadrants but the `(-angle, +ang_vel)` quadrant is ambiguous — optimal action depends on magnitude ratio, which the coarse state loses. CartPole requires at least 4-bit encoding (magnitude buckets) for a genuinely useful Q-table.
+
+### The pattern-as-Q-table equivalence
+
+The binary_sign polygraph view `(sign_angle, sign_ang_vel, sign_action)` gives the PatternEngine 8 distinct states. With retroactive reward reinforcement, the engine's pattern utility scores play the same role as Q-values — patterns for correct (state, action) pairs accumulate higher utility than patterns for incorrect pairs. This is a direct HPM encoding of a Q-table without any separate data structure.
+
+The limitation is the same: 8 patterns can't resolve the magnitude ambiguity in the `(-angle, +ang_vel)` quadrant.
