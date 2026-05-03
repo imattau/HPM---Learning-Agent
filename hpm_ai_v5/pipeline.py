@@ -35,12 +35,21 @@ class HPMPipeline:
         *,
         polygraph_generator: PolygraphGenerator | None = None,
         polygraph_evaluator: PolygraphEvaluator | None = None,
+        polygraph_every_n_steps: int = 1,
+        polygraph_min_patterns: int = 0,
+        polygraph_confidence_skip: float = 0.85,
     ) -> None:
         self.preprocessor = preprocessor
         self.engine = engine
         self.postprocessor = postprocessor
         self.polygraph_generator = polygraph_generator
         self.polygraph_evaluator = polygraph_evaluator or PolygraphEvaluator()
+        self.polygraph_every_n_steps = polygraph_every_n_steps
+        self.polygraph_min_patterns = polygraph_min_patterns
+        self.polygraph_confidence_skip = polygraph_confidence_skip
+        self._step_count: int = 0
+        self._cached_polygraph_scores: dict | None = None
+        self._cached_selected_view: str | None = None
         self.view_engines: dict[str, PatternEngine] = {}
         self.preprocessing_pipeline = AdapterRegistry()
         self.postprocessing_pipeline = AdapterRegistry()
@@ -62,89 +71,110 @@ class HPMPipeline:
         if not packet.states:
             raise ValueError("Preprocessing pipeline produced no state")
         preprocessed_state = packet.states[-1]
-        
+
         # Use goal from packet as it might have been modified by adapters (e.g., RewardToGoalAdapter)
         active_goal = packet.goal or {}
-        
+
         preprocessed = PreprocessedInput(state=preprocessed_state, context=dict(preprocessed_state.context), raw=raw, packet=packet)
         plan_horizon = int(active_goal.get("plan_horizon", 1))
-        
+
+        # Always observe and act on the primary engine first
+        self.engine.observe(preprocessed.state)
+        action = self.engine.act(goal=active_goal, horizon=plan_horizon)
+
         if self.polygraph_generator is None:
-            self.engine.observe(preprocessed.state)
-            action = self.engine.act(goal=active_goal, horizon=plan_horizon)
             polygraph_scores = None
-        else:
-            views = self.polygraph_generator.generate(raw, context=preprocessed.context)
-            polygraph_scores = {}
-            view_actions: dict[str, Action] = {}
-            for view in views:
-                engine = self.view_engines.setdefault(view.name, PatternEngine())
-                engine.observe(view.state)
-                polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
-                view_actions[view.name] = engine.act(goal=active_goal, horizon=plan_horizon)
-
-            selected_view = self.polygraph_evaluator.select_view(polygraph_scores)
-            long_horizon = plan_horizon > 1 or bool(active_goal.get("planning_mode") == "long")
             polygraph_agreement = None
+        else:
+            # Determine whether to run the polygraph this step
+            should_run_polygraph = (
+                self._step_count % self.polygraph_every_n_steps == 0
+                and len(self.engine.store.patterns) >= self.polygraph_min_patterns
+                and action.confidence < self.polygraph_confidence_skip
+            )
 
-            if long_horizon:
-                polygraph_agreement = self.polygraph_evaluator.agreement(view_actions, polygraph_scores)
-                if polygraph_agreement.selected_key is not None:
-                    for view_name, candidate_action in view_actions.items():
-                        if self.polygraph_evaluator._action_key(candidate_action) == polygraph_agreement.selected_key:
-                            selected_view = view_name
-                            action = candidate_action
-                            break
-                    else:
-                        selected_view = selected_view or (views[0].name if views else None)
-                        action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
+            if should_run_polygraph:
+                views = self.polygraph_generator.generate(raw, context=preprocessed.context)
+                polygraph_scores = {}
+                # Observe and score all views cheaply
+                for view in views:
+                    engine = self.view_engines.setdefault(view.name, PatternEngine())
+                    engine.observe(view.state)
+                    polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
+
+                selected_view = self.polygraph_evaluator.select_view(polygraph_scores)
+                if selected_view is None and views:
+                    selected_view = views[0].name
+
+                # Only call act() on the selected view engine
+                if selected_view is not None and selected_view in self.view_engines:
+                    selected_action = self.view_engines[selected_view].act(goal=active_goal, horizon=plan_horizon)
                 else:
-                    selected_view = selected_view or (views[0].name if views else None)
-                    action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
-                action = Action(
-                    action_type=action.action_type,
-                    value=action.value,
-                    confidence=action.confidence,
-                    selected_pattern=action.selected_pattern,
-                    selected_sequence=action.selected_sequence,
-                    selected_view=selected_view,
-                    trace={
-                        **action.trace,
-                        "polygraph_scores": {name: score.score for name, score in polygraph_scores.items()},
-                        "polygraph_agreement": None
-                        if polygraph_agreement is None
-                        else {
-                            "selected_key": polygraph_agreement.selected_key,
-                            "support": polygraph_agreement.support,
-                            "dispersion": polygraph_agreement.dispersion,
-                            "score": polygraph_agreement.score,
+                    selected_action = action
+
+                # Cache for future skipped steps
+                self._cached_polygraph_scores = polygraph_scores
+                self._cached_selected_view = selected_view
+
+                long_horizon = plan_horizon > 1 or bool(active_goal.get("planning_mode") == "long")
+                polygraph_agreement = None
+
+                if long_horizon:
+                    # Build a single-entry actions dict for agreement (only selected view acted)
+                    view_actions = {selected_view: selected_action} if selected_view is not None else {}
+                    polygraph_agreement = self.polygraph_evaluator.agreement(view_actions, polygraph_scores)
+                    if polygraph_agreement.selected_key is not None:
+                        action = selected_action
+                    else:
+                        action = selected_action
+                    action = Action(
+                        action_type=action.action_type,
+                        value=action.value,
+                        confidence=action.confidence,
+                        selected_pattern=action.selected_pattern,
+                        selected_sequence=action.selected_sequence,
+                        selected_view=selected_view,
+                        trace={
+                            **action.trace,
+                            "polygraph_scores": {name: score.score for name, score in polygraph_scores.items()},
+                            "polygraph_agreement": None
+                            if polygraph_agreement is None
+                            else {
+                                "selected_key": polygraph_agreement.selected_key,
+                                "support": polygraph_agreement.support,
+                                "dispersion": polygraph_agreement.dispersion,
+                                "score": polygraph_agreement.score,
+                            },
+                            "selection_mode": "agreement",
                         },
-                        "selection_mode": "agreement",
-                    },
-                    forecast=action.forecast,
-                )
+                        forecast=action.forecast,
+                    )
+                else:
+                    selected_polygraph_score = polygraph_scores.get(selected_view) if selected_view is not None else None
+                    polygraph_bias = 0.05 * selected_polygraph_score.score if selected_polygraph_score is not None else 0.0
+                    confidence = max(0.0, min(1.0, selected_action.confidence + polygraph_bias))
+                    action = Action(
+                        action_type=selected_action.action_type,
+                        value=selected_action.value,
+                        confidence=confidence,
+                        selected_pattern=selected_action.selected_pattern,
+                        selected_sequence=selected_action.selected_sequence,
+                        selected_view=selected_view,
+                        trace={
+                            **selected_action.trace,
+                            "polygraph_scores": {name: score.score for name, score in polygraph_scores.items()},
+                            "selected_polygraph_score": None if selected_polygraph_score is None else selected_polygraph_score.score,
+                            "selection_mode": "single_view",
+                        },
+                        forecast=selected_action.forecast,
+                    )
             else:
-                if selected_view is None:
-                    selected_view = views[0].name if views else None
-                action = view_actions[selected_view] if selected_view is not None and selected_view in view_actions else self.engine.act(goal=active_goal, horizon=plan_horizon)
-                selected_polygraph_score = polygraph_scores.get(selected_view) if selected_view is not None else None
-                polygraph_bias = 0.05 * selected_polygraph_score.score if selected_polygraph_score is not None else 0.0
-                confidence = max(0.0, min(1.0, action.confidence + polygraph_bias))
-                action = Action(
-                    action_type=action.action_type,
-                    value=action.value,
-                    confidence=confidence,
-                    selected_pattern=action.selected_pattern,
-                    selected_sequence=action.selected_sequence,
-                    selected_view=selected_view,
-                    trace={
-                        **action.trace,
-                        "polygraph_scores": {name: score.score for name, score in polygraph_scores.items()},
-                        "selected_polygraph_score": None if selected_polygraph_score is None else selected_polygraph_score.score,
-                        "selection_mode": "single_view",
-                    },
-                    forecast=action.forecast,
-                )
+                # Polygraph skipped — use cached scores, no additional act() calls
+                polygraph_scores = self._cached_polygraph_scores
+                polygraph_agreement = None
+                # action already set from primary engine above
+
+        self._step_count += 1
 
         output = None
         if action.action_type == "apply_delta":
@@ -152,8 +182,6 @@ class HPMPipeline:
             post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=[self.postprocessor.name])
             output = post_packet.validated_output
 
-        if self.polygraph_generator is None:
-            polygraph_agreement = None
         return PipelineResult(
             input=preprocessed,
             action=action,

@@ -115,7 +115,10 @@ class CartpoleBenchmark:
             preprocessor=self.state_adapter,
             engine=self.engine,
             postprocessor=self.postprocessor,
-            polygraph_generator=PhysicsPolygraphGenerator()
+            polygraph_generator=PhysicsPolygraphGenerator(),
+            polygraph_every_n_steps=5,
+            polygraph_min_patterns=3,
+            polygraph_confidence_skip=0.8,
         )
         self.pipeline.register_preprocessor(self.normaliser)
         self.pipeline.register_preprocessor(self.reward_adapter)
