@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .adapter import AdapterPacket, AdapterRegistry
@@ -22,6 +22,7 @@ class PipelineResult:
     output: Any | None
     polygraph_scores: dict[str, PolygraphScore] | None = None
     polygraph_agreement: PolygraphAgreement | None = None
+    carry_context: dict = field(default_factory=dict)
 
 
 class HPMPipeline:
@@ -177,10 +178,12 @@ class HPMPipeline:
         self._step_count += 1
 
         output = None
+        carry_context: dict = {}
         if action.action_type == "apply_delta":
             post_packet = AdapterPacket(raw=raw, goal=packet.goal, context=dict(preprocessed.context), core_action=action)
             post_packet = self.postprocessing_pipeline.run(post_packet, target_outputs=list(self.postprocessing_pipeline.adapters.keys()))
             output = post_packet.validated_output
+            carry_context = {k[6:]: v for k, v in post_packet.context.items() if k.startswith("carry_")}
 
         return PipelineResult(
             input=preprocessed,
@@ -188,4 +191,5 @@ class HPMPipeline:
             output=output,
             polygraph_scores=polygraph_scores,
             polygraph_agreement=polygraph_agreement,
+            carry_context=carry_context,
         )

@@ -15,7 +15,7 @@ from ..agents import ScoringWeightAdaptationAgent
 from ..core import PatternEngine
 from ..pipeline import HPMPipeline
 from ..polygraphs.action_policy import ActionPolygraphGenerator
-from ..postprocessors.physics import BinaryExplorationPostprocessor, CartpoleForecastPostprocessor
+from ..postprocessors.physics import CartpoleForecastPostprocessor
 
 
 class CartpoleEnv:
@@ -103,7 +103,6 @@ class CartpoleBenchmark:
         self.td_error = TDErrorAdapter(error_alpha=0.1)
         self.reward_adapter = RewardToGoalAdapter(decay=0.95)
         
-        self.exploration = BinaryExplorationPostprocessor(epsilon=0.3)
         self.postprocessor = CartpoleForecastPostprocessor(
             action_index=2,
             confidence_threshold=0.6,
@@ -122,7 +121,6 @@ class CartpoleBenchmark:
         self.pipeline.register_preprocessor(self.normaliser)
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.td_error)
-        self.pipeline.register_postprocessor(self.exploration)
 
     def run(self, episodes: int = 50, max_steps: int = 1000, global_episode_start: int = 0, total_episodes: int = 100) -> CartpoleResult:
         episode_lengths = []
@@ -137,7 +135,7 @@ class CartpoleBenchmark:
             
             # Decay epsilon based on global progress
             global_ep = global_episode_start + ep
-            self.exploration.epsilon = max(epsilon_min, epsilon_start * (1 - global_ep / total_episodes))
+            self.postprocessor.q_epsilon = max(epsilon_min, epsilon_start * (1 - global_ep / total_episodes))
             
             # Reset engine history for new episode
             self.engine.history = []
@@ -146,17 +144,19 @@ class CartpoleBenchmark:
             done = False
             last_action = 0.0
             prev_forecast = None
-            
+            carry: dict = {}
+
             while not done and steps < max_steps:
                 # 1. Get adaptive weights from SWA
                 swa_weights = self.swa.current_weights("cartpole")
-                
+
                 # Step the pipeline
                 context = {
                     "reward": 1.0 if steps > 0 else 0.0,
                     "last_action": last_action,
                     "prev_forecast": prev_forecast,
-                    "action_index": 5  # sin(theta) index in (a0,a1,a2,pos,vel,sin,cos,ang_vel,err)
+                    "action_index": 5,  # sin(theta) index in (a0,a1,a2,pos,vel,sin,cos,ang_vel,err)
+                    **carry,
                 }
                 
                 # Goal with learned adaptive weights and sequence execution enabled
@@ -202,6 +202,7 @@ class CartpoleBenchmark:
                     running_utility
                 )
                 
+                carry = result.carry_context
                 last_action = action
                 steps += 1
                 

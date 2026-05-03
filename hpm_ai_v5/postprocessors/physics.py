@@ -40,10 +40,19 @@ class CartpoleForecastPostprocessor:
         action_index: int = 2,
         confidence_threshold: float = 0.6,
         max_blend_alpha: float = 0.4,
+        q_alpha: float = 0.15,
+        q_gamma: float = 0.9,
+        q_epsilon_start: float = 0.3,
     ) -> None:
         self.action_index = action_index
         self.confidence_threshold = confidence_threshold
         self.max_blend_alpha = max_blend_alpha
+        self.q_alpha = q_alpha
+        self.q_gamma = q_gamma
+        self.q_epsilon = q_epsilon_start
+        self.q_table: dict[tuple[str, float], float] = {}
+        self._prev_pattern: str | None = None
+        self._prev_action: float = 0.0
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         if not isinstance(packet.core_action, Action):
@@ -56,9 +65,6 @@ class CartpoleForecastPostprocessor:
         context = context or {}
 
         # Weak baseline: sign(angle) only — ~40 steps alone.
-        # The engine must learn angular velocity and position corrections
-        # to extend beyond this floor. Using the full PD controller as the
-        # baseline makes the benchmark trivial (heuristic alone scores 500/500).
         raw_obs = context.get("raw_observation", {})
         angle = float(raw_obs.get("angle", context.get("angle", 0.0)))
         heuristic_action = 1.0 if angle > 0 else -1.0
@@ -73,12 +79,10 @@ class CartpoleForecastPostprocessor:
             fv = action.forecast.value
             if isinstance(fv, (tuple, list, np.ndarray)) and len(fv) > 0:
                 if len(fv) <= 4:
-                    # Short action polygraph view — fv[0] is last_action or action_angle_product
                     raw_val = float(np.sign(fv[0])) if fv[0] != 0.0 else 1.0
                     engine_action = float(np.clip(raw_val, -1.0, 1.0))
                 elif len(fv) > self.action_index:
                     raw_val = float(fv[self.action_index])
-                    # De-normalise: RunningNormaliserAdapter stores mean/scale in context
                     means = context.get("normalisation_mean", [])
                     scales = context.get("normalisation_scale", [])
                     if (
@@ -98,9 +102,54 @@ class CartpoleForecastPostprocessor:
         if engine_action is not None and confidence >= self.confidence_threshold:
             alpha = min(self.max_blend_alpha, (confidence - self.confidence_threshold) * 2.0)
             blended = (1.0 - alpha) * heuristic_action + alpha * engine_action
-            result = 1.0 if blended > 0 else -1.0
+            heuristic_result = 1.0 if blended > 0 else -1.0
         else:
-            result = heuristic_action
+            heuristic_result = heuristic_action
+
+        # --- Q-table policy ---
+        reward = float(context.get("reward", 0.0))
+        matched_pattern = action.selected_pattern.name if action.selected_pattern else "none"
+
+        # Q-update from previous step
+        if self._prev_pattern is not None:
+            key_prev = (self._prev_pattern, self._prev_action)
+            q_prev = self.q_table.get(key_prev, 0.0)
+            q_next_pos = self.q_table.get((matched_pattern, 1.0), 0.0)
+            q_next_neg = self.q_table.get((matched_pattern, -1.0), 0.0)
+            max_q_next = max(q_next_pos, q_next_neg)
+            td_target = reward + self.q_gamma * max_q_next
+            self.q_table[key_prev] = q_prev + self.q_alpha * (td_target - q_prev)
+
+        # Q-action selection
+        q_pos = self.q_table.get((matched_pattern, 1.0), 0.0)
+        q_neg = self.q_table.get((matched_pattern, -1.0), 0.0)
+        if abs(q_pos - q_neg) > 0.01:
+            q_action = 1.0 if q_pos > q_neg else -1.0
+            q_confidence = abs(q_pos - q_neg) / (abs(q_pos) + abs(q_neg) + 1e-8)
+        else:
+            q_action = heuristic_result
+            q_confidence = 0.0
+
+        # ε-greedy: with probability q_epsilon, explore with random action
+        import random
+        if self.q_epsilon > 0 and random.random() < self.q_epsilon:
+            result = 1.0 if random.random() < 0.5 else -1.0
+        else:
+            # Greedy: use Q-action if confident, else heuristic
+            result = q_action if q_confidence > 0.1 else heuristic_result
+
+        # Write carry_context (prefixed with carry_) into context dict
+        context["carry_q_action"] = result
+        context["carry_q_confidence"] = q_confidence
+        context["carry_q_value"] = max(q_pos, q_neg)
+        context["carry_matched_pattern"] = matched_pattern
+        context["carry_q_table_size"] = len(self.q_table)
+
+        context["carry_q_epsilon"] = self.q_epsilon
+
+        # Update state for next step
+        self._prev_pattern = matched_pattern
+        self._prev_action = result
 
         return result
 
