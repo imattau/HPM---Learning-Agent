@@ -15,7 +15,8 @@ from ..agents import ScoringWeightAdaptationAgent
 from ..core import PatternEngine
 from ..pipeline import HPMPipeline
 from ..polygraphs.physics import PhysicsPolygraphGenerator
-from ..postprocessors.numeric import MultiNumericPostprocessor, ExplorationPostprocessor
+from ..postprocessors.numeric import ExplorationPostprocessor
+from ..postprocessors.physics import CartpoleForecastPostprocessor
 
 
 class CartpoleEnv:
@@ -104,8 +105,12 @@ class CartpoleBenchmark:
         self.reward_adapter = RewardToGoalAdapter(decay=0.95)
         
         self.exploration = ExplorationPostprocessor(epsilon=0.2, noise_scale=0.05)
-        self.postprocessor = MultiNumericPostprocessor()
-        
+        self.postprocessor = CartpoleForecastPostprocessor(
+            action_index=2,
+            confidence_threshold=0.6,
+            max_blend_alpha=0.4,
+        )
+
         self.pipeline = HPMPipeline(
             preprocessor=self.state_adapter,
             engine=self.engine,
@@ -115,9 +120,6 @@ class CartpoleBenchmark:
         self.pipeline.register_preprocessor(self.normaliser)
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.td_error)
-        
-        # Register exploration before clipping
-        self.pipeline.register_postprocessor(self.exploration)
 
     def run(self, episodes: int = 50, max_steps: int = 1000, global_episode_start: int = 0, total_episodes: int = 100) -> CartpoleResult:
         episode_lengths = []
@@ -164,25 +166,11 @@ class CartpoleBenchmark:
                 
                 result = self.pipeline.step(obs, goal=goal, context=context)
 
-                # Always compute the PD heuristic as the baseline action
-                angle = obs.get("angle", 0.0)
-                ang_vel = obs.get("angular_velocity", 0.0)
-                position = obs.get("position", 0.0)
-                velocity = obs.get("velocity", 0.0)
-                signal = angle + 0.3 * ang_vel + 0.05 * position + 0.02 * velocity
-                heuristic_action = 1.0 if signal > 0 else -1.0
-
-                # Only blend in the engine action if it has high confidence
-                confidence = result.action.confidence if result.action else 0.0
-                engine_action = float(result.output) if result.output is not None else None
-                if engine_action is not None and confidence >= 0.6:
-                    # High-confidence blend: engine nudges the heuristic direction
-                    alpha = min(0.4, (confidence - 0.6) * 2.0)
-                    action = float(np.sign((1 - alpha) * heuristic_action + alpha * engine_action))
-                    if action == 0.0:
-                        action = heuristic_action
-                else:
-                    action = heuristic_action
+                # Action comes from CartpoleForecastPostprocessor — heuristic
+                # baseline with confidence-gated engine blending.
+                action = float(result.output) if result.output is not None else (
+                    1.0 if (obs.get("angle", 0.0) + 0.3 * obs.get("angular_velocity", 0.0)) > 0 else -1.0
+                )
 
                 # Store normalized forecast for TD error in next step
                 if result.action and result.action.forecast:
