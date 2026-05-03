@@ -9,6 +9,30 @@ import numpy as np
 from ..adapter import AdapterPacket
 from ..core import Action
 
+# View-specific state key extractors for per-view Q-tables
+_VIEW_STATE_KEYS = {
+    "binary_sign": lambda obs, ctx: (
+        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
+        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
+    ),
+    "action_angle": lambda obs, ctx: (
+        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
+        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
+        float(ctx.get("last_action", 0.0)),
+    ),
+    "action_stability": lambda obs, ctx: (
+        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
+        min(2, int(float(ctx.get("derived_error", 0.0)) / 0.05)),  # 3 stability buckets
+    ),
+    "action_alignment": lambda obs, ctx: (
+        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
+        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
+    ),
+    "action_history_pattern": lambda obs, ctx: (
+        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
+    ),
+}
+
 
 class CartpoleForecastPostprocessor:
     """Convert a PatternEngine forecast into a CartPole action.
@@ -51,8 +75,12 @@ class CartpoleForecastPostprocessor:
         self.q_gamma = q_gamma
         self.q_epsilon = q_epsilon_start
         self.q_table: dict[tuple, float] = {}
+        self.view_q_tables: dict[str, dict[tuple, float]] = {}
         self._prev_state_key: tuple | None = None
         self._prev_action: float = 0.0
+        self._prev_view_states: dict[str, tuple] = {}
+        # pipeline reference injected externally (optional)
+        self.pipeline = None
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         if not isinstance(packet.core_action, Action):
@@ -106,10 +134,22 @@ class CartpoleForecastPostprocessor:
         else:
             heuristic_result = heuristic_action
 
-        # --- Q-table policy ---
-        reward = float(context.get("reward", 0.0))
+        # --- Delta-error shaped reward ---
+        # Negative when error grew (wrong action), positive when it shrank.
+        # Terminal steps get a large negative reward (-1.0).
+        _MAX_ERROR = 0.15
+        derived_error = float(context.get("derived_error", 0.0))
+        prev_derived_error = float(context.get("prev_derived_error", 0.0))
+        binary_reward = float(context.get("reward", 0.0))
 
-        # Compute binary sign state key from raw observation
+        if binary_reward == 0.0:
+            shaped_reward = -1.0
+        else:
+            delta_error = derived_error - prev_derived_error
+            shaped_reward = -delta_error / _MAX_ERROR
+            shaped_reward = max(-1.0, min(1.0, shaped_reward))
+
+        # 4-state key: (sign_angle, sign_ang_vel) — compact enough to converge quickly
         raw_obs = context.get("raw_observation", {})
         angle = float(raw_obs.get("angle", 0.0))
         ang_vel = float(raw_obs.get("angular_velocity", 0.0))
@@ -117,48 +157,102 @@ class CartpoleForecastPostprocessor:
         sign_ang_vel = 1.0 if ang_vel > 0 else -1.0
         q_state_key = (sign_angle, sign_ang_vel)
 
-        # Q-update from previous step
+        # Q-update for primary Q-table from previous step using shaped reward
         if self._prev_state_key is not None:
             key_prev = (self._prev_state_key, self._prev_action)
             q_prev = self.q_table.get(key_prev, 0.0)
             q_next_pos = self.q_table.get((q_state_key, 1.0), 0.0)
             q_next_neg = self.q_table.get((q_state_key, -1.0), 0.0)
             max_q_next = max(q_next_pos, q_next_neg)
-            td_target = reward + self.q_gamma * max_q_next
+            td_target = shaped_reward + self.q_gamma * max_q_next
             self.q_table[key_prev] = q_prev + self.q_alpha * (td_target - q_prev)
 
-        # Q-action selection
+        # Q-action selection from primary table
         q_pos = self.q_table.get((q_state_key, 1.0), 0.0)
         q_neg = self.q_table.get((q_state_key, -1.0), 0.0)
-        # Use absolute difference — Q-values near 10 make relative ratios tiny
-        # even when discrimination is meaningful.
         q_diff = abs(q_pos - q_neg)
         if q_diff > 0.01:
             q_action = 1.0 if q_pos > q_neg else -1.0
-            q_confidence = q_diff  # absolute, not relative
+            q_confidence = q_diff
         else:
             q_action = heuristic_result
             q_confidence = 0.0
 
-        # ε-greedy: with probability q_epsilon, explore with random action
+        # --- Per-view Q-tables with weighted voting ---
+        view_votes: list[tuple[float, float]] = []  # (action, weight)
+
+        pipeline = self.pipeline
+        current_view_states: dict[str, tuple] = {}
+
+        for view_name, state_fn in _VIEW_STATE_KEYS.items():
+            view_state = state_fn(raw_obs, context)
+            current_view_states[view_name] = view_state
+
+            view_qtable = self.view_q_tables.setdefault(view_name, {})
+
+            # Update this view's Q-table if we have a previous state
+            prev_view_state = self._prev_view_states.get(view_name)
+            if prev_view_state is not None:
+                vkey_prev = (prev_view_state, self._prev_action)
+                vq_prev = view_qtable.get(vkey_prev, 0.0)
+                vq_next_pos = view_qtable.get((view_state, 1.0), 0.0)
+                vq_next_neg = view_qtable.get((view_state, -1.0), 0.0)
+                max_vq_next = max(vq_next_pos, vq_next_neg)
+                vtd_target = shaped_reward + self.q_gamma * max_vq_next
+                view_qtable[vkey_prev] = vq_prev + self.q_alpha * (vtd_target - vq_prev)
+
+            # Get view reliability from polygraph score
+            if pipeline is not None and pipeline._cached_polygraph_scores:
+                score_obj = pipeline._cached_polygraph_scores.get(view_name)
+                view_weight = max(0.1, score_obj.score if score_obj is not None else 0.1)
+            else:
+                view_weight = 0.1
+
+            # Vote based on this view's Q-table
+            vq_pos = view_qtable.get((view_state, 1.0), 0.0)
+            vq_neg = view_qtable.get((view_state, -1.0), 0.0)
+            v_diff = vq_pos - vq_neg
+            if abs(v_diff) > 0.01:
+                view_votes.append((1.0 if v_diff > 0 else -1.0, view_weight))
+
+        # Also add primary Q-table vote
+        if q_diff > 0.01:
+            view_votes.append((q_action, 1.0))
+
+        # Weighted voting: sum weights for +1 and -1
+        pos_weight = sum(w for a, w in view_votes if a > 0)
+        neg_weight = sum(w for a, w in view_votes if a < 0)
+
+        if pos_weight + neg_weight > 0:
+            ensemble_action = 1.0 if pos_weight > neg_weight else -1.0
+            ensemble_confidence = abs(pos_weight - neg_weight) / (pos_weight + neg_weight)
+        else:
+            ensemble_action = heuristic_result
+            ensemble_confidence = 0.0
+
+        # Use ensemble if it has meaningful confidence, else heuristic
+        greedy_result = ensemble_action if ensemble_confidence > 0.1 else heuristic_result
+
+        # ε-greedy exploration
         import random
         if self.q_epsilon > 0 and random.random() < self.q_epsilon:
             result = 1.0 if random.random() < 0.5 else -1.0
         else:
-            # Greedy: use Q-action when any meaningful difference exists
-            result = q_action if q_diff > 0.01 else heuristic_result
+            result = greedy_result
 
-        # Write carry_context (prefixed with carry_) into context dict
+        # Write carry_context
         context["carry_q_action"] = result
         context["carry_q_confidence"] = q_confidence
         context["carry_q_value"] = max(q_pos, q_neg)
         context["carry_q_state_key"] = q_state_key
         context["carry_q_table_size"] = len(self.q_table)
         context["carry_q_epsilon"] = self.q_epsilon
+        context["carry_prev_derived_error"] = derived_error  # this step's error becomes next step's prev
 
         # Update state for next step
         self._prev_state_key = q_state_key
         self._prev_action = result
+        self._prev_view_states = current_view_states
 
         return result
 

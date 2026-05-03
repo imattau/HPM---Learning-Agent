@@ -121,6 +121,7 @@ class CartpoleBenchmark:
         self.pipeline.register_preprocessor(self.normaliser)
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.td_error)
+        self.postprocessor.pipeline = self.pipeline  # give postprocessor access to view engine scores
 
     def run(self, episodes: int = 50, max_steps: int = 1000, global_episode_start: int = 0, total_episodes: int = 100) -> CartpoleResult:
         episode_lengths = []

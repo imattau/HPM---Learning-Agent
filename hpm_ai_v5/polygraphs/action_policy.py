@@ -79,9 +79,11 @@ class ActionPolygraphGenerator(PolygraphGenerator):
                 state=State(value=v4, context={**context, "view": "action_history_pattern"})
             ))
 
-        # View 5 — binary_sign: 8 possible states encoding (sign_angle, sign_ang_vel, last_action)
-        # The engine learns exactly 8 patterns from this minimal space.
-        # With retroactive reward, high-utility patterns encode the correct action per quadrant.
+        # View 5 — binary_sign: 8 states = (sign_angle, sign_ang_vel, sign_action).
+        # 4-state key for Q-table (sign_angle, sign_ang_vel) — converges quickly
+        # with few episodes. The shaped reward (derived_error-based) provides the
+        # gradient signal that distinguishes correct from incorrect actions within
+        # each quadrant, compensating for the coarse state resolution.
         sign_action = 1.0 if last_action > 0 else -1.0
         v5 = (sign_angle, sign_ang_vel, sign_action)
         if all(math.isfinite(x) for x in v5):
