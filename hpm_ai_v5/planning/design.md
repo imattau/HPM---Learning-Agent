@@ -249,3 +249,55 @@ The high-value canonical adapter set also includes:
 - `GridPostprocessor`
 - `ActionSequenceUnpacker`
 - `ValidationOnlyAdapter`
+
+## Continuous control: CartPole benchmark
+
+CartPole is the first physics control benchmark. Key design learnings:
+
+### Postprocessing is the action interface
+
+The engine forecasts the next state. The state tuple includes an action history
+buffer as its first N elements: `(a0, a1, ..., aN, obs...)`. In the forecast,
+`forecast[N-1]` is the action predicted to have been taken — this is the action
+to execute now. The postprocessor must extract and de-normalise this component,
+not an arbitrary observable (e.g. sin θ).
+
+Selecting the wrong index (e.g. sin θ at index 5 instead of the action at index 2)
+is a silent bug — the output stays in [-1,1] and looks plausible but is meaningless.
+
+### Heuristic-as-baseline, engine-as-refinement
+
+The engine should not replace the heuristic until it has earned confidence.
+The right pattern for continuous control:
+
+1. Compute the domain heuristic unconditionally.
+2. If `engine.confidence >= 0.6`, blend engine action in with weight `alpha ≤ 0.4`.
+3. Below threshold, use pure heuristic.
+
+This prevents the engine from producing catastrophic overrides during the early
+episodes when its pattern store is sparse.
+
+### Position matters as much as angle
+
+Short CartPole runs (~40 steps) are usually caused by the pole angle exceeding
+the threshold. Long runs (200+) are limited by the cart drifting to the position
+boundary (±2.4m). The heuristic must correct both simultaneously:
+
+```
+signal = angle + 0.3 * ang_vel + 0.05 * position + 0.02 * velocity
+```
+
+A pure angle-based heuristic plateaus around 100-200 steps. Adding cart terms
+allows sustained 500-step runs.
+
+### Bang-bang not proportional
+
+Proportional control applies near-zero force when state variables are small.
+For CartPole, this allows small perturbations to accumulate uncorrected.
+Bang-bang (±1) commits to a direction and applies maximum corrective force
+regardless of magnitude — which is correct given the threshold-based termination
+condition.
+
+### Result
+
+Avg 500/500 steps across 20 episodes. 64 patterns, 25 sequences.

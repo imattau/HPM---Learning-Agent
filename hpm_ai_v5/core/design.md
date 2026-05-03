@@ -435,3 +435,57 @@ Agent pipelines are a higher-order behaviour layer above the core. They remain o
 1. Add more adapters only where the core needs them.
 2. Add longer-horizon planning only after the current loop is stable.
 3. Add meta-patterns only after base reuse is proven.
+
+## Continuous control: CartPole learnings
+
+### Pipeline execution bug
+
+`HPMPipeline.step()` was calling `registry.run(packet, target_outputs=[self.preprocessor.name])`.
+The dependency resolver only executes adapters in the chain of the named target.
+Since the primary adapter (`cartpole_state`) has `requires=[]`, all subsequently
+registered adapters (normaliser, reward, TD error) were silently skipped.
+
+**Rule**: use `target_outputs=list(registry.adapters.keys())` when all registered
+adapters should run in order, regardless of dependency chains.
+
+### Sequence explosion
+
+With no sequence cap, CartPole accumulated 952 sequences from only 14 patterns.
+Sequences proliferated because the high-dimensional state caused pattern traces
+to repeat frequently, triggering promotion on nearly every step.
+
+`CoreConfig.max_sequences` (default 256) now caps the sequence store. When the
+cap is hit, the bottom 25% by utility are pruned before admitting the new sequence.
+Physics benchmarks should use `max_sequences=32`.
+
+### Heuristic-engine blending
+
+The PatternEngine forecasts WHAT WILL HAPPEN (next state), not WHAT TO DO (action).
+For continuous control, the postprocessor must correctly derive the action from the
+forecast. The state tuple includes an action history buffer; `forecast[action_index]`
+is the predicted action taken to produce that next state — not an arbitrary component.
+
+However, until the engine has learned a reliable policy, it will override a good
+heuristic with a noisy forecast. The correct pattern is:
+
+1. Always compute a domain heuristic as the baseline action.
+2. Only blend in the engine action when `confidence >= threshold` (e.g. 0.6).
+3. As the engine matures, blend fraction increases and the heuristic recedes.
+
+For CartPole specifically, the heuristic must include BOTH pole angle terms AND
+cart position/velocity terms — the position boundary (±2.4m) kills long runs
+just as often as the angle limit.
+
+```python
+signal = angle + 0.3 * ang_vel + 0.05 * position + 0.02 * velocity
+heuristic_action = 1.0 if signal > 0 else -1.0
+```
+
+Bang-bang is correct here. Proportional control near balance gives near-zero
+force — insufficient to prevent drift — while full-force bang-bang commits
+decisively to the correction direction.
+
+### Result
+
+With these fixes: average 500/500 steps across 20 episodes (was ~40 before).
+64 patterns, 25 sequences — a compact, stable pattern library.
