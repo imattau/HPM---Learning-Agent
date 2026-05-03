@@ -79,4 +79,15 @@ class ActionPolygraphGenerator(PolygraphGenerator):
                 state=State(value=v4, context={**context, "view": "action_history_pattern"})
             ))
 
+        # View 5 — binary_sign: 8 possible states encoding (sign_angle, sign_ang_vel, last_action)
+        # The engine learns exactly 8 patterns from this minimal space.
+        # With retroactive reward, high-utility patterns encode the correct action per quadrant.
+        sign_action = 1.0 if last_action > 0 else -1.0
+        v5 = (sign_angle, sign_ang_vel, sign_action)
+        if all(math.isfinite(x) for x in v5):
+            views.append(PolygraphView(
+                name="binary_sign",
+                state=State(value=v5, context={**context, "view": "binary_sign"})
+            ))
+
         return views

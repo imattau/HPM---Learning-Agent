@@ -50,8 +50,8 @@ class CartpoleForecastPostprocessor:
         self.q_alpha = q_alpha
         self.q_gamma = q_gamma
         self.q_epsilon = q_epsilon_start
-        self.q_table: dict[tuple[str, float], float] = {}
-        self._prev_pattern: str | None = None
+        self.q_table: dict[tuple, float] = {}
+        self._prev_state_key: tuple | None = None
         self._prev_action: float = 0.0
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
@@ -108,21 +108,28 @@ class CartpoleForecastPostprocessor:
 
         # --- Q-table policy ---
         reward = float(context.get("reward", 0.0))
-        matched_pattern = action.selected_pattern.name if action.selected_pattern else "none"
+
+        # Compute binary sign state key from raw observation
+        raw_obs = context.get("raw_observation", {})
+        angle = float(raw_obs.get("angle", 0.0))
+        ang_vel = float(raw_obs.get("angular_velocity", 0.0))
+        sign_angle = 1.0 if angle > 0 else -1.0
+        sign_ang_vel = 1.0 if ang_vel > 0 else -1.0
+        q_state_key = (sign_angle, sign_ang_vel)
 
         # Q-update from previous step
-        if self._prev_pattern is not None:
-            key_prev = (self._prev_pattern, self._prev_action)
+        if self._prev_state_key is not None:
+            key_prev = (self._prev_state_key, self._prev_action)
             q_prev = self.q_table.get(key_prev, 0.0)
-            q_next_pos = self.q_table.get((matched_pattern, 1.0), 0.0)
-            q_next_neg = self.q_table.get((matched_pattern, -1.0), 0.0)
+            q_next_pos = self.q_table.get((q_state_key, 1.0), 0.0)
+            q_next_neg = self.q_table.get((q_state_key, -1.0), 0.0)
             max_q_next = max(q_next_pos, q_next_neg)
             td_target = reward + self.q_gamma * max_q_next
             self.q_table[key_prev] = q_prev + self.q_alpha * (td_target - q_prev)
 
         # Q-action selection
-        q_pos = self.q_table.get((matched_pattern, 1.0), 0.0)
-        q_neg = self.q_table.get((matched_pattern, -1.0), 0.0)
+        q_pos = self.q_table.get((q_state_key, 1.0), 0.0)
+        q_neg = self.q_table.get((q_state_key, -1.0), 0.0)
         if abs(q_pos - q_neg) > 0.01:
             q_action = 1.0 if q_pos > q_neg else -1.0
             q_confidence = abs(q_pos - q_neg) / (abs(q_pos) + abs(q_neg) + 1e-8)
@@ -142,13 +149,12 @@ class CartpoleForecastPostprocessor:
         context["carry_q_action"] = result
         context["carry_q_confidence"] = q_confidence
         context["carry_q_value"] = max(q_pos, q_neg)
-        context["carry_matched_pattern"] = matched_pattern
+        context["carry_q_state_key"] = q_state_key
         context["carry_q_table_size"] = len(self.q_table)
-
         context["carry_q_epsilon"] = self.q_epsilon
 
         # Update state for next step
-        self._prev_pattern = matched_pattern
+        self._prev_state_key = q_state_key
         self._prev_action = result
 
         return result
