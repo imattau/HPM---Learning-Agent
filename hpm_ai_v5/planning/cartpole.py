@@ -144,15 +144,19 @@ class CartpoleBenchmark:
             done = False
             last_action = 0.0
             prev_forecast = None
-            carry: dict = {}
+            # Carry terminal reward=0 from previous episode so the Q-table
+            # penalises the (state, action) that caused failure. Without this,
+            # reward is always 1.0 during an episode and all Q-values saturate
+            # at ~10 with no discrimination between correct and incorrect actions.
+            carry: dict = {"reward": 0.0}
 
             while not done and steps < max_steps:
                 # 1. Get adaptive weights from SWA
                 swa_weights = self.swa.current_weights("cartpole")
 
-                # Step the pipeline
+                # Step the pipeline — reward in carry is from the previous step
+                # (or 0.0 at episode start for terminal penalty from last episode)
                 context = {
-                    "reward": 1.0 if steps > 0 else 0.0,
                     "last_action": last_action,
                     "prev_forecast": prev_forecast,
                     "action_index": 5,  # sin(theta) index in (a0,a1,a2,pos,vel,sin,cos,ang_vel,err)
@@ -202,7 +206,9 @@ class CartpoleBenchmark:
                     running_utility
                 )
                 
-                carry = result.carry_context
+                # Thread actual env reward into carry so Q-update next step
+                # uses the real outcome, including reward=0 on terminal steps.
+                carry = {**result.carry_context, "reward": reward}
                 last_action = action
                 steps += 1
                 

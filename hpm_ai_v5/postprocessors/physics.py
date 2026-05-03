@@ -130,9 +130,12 @@ class CartpoleForecastPostprocessor:
         # Q-action selection
         q_pos = self.q_table.get((q_state_key, 1.0), 0.0)
         q_neg = self.q_table.get((q_state_key, -1.0), 0.0)
-        if abs(q_pos - q_neg) > 0.01:
+        # Use absolute difference — Q-values near 10 make relative ratios tiny
+        # even when discrimination is meaningful.
+        q_diff = abs(q_pos - q_neg)
+        if q_diff > 0.01:
             q_action = 1.0 if q_pos > q_neg else -1.0
-            q_confidence = abs(q_pos - q_neg) / (abs(q_pos) + abs(q_neg) + 1e-8)
+            q_confidence = q_diff  # absolute, not relative
         else:
             q_action = heuristic_result
             q_confidence = 0.0
@@ -142,8 +145,8 @@ class CartpoleForecastPostprocessor:
         if self.q_epsilon > 0 and random.random() < self.q_epsilon:
             result = 1.0 if random.random() < 0.5 else -1.0
         else:
-            # Greedy: use Q-action if confident, else heuristic
-            result = q_action if q_confidence > 0.1 else heuristic_result
+            # Greedy: use Q-action when any meaningful difference exists
+            result = q_action if q_diff > 0.01 else heuristic_result
 
         # Write carry_context (prefixed with carry_) into context dict
         context["carry_q_action"] = result
