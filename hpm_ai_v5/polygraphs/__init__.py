@@ -1,13 +1,26 @@
 """Polygraph generators for v5."""
 
 from .action_policy import ActionPolygraphGenerator
-from .audio import AudioPolygraphGenerator
 from .base import PolygraphGenerator, PolygraphView
-from .graph import GraphPolygraphGenerator
-from .grid import GridPolygraphGenerator
 from .numeric import NumericPolygraphGenerator
-from .text import TextPolygraphGenerator
 from .timeseries import TimeSeriesPolygraphGenerator
+
+
+def __getattr__(name: str):
+    if name == "AudioPolygraphGenerator":
+        from .audio import AudioPolygraphGenerator
+        return AudioPolygraphGenerator
+    if name == "GraphPolygraphGenerator":
+        from .graph import GraphPolygraphGenerator
+        return GraphPolygraphGenerator
+    if name == "GridPolygraphGenerator":
+        from .grid import GridPolygraphGenerator
+        return GridPolygraphGenerator
+    if name == "TextPolygraphGenerator":
+        from .text import TextPolygraphGenerator
+        return TextPolygraphGenerator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ActionPolygraphGenerator",
