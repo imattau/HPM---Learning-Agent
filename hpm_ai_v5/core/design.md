@@ -650,3 +650,118 @@ The cleanest long-term architecture:
 This preserves the HPM substrate while giving RL the role it is genuinely good at
 (credit assignment), without requiring the engine to solve a problem it was not
 designed for.
+
+## Engineering principles from CartPole development
+
+These are implementation-level rules derived from building and debugging the CartPole
+benchmark. They apply across all v5 domain development.
+
+### Context values must be hashable
+
+Any value written to `packet.context` or carried via `carry_context` will eventually
+propagate into `State.context`, which the PatternEngine uses for context-signature hashing.
+Lists and dicts will corrupt the engine silently — patterns accumulate but the context
+match produces no signal.
+
+**Rule**: all context values must be tuples, floats, ints, strings, or booleans.
+Never put lists, dicts, or mutable objects into context. Convert before writing.
+
+```python
+# Wrong
+ctx["error_history"] = [e1, e2, e3]
+
+# Correct
+ctx["error_history"] = tuple([e1, e2, e3])
+```
+
+### The carry_context mechanism strips "carry_" prefix
+
+The pipeline extracts keys prefixed with `carry_` from the post-packet context and strips
+the prefix before returning them in `PipelineResult.carry_context`. A key written as
+`carry_error_history` arrives in the next step as `error_history`.
+
+**Rule**: when reading from carry in an adapter, use the stripped name:
+```python
+# Written by adapter: ctx["carry_error_history"] = value
+# Read next step:     ctx.get("error_history", default)    ← no carry_ prefix
+```
+
+### Dependency resolver uses adapter NAMES, not capability names
+
+`AdapterRegistry.resolve()` treats `adapter.requires` as a list of ADAPTER NAMES.
+Writing `requires = ["state"]` does nothing unless there is an adapter named `"state"`.
+With `target_outputs=list(registry.adapters.keys())`, all adapters run in registration
+order regardless of requires/provides metadata.
+
+**Rule**: the requires/provides fields are documentation only in the current resolver.
+Register adapters in the order they should run. Don't rely on capability-based resolution.
+
+### Trajectory views belong to the engine, not the Q-table ensemble
+
+Views that operate on multi-step trajectories (error trend, oscillation) take many episodes
+to accumulate enough Q-table data to vote usefully. Adding them to the ensemble before
+convergence adds noise and degrades performance.
+
+The correct separation: trajectory views generate polygraph observations for the engine
+to learn multi-step structure from. Single-step views drive the Q-table ensemble for fast
+policy convergence. Both coexist in the pipeline — their roles are distinct.
+
+**Rule**: a new view should be added to the ensemble only when it has a state space
+small enough to converge within the expected episode budget (≈ 40 episodes). Larger or
+slower views feed the engine's pattern library only.
+
+### The adapter registration order determines execution order
+
+Since the resolver runs adapters in registration order (with `target_outputs=all`), the
+registration sequence IS the execution sequence. Always register adapters in the order
+they must run:
+
+1. Raw state extraction (e.g., `CartpoleStateAdapter`)
+2. Normalisation
+3. Reward / goal shaping
+4. Error / TD adapters
+5. Derived feature adapters (e.g., `TrajectoryBufferAdapter`)
+
+### Reward signals must be derivative-of-error for dense learning
+
+Binary survival reward (1.0 per step, 0.0 on failure) gives the Q-table no gradient
+within an episode — every action looks equally good until the terminal step, which is
+never observed because the episode resets before carry is processed.
+
+The shaped reward `-(error_t - error_{t-1}) / max_error` provides a dense signal at
+every step: negative when the error grew (wrong direction), positive when it shrank.
+This is the HPM prediction-error dynamic applied to RL credit assignment.
+
+**Rule**: for any continuous control domain, the reward flowing into the postprocessor
+Q-table must be a derivative or relative measure, not a binary outcome. The environment's
+sparse reward is correct for evaluation; a shaped signal is required for learning.
+
+### Terminal reward must be carried into the next episode
+
+The environment's terminal reward (0.0 on failure) arrives when `done=True`. At that
+point, the episode loop resets and `carry` is cleared — the penalty never reaches the
+Q-update that should penalise the action that caused failure.
+
+Fix: initialise `carry = {"reward": 0.0}` at episode start, so the first step of
+each episode processes the terminal reward from the previous episode. Then update with
+the real reward after `env.step()`.
+
+### Evaluate on the learned policy, not the full training run
+
+RL systems have an exploration phase (high epsilon, random actions) that dominates early
+episode averages. Evaluating the overall mean conflates exploration noise with learned
+performance.
+
+**Rule**: measure the average of the last half of episodes (or a fixed eval window) as
+the benchmark criterion. This reflects the converged policy, not the training curriculum.
+
+### Multi-view ensemble voting converges faster than single Q-table
+
+With 5 views voting with polygraph-score weights, the CartPole Q-table ensemble reaches
+>150 avg by episode 41-60. A single Q-table with the same 4-state encoding took >80
+episodes. The ensemble is more robust because:
+- Views with reliable polygraph scores dominate
+- Views that have not converged contribute low weight (0.1 floor)
+- Different state encodings catch different failure modes
+
+This is a direct implementation of HPM's multi-level concurrent hypothesis evaluation.
