@@ -553,3 +553,100 @@ preprocess → engine → postprocess → [carry_context]
 The binary_sign polygraph view `(sign_angle, sign_ang_vel, sign_action)` gives the PatternEngine 8 distinct states. With retroactive reward reinforcement, the engine's pattern utility scores play the same role as Q-values — patterns for correct (state, action) pairs accumulate higher utility than patterns for incorrect pairs. This is a direct HPM encoding of a Q-table without any separate data structure.
 
 The limitation is the same: 8 patterns can't resolve the magnitude ambiguity in the `(-angle, +ang_vel)` quadrant.
+
+## What the CartPole benchmark reveals about v5 design
+
+### The learning curve is a phase transition, not gradual improvement
+
+In a 120-episode run, the system performs near-randomly for episodes 1-60 (~45 steps avg),
+then snaps into competent policy by episode 61 (150+ steps, sustained). This is not gradual
+learning — it is a phase transition driven by Q-table convergence once the shaped reward
+provides sufficient gradient signal.
+
+This maps directly to HPM's consolidation dynamic: a period of exploration/noise followed
+by rapid stabilisation once the evaluator signal becomes discriminative.
+
+### The HPM engine is not doing the policy learning
+
+The Q-tables in the postprocessor carry the actual control policy. The PatternEngine
+provides state representations and confidence signals, but action selection is classical RL.
+v5 demonstrates that HPM pattern learning can *coexist* with a policy layer — it has not yet
+demonstrated that hierarchical pattern learning *is* the policy.
+
+This is the correct boundary to expose now. Blurring it would mask what is actually working
+and why.
+
+### The shaped reward was the critical unlock
+
+Binary survival reward (1.0 per step, 0.0 on failure) gave Q-tables no gradient within an
+episode — all non-terminal actions looked identical. The delta-error shaped reward:
+
+```
+shaped_reward = -(derived_error_t - derived_error_{t-1}) / max_error
+```
+
+provides a dense signal: negative when angle error grew (wrong action), positive when it
+shrank. This is a direct implementation of HPM's prediction error dynamics — patterns need
+a signal that distinguishes quality of match, not just survival.
+
+**Design rule**: for any continuous control domain, the reward signal fed into the policy
+layer must be derivative-of-error, not binary outcome.
+
+### Per-view ensemble voting is structurally sound but shallow
+
+The 5 polygraph views each maintain independent Q-tables and vote on action with weights
+proportional to polygraph reliability scores. This is the right structural form — multiple
+concurrent hypotheses at different granularities — but currently all views operate at the
+same abstraction level (immediate angle/velocity observations).
+
+Genuine hierarchical voting requires views at different timescales:
+- Short view: immediate correction (sign of angle)
+- Mid view: trajectory trend (error growing or shrinking over 5 steps)
+- Long view: strategy-level (oscillation vs. drift vs. boundary proximity)
+
+The ensemble is the scaffold; hierarchy is the next layer.
+
+### Future development directions
+
+**1. Engine utility as policy signal (absorb the Q-table)**
+
+The binary_sign polygraph view already encodes an implicit Q-table through pattern utility.
+With retroactive `pattern.reward(reward)` reinforcement, utility scores discriminate correct
+from incorrect (state, action) pairs — exactly what a Q-value does. The next step is to
+make this convergence fast enough to replace the external Q-table entirely. The Q-table
+is a crutch that compensates for the engine's slow utility convergence; fixing that
+convergence rate is the deeper solution.
+
+**2. Hierarchical timescale views**
+
+Add polygraph views that operate on sliding windows of 5-20 steps rather than single-step
+observations. A "trajectory view" that encodes (error trend, oscillation frequency,
+boundary proximity) would allow the ensemble to distinguish recovery strategies from
+maintenance strategies — a level of abstraction the current views cannot represent.
+
+**3. Cross-task transfer via PatternManager**
+
+Q-tables currently reset between benchmark runs. A genuine HPM agent would carry learned
+control priors into new environments. The PatternManager and lifecycle architecture are
+already built for this; the next step is to wire CartPole episodes into the cross-episode
+promotion pipeline so the engine retains stable patterns across environment instances.
+
+**4. Meta-pattern layer for policy consolidation**
+
+The phase transition at episode 60 represents a strategy consolidating. An explicit
+meta-pattern layer would represent "I have a reliable policy for this regime" as a
+first-class object — triggering reduced exploration, increased confidence thresholds,
+and strategy transfer to related tasks. This is the HPM analogue of skill consolidation
+in human motor learning.
+
+**5. Engine as state recogniser, Q-table as policy improver**
+
+The cleanest long-term architecture:
+1. PatternEngine identifies which state region the system is in (pattern matching)
+2. Q-table keyed on `(pattern_name, action)` provides action values per region
+3. Utility propagation from reward updates both Q-table and engine pattern utility
+4. As pattern utility converges, the Q-table becomes redundant and can be dropped
+
+This preserves the HPM substrate while giving RL the role it is genuinely good at
+(credit assignment), without requiring the engine to solve a problem it was not
+designed for.
