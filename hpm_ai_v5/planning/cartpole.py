@@ -194,7 +194,6 @@ class CartpoleBenchmark:
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.td_error)
         self.pipeline.register_preprocessor(self.trajectory_buffer)
-        self.postprocessor.pipeline = self.pipeline  # give postprocessor access to view engine scores
 
     def export_transfer_state(self) -> CartpoleTransferState:
         return CartpoleTransferState(
@@ -214,7 +213,6 @@ class CartpoleBenchmark:
         self.swa = copy.deepcopy(state.swa)
         self.pipeline.engine = self.engine
         self.postprocessor.import_state(copy.deepcopy(state.postprocessor_state))
-        self.postprocessor.pipeline = self.pipeline
 
     def save_transfer_state(self, path: str | Path) -> None:
         with Path(path).open("wb") as handle:
