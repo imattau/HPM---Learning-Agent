@@ -15,6 +15,88 @@ raw input
 → validated output
 ```
 
+## Architectural mechanisms
+
+### The carry_context feedback loop
+
+The pipeline closes a feedback loop from postprocessing back into preprocessing:
+
+```
+preprocess → engine → postprocess → [carry_context]
+     ↑                                      ↓
+     └──────────────────────────────────────┘
+```
+
+Any key written to `packet.context` with the prefix `carry_` is extracted by the
+pipeline after postprocessing, stripped of its prefix, and returned in
+`PipelineResult.carry_context`. The benchmark (or agent) merges this into the context
+dict for the next step.
+
+This lets the postprocessor write state that preprocessing adapters read on the next
+step — without coupling the postprocessor to any specific adapter. The carry is
+explicit, inspectable, and survives across the engine boundary.
+
+**What goes in carry_context**:
+- Q-table learning state: current Q-state key, last action, last Q-confidence
+- Trajectory buffers: sliding windows of error, action, or reward history
+- Shaped reward inputs: previous-step error values for delta computation
+- Any signal the postprocessor computes that a preprocessing adapter needs next step
+
+**Rules**:
+- All carry values must be hashable (tuples, floats, ints, strings). Lists corrupt the engine.
+- The `carry_` prefix is stripped on delivery — read `ctx.get("error_history")`, not `ctx.get("carry_error_history")`.
+- Never use carry to pass large objects. Keep carries small and typed.
+
+### Polygraphs: multi-view observation
+
+The polygraph layer generates alternative structural views of the same raw observation.
+Each view is a `PolygraphView(name, state)` passed to a separate PatternEngine instance.
+
+**Why multiple views**: a single state encoding loses information. Different encodings
+expose different structural regularities — one view may produce dense reliable patterns
+while another fragments on the same data. The polygraph layer lets the system discover
+which encoding is useful for a given domain without committing to one at design time.
+
+**Scoring**: each view engine is scored by a reliability metric (concentration, density,
+fragmentation). Views with stable reusable patterns score higher. Unreliable views
+lose influence without being removed.
+
+**Polygraph vs primary engine**:
+- Primary engine: full-dimensional state, used for action selection and forecasting
+- Polygraph views: compact encodings, used for multi-hypothesis pattern learning and Q-table voting
+
+**Configuration rules** (from physics benchmarks):
+- `polygraph_every_n_steps=1`: run polygraph every step for control tasks
+- `polygraph_confidence_skip=0.99`: the primary engine hits 0.9 confidence fast; set skip near 1.0 or polygraphs never fire
+- `polygraph_min_patterns=0`: don't wait for a minimum pattern count before scoring
+
+**When to add a new view**: when you have a compact state encoding (≤8 states) that
+captures a meaningful structural distinction the primary engine's full state obscures.
+Don't add a view for every feature combination — add one when you can name what
+structural property it isolates.
+
+**Trajectory vs single-step views**: trajectory views (multi-step window encodings)
+take many episodes to accumulate sufficient Q-table data. Add them to the PatternEngine
+polygraph for long-term structure learning, but exclude them from fast-converging
+single-step Q-table ensembles until they have enough data to vote usefully.
+
+### Postprocessor as policy learner
+
+The postprocessor is the correct location for policy learning (Q-tables, action
+selection) because it receives at every step:
+- `packet.context["reward"]` — actual env reward from previous step (via carry)
+- `action.selected_pattern` — which state region the engine matched
+- `packet.context["raw_observation"]` — full current observation
+- `packet.context["last_action"]` — what was executed
+
+A Q-table maintained in the postprocessor can update on every step without a separate
+agent layer. The carry_context loop threads the postprocessor's learned state back into
+preprocessing, closing the RL update cycle.
+
+This keeps RL credit assignment in the postprocessor (where reward and action are both
+known), and pattern learning in the engine (where temporal structure is known). These
+roles are complementary and should not be merged.
+
 ## Purpose
 
 The core operates on structure, not raw content.
