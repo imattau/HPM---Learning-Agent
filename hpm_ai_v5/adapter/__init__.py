@@ -13,6 +13,7 @@ from .recent_buffer import RecentBufferAdapter
 from .registry import AdapterRegistry
 from .reward import RewardAdapter
 from .store_size import PatternStoreSizeAdapter
+from .trajectory_buffer import TrajectoryBufferAdapter
 from .validation_only import ValidationOnlyAdapter
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "PatternStoreSizeAdapter",
     "RecentBufferAdapter",
     "RewardAdapter",
+    "TrajectoryBufferAdapter",
     "ValidationOnlyAdapter",
 ]

@@ -80,16 +80,40 @@ class ActionPolygraphGenerator(PolygraphGenerator):
             ))
 
         # View 5 — binary_sign: 8 states = (sign_angle, sign_ang_vel, sign_action).
-        # 4-state key for Q-table (sign_angle, sign_ang_vel) — converges quickly
-        # with few episodes. The shaped reward (derived_error-based) provides the
-        # gradient signal that distinguishes correct from incorrect actions within
-        # each quadrant, compensating for the coarse state resolution.
         sign_action = 1.0 if last_action > 0 else -1.0
         v5 = (sign_angle, sign_ang_vel, sign_action)
         if all(math.isfinite(x) for x in v5):
             views.append(PolygraphView(
                 name="binary_sign",
                 state=State(value=v5, context={**context, "view": "binary_sign"})
+            ))
+
+        # View 6 — trajectory_trend: multi-step error trend + oscillation pattern.
+        # Encodes whether the pole is getting worse, stable, or recovering across
+        # the last N steps, and whether the error is oscillating (overcorrecting)
+        # or drifting monotonically. This is a longer-timescale view than the
+        # single-step views above.
+        error_trend = float(context.get("error_trend", 0.0))
+        oscillation = float(context.get("oscillation", 0.0))
+        # Discretise trend into 3 buckets: worsening / stable / recovering
+        trend_bucket = 1.0 if error_trend > 0.005 else (-1.0 if error_trend < -0.005 else 0.0)
+        # Discretise oscillation: high (>0.5 sign-change fraction) vs low
+        osc_bucket = 1.0 if oscillation > 0.5 else 0.0
+        v6 = (last_action, trend_bucket, osc_bucket)
+        if all(math.isfinite(x) for x in v6):
+            views.append(PolygraphView(
+                name="trajectory_trend",
+                state=State(value=v6, context={**context, "view": "trajectory_trend"})
+            ))
+
+        # View 7 — recovery_strategy: combines sign_angle with trend and oscillation.
+        # Distinguishes "pole leaning right and worsening" from "pole leaning right
+        # but already recovering" — these require different actions (push vs hold).
+        v7 = (sign_angle, trend_bucket, osc_bucket)
+        if all(math.isfinite(x) for x in v7):
+            views.append(PolygraphView(
+                name="recovery_strategy",
+                state=State(value=v7, context={**context, "view": "recovery_strategy"})
             ))
 
         return views

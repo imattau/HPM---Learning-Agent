@@ -11,6 +11,7 @@ import numpy as np
 from ..adapter import AdapterPacket, AdapterRegistry
 from ..adapter.physics import CartpoleStateAdapter, RewardToGoalAdapter, RunningNormaliserAdapter, TDErrorAdapter
 from ..adapter.recent_buffer import RecentBufferAdapter
+from ..adapter.trajectory_buffer import TrajectoryBufferAdapter
 from ..agents import ScoringWeightAdaptationAgent
 from ..core import PatternEngine
 from ..pipeline import HPMPipeline
@@ -102,6 +103,7 @@ class CartpoleBenchmark:
         self.normaliser = RunningNormaliserAdapter()
         self.td_error = TDErrorAdapter(error_alpha=0.1)
         self.reward_adapter = RewardToGoalAdapter(decay=0.95)
+        self.trajectory_buffer = TrajectoryBufferAdapter(window=5)
         
         self.postprocessor = CartpoleForecastPostprocessor(
             action_index=2,
@@ -121,6 +123,7 @@ class CartpoleBenchmark:
         self.pipeline.register_preprocessor(self.normaliser)
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.td_error)
+        self.pipeline.register_preprocessor(self.trajectory_buffer)
         self.postprocessor.pipeline = self.pipeline  # give postprocessor access to view engine scores
 
     def run(self, episodes: int = 50, max_steps: int = 1000, global_episode_start: int = 0, total_episodes: int = 100) -> CartpoleResult:
