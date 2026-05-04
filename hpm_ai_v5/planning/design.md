@@ -301,3 +301,17 @@ condition.
 ### Result
 
 Avg 500/500 steps across 20 episodes. 64 patterns, 25 sequences.
+
+### CPT carry-forward principles
+
+Cross-Physics Transfer reinforced a small set of rules for future domains:
+
+- Keep preprocessing minimal and explicit.
+- Keep the postprocessor policy path stable and easy to inspect.
+- Use the engine as a recogniser, not as the final control policy.
+- Prefer one strong heuristic plus one stable learned policy over multiple weak
+  action voters.
+- Add extra hypotheses or views only if they improve convergence within the
+  benchmark budget.
+- If a richer representation reduces stability, revert it quickly.
+- Run transfer only after the source policy is already solved and reproducible.

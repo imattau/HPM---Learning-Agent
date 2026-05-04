@@ -9,30 +9,6 @@ import numpy as np
 from ..adapter import AdapterPacket
 from ..core import Action
 
-# View-specific state key extractors for per-view Q-tables
-_VIEW_STATE_KEYS = {
-    "binary_sign": lambda obs, ctx: (
-        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
-        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
-    ),
-    "action_angle": lambda obs, ctx: (
-        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
-        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
-        float(ctx.get("last_action", 0.0)),
-    ),
-    "action_stability": lambda obs, ctx: (
-        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
-        min(2, int(float(ctx.get("derived_error", 0.0)) / 0.05)),  # 3 stability buckets
-    ),
-    "action_alignment": lambda obs, ctx: (
-        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
-        1.0 if obs.get("angular_velocity", 0.0) > 0 else -1.0,
-    ),
-    "action_history_pattern": lambda obs, ctx: (
-        1.0 if obs.get("angle", 0.0) > 0 else -1.0,
-    ),
-}
-
 
 class CartpoleForecastPostprocessor:
     """Convert a PatternEngine forecast into a CartPole action.
@@ -47,9 +23,8 @@ class CartpoleForecastPostprocessor:
     The forecast is in normalised space (StandardScaler). We de-normalise using
     the scaler statistics stored in packet.context by RunningNormaliserAdapter.
 
-    A PD heuristic is always computed as the baseline. The engine action is
-    blended in only when engine confidence >= confidence_threshold, preventing
-    chaotic overrides during early sparse-pattern episodes.
+    A simple heuristic is always computed as the baseline. The engine forecast
+    is treated as an auxiliary directional hint, not as a replacement policy.
 
     Bang-bang output (±1) is used because CartPole's threshold-based termination
     rewards decisive correction over proportional control near balance.
@@ -74,13 +49,30 @@ class CartpoleForecastPostprocessor:
         self.q_alpha = q_alpha
         self.q_gamma = q_gamma
         self.q_epsilon = q_epsilon_start
+        self.learning_enabled = True
         self.q_table: dict[tuple, float] = {}
-        self.view_q_tables: dict[str, dict[tuple, float]] = {}
         self._prev_state_key: tuple | None = None
         self._prev_action: float = 0.0
-        self._prev_view_states: dict[str, tuple] = {}
-        # pipeline reference injected externally (optional)
-        self.pipeline = None
+
+    def export_state(self) -> dict[str, Any]:
+        return {
+            "q_alpha": self.q_alpha,
+            "q_gamma": self.q_gamma,
+            "q_epsilon": self.q_epsilon,
+            "learning_enabled": self.learning_enabled,
+            "q_table": dict(self.q_table),
+            "prev_state_key": self._prev_state_key,
+            "prev_action": self._prev_action,
+        }
+
+    def import_state(self, state: dict[str, Any]) -> None:
+        self.q_alpha = float(state.get("q_alpha", self.q_alpha))
+        self.q_gamma = float(state.get("q_gamma", self.q_gamma))
+        self.q_epsilon = float(state.get("q_epsilon", self.q_epsilon))
+        self.learning_enabled = bool(state.get("learning_enabled", self.learning_enabled))
+        self.q_table = dict(state.get("q_table", {}))
+        self._prev_state_key = state.get("prev_state_key")
+        self._prev_action = float(state.get("prev_action", 0.0))
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         if not isinstance(packet.core_action, Action):
@@ -89,15 +81,53 @@ class CartpoleForecastPostprocessor:
         packet.log(self.name, {"validated_output": packet.validated_output}, role="adapter")
         return packet
 
+    @staticmethod
+    def _fallback_q_state_key(raw_obs: dict[str, Any]) -> tuple[float, float]:
+        angle = float(raw_obs.get("angle", 0.0))
+        ang_vel = float(raw_obs.get("angular_velocity", 0.0))
+        sign_angle = 1.0 if angle > 0 else -1.0
+        sign_ang_vel = 1.0 if ang_vel > 0 else -1.0
+        return (sign_angle, sign_ang_vel)
+
+    @staticmethod
+    def _magnitude_bucket(value: float, thresholds: tuple[float, float]) -> float:
+        magnitude = abs(value)
+        if magnitude < thresholds[0]:
+            bucket = 0.0
+        elif magnitude < thresholds[1]:
+            bucket = 1.0
+        else:
+            bucket = 2.0
+        if value == 0.0:
+            return 0.0
+        return bucket if value > 0 else -bucket
+
+    def _policy_state_key(self, action: Action, raw_obs: dict[str, Any]) -> tuple[Any, ...]:
+        angle = float(raw_obs.get("angle", 0.0))
+        ang_vel = float(raw_obs.get("angular_velocity", 0.0))
+        position = float(raw_obs.get("position", 0.0))
+        velocity = float(raw_obs.get("velocity", 0.0))
+        return (
+            "cartpole_q",
+            self._magnitude_bucket(angle, (0.03, 0.10)),
+            self._magnitude_bucket(ang_vel, (0.25, 0.75)),
+            self._magnitude_bucket(position, (0.5, 1.5)),
+            self._magnitude_bucket(velocity, (0.25, 0.75)),
+        )
+
     def postprocess(self, action: Action, *, context: dict[str, Any] | None = None) -> float:
         context = context or {}
 
-        # Weak baseline: sign(angle) only — ~40 steps alone.
+        # Keep the baseline policy simple and interpretable.
         raw_obs = context.get("raw_observation", {})
         angle = float(raw_obs.get("angle", context.get("angle", 0.0)))
-        heuristic_action = 1.0 if angle > 0 else -1.0
+        ang_vel = float(raw_obs.get("angular_velocity", 0.0))
+        position = float(raw_obs.get("position", 0.0))
+        velocity = float(raw_obs.get("velocity", 0.0))
+        signal = angle + (0.3 * ang_vel) + (0.05 * position) + (0.02 * velocity)
+        heuristic_action = 1.0 if signal > 0 else -1.0
 
-        # Attempt to extract and de-normalise the engine's forecast action.
+        # Treat the engine forecast as a weak directional hint only.
         engine_action: float | None = None
         if (
             action.action_type == "apply_delta"
@@ -125,10 +155,9 @@ class CartpoleForecastPostprocessor:
                             raw_val = raw_val * scale + mean
                     engine_action = float(np.clip(raw_val, -1.0, 1.0))
 
-        # Blend engine action in when confidence is sufficient.
         confidence = action.confidence
         if engine_action is not None and confidence >= self.confidence_threshold:
-            alpha = min(self.max_blend_alpha, (confidence - self.confidence_threshold) * 2.0)
+            alpha = min(0.2, (confidence - self.confidence_threshold) * 1.0)
             blended = (1.0 - alpha) * heuristic_action + alpha * engine_action
             heuristic_result = 1.0 if blended > 0 else -1.0
         else:
@@ -149,16 +178,11 @@ class CartpoleForecastPostprocessor:
             shaped_reward = -delta_error / _MAX_ERROR
             shaped_reward = max(-1.0, min(1.0, shaped_reward))
 
-        # 4-state key: (sign_angle, sign_ang_vel) — compact enough to converge quickly
         raw_obs = context.get("raw_observation", {})
-        angle = float(raw_obs.get("angle", 0.0))
-        ang_vel = float(raw_obs.get("angular_velocity", 0.0))
-        sign_angle = 1.0 if angle > 0 else -1.0
-        sign_ang_vel = 1.0 if ang_vel > 0 else -1.0
-        q_state_key = (sign_angle, sign_ang_vel)
+        q_state_key = self._policy_state_key(action, raw_obs)
 
         # Q-update for primary Q-table from previous step using shaped reward
-        if self._prev_state_key is not None:
+        if self.learning_enabled and self._prev_state_key is not None:
             key_prev = (self._prev_state_key, self._prev_action)
             q_prev = self.q_table.get(key_prev, 0.0)
             q_next_pos = self.q_table.get((q_state_key, 1.0), 0.0)
@@ -178,64 +202,19 @@ class CartpoleForecastPostprocessor:
             q_action = heuristic_result
             q_confidence = 0.0
 
-        # --- Per-view Q-tables with weighted voting ---
-        view_votes: list[tuple[float, float]] = []  # (action, weight)
-
-        pipeline = self.pipeline
-        current_view_states: dict[str, tuple] = {}
-
-        for view_name, state_fn in _VIEW_STATE_KEYS.items():
-            view_state = state_fn(raw_obs, context)
-            current_view_states[view_name] = view_state
-
-            view_qtable = self.view_q_tables.setdefault(view_name, {})
-
-            # Update this view's Q-table if we have a previous state
-            prev_view_state = self._prev_view_states.get(view_name)
-            if prev_view_state is not None:
-                vkey_prev = (prev_view_state, self._prev_action)
-                vq_prev = view_qtable.get(vkey_prev, 0.0)
-                vq_next_pos = view_qtable.get((view_state, 1.0), 0.0)
-                vq_next_neg = view_qtable.get((view_state, -1.0), 0.0)
-                max_vq_next = max(vq_next_pos, vq_next_neg)
-                vtd_target = shaped_reward + self.q_gamma * max_vq_next
-                view_qtable[vkey_prev] = vq_prev + self.q_alpha * (vtd_target - vq_prev)
-
-            # Get view reliability from polygraph score
-            if pipeline is not None and pipeline._cached_polygraph_scores:
-                score_obj = pipeline._cached_polygraph_scores.get(view_name)
-                view_weight = max(0.1, score_obj.score if score_obj is not None else 0.1)
-            else:
-                view_weight = 0.1
-
-            # Vote based on this view's Q-table
-            vq_pos = view_qtable.get((view_state, 1.0), 0.0)
-            vq_neg = view_qtable.get((view_state, -1.0), 0.0)
-            v_diff = vq_pos - vq_neg
-            if abs(v_diff) > 0.01:
-                view_votes.append((1.0 if v_diff > 0 else -1.0, view_weight))
-
-        # Also add primary Q-table vote
-        if q_diff > 0.01:
-            view_votes.append((q_action, 1.0))
-
-        # Weighted voting: sum weights for +1 and -1
-        pos_weight = sum(w for a, w in view_votes if a > 0)
-        neg_weight = sum(w for a, w in view_votes if a < 0)
-
-        if pos_weight + neg_weight > 0:
-            ensemble_action = 1.0 if pos_weight > neg_weight else -1.0
-            ensemble_confidence = abs(pos_weight - neg_weight) / (pos_weight + neg_weight)
+        if q_confidence >= 0.05:
+            greedy_result = q_action
+            selected_source = "primary_q"
+            selected_confidence = min(1.0, q_confidence)
         else:
-            ensemble_action = heuristic_result
-            ensemble_confidence = 0.0
-
-        # Use ensemble if it has meaningful confidence, else heuristic
-        greedy_result = ensemble_action if ensemble_confidence > 0.1 else heuristic_result
+            greedy_result = heuristic_result
+            selected_source = "heuristic"
+            selected_confidence = 0.0
 
         # ε-greedy exploration
         import random
-        if self.q_epsilon > 0 and random.random() < self.q_epsilon:
+        effective_epsilon = self.q_epsilon if self.learning_enabled else 0.0
+        if effective_epsilon > 0 and random.random() < effective_epsilon:
             result = 1.0 if random.random() < 0.5 else -1.0
         else:
             result = greedy_result
@@ -247,12 +226,13 @@ class CartpoleForecastPostprocessor:
         context["carry_q_state_key"] = q_state_key
         context["carry_q_table_size"] = len(self.q_table)
         context["carry_q_epsilon"] = self.q_epsilon
+        context["carry_action_hypothesis_source"] = selected_source
+        context["carry_action_hypothesis_confidence"] = selected_confidence
         context["carry_prev_derived_error"] = derived_error  # this step's error becomes next step's prev
 
         # Update state for next step
         self._prev_state_key = q_state_key
         self._prev_action = result
-        self._prev_view_states = current_view_states
 
         return result
 

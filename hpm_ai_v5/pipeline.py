@@ -154,20 +154,25 @@ class HPMPipeline:
                     selected_polygraph_score = polygraph_scores.get(selected_view) if selected_view is not None else None
                     polygraph_bias = 0.05 * selected_polygraph_score.score if selected_polygraph_score is not None else 0.0
                     confidence = max(0.0, min(1.0, selected_action.confidence + polygraph_bias))
+                    # Keep the primary engine forecast and matched pattern for domains
+                    # like CartPole where the postprocessor expects the full primary
+                    # state semantics. Polygraph views still contribute via reliability
+                    # scores and confidence shaping, but their compact forecasts are not
+                    # assumed to be executable control forecasts.
                     action = Action(
-                        action_type=selected_action.action_type,
-                        value=selected_action.value,
+                        action_type=action.action_type,
+                        value=action.value,
                         confidence=confidence,
-                        selected_pattern=selected_action.selected_pattern,
-                        selected_sequence=selected_action.selected_sequence,
+                        selected_pattern=action.selected_pattern,
+                        selected_sequence=action.selected_sequence,
                         selected_view=selected_view,
                         trace={
-                            **selected_action.trace,
+                            **action.trace,
                             "polygraph_scores": {name: score.score for name, score in polygraph_scores.items()},
                             "selected_polygraph_score": None if selected_polygraph_score is None else selected_polygraph_score.score,
                             "selection_mode": "single_view",
                         },
-                        forecast=selected_action.forecast,
+                        forecast=action.forecast,
                     )
             else:
                 # Polygraph skipped — use cached scores, no additional act() calls

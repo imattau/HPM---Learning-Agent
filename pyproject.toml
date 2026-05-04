@@ -10,6 +10,7 @@ dependencies = [
     "pydantic",
     "ray[default]",
     "numpy",
+    "scikit-image>=0.26.0",
 ]
 
 [build-system]

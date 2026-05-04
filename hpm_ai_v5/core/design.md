@@ -706,12 +706,31 @@ observations. A "trajectory view" that encodes (error trend, oscillation frequen
 boundary proximity) would allow the ensemble to distinguish recovery strategies from
 maintenance strategies — a level of abstraction the current views cannot represent.
 
-**3. Cross-task transfer via PatternManager**
+**3. Cross-physics transfer via PatternManager**
 
-Q-tables currently reset between benchmark runs. A genuine HPM agent would carry learned
-control priors into new environments. The PatternManager and lifecycle architecture are
-already built for this; the next step is to wire CartPole episodes into the cross-episode
-promotion pipeline so the engine retains stable patterns across environment instances.
+This is now the next benchmark after single-environment CartPole convergence. The goal is
+to test whether the learned state recognisers and policy priors transfer across related
+physics variants without retraining from scratch.
+
+Implemented harness scope:
+
+- source training on baseline CartPole
+- parameterized target variants: Heavy, Light, Short, Long
+- snapshot/export of PatternManager archive, engine state, normaliser state, SWA state,
+  and postprocessor Q-tables via agent-side persistence
+- zero-shot evaluation mode that freezes learning and restores the pre-eval state after
+  scoring
+- fine-tune runs from the same seeded snapshot
+- catastrophic-forgetting check by evaluating the fine-tuned agent back on source CartPole
+
+The benchmark answers a sharper question than the original single-task run:
+
+- do sign-based and compact state abstractions survive physics scaling?
+- does the Q-table/postprocessor transfer as a meaningful policy prior?
+- does PatternManager seeding preserve useful patterns without clobbering the source regime?
+
+Current implementation note: the CPT harness is built around the existing parameterized
+CartPole dynamics. Acrobot remains a follow-on environment, not part of the current codebase.
 
 **4. Meta-pattern layer for policy consolidation**
 
@@ -777,6 +796,68 @@ order regardless of requires/provides metadata.
 
 **Rule**: the requires/provides fields are documentation only in the current resolver.
 Register adapters in the order they should run. Don't rely on capability-based resolution.
+
+### Post-/pre-processor design principles from CPT
+
+The CPT benchmark turned the control stack into a useful design test. The main lesson
+is that the preprocessor and postprocessor should stay small, explicit, and stable:
+
+- Preprocessors should build state, normalization, error, and short history features.
+- Postprocessors should turn engine output into action with one stable policy path.
+- Use a simple heuristic baseline first; blend engine output only as a weak hint.
+- Keep the primary policy state compact and semantically stable across episodes.
+- Add extra action hypotheses only if they are easier to interpret than the baseline,
+  not because they are architecturally available.
+- Trajectory views and other slower signals belong in the engine or auxiliary scoring
+  path unless they can converge within the benchmark budget.
+- If a richer control representation lowers performance, revert it quickly.
+
+For other domains, that translates into a KISS rule:
+
+1. Preprocessing should expose the smallest feature set that preserves the domain's
+   decision boundary.
+2. Postprocessing should prefer one clear action source, not a majority of weak ones.
+3. Add extra views or action hypotheses only when they improve convergence on a small
+   validation sweep, not when they simply add diversity.
+4. Treat transfer benchmarks as a gate on stability, not as a place to debug the source
+   control loop.
+
+## Next benchmark: Cross-Physics Transfer (CPT)
+
+Now that CartPole reliably reaches long horizons with the polygraph-weighted Q-table
+postprocessor, the next benchmark is transfer rather than raw within-task learning.
+
+### Environment suite
+
+- `cartpole`: source training environment
+- `cartpole_heavy`: `mass_pole=0.5`
+- `cartpole_light`: `mass_pole=0.02`
+- `cartpole_short`: `length=0.25`
+- `cartpole_long`: `length=1.0`
+
+These variants preserve the action space and task structure while perturbing the dynamics.
+That makes them the right first test for whether the learned structures are physics-invariant
+or just tuned to one set of scales.
+
+### Transfer protocol
+
+1. Train on source CartPole and export a transfer snapshot.
+2. Run zero-shot evaluation on a target variant with learning disabled.
+3. Restore the same source snapshot and fine-tune on the target.
+4. Compare target fine-tune against a scratch baseline.
+5. Evaluate the fine-tuned agent back on source CartPole to measure forgetting.
+
+### Architectural implication
+
+The CPT harness makes the current v5 boundary explicit:
+
+- `PatternManager` and the engine carry recognisers and reusable structure.
+- The CartPole postprocessor carries the fast policy prior through its Q-tables.
+- Evaluation uses frozen snapshots so transfer can be measured without contaminating the seed.
+
+If CPT passes on the parameterized CartPole suite, the next meaningful extension is not more
+within-task tuning. It is moving the same protocol to a structurally different control domain
+such as Acrobot and measuring which abstractions survive that jump.
 
 ### Trajectory views belong to the engine, not the Q-table ensemble
 
