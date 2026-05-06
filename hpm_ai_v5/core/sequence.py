@@ -20,9 +20,15 @@ class PatternSequence:
     utility: float = 0.0
     last_error: float = 0.0
     context_memory: dict[str, float] = field(default_factory=dict)
+    _cached_canon_names: tuple[str, ...] | None = field(default=None, init=False)
 
     def canonical_names(self) -> tuple[str, ...]:
-        return tuple(str(item) for item in canonicalize_sequence(self.pattern_names))
+        if self._cached_canon_names is not None:
+            return self._cached_canon_names
+            
+        res = tuple(str(item) for item in canonicalize_sequence(self.pattern_names))
+        self._cached_canon_names = res
+        return res
 
     def context_score(self, context_signature: str | None) -> float:
         if not context_signature:

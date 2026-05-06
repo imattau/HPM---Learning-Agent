@@ -160,6 +160,35 @@ class PatternEngine:
         sequence.observe_support()
         sequence.reinforce(context_signature, density_boost=1.0, context_boost=1.0)
         self.sequences.append(sequence)
+        
+        # V5 Extension: Automatic Meta-Pattern Promotion
+        # If a sequence is stable and high-utility, promote it to a first-class Pattern
+        if sequence.utility >= 1.5:
+             self.promote_to_meta(sequence.pattern_names)
+
+    def promote_to_meta(self, pattern_names: tuple[str, ...], name: str | None = None) -> Pattern | None:
+        """Compress a sequence of pattern names into a single meta-pattern."""
+        
+        children = []
+        for p_name in pattern_names:
+            child = self.store.get(p_name)
+            if child:
+                children.append(child)
+        
+        if not children:
+            return None
+            
+        meta_name = name or f"meta_{'_'.join(pattern_names)[:16]}"
+        if self.store.get(meta_name):
+            return self.store.get(meta_name)
+            
+        meta = Pattern(
+            name=meta_name,
+            children=children,
+            support=1,
+            utility=0.5 * len(children)
+        )
+        return self.store.add(meta)
 
     def observe(self, state: State) -> MatchResult | None:
         """Observe a new state and update the pattern store from the delta."""
@@ -312,15 +341,19 @@ class PatternEngine:
         if use_sequence:
             path = sequence_path
             forecast = path[-1] if path else self.current_state
+            action_state = path[0] if path else self.current_state
         else:
             path = pattern_path
             forecast = path[-1] if path else self.current_state
+            action_state = path[0] if path else self.current_state
         action_type = "apply_delta" if (pattern is not None or use_sequence) and confidence >= min_confidence else "defer"
-        if action_type == "apply_delta" and use_sequence_macro:
+        if use_sequence_macro:
             action_type = "execute_sequence"
+            # if sequence:
+            #      print(f"  [Engine] Selected sequence for macro execution: {sequence.pattern_names}")
         action_value = None
         if action_type == "apply_delta":
-            action_value = forecast.value
+            action_value = action_state.value
         elif action_type == "execute_sequence" and sequence is not None:
             action_value = list(sequence.pattern_names)
         candidate_pattern_traces = [

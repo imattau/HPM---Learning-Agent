@@ -62,9 +62,21 @@ class Pattern:
     utility: float = 0.0
     last_error: float = 0.0
     context_memory: dict[str, float] = field(default_factory=dict)
+    precision: tuple[float, ...] = field(default_factory=tuple) # Per-slot inverse variance
+    last_used: int = 0
+    created_at: int = 0
+    children: list[Pattern] = field(default_factory=list) # Meta-pattern support
+    _cached_canon_template: tuple[float, ...] | None = field(default=None, init=False)
+    _cached_canon_mode: str | None = field(default=None, init=False)
 
     def canonical_template(self, *, canonicalization_mode: str = "rotation_compression") -> tuple[float, ...]:
-        return tuple(float(item) for item in canonicalize_sequence(self.template, mode=canonicalization_mode))
+        if self._cached_canon_template is not None and self._cached_canon_mode == canonicalization_mode:
+            return self._cached_canon_template
+        
+        res = tuple(float(item) for item in canonicalize_sequence(self.template, mode=canonicalization_mode))
+        self._cached_canon_template = res
+        self._cached_canon_mode = canonicalization_mode
+        return res
 
     def distance(
         self,
@@ -72,20 +84,43 @@ class Pattern:
         *,
         canonicalization_mode: str = "rotation_compression",
         distance_scale: float = 1.0,
+        canon_candidate: tuple[float, ...] | None = None,
     ) -> float:
         candidate = _as_tuple(observation)
         if not self.template:
             return float(len(candidate))
         if all(isinstance(item, Real) for item in candidate + self.template):
-            return _mean_abs_error(
-                self.canonical_template(canonicalization_mode=canonicalization_mode),
-                tuple(float(item) for item in canonicalize_sequence(candidate, mode=canonicalization_mode)),
-                scale=distance_scale,
-            )
-        return 1.0 if canonicalize_sequence(candidate, mode=canonicalization_mode) != canonicalize_sequence(self.template, mode=canonicalization_mode) else 0.0
+            if canon_candidate is None:
+                canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=canonicalization_mode))
+            
+            tpl = self.canonical_template(canonicalization_mode=canonicalization_mode)
+            
+            # Weighted Mean Abs Error using precision
+            limit = min(len(tpl), len(canon_candidate))
+            if not limit:
+                return float(abs(len(tpl) - len(canon_candidate)))
+            
+            total = 0.0
+            total_weight = 0.0
+            for i in range(limit):
+                weight = self.precision[i] if i < len(self.precision) else 1.0
+                total += abs(float(tpl[i]) - float(canon_candidate[i])) * weight
+                total_weight += weight
+            
+            scale = max(1.0, float(distance_scale))
+            avg_err = (total / total_weight) / scale if total_weight > 0 else 0.0
+            length_penalty = abs(len(tpl) - len(canon_candidate)) / max(1.0, max(len(tpl), len(canon_candidate)))
+            return avg_err + length_penalty
+        
+        canon_obs = canonicalize_sequence(candidate, mode=canonicalization_mode) if canon_candidate is None else canon_candidate
+        canon_tpl = canonicalize_sequence(self.template, mode=canonicalization_mode)
+        return 1.0 if canon_obs != canon_tpl else 0.0
 
     def predict(self, state: State) -> State:
         """Predict a one-step continuation."""
+
+        if self.children:
+            return self.children[0].predict(state)
 
         if not self.template:
             return state
@@ -105,6 +140,15 @@ class Pattern:
 
     def simulate(self, state: State, horizon: int = 1) -> list[State]:
         """Simulate a short continuation."""
+
+        if self.children:
+            current = state
+            path: list[State] = []
+            for i in range(max(0, horizon)):
+                child = self.children[i % len(self.children)]
+                current = child.predict(current)
+                path.append(current)
+            return path
 
         current = state
         path: list[State] = []
@@ -136,30 +180,56 @@ class Pattern:
         beta = goal.get("beta", 1.0)
         gamma = goal.get("gamma", 1.0)
         delta = goal.get("delta", 1.0)
+        zeta = goal.get("zeta", 0.0) # Abstraction benefit coefficient
+        
         accuracy = 1.0 / (1.0 + self.last_error)
         density = log1p(max(0.0, self.density))
         context_match = self.context_score(context_signature)
         goal_utility = self.utility + float(goal.get("utility", 0.0))
-        return (alpha * accuracy) + (beta * density) + (gamma * context_match) + (delta * goal_utility)
+        
+        abstraction_benefit = zeta * log1p(len(self.children)) if self.children else 0.0
+        
+        return (alpha * accuracy) + (beta * density) + (gamma * context_match) + (delta * goal_utility) + abstraction_benefit
 
     def update(self, observation: Delta) -> None:
         """Lightweight pattern update on the delta."""
 
+        if self.children:
+            # Meta-patterns don't update their template directly from raw deltas
+            # They are structural compositions.
+            return
+
         candidate = _as_tuple(observation.value)
         if candidate and all(isinstance(item, Real) for item in candidate):
+            # Invalidate cache
+            self._cached_canon_template = None
+            
             if not self.template:
                 self.template = tuple(float(item) for item in canonicalize_sequence(candidate))
+                self.precision = tuple(1.0 for _ in self.template)
             else:
                 limit = min(len(self.template), len(candidate))
-                merged = [
-                    (self.template[index] * (self.support - 1) + float(candidate[index])) / self.support
-                    for index in range(limit)
-                ]
+                
+                # Update template using incremental average
+                new_tpl = list(self.template)
+                new_precision = list(self.precision) if self.precision else [1.0] * len(self.template)
+                
+                for i in range(limit):
+                    diff = float(candidate[i]) - self.template[i]
+                    new_tpl[i] += diff / self.support
+                    
+                    # Update precision (Inverse Variance tracking)
+                    error_sq = diff * diff
+                    variance = (1.0 / new_precision[i]) - 1.0
+                    variance = variance + (error_sq - variance) / self.support
+                    new_precision[i] = 1.0 / (1.0 + variance)
+
                 if len(candidate) > len(self.template):
-                    merged.extend(float(item) for item in candidate[limit:])
-                else:
-                    merged.extend(self.template[limit:])
-                self.template = tuple(float(item) for item in canonicalize_sequence(merged))
+                    new_tpl.extend(float(item) for item in candidate[limit:])
+                    new_precision.extend(1.0 for _ in candidate[limit:])
+                
+                self.template = tuple(new_tpl)
+                self.precision = tuple(new_precision)
         self.last_error = observation.magnitude
 
     def reinforce(self, context_signature: str | None = None, *, density_boost: float = 1.0, context_boost: float = 1.0) -> None:

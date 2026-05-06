@@ -189,3 +189,68 @@ class TDErrorAdapter:
         
         packet.log(self.name, {"sq_error": sq_error, "penalty": penalty}, role="adapter")
         return packet
+
+
+@dataclass(slots=True)
+class AcrobotStateAdapter:
+    """Preprocessor to convert acrobot dict observations to flattened sin/cos tuples
+    with action history and derived error metrics."""
+
+    name: str = "acrobot_state"
+    action_history_len: int = 3
+    requires: list[str] = field(default_factory=list)
+    provides: list[str] = field(default_factory=lambda: ["state"])
+    _action_buffer: deque[float] = field(init=False)
+
+    def __post_init__(self):
+        self._action_buffer = deque([0.0] * self.action_history_len, maxlen=self.action_history_len)
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        raw = packet.raw
+        if not isinstance(raw, dict):
+            raise TypeError(f"AcrobotStateAdapter expects a dict, got {type(raw).__name__}")
+
+        theta1 = float(raw.get("theta1", 0.0))
+        theta2 = float(raw.get("theta2", 0.0))
+        theta1_dot = float(raw.get("theta1_dot", 0.0))
+        theta2_dot = float(raw.get("theta2_dot", 0.0))
+        
+        # Include last action in state if available in context, and update buffer
+        last_action = float(packet.context.get("last_action", 0.0))
+        self._action_buffer.append(last_action)
+        
+        # 1. Action history
+        actions = tuple(self._action_buffer)
+
+        # 2. Derived stability error: distance to top position (theta1=pi, theta2=0)
+        # We want -cos(theta1) to be 1, and cos(theta2) to be 1.
+        # Height of tip: -cos(theta1) - cos(theta1 + theta2)
+        # Goal is height > 1.0 (approx)
+        tip_y = -math.cos(theta1) - math.cos(theta1 + theta2)
+        derived_error = (2.0 - tip_y) + 0.1 * (theta1_dot**2 + theta2_dot**2)
+
+        # Flattened state: (actions..., cos1, sin1, cos2, sin2, v1, v2, error)
+        state_value = actions + (
+            math.cos(theta1), math.sin(theta1),
+            math.cos(theta2), math.sin(theta2),
+            theta1_dot, theta2_dot,
+            derived_error
+        )
+
+        context = dict(packet.context or {})
+        context.update({
+            "domain": "physics",
+            "task": "acrobot",
+            "raw_observation": raw,
+            "flattened_state": state_value,
+            "action_history": actions,
+            "derived_error": derived_error,
+            "tip_y": tip_y,
+        })
+        packet.context = context
+        packet.states.append(State(value=state_value, context=context))
+        packet.log(self.name, {"state": state_value, "derived_error": derived_error}, role="adapter")
+        return packet
+
+    def reset(self):
+        self._action_buffer = deque([0.0] * self.action_history_len, maxlen=self.action_history_len)

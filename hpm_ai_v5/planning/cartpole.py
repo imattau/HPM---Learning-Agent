@@ -247,6 +247,9 @@ class CartpoleBenchmark:
         self.postprocessor.learning_enabled = not evaluate
 
         for ep in range(episodes):
+            print(".", end="", flush=True)
+            if (ep + 1) % 50 == 0:
+                 print(f" {ep + 1}/{episodes}")
             obs = self.env.reset()
             self.reward_adapter.reset()
             self.state_adapter.reset()
@@ -291,6 +294,7 @@ class CartpoleBenchmark:
                     **swa_weights,
                     "delta": swa_weights.get("delta", 1.0) * 5.0, # Amplify utility importance for physics
                     "sequence_execution": True,
+                    "sequence_atomic_threshold": 0.1, # Eagerly use sequences
                     "plan_horizon": 3,
                 }
                 
@@ -298,6 +302,18 @@ class CartpoleBenchmark:
 
                 # Capture pattern matched at this state — used for retroactive reward below
                 last_match = self.engine.last_match
+
+                if not evaluate and result.action:
+                    # Use shaped reward for dense reinforcement
+                    shaped_reward = float(result.carry_context.get("carry_shaped_reward", 0.0))
+                    
+                    # Reward selected pattern
+                    if last_match and last_match.pattern:
+                        last_match.pattern.reward(max(0.0, shaped_reward))
+                    
+                    # Reward selected sequence if it was used
+                    if result.action.selected_sequence:
+                        result.action.selected_sequence.reward(max(0.0, shaped_reward))
 
                 # Action comes from CartpoleForecastPostprocessor — heuristic
                 # baseline with confidence-gated engine blending.
@@ -312,12 +328,6 @@ class CartpoleBenchmark:
                     prev_forecast = None
 
                 obs, reward, done = self.env.step(action)
-
-                # Retroactive pattern reinforcement: reward the pattern that was
-                # active when this action was taken with the environment's feedback.
-                # This ties pattern utility to actual survival, not just observation.
-                if not evaluate and last_match is not None and last_match.pattern is not None:
-                    last_match.pattern.reward(reward)
 
                 # 2. Update SWA agent with performance feedback
                 if not evaluate:

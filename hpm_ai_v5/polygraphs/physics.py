@@ -77,3 +77,60 @@ class PhysicsPolygraphGenerator(PolygraphGenerator):
             ))
 
         return views
+
+
+@dataclass(slots=True)
+class AcrobotPolygraphGenerator(PolygraphGenerator):
+    """Generates specialized views for Acrobot swing-up control."""
+
+    name: str = "acrobot_polygraph"
+
+    def generate(self, raw: Any, *, context: dict[str, Any] | None = None) -> list[PolygraphView]:
+        context = context or {}
+        # state_tuple: (a1, a2, a3, cos1, sin1, cos2, sin2, th1_dot, th2_dot, derived_err)
+        state_tuple = context.get("flattened_state")
+        if not state_tuple or not isinstance(state_tuple, tuple) or len(state_tuple) < 9:
+            return []
+
+        actions = state_tuple[:3]
+        cos1, sin1, cos2, sin2 = state_tuple[3:7]
+        th1_dot, th2_dot = state_tuple[7:9]
+        
+        views = []
+        
+        # 1. Raw View
+        views.append(PolygraphView(
+            name="raw_view",
+            state=State(value=state_tuple, context={**context, "view": "raw"})
+        ))
+
+        # 2. Energy View (Crucial for swing-up)
+        # Potential Energy depends on height of both tips.
+        # Height1 = -cos(th1), Height2 = -cos(th1) - cos(th1+th2)
+        # In the env's state, cos1 is cos(th1), and we need cos(th1+th2).
+        # cos(th1+th2) = cos1*cos2 - sin1*sin2
+        height1 = -cos1
+        height2 = -cos1 - (cos1 * cos2 - sin1 * sin2)
+        potential = height1 + height2
+        # Kinetic energy (approximate)
+        kinetic = 0.5 * (th1_dot**2 + th2_dot**2)
+        energy = potential + kinetic
+        views.append(PolygraphView(
+            name="energy_view",
+            state=State(value=actions + (energy, potential), context={**context, "view": "energy"})
+        ))
+
+        # 3. Elbow View (Focus on the second joint)
+        # For swing-up, the timing of the second joint is the "pump".
+        views.append(PolygraphView(
+            name="elbow_view",
+            state=State(value=actions + (cos2, sin2, th2_dot), context={**context, "view": "elbow"})
+        ))
+
+        # 4. Phase Space View (Velocities only)
+        views.append(PolygraphView(
+            name="phase_view",
+            state=State(value=actions + (th1_dot, th2_dot), context={**context, "view": "phase"})
+        ))
+
+        return views
