@@ -11,7 +11,7 @@ from ..adapter import AdapterPacket
 from ..adapter.changepoint import ChangepointAdapter
 from ..adapter.physics import RewardToGoalAdapter, RunningNormaliserAdapter
 from ..adapter.validation_only import ValidationOnlyAdapter
-from ..agents import ScoringWeightAdaptationAgent
+from ..agents import ScoringWeightAdaptationAgent, SelfAdaptiveAgent
 from ..core import PatternEngine, PatternManager
 from ..core.config import CoreConfig
 from ..pipeline import HPMPipeline
@@ -75,6 +75,15 @@ class RSABenchmark:
         self.pipeline.register_preprocessor(self.td_error)
         self.pipeline.register_preprocessor(self.reward_adapter)
         self.pipeline.register_preprocessor(self.trajectory_buffer)
+        
+        # Self-Adaptive Agent Wrapper
+        self.agent = SelfAdaptiveAgent(
+            name="rsa_agent",
+            core=self.engine,
+            pipeline=self.pipeline,
+            changepoint=self.changepoint,
+            swa=self.swa
+        )
 
     def run(
         self,
@@ -85,7 +94,6 @@ class RSABenchmark:
         detection_points = []
         regime_shifts = []
         
-        epsilon_base = 0.1
         global_ep = 0
         
         for phase in phases:
@@ -104,46 +112,30 @@ class RSABenchmark:
                 env_name = f"cartpole_{config.mass_cart}"
                 
                 for step in range(max_steps):
-                    # 1. Pipeline Step (includes Preprocessing + Polygraphs)
-                    # We pass the SWA-determined weights via the goal parameter
-                    weights = self.swa._weights_for_env(env_name)
-                    res = self.pipeline.step(obs, goal=weights, context={"env": env_name})
+                    # Use the consolidated Agent step
+                    res = self.agent.step_adaptive(obs, env_name=env_name)
                     
-                    # 2. Action Selection (HPM + Epsilon)
-                    if self.swa.rng.random() < epsilon_base:
-                        action = self.swa.rng.randint(0, 1)
+                    # Action Selection (HPM + Epsilon)
+                    if self.agent.swa.rng.random() < self.agent.adaptation_epsilon:
+                        action = self.agent.swa.rng.randint(0, 1)
                     else:
                         action = int(res.action.value[0]) if res.action.value else 0
                     
-                    # 3. Environment Step
+                    # Environment Step
                     next_obs, reward, done = env.step(float(action))
                     total_reward += 1
                     
-                    # 4. Learning Feedback (SWA + Pattern Engine)
-                    # Pipeline.step already updated the engine. We update SWA weights.
-                    state = res.input.state
-                    self.swa.observe_reward(env_name, res.action.selected_pattern, state, float(reward))
+                    # Feedback to SWA layer
+                    self.agent.observe_reward(env_name, res, float(reward))
                     
-                    # 5. Regime Detection via Polygraph Agreement/Score
-                    # We can use the sum of polygraph scores as a proxy for structural stability
-                    pg_sum = sum(s.score for s in res.polygraph_scores.values()) if res.polygraph_scores else 0.5
-                    
-                    cp_packet = AdapterPacket(raw=float(pg_sum))
-                    self.changepoint.run(cp_packet)
-                    
-                    if cp_packet.context.get("regime_changed"):
+                    # Check for detection
+                    if res.carry_context.get("regime_changed"):
                         print(f"\n[!] Regime Shift Detected at Episode {global_ep}, Step {step}")
                         detection_points.append(global_ep)
-                        epsilon_base = 0.4 
-                        for p in self.engine.store.patterns:
-                            p.utility *= 0.6
                     
                     obs = next_obs
                     if done:
                         break
-                
-                # Decay exploration
-                epsilon_base = max(0.01, epsilon_base * 0.98)
                 
                 self.pattern_manager.end_episode(self.engine)
                 episode_lengths.append(total_reward)

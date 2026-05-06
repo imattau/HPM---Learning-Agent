@@ -27,11 +27,6 @@ Library of leaf and meta-patterns.
 - **`match(observation) -> MatchResult`**: Finds closest pattern (Exact, Near, Novel).
 - **`prune()`**: Managed forgetting based on density/utility.
 
-### `PatternManager`
-Cross-episode persistence and promotion.
-- **`end_episode(engine, context)`**: Archives high-utility patterns.
-- **`start_episode(engine, context)`**: Seeds engine with context-relevant knowledge.
-
 ---
 
 ## 2. Pipeline Orchestration (`hpm_ai_v5.pipeline`)
@@ -43,28 +38,26 @@ Orchestrates preprocessing, engine execution, and postprocessing.
 - **`step(raw: Any, goal: dict, context: dict) -> PipelineResult`**: Runs a full cycle.
 - **`register_preprocessor(adapter: Adapter)`**: Adds a stage to the preprocessing chain.
 
-### `PipelineResult`
-- **`input`**: The preprocessed `State`.
-- **`action`**: The HPM-selected `Action`.
-- **`polygraph_scores`**: Reliability metrics from multiple views.
-- **`polygraph_agreement`**: Consensus data from the polygraph evaluator.
-
 ---
 
 ## 3. Adapters & Processing (`hpm_ai_v5.adapter`)
 
 Adapters transform raw data into HPM-compatible states and back.
 
-### Preprocessing Adapters
-- **`UnifiedASTFlattener`**: Converts code (Python, Java, etc.) into a generic structural sequence.
-- **`CartpoleStateAdapter`**: Normalizes physics observations into HPM states.
-- **`UnifiedVocabulary`**: Maps structural tokens to numeric IDs.
-- **`ChangepointAdapter`**: Detects distribution shifts in any signal (e.g., reward or polygraph score).
+### NLP & Bridging Adapters
+- **`NLPTokenizer`**: spaCy-based tokenizer for natural language queries.
+- **`CanonicalPhraser`**: Normalizes synonyms and variable phrases into stable placeholders.
+- **`NL2CodeBridgeAdapter`**: Maps functional linguistic tokens to `UnifiedVocabulary` structural IDs.
+- **`KnowledgeBaseLookup`**: Simulates external dictionary lookup for synonym expansion and semantic hypothesis testing.
 
-### Postprocessing Adapters
-- **`CLTRefinementAdapter`**: Maps abstract code deltas back to language-specific syntax.
-- **`ActionSequenceUnpacker`**: Unrolls `execute_sequence` actions into step-by-step environment commands.
-- **`ValidationOnlyAdapter`**: Simple pass-through for benchmarks requiring external validation.
+### CLT & Code Adapters
+- **`UnifiedASTFlattener`**: Linearizes code (Python, Java) into a universal structural sequence.
+- **`UnifiedStateAdapter`**: Maps universal AST nodes to `UnifiedVocabulary` IDs for the core engine.
+- **`UnifiedVocabulary`**: Shared mapping for string tokens (keywords, functional concepts) to stable numeric IDs.
+
+### Physics & Control Adapters
+- **`CartpoleStateAdapter`**: Normalizes continuous physics observations into HPM-compatible deltas.
+- **`ChangepointAdapter`**: Detects distribution shifts in signals (e.g., reward or polygraph score).
 
 ---
 
@@ -73,12 +66,10 @@ Adapters transform raw data into HPM-compatible states and back.
 Polygraphs provide multi-view reliability and consensus for pattern selection.
 
 ### `PolygraphGenerator`
-- **`generate(packet: AdapterPacket) -> list[PolygraphView]`**: Creates multiple internal representations (e.g., AST view, Skeleton view, Token view).
+Generates multiple internal representations (e.g., Token view, Skeleton view).
+- **`NLPPolygraphGenerator`**: Provides Token, Canonical, Skeleton, and **Semantic** views. The Semantic view leverages `KnowledgeBaseLookup` to resolve linguistic ambiguity.
+- **`CLTPolygraphGenerator`**: Provides Unified Node, Control Skeleton, and **Functional Skeleton** views for cross-modal transfer.
 
 ### `PolygraphEvaluator`
 - **`agreement(view_actions, scores)`**: Calculates the dispersion and support across views to determine the "consensus action."
-
-### Specialized Polygraphs
-- **`CLTPolygraphGenerator`**: Validates structural patterns across language boundaries.
-- **`PhysicsPolygraphGenerator`**: Evaluates prediction reliability in continuous control tasks (CartPole).
-- **`GridPolygraphGenerator`**: Handles spatial/topological patterns (ARC).
+- **`score_engine(engine)`**: Evaluates engine reliability based on pattern concentration and density.

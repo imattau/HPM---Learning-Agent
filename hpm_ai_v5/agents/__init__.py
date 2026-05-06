@@ -2,6 +2,9 @@
 
 from .base import Agent, AgentInput, AgentOutput, BaseAgent
 from .adapter_composition import AACResult, AACTaskResult, AutomaticAdapterComposer
+from .adaptive import SelfAdaptiveAgent
+from .hierarchical_planner import HierarchicalPlanningAgent
+from .layered import LayeredAgent
 from .open_adapter_discovery import (
     OpenAdapterDiscoveryAgent,
     OpenAdapterDiscoveryResult,
@@ -26,6 +29,9 @@ __all__ = [
     "AgentPipeline",
     "BaseAgent",
     "AutomaticAdapterComposer",
+    "HierarchicalPlanningAgent",
+    "LayeredAgent",
+    "SelfAdaptiveAgent",
     "OpenAdapterDiscoveryAgent",
     "OpenAdapterDiscoveryResult",
     "OpenAdapterPipelineSpec",

@@ -42,4 +42,13 @@ class CLTPolygraphGenerator(PolygraphGenerator):
                     state=State(value=skeleton, context={**context, "view": "control_skeleton"})
                 ))
 
+            # 3. Functional Skeleton (Control Flow + Actions)
+            func_nodes = ["U_IF", "U_WHILE", "U_FOR", "U_TRY", "U_CATCH", "U_CALL", "U_RETURN", "U_ASSIGN", "U_THROW"]
+            func_skeleton = tuple(UnifiedVocabulary.get_id(n) for n in unified_ast if n in func_nodes)
+            if func_skeleton:
+                views.append(PolygraphView(
+                    name="functional_skeleton",
+                    state=State(value=func_skeleton, context={**context, "view": "functional_skeleton"})
+                ))
+
         return views
