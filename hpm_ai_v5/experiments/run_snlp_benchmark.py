@@ -118,6 +118,7 @@ class SNLPBenchmark:
         print("\nRunning T2: Delta Induction...")
         self.reset_for_isolation(clear_views=True)
         correct = 0
+        forecast_count = 0
         trials = 50
 
         # Training on sequences: weather -> flight -> buy
@@ -135,6 +136,12 @@ class SNLPBenchmark:
 
             # Capture forecast before observing the next state
             action = self.engine.act()
+
+            # Skip trials where no forecast was made
+            if action.action_type == "defer":
+                continue
+
+            forecast_count += 1
             forecast_value = action.forecast.value if action.forecast else None
 
             # Observe the next state
@@ -152,8 +159,10 @@ class SNLPBenchmark:
                     if dist < 1.0:
                         correct += 1
 
-        acc = correct / trials
-        print(f"  T2 Score: {acc:.2%}")
+        forecast_rate = forecast_count / trials
+        acc = correct / forecast_count if forecast_count > 0 else 0.0
+        print(f"  Forecast Rate: {forecast_rate:.2%} ({forecast_count}/{trials} trials)")
+        print(f"  T2 Score (accuracy among forecasts): {acc:.2%}")
         return acc
 
     def run_t3_slot_filling(self) -> float:
@@ -229,7 +238,7 @@ class SNLPBenchmark:
         ]
 
         # Train on clean data
-        for _ in range(50):
+        for _ in range(100):
             self.reset_for_isolation(clear_views=False)
             intent = random.choice(list(self.templates.keys()))
             self.pipeline.step(self.generate_sentence(intent))
@@ -238,10 +247,10 @@ class SNLPBenchmark:
         scores: list[float] = []
 
         def _get_skeleton_confidence() -> float:
-            view_engine = self.pipeline.view_engines.get("skeleton_view")
-            if view_engine:
-                return view_engine.act().confidence
-            return 0.0
+            view_engine = self.pipeline.view_engines.get("skeleton_bigram_view")
+            if view_engine is None:
+                return 0.0
+            return view_engine.act().confidence
 
         # Clean sentences (label=1 → high confidence expected)
         for _ in range(len(salad_sentences)):
