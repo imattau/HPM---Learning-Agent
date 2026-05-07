@@ -1,75 +1,119 @@
 # HPM v5 API Reference
 
-This document provides a comprehensive reference for the core components, adapter system, and pipeline orchestration of the Hierarchical Pattern Modelling (HPM) v5 framework.
+This document is a concise reference for the current public API of the HPM v5 framework.
 
 ---
 
-## 1. Core Learning Engine (`hpm_ai_v5.core`)
-
-The core engine handles the discovery, stabilization, and composition of structural invariants.
+## 1. Core (`hpm_ai_v5.core`)
 
 ### `PatternEngine`
-The central orchestrator for the HPM learning and acting loop.
-- **`observe(state: State) -> MatchResult | None`**: Processes a new state and updates the `PatternStore`.
-- **`act(goal: Mapping[str, float] | None = None, horizon: int = 1) -> Action`**: Selects a pattern/sequence and provides a forecast.
-- **`promote_to_meta(pattern_names, name=None) -> Pattern`**: **(V5 Extension)** Compresses a sequence into a hierarchical meta-pattern.
+Central learning and acting loop.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `observe` | `(state: State) -> MatchResult \| None` | Processes a state, updates store, sets `last_match` |
+| `act` | `(goal=None, horizon=1, top_k=3) -> Action` | Selects pattern/sequence, returns forecast. `action.confidence` decays over time — use `last_match.status` for discrimination. |
+| `select` | `(goal=None, top_k=3) -> Pattern \| None` | Best concrete pattern for current state |
+| `select_sequence` | `(goal=None) -> PatternSequence \| None` | Best learned sequence |
+| `last_match` | `MatchResult \| None` | Result of most recent `observe()` call |
+
+**`MatchResult.status` values:** `"exact"` / `"near"` / `"novel"` / `"variant"` (after PatternVariant consolidation)
+
+### `Action`
+Returned by `act()`.
+- `action_type`: `"select"` / `"defer"` — check before using forecast
+- `forecast`: `State | None` — single-token state, not a full skeleton prediction
+- `confidence`: decaying float — **do not use for input discrimination**
 
 ### `Pattern`
 A structural invariant (delta template).
-- **`template`**: Numerical delta representation.
-- **`precision`**: Per-slot inverse variance ( Heteroscedastic matching).
-- **`children`**: List of patterns for hierarchical composition.
-- **`predict(state) -> State`**: One-step forecast.
-- **`distance(observation) -> float`**: Weighted error calculation.
+- `template`: tuple of floats — canonical state representation
+- `support`: int — number of times seen
+- `utility`: float — decaying reward signal
+- `distance(observation, ...) -> float`: weighted distance to an observation
 
 ### `PatternStore`
-Library of leaf and meta-patterns.
-- **`match(observation) -> MatchResult`**: Finds closest pattern (Exact, Near, Novel).
-- **`prune()`**: Managed forgetting based on density/utility.
+In-memory pattern library.
+- `match(observation) -> MatchResult`
+- `learn(observation, name=None) -> Pattern`
+- `get(name) -> Pattern | None`
+- `top_k(observation, k=3) -> list[Pattern]`
+- `register_variant(variant)` — adds a `PatternVariant` (pending ATIS plan)
+- `variants: dict[str, PatternVariant]` — promoted near-duplicate clusters
+- Eviction policy: drops lowest-utility patterns when `max_patterns` is reached
+
+### `PatternSequence`
+A named sequence of pattern references.
+- `simulate(state, horizon, resolver, start_offset=0) -> list[State]`
+
+### `PatternManager`
+Episode-level promotion and consolidation.
+- `start_episode(engine, context=None) -> dict`
+- `end_episode(engine, context=None) -> dict` — runs sequence promotion + `_consolidate_variants()`
+- `_consolidate_variants(engine) -> int` — promotes near-duplicate patterns to `PatternVariant` nodes when store exceeds `config.consolidation_threshold`
+
+### `CoreConfig`
+- `max_patterns: int = 32`
+- `near_threshold: float = 1.0`
+- `exact_threshold: float = 0.0`
+- `consolidation_threshold: float = 0.8` — fraction of `max_patterns` that triggers consolidation
+- `history_limit: int = 10`
+- `density_decay: float = 0.01`
+- `utility_decay: float = 0.005`
 
 ---
 
-## 2. Pipeline Orchestration (`hpm_ai_v5.pipeline`)
-
-The high-level bridge between raw data and core HPM logic.
+## 2. Pipeline (`hpm_ai_v5.pipeline`)
 
 ### `HPMPipeline`
-Orchestrates preprocessing, engine execution, and postprocessing.
-- **`step(raw: Any, goal: dict, context: dict) -> PipelineResult`**: Runs a full cycle.
-- **`register_preprocessor(adapter: Adapter)`**: Adds a stage to the preprocessing chain.
+Orchestrates adapter pipeline → engine → polygraph → postprocessor.
+
+- `step(raw: Any) -> PipelineResult` — full cycle; returns action and polygraph scores
+- `register_preprocessor(adapter: Adapter)` — appends to preprocessing chain
+- `view_engines: dict[str, PatternEngine]` — per-view engines created by polygraph generator
+- `polygraph_confidence_skip: float` — skip polygraph if engine confidence exceeds this (set >1.0 to force always)
 
 ---
 
-## 3. Adapters & Processing (`hpm_ai_v5.adapter`)
+## 3. Adapters (`hpm_ai_v5.adapter`)
 
-Adapters transform raw data into HPM-compatible states and back.
+### NLP
+- **`NLPTokenizer`**: spaCy `en_core_web_sm`; produces `tokens`, `pos_tags`, `lemmas`
+- **`CanonicalPhraser`**: maps lemmas to concept vocabulary (`WEATHER`, `FLIGHT`, etc.)
+- **`SkeletonExtractor`**: POS tags → skeleton groups (`N`, `V`, `D`, `P`, `R`, `C`, `A`); maps `AUX→V`, `PART→R`
+- **`SkeletonNgramAdapter`**: skeleton bigrams stored in `context["skeleton_ngrams"]` only — not appended to `packet.states`
+- **`DeltaEncoder`**: computes first-differing-position delta between consecutive skeletons
+- **`KnowledgeBaseLookup`**: WordNet synonym lookup (max 5 candidates); populates `context["semantic_candidates"]`
+- **`NL2CodeBridgeAdapter`**: maps NL tokens to `U_*` structural IDs (`U_IF`, `U_WHILE`, `U_TRY`, etc.)
 
-### NLP & Bridging Adapters
-- **`NLPTokenizer`**: spaCy-based tokenizer for natural language queries.
-- **`CanonicalPhraser`**: Normalizes synonyms and variable phrases into stable placeholders.
-- **`NL2CodeBridgeAdapter`**: Maps functional linguistic tokens to `UnifiedVocabulary` structural IDs.
-- **`KnowledgeBaseLookup`**: Simulates external dictionary lookup for synonym expansion and semantic hypothesis testing.
+### Code
+- **`UnifiedVocabulary`**: global string→int mapping; `get_id(token) -> int`
 
-### CLT & Code Adapters
-- **`UnifiedASTFlattener`**: Linearizes code (Python, Java) into a universal structural sequence.
-- **`UnifiedStateAdapter`**: Maps universal AST nodes to `UnifiedVocabulary` IDs for the core engine.
-- **`UnifiedVocabulary`**: Shared mapping for string tokens (keywords, functional concepts) to stable numeric IDs.
-
-### Physics & Control Adapters
-- **`CartpoleStateAdapter`**: Normalizes continuous physics observations into HPM-compatible deltas.
-- **`ChangepointAdapter`**: Detects distribution shifts in signals (e.g., reward or polygraph score).
+### Physics / Control
+- **`CartpoleStateAdapter`**: normalises CartPole obs to HPM state tuples with action history buffer
+- **`ChangepointAdapter`**: detects distribution shifts in reward/polygraph signals
 
 ---
 
 ## 4. Polygraphs (`hpm_ai_v5.polygraphs`)
 
-Polygraphs provide multi-view reliability and consensus for pattern selection.
+### View names by generator
 
-### `PolygraphGenerator`
-Generates multiple internal representations (e.g., Token view, Skeleton view).
-- **`NLPPolygraphGenerator`**: Provides Token, Canonical, Skeleton, and **Semantic** views. The Semantic view leverages `KnowledgeBaseLookup` to resolve linguistic ambiguity.
-- **`CLTPolygraphGenerator`**: Provides Unified Node, Control Skeleton, and **Functional Skeleton** views for cross-modal transfer.
+| Generator | View names |
+|-----------|-----------|
+| `NLPPolygraphGenerator` | `token_view`, `canonical_view`, `skeleton_view`, `skeleton_bigram_view`, `delta_view`, `semantic_view_<candidate>` |
+| `CodePolygraphGenerator` | `ast_types`, `token_types`, `skeleton` |
+| `CLTPolygraphGenerator` | `unified_node`, `control_skeleton`, `functional_skeleton` |
+
+**Key rule:** `last_match.status` on a view engine is the correct discrimination signal. `act().confidence` on a view engine decays monotonically and has no discriminative value.
 
 ### `PolygraphEvaluator`
-- **`agreement(view_actions, scores)`**: Calculates the dispersion and support across views to determine the "consensus action."
-- **`score_engine(engine)`**: Evaluates engine reliability based on pattern concentration and density.
+- `agreement(view_actions, scores)` — weighted consensus across views
+- `score_engine(engine)` — reliability score based on pattern concentration
+
+---
+
+## 5. Postprocessors (`hpm_ai_v5.postprocessors`)
+
+- **`ValidationOnlyAdapter`**: passes action through unchanged; used in benchmarks
+- **`UCodeRenderer`** *(pending SCB plan)*: maps `U_*` sequences to Python function skeletons
