@@ -1,4 +1,4 @@
-"""NLP adapters for Symbolic Pattern Matching in HPM v5."""
+"""NLP adapters for structural language processing in HPM v5."""
 
 from __future__ import annotations
 
@@ -18,55 +18,91 @@ class NLPTokenizer(Adapter):
     """Tokenizer for natural language queries using spaCy."""
 
     name: str = "nlp_tokenizer"
+    # Use blank model as we don't have internet to download full models
     nlp: Any = field(default_factory=lambda: spacy.blank("en"), init=False)
     requires: list[str] = field(default_factory=list)
-    provides: list[str] = field(default_factory=lambda: ["tokens", "pos_tags"])
+    provides: list[str] = field(default_factory=lambda: ["tokens", "pos_tags", "lemmas"])
+
+    # Simple rule-based POS tagger for structural benchmark
+    POS_MAP: dict[str, str] = field(default_factory=lambda: {
+        "what": "PRON", "is": "VERB", "the": "DET", "a": "DET", "an": "DET",
+        "in": "ADP", "from": "ADP", "to": "ADP", "on": "ADP", "for": "ADP",
+        "show": "VERB", "tell": "VERB", "book": "VERB", "reserve": "VERB",
+        "buy": "VERB", "purchase": "VERB", "acquire": "VERB", "want": "VERB",
+        "flights": "NOUN", "flight": "NOUN", "weather": "NOUN", "forecast": "NOUN",
+        "conditions": "NOUN", "city": "NOUN", "town": "NOUN", "status": "NOUN",
+        "plane": "NOUN", "journey": "NOUN", "laptop": "NOUN", "ticket": "NOUN",
+        "me": "PRON", "it": "PRON", "i": "PRON", "you": "PRON", "user": "NOUN", "task": "NOUN",
+        "and": "CCONJ", "or": "CCONJ", "if": "SCONJ", "while": "SCONJ",
+        "authenticated": "ADJ", "active": "ADJ", "valid": "ADJ", "immediately": "ADV",
+        "like": "VERB", "would": "AUX",
+    })
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         raw = packet.raw
         if not isinstance(raw, str):
             packet.context["tokens"] = [str(raw)]
             packet.context["pos_tags"] = ["UNKNOWN"]
+            packet.context["lemmas"] = [str(raw).lower()]
             return packet
 
         doc = self.nlp(raw)
-        tokens = [t.text.lower() for t in doc]
-        pos_tags = [t.pos_ for t in doc]
+        tokens = []
+        pos_tags = []
+        lemmas = []
+        
+        for token in doc:
+            if token.is_punct or token.is_space:
+                continue
+            t = token.text.lower()
+            tokens.append(t)
+            # Use POS_MAP or fallback to NOUN for unknown words in this simple implementation
+            pos = self.POS_MAP.get(t, "NOUN")
+            pos_tags.append(pos)
+            lemmas.append(t) # Simple lemma for now
         
         packet.context["tokens"] = tokens
         packet.context["pos_tags"] = pos_tags
+        packet.context["lemmas"] = lemmas
         return packet
 
 
 @dataclass(slots=True)
 class CanonicalPhraser(Adapter):
-    """Replaces synonyms and variable phrases with placeholders."""
+    """Map natural language phrases to a fixed concept vocabulary."""
 
     name: str = "canonical_phraser"
-    synonyms: dict[str, str] = field(default_factory=dict)
-    placeholders: dict[str, str] = field(default_factory=dict)
+    concept_map: dict[str, list[str]] = field(default_factory=lambda: {
+        "BUY": ["buy", "purchase", "acquire", "get", "obtain"],
+        "SELL": ["sell", "sell off", "dispose", "vend"],
+        "WEATHER": ["weather", "forecast", "conditions", "temperature"],
+        "CITY": ["city", "town", "municipality", "metropolis"],
+        "FLIGHT": ["flight", "plane", "air travel", "journey"],
+        "BOOK": ["book", "reserve", "schedule", "arrange"],
+    })
     requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
     provides: list[str] = field(default_factory=lambda: ["canonical_tokens", "state"])
+    
+    _lemma_to_concept: dict[str, str] = field(default_factory=dict, init=False)
+
+    def __post_init__(self):
+        for concept, lemmas in self.concept_map.items():
+            for lemma in lemmas:
+                self._lemma_to_concept[lemma] = concept
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
-        tokens = packet.context.get("tokens", [])
+        lemmas = packet.context.get("lemmas", [])
         canonical_tokens = []
-        bindings = {}
         
-        for token in tokens:
-            canon = self.synonyms.get(token, token)
-            if token in self.placeholders:
-                placeholder = self.placeholders[token]
-                canonical_tokens.append(placeholder)
-                bindings[placeholder] = token
-            else:
-                canonical_tokens.append(canon)
+        for lemma in lemmas:
+            concept = self._lemma_to_concept.get(lemma, lemma)
+            canonical_tokens.append(concept)
 
         packet.context["canonical_tokens"] = canonical_tokens
-        packet.context["parameter_bindings"] = bindings
         
         if canonical_tokens:
             t = canonical_tokens[0]
+            # Map first token to state for basic HPM use
             state_value = (float(UnifiedVocabulary.get_id(t)),)
         else:
             state_value = ()
@@ -76,20 +112,87 @@ class CanonicalPhraser(Adapter):
 
 
 @dataclass(slots=True)
-class ToolSchemaEncoder(Adapter):
-    """Encodes tool signatures into HPM patterns."""
+class SkeletonExtractor(Adapter):
+    """Extract grammatical skeleton as sequence of POS tag groups."""
 
-    name: str = "tool_schema_encoder"
-    requires: list[str] = field(default_factory=list)
-    provides: list[str] = field(default_factory=lambda: ["tool_pattern"])
-
-    def encode(self, tool_name: str, params: list[str]) -> tuple[float, ...]:
-        tool_id = float(UnifiedVocabulary.get_id(tool_name))
-        param_ids = [float(UnifiedVocabulary.get_id(p)) for p in params]
-        return (tool_id,) + tuple(param_ids)
+    name: str = "skeleton_extractor"
+    # Map coarse POS tags to skeleton types
+    POS_GROUP: dict[str, str] = field(default_factory=lambda: {
+        "NOUN": "N", "PROPN": "N",
+        "VERB": "V",
+        "ADJ": "A", "ADV": "A",
+        "DET": "D", "PRON": "P",
+        "ADP": "R", "CCONJ": "C", "SCONJ": "C",
+        "NUM": "NUM",
+        "PUNCT": "PUNCT",
+    })
+    collapse_repeats: bool = True
+    requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
+    provides: list[str] = field(default_factory=lambda: ["skeleton", "state"])
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
+        pos_tags = packet.context.get("pos_tags", [])
+        skeleton = []
+        
+        for pos in pos_tags:
+            group = self.POS_GROUP.get(pos, pos)
+            if self.collapse_repeats and skeleton and skeleton[-1] == group:
+                continue
+            skeleton.append(group)
+            
+        packet.context["skeleton"] = skeleton
+        packet.context["skeleton_str"] = " ".join(skeleton)
+        
+        state_value = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
+        packet.states.append(State(value=state_value, context=packet.context))
         return packet
+
+
+@dataclass(slots=True)
+class DeltaEncoder(Adapter):
+    """Compute structural deltas between consecutive skeleton states."""
+
+    name: str = "delta_encoder"
+    requires: list[str] = field(default_factory=lambda: ["skeleton_extractor"])
+    provides: list[str] = field(default_factory=lambda: ["delta", "state"])
+    
+    _previous_skeleton: tuple[float, ...] | None = field(default=None, init=False)
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        # We need to find the skeleton state value
+        current_skeleton = None
+        for state in reversed(packet.states):
+            if state.context.get("domain") == "nlp_skeleton" or "skeleton" in state.context:
+                current_skeleton = state.value
+                break
+        
+        if current_skeleton is None:
+            return packet
+
+        delta = ()
+        if self._previous_skeleton is not None:
+            # Simple delta: first differing position (old, new)
+            min_len = min(len(self._previous_skeleton), len(current_skeleton))
+            diff_idx = -1
+            for i in range(min_len):
+                if self._previous_skeleton[i] != current_skeleton[i]:
+                    diff_idx = i
+                    break
+            if diff_idx == -1 and len(self._previous_skeleton) != len(current_skeleton):
+                diff_idx = min_len
+            
+            if diff_idx != -1:
+                old = self._previous_skeleton[diff_idx] if diff_idx < len(self._previous_skeleton) else -1.0
+                new = current_skeleton[diff_idx] if diff_idx < len(current_skeleton) else -1.0
+                delta = (old, new)
+        
+        self._previous_skeleton = current_skeleton
+        packet.context["delta"] = delta
+        packet.states.append(State(value=delta, context=packet.context))
+        return packet
+
+    def reset(self):
+        self._previous_skeleton = None
 
 
 @dataclass(slots=True)
@@ -104,6 +207,7 @@ class KnowledgeBaseLookup(Adapter):
         "perform": ["call", "run", "execute"],
         "store": ["set", "assign"],
         "output": ["return", "yield"],
+        "validate": ["check", "if", "verify"],
     })
     requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
     provides: list[str] = field(default_factory=lambda: ["semantic_candidates"])

@@ -1,4 +1,4 @@
-"""NLP polygraphs for Symbolic Pattern Matching in HPM v5."""
+"""NLP polygraphs for structural language processing in HPM v5."""
 
 from __future__ import annotations
 
@@ -18,47 +18,62 @@ class NLPPolygraphGenerator(PolygraphGenerator):
 
     def generate(self, raw: Any, *, context: dict[str, Any] | None = None) -> list[PolygraphView]:
         if not isinstance(raw, str):
-            # If raw is already a token, we handle it as a single-view state
             token_id = float(UnifiedVocabulary.get_id(str(raw)))
             return [PolygraphView(name="token_view", state=State(value=(token_id,), context={**context, "view": "tokens"}))]
             
         context = context or {}
         tokens = context.get("tokens", [])
         canonical_tokens = context.get("canonical_tokens", [])
+        skeleton = context.get("skeleton", [])
+        delta = context.get("delta", ())
         
         views = []
         
         # 1. Token View (Raw surface tokens)
-        token_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in tokens)
-        views.append(PolygraphView(
-            name="token_view",
-            state=State(value=token_values, context={**context, "view": "tokens"})
-        ))
+        if tokens:
+            token_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in tokens)
+            views.append(PolygraphView(
+                name="token_view",
+                state=State(value=token_values, context={**context, "view": "tokens"})
+            ))
         
         # 2. Canonical View (Synonym-normalized tokens)
-        canonical_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in canonical_tokens)
-        views.append(PolygraphView(
-            name="canonical_view",
-            state=State(value=canonical_values, context={**context, "view": "canonical"})
-        ))
+        if canonical_tokens:
+            canonical_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in canonical_tokens)
+            views.append(PolygraphView(
+                name="canonical_view",
+                state=State(value=canonical_values, context={**context, "view": "canonical"})
+            ))
         
-        # 3. Skeleton View (Placeholders and high-signal words only)
-        skeleton = [t for t in canonical_tokens if t.startswith("PARAM_") or len(t) > 3]
-        skeleton_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in skeleton)
-        views.append(PolygraphView(
-            name="skeleton_view",
-            state=State(value=skeleton_values, context={**context, "view": "skeleton"})
-        ))
+        # 3. Skeleton View (POS-based structure)
+        if skeleton:
+            skeleton_values = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
+            views.append(PolygraphView(
+                name="skeleton_view",
+                state=State(value=skeleton_values, context={**context, "view": "skeleton"})
+            ))
+            
+        # 4. Delta View (Structural changes)
+        if delta:
+            views.append(PolygraphView(
+                name="delta_view",
+                state=State(value=delta, context={**context, "view": "delta"})
+            ))
         
-        # 4. Synonym/Semantic Candidate View (New Task)
-        # In a real system, this would call an external dictionary (WordNet/spaCy)
-        # Here we use the context-provided 'semantic_candidates' or a simple proxy
+        # 5. Semantic View (Synonym/Semantic Candidate View)
+        # We try to map ALL tokens to their semantic candidates' canonical IDs if possible
+        # For simplicity in this benchmark, we just use the candidates directly.
         candidates = context.get("semantic_candidates", [])
         if candidates:
-            candidate_values = tuple(float(UnifiedVocabulary.get_id(c)) for c in candidates)
-            views.append(PolygraphView(
-                name="semantic_view",
-                state=State(value=candidate_values, context={**context, "view": "semantic"})
-            ))
+            # We take the first candidate as the primary hypothesis for the state value
+            # This allows matching against patterns learned from that candidate.
+            for cand in candidates[:3]: # Try first few as separate views? 
+                # Actually, PolygraphGenerator expects a list of views.
+                # We can have multiple semantic views!
+                cand_id = float(UnifiedVocabulary.get_id(cand))
+                views.append(PolygraphView(
+                    name=f"semantic_view_{cand}",
+                    state=State(value=(cand_id,), context={**context, "view": "semantic", "candidate": cand})
+                ))
             
         return views
