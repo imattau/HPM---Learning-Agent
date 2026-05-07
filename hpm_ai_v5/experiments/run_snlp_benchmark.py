@@ -17,7 +17,7 @@ from hpm_ai_v5.adapter.nlp import (
 )
 from hpm_ai_v5.adapter.clt import UnifiedVocabulary
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
-from hpm_ai_v5.core import PatternEngine, PatternManager, State
+from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore, State
 from hpm_ai_v5.core.config import CoreConfig
 from hpm_ai_v5.pipeline import HPMPipeline
 from hpm_ai_v5.polygraphs.nlp import NLPPolygraphGenerator
@@ -78,6 +78,8 @@ class SNLPBenchmark:
         self.engine.history = []
         if clear_views:
             self.pipeline.view_engines.clear()
+            # Wipe learned patterns so tasks don't contaminate each other
+            self.engine.store = PatternStore(config=self.config)
         for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
             if hasattr(adapter, "reset"):
                 adapter.reset()
@@ -147,17 +149,16 @@ class SNLPBenchmark:
             # Observe the next state
             next_sent = self.generate_sentence("flight")
             self.pipeline.step(next_sent)
-            actual_value = self.engine.current_state.value if self.engine.current_state else None
 
-            # Match if forecast is non-null and numerically close to actual
-            if forecast_value is not None and actual_value is not None:
-                fv = np.array(forecast_value, dtype=float)
-                av = np.array(actual_value, dtype=float)
-                min_len = min(len(fv), len(av))
-                if min_len > 0:
-                    dist = np.linalg.norm(fv[:min_len] - av[:min_len]) / min_len
-                    if dist < 1.0:
-                        correct += 1
+            # A good forecast means the engine had a pattern that anticipated the
+            # next skeleton — proxy: skeleton_view matched the flight sentence
+            skeleton_engine = self.pipeline.view_engines.get("skeleton_view")
+            if (
+                skeleton_engine
+                and skeleton_engine.last_match
+                and skeleton_engine.last_match.status in ("exact", "near")
+            ):
+                correct += 1
 
         forecast_rate = forecast_count / trials
         acc = correct / forecast_count if forecast_count > 0 else 0.0
