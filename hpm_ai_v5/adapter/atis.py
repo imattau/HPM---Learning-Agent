@@ -20,8 +20,9 @@ def load_atis() -> tuple[list[dict], list[dict]]:
                 data.append({"text": row["text"], "intent": row["intent"]})
         return data
 
-    train = _read_csv("data/atis/atis_train.csv")
-    test = _read_csv("data/atis/atis_test.csv")
+    _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    train = _read_csv(os.path.join(_repo, "data", "atis", "atis_train.csv"))
+    test = _read_csv(os.path.join(_repo, "data", "atis", "atis_test.csv"))
     
     return train, test
 

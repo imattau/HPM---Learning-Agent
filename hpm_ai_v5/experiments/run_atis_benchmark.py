@@ -4,12 +4,12 @@ import random
 from collections import defaultdict
 
 from hpm_ai_v5.adapter.nlp import (
-    NLPTokenizer, CanonicalPhraser, SkeletonExtractor,
-    SkeletonNgramAdapter, KnowledgeBaseLookup, StartOfEpisodeAdapter
+    NLPTokenizer, CanonicalPhraser, NamedEntityCanonicaliser, SkeletonExtractor,
+    SkeletonNgramAdapter, KnowledgeBaseLookup, StartOfEpisodeAdapter,
 )
 from hpm_ai_v5.adapter.atis import load_atis, IntentLabelAdapter
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
-from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore, Pattern
+from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore
 from hpm_ai_v5.core.config import CoreConfig
 from hpm_ai_v5.pipeline import HPMPipeline
 from hpm_ai_v5.polygraphs.nlp import NLPPolygraphGenerator
@@ -21,7 +21,7 @@ class ATISBenchmark:
             max_patterns=2048,
             max_sequences=512,
             history_limit=100,
-            near_threshold=0.4,
+            near_threshold=1.5,
             consolidation_threshold=0.8,
         )
         self.engine = PatternEngine(config=self.config)
@@ -36,6 +36,7 @@ class ATISBenchmark:
         )
         self.pipeline.register_preprocessor(StartOfEpisodeAdapter())
         self.pipeline.register_preprocessor(CanonicalPhraser())
+        self.pipeline.register_preprocessor(NamedEntityCanonicaliser())
         self.pipeline.register_preprocessor(SkeletonExtractor())
         self.pipeline.register_preprocessor(SkeletonNgramAdapter())
         self.pipeline.register_preprocessor(KnowledgeBaseLookup())
@@ -58,66 +59,34 @@ class ATISBenchmark:
         self.engine.history = []
         self.intent_adapter.label = intent
         self.pipeline.step(text)
+        # Track primary engine match
         if self.engine.last_match and self.engine.last_match.pattern:
             self.intent_patterns[intent].append(self.engine.last_match.pattern.name)
+        # Track all view engine matches so they can contribute votes at inference
+        for view_engine in self.pipeline.view_engines.values():
+            if view_engine.last_match and view_engine.last_match.pattern:
+                pname = view_engine.last_match.pattern.name
+                if pname not in self.intent_patterns.get(intent, []):
+                    self.intent_patterns[intent].append(pname)
 
     def _predict_intent(self) -> str | None:
-        # 1. Aggregate votes from all view engines (including primary)
-        all_engines = [("primary", self.engine)] + list(self.pipeline.view_engines.items())
-        
+        """Vote across primary + all view engines using intent_patterns lookup."""
+        all_engines = [self.engine] + list(self.pipeline.view_engines.values())
         intent_votes: dict[str, float] = defaultdict(float)
 
-        def _get_intent_from_pattern(p: Pattern) -> str | None:
-            # Look for intent_label='LABEL' in context signatures
-            best_intent = None
-            max_density = -1.0
-            for sig, density in p.context_memory.items():
-                if "intent_label=" in sig:
-                    try:
-                        # Extract 'LABEL' from intent_label='LABEL'|...
-                        intent = sig.split("intent_label=")[1].split("|")[0].strip("'")
-                        if density > max_density:
-                            max_density = density
-                            best_intent = intent
-                    except IndexError:
-                        continue
-            return best_intent
-
-        for name, engine in all_engines:
+        for engine in all_engines:
             match = engine.last_match
-            if not match:
+            if not match or not match.pattern:
                 continue
-                
-            # Weight votes by match quality
-            weight = 1.0 if match.status == "exact" else (0.5 if match.status in ("near", "variant") else 0.0)
+            weight = 1.0 if match.status == "exact" else 0.5 if match.status == "near" else 0.0
             if weight == 0:
                 continue
-            
-            # Vote from pattern context
-            if match.pattern:
-                intent = _get_intent_from_pattern(match.pattern)
-                if intent:
+            for intent, names in self.intent_patterns.items():
+                if match.pattern.name in names:
                     intent_votes[intent] += weight * match.pattern.utility
-            
-            # Vote from variant
-            if match.status == "variant" and match.variant:
-                for member_name in match.variant.member_names:
-                    member = engine.store.get(member_name)
-                    if member:
-                        intent = _get_intent_from_pattern(member)
-                        if intent:
-                            intent_votes[intent] += weight * member.utility * 0.5
-            
-            # Vote from manual tracking (for primary engine only to avoid noise)
-            if name == "primary" and match.pattern:
-                for intent, names in self.intent_patterns.items():
-                    if match.pattern.name in names:
-                        intent_votes[intent] += weight
-        
-        if intent_votes:
-            return max(intent_votes, key=intent_votes.__getitem__)
-        
-        return None
+                    break
+
+        return max(intent_votes, key=intent_votes.__getitem__) if intent_votes else None
 
     def run_b1(self, train: list[dict], test: list[dict]) -> float:
         print("\nB1: Intent Recognition...")

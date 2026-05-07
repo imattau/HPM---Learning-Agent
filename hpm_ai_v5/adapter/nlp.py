@@ -57,9 +57,16 @@ class NLPTokenizer(Adapter):
             pos_tags.append(token.pos_)
             lemmas.append(token.lemma_.lower())
         
+        ent_types = []
+        for token in doc:
+            if token.is_punct or token.is_space:
+                continue
+            ent_types.append(token.ent_type_ if token.ent_type_ else "")
+
         packet.context["tokens"] = tokens
         packet.context["pos_tags"] = pos_tags
         packet.context["lemmas"] = lemmas
+        packet.context["ent_types"] = ent_types
         return packet
 
 
@@ -73,8 +80,14 @@ class CanonicalPhraser(Adapter):
         "SELL": ["sell", "sell off", "dispose", "vend"],
         "WEATHER": ["weather", "forecast", "conditions", "temperature"],
         "CITY": ["city", "town", "municipality", "metropolis"],
-        "FLIGHT": ["flight", "plane", "air travel", "journey"],
+        "FLIGHT": ["flight", "plane", "air travel", "journey", "fly", "trip"],
         "BOOK": ["book", "reserve", "schedule", "arrange"],
+        "MEAL": ["meal", "food", "dinner", "lunch", "breakfast", "snack"],
+        "AIRFARE": ["airfare", "fare", "price", "cost", "ticket", "charge"],
+        "AIRPORT": ["airport", "hub", "terminal", "airfield"],
+        "DISTANCE": ["distance", "mile", "kilometer", "length"],
+        "CAPACITY": ["capacity", "seat", "seating", "size", "hold", "passenger"],
+        "TIME": ["time", "arrive", "depart", "leave", "schedule", "when", "arrival", "departure"],
     })
     requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
     provides: list[str] = field(default_factory=lambda: ["canonical_tokens", "state"])
@@ -86,24 +99,83 @@ class CanonicalPhraser(Adapter):
             for lemma in lemmas:
                 self._lemma_to_concept[lemma] = concept
 
+    def _get_concept(self, lemma: str) -> str:
+        # 1. Hardcoded map override
+        if lemma in self._lemma_to_concept:
+            return self._lemma_to_concept[lemma]
+        
+        # 2. WordNet Lemma Normalization (Zero-shot)
+        try:
+            import nltk
+            if "/home/mattthomson/nltk_data" not in nltk.data.path:
+                nltk.data.path.append("/home/mattthomson/nltk_data")
+            from nltk.corpus import wordnet
+            
+            # Find the most frequent synset's primary lemma
+            synsets = wordnet.synsets(lemma)
+            if synsets:
+                primary = synsets[0].lemmas()[0].name().replace("_", " ").upper()
+                return primary
+        except Exception:
+            pass
+            
+        return lemma.upper()
+
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         lemmas = packet.context.get("lemmas", [])
         canonical_tokens = []
         
         for lemma in lemmas:
-            concept = self._lemma_to_concept.get(lemma, lemma)
+            concept = self._get_concept(lemma)
             canonical_tokens.append(concept)
 
         packet.context["canonical_tokens"] = canonical_tokens
         
         if canonical_tokens:
-            t = canonical_tokens[0]
-            # Map first token to state for basic HPM use
-            state_value = (float(UnifiedVocabulary.get_id(t)),)
+            # Map all tokens to state for full structural matching
+            state_value = tuple(float(UnifiedVocabulary.get_id(t)) for t in canonical_tokens)
         else:
             state_value = ()
         
         packet.states.append(State(value=state_value, context=packet.context))
+        return packet
+
+
+@dataclass(slots=True)
+class NamedEntityCanonicaliser(Adapter):
+    """Replace entity tokens with their NER type tag for entity-invariant matching.
+
+    'boston' -> 'GPE', 'united' -> 'ORG', 'thursday' -> 'DATE'.
+    Tokens without entity types are left unchanged.
+    Updates tokens, lemmas, and canonical_tokens in context.
+    """
+
+    name: str = "ner_canonicaliser"
+    requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
+    provides: list[str] = field(default_factory=lambda: ["tokens", "lemmas"])
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        tokens = packet.context.get("tokens", [])
+        ent_types = packet.context.get("ent_types", [])
+        canonical = packet.context.get("canonical_tokens", list(tokens))
+
+        new_tokens = []
+        new_lemmas = []
+        new_canonical = []
+        for i, token in enumerate(tokens):
+            ent = ent_types[i] if i < len(ent_types) else ""
+            if ent:
+                new_tokens.append(ent)
+                new_lemmas.append(ent)
+                new_canonical.append(ent)
+            else:
+                new_tokens.append(token)
+                new_lemmas.append(token)
+                new_canonical.append(canonical[i] if i < len(canonical) else token)
+
+        packet.context["tokens"] = new_tokens
+        packet.context["lemmas"] = new_lemmas
+        packet.context["canonical_tokens"] = new_canonical
         return packet
 
 
