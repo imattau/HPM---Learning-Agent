@@ -2,15 +2,14 @@
 from __future__ import annotations
 import random
 from collections import defaultdict
-import numpy as np
 
 from hpm_ai_v5.adapter.nlp import (
     NLPTokenizer, CanonicalPhraser, SkeletonExtractor,
-    SkeletonNgramAdapter, KnowledgeBaseLookup,
+    SkeletonNgramAdapter, KnowledgeBaseLookup, StartOfEpisodeAdapter
 )
 from hpm_ai_v5.adapter.atis import load_atis, IntentLabelAdapter
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
-from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore
+from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore, Pattern
 from hpm_ai_v5.core.config import CoreConfig
 from hpm_ai_v5.pipeline import HPMPipeline
 from hpm_ai_v5.polygraphs.nlp import NLPPolygraphGenerator
@@ -35,6 +34,7 @@ class ATISBenchmark:
             polygraph_generator=NLPPolygraphGenerator(),
             polygraph_confidence_skip=1.1,
         )
+        self.pipeline.register_preprocessor(StartOfEpisodeAdapter())
         self.pipeline.register_preprocessor(CanonicalPhraser())
         self.pipeline.register_preprocessor(SkeletonExtractor())
         self.pipeline.register_preprocessor(SkeletonNgramAdapter())
@@ -62,45 +62,60 @@ class ATISBenchmark:
             self.intent_patterns[intent].append(self.engine.last_match.pattern.name)
 
     def _predict_intent(self) -> str | None:
-        match = self.engine.last_match
-        if match is None:
-            return None
+        # 1. Aggregate votes from all view engines (including primary)
+        all_engines = [("primary", self.engine)] + list(self.pipeline.view_engines.items())
+        
+        intent_votes: dict[str, float] = defaultdict(float)
 
         def _get_intent_from_pattern(p: Pattern) -> str | None:
-            # Look for intent:LABEL in context signatures
+            # Look for intent_label='LABEL' in context signatures
             best_intent = None
             max_density = -1.0
             for sig, density in p.context_memory.items():
-                if "intent:" in sig:
-                    intent = sig.split("intent:")[1].split(",")[0]
-                    if density > max_density:
-                        max_density = density
-                        best_intent = intent
+                if "intent_label=" in sig:
+                    try:
+                        # Extract 'LABEL' from intent_label='LABEL'|...
+                        intent = sig.split("intent_label=")[1].split("|")[0].strip("'")
+                        if density > max_density:
+                            max_density = density
+                            best_intent = intent
+                    except IndexError:
+                        continue
             return best_intent
 
-        # 1. Check primary matched pattern
-        if match.pattern:
-            intent = _get_intent_from_pattern(match.pattern)
-            if intent:
-                return intent
-
-        # 2. Check variant members
-        if match.status == "variant" and match.variant:
-            intent_counts: dict[str, float] = defaultdict(float)
-            for member_name in match.variant.member_names:
-                member = self.engine.store.get(member_name)
-                if member:
-                    intent = _get_intent_from_pattern(member)
-                    if intent:
-                        intent_counts[intent] += member.utility
-            if intent_counts:
-                return max(intent_counts, key=intent_counts.__getitem__)
-
-        # 3. Fallback to manual tracking
-        if match.pattern:
-            for intent, names in self.intent_patterns.items():
-                if match.pattern.name in names:
-                    return intent
+        for name, engine in all_engines:
+            match = engine.last_match
+            if not match:
+                continue
+                
+            # Weight votes by match quality
+            weight = 1.0 if match.status == "exact" else (0.5 if match.status in ("near", "variant") else 0.0)
+            if weight == 0:
+                continue
+            
+            # Vote from pattern context
+            if match.pattern:
+                intent = _get_intent_from_pattern(match.pattern)
+                if intent:
+                    intent_votes[intent] += weight * match.pattern.utility
+            
+            # Vote from variant
+            if match.status == "variant" and match.variant:
+                for member_name in match.variant.member_names:
+                    member = engine.store.get(member_name)
+                    if member:
+                        intent = _get_intent_from_pattern(member)
+                        if intent:
+                            intent_votes[intent] += weight * member.utility * 0.5
+            
+            # Vote from manual tracking (for primary engine only to avoid noise)
+            if name == "primary" and match.pattern:
+                for intent, names in self.intent_patterns.items():
+                    if match.pattern.name in names:
+                        intent_votes[intent] += weight
+        
+        if intent_votes:
+            return max(intent_votes, key=intent_votes.__getitem__)
         
         return None
 
@@ -108,8 +123,8 @@ class ATISBenchmark:
         print("\nB1: Intent Recognition...")
         self._reset()
         random.shuffle(train)
-        # Using a smaller subset for speed in this environment if needed, but let's try full 80%
-        train_set = train[:int(len(train) * 0.8)]
+        # Scale training down to 1000 for development speed
+        train_set = train[:1000]
         self.manager.start_episode(self.engine)
         for item in train_set:
             self._train_utterance(item["text"], item["intent"])
@@ -143,12 +158,8 @@ class ATISBenchmark:
         if not novel:
             print("  No novel-token items — skipping")
             return 0.0
-            
-        correct = 0
-        for item in novel:
-            if self._run_and_predict(item["text"]) == item["intent"]:
-                correct += 1
-        
+
+        correct = sum(1 for item in novel if self._run_and_predict(item["text"]) == item["intent"])
         acc = correct / len(novel)
         print(f"  Accuracy: {acc:.2%} ({correct}/{len(novel)} novel-token items)")
         return acc
@@ -157,14 +168,14 @@ class ATISBenchmark:
         print("\nB3: Consolidation Effectiveness...")
         subset = train[:1000]
         
-        # Without consolidation
+        # Without consolidation — same config as B1
         b_no = ATISBenchmark(consolidation=False)
         b_no._reset()
         for item in subset:
             b_no._train_utterance(item["text"], item["intent"])
         size_no = len(b_no.engine.store.patterns)
-        
-        # With consolidation
+
+        # With consolidation — same config as B1
         b_yes = ATISBenchmark(consolidation=True)
         b_yes._reset()
         b_yes.manager.start_episode(b_yes.engine)
