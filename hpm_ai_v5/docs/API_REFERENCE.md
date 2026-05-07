@@ -75,7 +75,52 @@ Orchestrates adapter pipeline → engine → polygraph → postprocessor.
 
 ---
 
-## 3. Adapters (`hpm_ai_v5.adapter`)
+## 3. AdapterPacket (`hpm_ai_v5.schemas.packet`)
+
+The shared Pydantic model passed through the entire pipeline — adapters, polygraphs, core, and agents all read and write to it.
+
+```python
+class Packet(BaseModel):
+    raw_input: Any          # alias "raw" — the original input
+    goal: Any = None
+    context: dict           # primary shared slot — adapters write named keys here
+
+    # Structured extraction slots
+    clean: Any              # normalised input (set by preprocessing)
+    clean_text: str | None
+    tokens: list            # tokenised input
+    entities: list
+    relations: list
+
+    # Core interface slots
+    states: list[State]     # states appended by adapters (engine observes these)
+    deltas: list            # delta objects
+    views: list             # polygraph view objects
+
+    # Action / output slots
+    core_action: Any        # primary action from engine
+    core_actions: list      # all candidate actions
+    draft_output: Any
+    candidate_outputs: list
+    validated_output: Any
+    final_output: Any
+
+    # Tracing
+    state: dict             # agent-level working state
+    agent_trace: list[str]  # names of agents/adapters that ran
+    trace: list[dict]       # detailed per-step trace entries
+```
+
+**Key conventions:**
+
+- Adapters communicate via `packet.context` using named string keys (e.g. `context["tokens"]`, `context["skeleton"]`, `context["semantic_candidates"]`). The `requires` and `provides` lists on each adapter document these keys.
+- Adapters append to `packet.states` to expose states for the engine. Only one state per adapter is typical. **Do not append multiple states** unless each is intended as a separate observation — the engine observes them in order.
+- `SkeletonNgramAdapter` is an exception: it stores bigrams in `context["skeleton_ngrams"]` only, not in `packet.states`, to avoid displacing the skeleton state.
+- Use `packet.log(actor, detail)` to append to `packet.trace` for debugging.
+
+---
+
+## 4. Adapters (`hpm_ai_v5.adapter`)
 
 ### NLP
 - **`NLPTokenizer`**: spaCy `en_core_web_sm`; produces `tokens`, `pos_tags`, `lemmas`
@@ -95,7 +140,7 @@ Orchestrates adapter pipeline → engine → polygraph → postprocessor.
 
 ---
 
-## 4. Polygraphs (`hpm_ai_v5.polygraphs`)
+## 5. Polygraphs (`hpm_ai_v5.polygraphs`)
 
 ### View names by generator
 
@@ -113,7 +158,7 @@ Orchestrates adapter pipeline → engine → polygraph → postprocessor.
 
 ---
 
-## 5. Postprocessors (`hpm_ai_v5.postprocessors`)
+## 6. Postprocessors (`hpm_ai_v5.postprocessors`)
 
 - **`ValidationOnlyAdapter`**: passes action through unchanged; used in benchmarks
 - **`UCodeRenderer`** *(pending SCB plan)*: maps `U_*` sequences to Python function skeletons
