@@ -84,7 +84,7 @@ class SNLPBenchmark:
             if hasattr(adapter, "reset"):
                 adapter.reset()
 
-    def run_t1_skeleton_recognition(self, episodes: int = 50) -> float:
+    def run_t1_skeleton_recognition(self, episodes: int = 100) -> float:
         """T1: Skeleton Recognition accuracy."""
         print("\nRunning T1: Skeleton Recognition...")
         self.reset_for_isolation(clear_views=True)
