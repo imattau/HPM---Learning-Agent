@@ -42,14 +42,14 @@ class ATISBenchmark:
         self.pipeline.register_preprocessor(KnowledgeBaseLookup())
         self.intent_adapter = IntentLabelAdapter()
         self.pipeline.register_preprocessor(self.intent_adapter)
-        self.intent_patterns: dict[str, list[str]] = defaultdict(list)
+        self.pattern_intent: dict[str, str] = {}  # pattern_name -> intent
 
     def _reset(self):
         self.engine.current_state = None
         self.engine.history = []
         self.pipeline.view_engines.clear()
         self.engine.store = PatternStore(config=self.config)
-        self.intent_patterns.clear()
+        self.pattern_intent.clear()
         for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
             if hasattr(adapter, "reset"):
                 adapter.reset()
@@ -59,33 +59,23 @@ class ATISBenchmark:
         self.engine.history = []
         self.intent_adapter.label = intent
         self.pipeline.step(text)
-        # Track primary engine match
-        if self.engine.last_match and self.engine.last_match.pattern:
-            self.intent_patterns[intent].append(self.engine.last_match.pattern.name)
-        # Track all view engine matches so they can contribute votes at inference
-        for view_engine in self.pipeline.view_engines.values():
-            if view_engine.last_match and view_engine.last_match.pattern:
-                pname = view_engine.last_match.pattern.name
-                if pname not in self.intent_patterns.get(intent, []):
-                    self.intent_patterns[intent].append(pname)
+        for engine in [self.engine] + list(self.pipeline.view_engines.values()):
+            if engine.last_match and engine.last_match.pattern:
+                self.pattern_intent[engine.last_match.pattern.name] = intent
 
     def _predict_intent(self) -> str | None:
-        """Vote across primary + all view engines using intent_patterns lookup."""
-        all_engines = [self.engine] + list(self.pipeline.view_engines.values())
+        """Vote across primary + all view engines using O(1) pattern_intent lookup."""
         intent_votes: dict[str, float] = defaultdict(float)
-
-        for engine in all_engines:
+        for engine in [self.engine] + list(self.pipeline.view_engines.values()):
             match = engine.last_match
             if not match or not match.pattern:
                 continue
             weight = 1.0 if match.status == "exact" else 0.5 if match.status == "near" else 0.0
             if weight == 0:
                 continue
-            for intent, names in self.intent_patterns.items():
-                if match.pattern.name in names:
-                    intent_votes[intent] += weight * match.pattern.utility
-                    break
-
+            intent = self.pattern_intent.get(match.pattern.name)
+            if intent:
+                intent_votes[intent] += weight * match.pattern.utility
         return max(intent_votes, key=intent_votes.__getitem__) if intent_votes else None
 
     def run_b1(self, train: list[dict], test: list[dict]) -> float:
