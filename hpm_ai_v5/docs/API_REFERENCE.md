@@ -120,45 +120,40 @@ class Packet(BaseModel):
 
 ---
 
-## 4. Adapters (`hpm_ai_v5.adapter`)
+## 4. Adapters, Preprocessors & Postprocessors
 
-### NLP
-- **`NLPTokenizer`**: spaCy `en_core_web_sm`; produces `tokens`, `pos_tags`, `lemmas`
-- **`CanonicalPhraser`**: maps lemmas to concept vocabulary (`WEATHER`, `FLIGHT`, etc.)
-- **`SkeletonExtractor`**: POS tags → skeleton groups (`N`, `V`, `D`, `P`, `R`, `C`, `A`); maps `AUX→V`, `PART→R`
-- **`SkeletonNgramAdapter`**: skeleton bigrams stored in `context["skeleton_ngrams"]` only — not appended to `packet.states`
-- **`DeltaEncoder`**: computes first-differing-position delta between consecutive skeletons
-- **`KnowledgeBaseLookup`**: WordNet synonym lookup (max 5 candidates); populates `context["semantic_candidates"]`
-- **`NL2CodeBridgeAdapter`**: maps NL tokens to `U_*` structural IDs (`U_IF`, `U_WHILE`, `U_TRY`, etc.)
+See **[API_ADAPTERS.md](API_ADAPTERS.md)** for the full reference covering:
+- NLP adapters (NLPTokenizer, SkeletonExtractor, KnowledgeBaseLookup, NL2CodeBridgeAdapter, …)
+- CLT / code adapters (UnifiedVocabulary, UnifiedASTFlattener, …)
+- Physics / control adapters (CartpoleStateAdapter, AcrobotStateAdapter, …)
+- Buffer / memory adapters (RecentBufferAdapter, TrajectoryBufferAdapter, …)
+- Grid / ARC adapters (FlattenGridAdapter, ConnectedComponentsAdapter, …)
+- Preprocessors (PrefixBufferPreprocessor, NormalisationPreprocessor, …)
 
-### Code
-- **`UnifiedVocabulary`**: global string→int mapping; `get_id(token) -> int`
-
-### Physics / Control
-- **`CartpoleStateAdapter`**: normalises CartPole obs to HPM state tuples with action history buffer
-- **`ChangepointAdapter`**: detects distribution shifts in reward/polygraph signals
+See **[API_AGENTS.md](API_AGENTS.md)** for postprocessors and agent classes.
 
 ---
 
-## 5. Polygraphs (`hpm_ai_v5.polygraphs`)
+## 5. Polygraphs
 
-### View names by generator
+See **[API_POLYGRAPHS.md](API_POLYGRAPHS.md)** for the full view name reference and all generator classes.
+
+Quick reference — view names by generator:
 
 | Generator | View names |
 |-----------|-----------|
 | `NLPPolygraphGenerator` | `token_view`, `canonical_view`, `skeleton_view`, `skeleton_bigram_view`, `delta_view`, `semantic_view_<candidate>` |
 | `CodePolygraphGenerator` | `ast_types`, `token_types`, `skeleton` |
 | `CLTPolygraphGenerator` | `unified_node`, `control_skeleton`, `functional_skeleton` |
+| `NumericPolygraphGenerator` | `exact_view`, `noisy_view`, `trend_view` |
 
-**Key rule:** `last_match.status` on a view engine is the correct discrimination signal. `act().confidence` on a view engine decays monotonically and has no discriminative value.
-
-### `PolygraphEvaluator`
-- `agreement(view_actions, scores)` — weighted consensus across views
-- `score_engine(engine)` — reliability score based on pattern concentration
+**Key rule:** use `last_match.status` for discrimination — not `act().confidence`.
 
 ---
 
-## 6. Postprocessors (`hpm_ai_v5.postprocessors`)
+## 6. Agents & Pipelines
 
-- **`ValidationOnlyAdapter`**: passes action through unchanged; used in benchmarks
-- **`UCodeRenderer`** *(pending SCB plan)*: maps `U_*` sequences to Python function skeletons
+See **[API_AGENTS.md](API_AGENTS.md)** for the full reference covering:
+- Agent classes (SelfAdaptiveAgent, LayeredAgent, HierarchicalPlanningAgent, …)
+- AgentPipeline and AdapterPipeline
+- Postprocessors (CartpoleForecastPostprocessor, UCodeRenderer, …)
