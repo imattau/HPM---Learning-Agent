@@ -18,25 +18,9 @@ class NLPTokenizer(Adapter):
     """Tokenizer for natural language queries using spaCy."""
 
     name: str = "nlp_tokenizer"
-    # Use blank model as we don't have internet to download full models
-    nlp: Any = field(default_factory=lambda: spacy.blank("en"), init=False)
+    nlp: Any = field(default_factory=lambda: spacy.load("en_core_web_sm"), init=False)
     requires: list[str] = field(default_factory=list)
     provides: list[str] = field(default_factory=lambda: ["tokens", "pos_tags", "lemmas"])
-
-    # Simple rule-based POS tagger for structural benchmark
-    POS_MAP: dict[str, str] = field(default_factory=lambda: {
-        "what": "PRON", "is": "VERB", "the": "DET", "a": "DET", "an": "DET",
-        "in": "ADP", "from": "ADP", "to": "ADP", "on": "ADP", "for": "ADP",
-        "show": "VERB", "tell": "VERB", "book": "VERB", "reserve": "VERB",
-        "buy": "VERB", "purchase": "VERB", "acquire": "VERB", "want": "VERB",
-        "flights": "NOUN", "flight": "NOUN", "weather": "NOUN", "forecast": "NOUN",
-        "conditions": "NOUN", "city": "NOUN", "town": "NOUN", "status": "NOUN",
-        "plane": "NOUN", "journey": "NOUN", "laptop": "NOUN", "ticket": "NOUN",
-        "me": "PRON", "it": "PRON", "i": "PRON", "you": "PRON", "user": "NOUN", "task": "NOUN",
-        "and": "CCONJ", "or": "CCONJ", "if": "SCONJ", "while": "SCONJ",
-        "authenticated": "ADJ", "active": "ADJ", "valid": "ADJ", "immediately": "ADV",
-        "like": "VERB", "would": "AUX",
-    })
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         raw = packet.raw
@@ -50,16 +34,13 @@ class NLPTokenizer(Adapter):
         tokens = []
         pos_tags = []
         lemmas = []
-        
+
         for token in doc:
             if token.is_punct or token.is_space:
                 continue
-            t = token.text.lower()
-            tokens.append(t)
-            # Use POS_MAP or fallback to NOUN for unknown words in this simple implementation
-            pos = self.POS_MAP.get(t, "NOUN")
-            pos_tags.append(pos)
-            lemmas.append(t) # Simple lemma for now
+            tokens.append(token.text.lower())
+            pos_tags.append(token.pos_)
+            lemmas.append(token.lemma_.lower())
         
         packet.context["tokens"] = tokens
         packet.context["pos_tags"] = pos_tags
@@ -119,10 +100,10 @@ class SkeletonExtractor(Adapter):
     # Map coarse POS tags to skeleton types
     POS_GROUP: dict[str, str] = field(default_factory=lambda: {
         "NOUN": "N", "PROPN": "N",
-        "VERB": "V",
+        "VERB": "V", "AUX": "V",
         "ADJ": "A", "ADV": "A",
         "DET": "D", "PRON": "P",
-        "ADP": "R", "CCONJ": "C", "SCONJ": "C",
+        "ADP": "R", "PART": "R", "CCONJ": "C", "SCONJ": "C",
         "NUM": "NUM",
         "PUNCT": "PUNCT",
     })

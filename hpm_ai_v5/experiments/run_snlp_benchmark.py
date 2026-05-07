@@ -247,10 +247,16 @@ class SNLPBenchmark:
         scores: list[float] = []
 
         def _get_skeleton_confidence() -> float:
+            # Use match status: 1.0=exact, 0.5=near, 0.0=no match or no view
+            # act() confidence decays over time and has no discriminative power here.
             view_engine = self.pipeline.view_engines.get("skeleton_bigram_view")
-            if view_engine is None:
+            if view_engine is None or view_engine.last_match is None:
                 return 0.0
-            return view_engine.act().confidence
+            if view_engine.last_match.status == "exact":
+                return 1.0
+            if view_engine.last_match.status == "near":
+                return 0.5
+            return 0.0
 
         # Clean sentences (label=1 → high confidence expected)
         for _ in range(len(salad_sentences)):
