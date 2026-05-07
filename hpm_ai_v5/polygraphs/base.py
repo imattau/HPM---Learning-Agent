@@ -15,6 +15,7 @@ class PolygraphView:
     name: str
     state: State
     context: dict[str, Any] = field(default_factory=dict)
+    states: list[State] = field(default_factory=list)
 
 
 class PolygraphGenerator(Protocol):

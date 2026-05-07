@@ -19,3 +19,4 @@ class CoreConfig:
     utility_decay: float = 0.005
     context_memory_limit: int = 8
     max_sequences: int = 256
+    consolidation_threshold: float = 0.8

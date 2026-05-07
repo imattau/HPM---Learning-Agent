@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+
 from .delta import _as_tuple
 from .config import CoreConfig
 from .pattern import Pattern, canonicalize_sequence
+from .variant import PatternVariant
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +21,7 @@ class MatchResult:
     pattern: Pattern | None
     distance: float
     residual: tuple[Any, ...] = field(default_factory=tuple)
+    variant: PatternVariant | None = None
 
 
 @dataclass
@@ -33,6 +37,7 @@ class PatternStore:
     max_meta_patterns: int = 32 # V5 Extension
     canonicalization_mode: str | None = None
     distance_scale: float | None = None
+    variants: dict[str, PatternVariant] = field(default_factory=dict, init=False)
     _pattern_index: dict[str, Pattern] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -70,6 +75,9 @@ class PatternStore:
     def get(self, name: str) -> Pattern | None:
         return self._pattern_index.get(name)
 
+    def register_variant(self, variant: PatternVariant) -> None:
+        self.variants[variant.name] = variant
+
     def top_k(self, observation: Any, k: int = 3) -> list[Pattern]:
         candidate = _as_tuple(observation)
         mode = self.canonicalization_mode or self.config.canonicalization_mode
@@ -92,32 +100,56 @@ class PatternStore:
     def match(self, observation: Any) -> MatchResult:
         candidate = _as_tuple(observation)
         all_candidates = self.patterns + self.meta_patterns
-        if not all_candidates:
-            return MatchResult(status="novel", pattern=None, distance=float(len(candidate)), residual=candidate)
+        
+        distance = float(len(candidate))
+        best = None
+        
+        if all_candidates:
+            mode = self.canonicalization_mode or self.config.canonicalization_mode
+            canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=mode))
+            scale = self.distance_scale or self.config.distance_scale
 
-        mode = self.canonicalization_mode or self.config.canonicalization_mode
-        canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=mode))
-        scale = self.distance_scale or self.config.distance_scale
-
-        best = min(
-            all_candidates,
-            key=lambda pattern: pattern.distance(
+            best = min(
+                all_candidates,
+                key=lambda pattern: pattern.distance(
+                    candidate,
+                    canonicalization_mode=mode,
+                    distance_scale=scale,
+                    canon_candidate=canon_candidate,
+                ),
+            )
+            distance = best.distance(
                 candidate,
                 canonicalization_mode=mode,
                 distance_scale=scale,
                 canon_candidate=canon_candidate,
-            ),
-        )
-        distance = best.distance(
-            candidate,
-            canonicalization_mode=mode,
-            distance_scale=scale,
-            canon_candidate=canon_candidate,
-        )
-        if distance <= self.exact_threshold:
-            return MatchResult(status="exact", pattern=best, distance=distance, residual=())
-        if distance <= self.near_threshold:
-            return MatchResult(status="near", pattern=best, distance=distance, residual=_residual(candidate, best.template))
+            )
+            if distance <= self.exact_threshold:
+                return MatchResult(status="exact", pattern=best, distance=distance, residual=())
+            if distance <= self.near_threshold:
+                return MatchResult(status="near", pattern=best, distance=distance, residual=_residual(candidate, best.template))
+            
+        if self.variants:
+            best_variant = None
+            best_vdist = float("inf")
+            for v in self.variants.values():
+                if not v.centroid:
+                    continue
+                c = candidate[:len(v.centroid)]
+                vdist = float(np.linalg.norm(
+                    np.array(c, dtype=float) - np.array(v.centroid, dtype=float)
+                ))
+                if vdist < best_vdist:
+                    best_vdist = vdist
+                    best_variant = v
+            nt = self.near_threshold or self.config.near_threshold
+            if best_variant is not None and best_vdist <= nt:
+                return MatchResult(
+                    status="variant", pattern=None,
+                    distance=best_vdist, residual=candidate,
+                    variant=best_variant,
+                )
+                
         return MatchResult(status="novel", pattern=None, distance=distance, residual=candidate)
 
     def learn(self, observation: Any, name: str | None = None) -> Pattern:

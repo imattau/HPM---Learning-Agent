@@ -14,6 +14,21 @@ from ..core.state import State
 
 
 @dataclass(slots=True)
+class StartOfEpisodeAdapter(Adapter):
+    """Prepends a null START state to every step, enabling single-sentence recognition."""
+
+    name: str = "start_of_episode"
+    requires: list[str] = field(default_factory=list)
+    provides: list[str] = field(default_factory=lambda: ["start_state"])
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        # Prepend START state to packet.states
+        # Use an empty tuple value to represent the origin
+        packet.states.insert(0, State(value=(), context={**packet.context, "domain": "start"}))
+        return packet
+
+
+@dataclass(slots=True)
 class NLPTokenizer(Adapter):
     """Tokenizer for natural language queries using spaCy."""
 
@@ -201,28 +216,35 @@ class DeltaEncoder(Adapter):
 
 @dataclass(slots=True)
 class KnowledgeBaseLookup(Adapter):
-    """Simulates external dictionary lookup for synonyms and concepts."""
+    """WordNet-backed synonym lookup for semantic candidate views."""
 
     name: str = "kb_lookup"
-    # Simulated external knowledge base
-    KNOWLEDGE_BASE: dict[str, list[str]] = field(default_factory=lambda: {
-        "check": ["if", "validate", "verify"],
-        "keep": ["while", "loop", "repeat"],
-        "perform": ["call", "run", "execute"],
-        "store": ["set", "assign"],
-        "output": ["return", "yield"],
-        "validate": ["check", "if", "verify"],
-    })
+    max_candidates: int = 5
     requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
     provides: list[str] = field(default_factory=lambda: ["semantic_candidates"])
 
+    def _synonyms(self, token: str) -> list[str]:
+        try:
+            import nltk
+            # Ensure nltk knows where the data is
+            if "/home/mattthomson/nltk_data" not in nltk.data.path:
+                nltk.data.path.append("/home/mattthomson/nltk_data")
+            from nltk.corpus import wordnet
+            syns: set[str] = set()
+            for syn in wordnet.synsets(token):
+                for lemma in syn.lemmas():
+                    name = lemma.name().replace("_", " ").lower()
+                    if name != token:
+                        syns.add(name)
+            return list(syns)[: self.max_candidates]
+        except Exception:
+            return []
+
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         tokens = packet.context.get("tokens", [])
-        all_candidates = []
+        all_candidates: list[str] = []
         for token in tokens:
-            candidates = self.KNOWLEDGE_BASE.get(token.lower(), [])
-            all_candidates.extend(candidates)
-        
+            all_candidates.extend(self._synonyms(token.lower()))
         packet.context["semantic_candidates"] = list(set(all_candidates))
         return packet
 

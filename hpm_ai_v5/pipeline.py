@@ -79,7 +79,10 @@ class HPMPipeline:
         preprocessed = PreprocessedInput(state=preprocessed_state, context=dict(preprocessed_state.context), raw=raw, packet=packet)
         plan_horizon = int(active_goal.get("plan_horizon", 1))
 
-        # Always observe and act on the primary engine first
+        # Observe all states in the packet (enables multi-state preprocessors)
+        for s in packet.states[:-1]:
+            self.engine.observe(s)
+            
         self.engine.observe(preprocessed.state)
         action = self.engine.act(goal=active_goal, horizon=plan_horizon)
 
@@ -100,7 +103,12 @@ class HPMPipeline:
                 # Observe and score all views cheaply
                 for view in views:
                     engine = self.view_engines.setdefault(view.name, PatternEngine())
-                    engine.observe(view.state)
+                    # If view generator provided multiple states, observe them all
+                    if hasattr(view, "states") and view.states:
+                        for s in view.states:
+                            engine.observe(s)
+                    else:
+                        engine.observe(view.state)
                     polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
 
                 selected_view = self.polygraph_evaluator.select_view(polygraph_scores)

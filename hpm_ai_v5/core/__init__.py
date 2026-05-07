@@ -10,5 +10,6 @@ from .sequence import PatternSequence
 from .state import State
 from .store import PatternStore
 from .pattern_manager import PatternManager
+from .variant import PatternVariant
 
-__all__ = ["Action", "CoreConfig", "Delta", "Pattern", "PatternEngine", "PatternManager", "PatternSequence", "PatternStore", "ReasoningTrace", "State"]
+__all__ = ["Action", "CoreConfig", "Delta", "Pattern", "PatternEngine", "PatternManager", "PatternSequence", "PatternStore", "PatternVariant", "ReasoningTrace", "State"]

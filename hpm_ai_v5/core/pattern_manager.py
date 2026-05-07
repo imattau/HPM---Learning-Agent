@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .engine import PatternEngine
 from .pattern import Pattern
+from .variant import make_variant
 
 
 def build_context_signature(context: dict) -> str:
@@ -18,6 +19,8 @@ def build_context_signature(context: dict) -> str:
     parts: list[str] = []
     if "env" in context:
         parts.append(f"env:{context['env']}")
+    if "intent_label" in context:
+        parts.append(f"intent:{context['intent_label']}")
     
     return ",".join(parts) if parts else "generic"
 
@@ -88,6 +91,35 @@ class PatternManager:
 
         return promoted
 
+    def _consolidate_variants(self, engine: "PatternEngine") -> int:
+        threshold = engine.config.max_patterns * engine.config.consolidation_threshold
+        if len(engine.store.patterns) < threshold:
+            return 0
+        patterns = list(engine.store.patterns)
+        used: set[str] = set()
+        promoted = 0
+        for i, p1 in enumerate(patterns):
+            if p1.name in used:
+                continue
+            cluster = [p1]
+            for p2 in patterns[i + 1:]:
+                if p2.name in used:
+                    continue
+                dist = p1.distance(
+                    p2.template,
+                    canonicalization_mode=engine.store.canonicalization_mode,
+                    distance_scale=engine.store.distance_scale or 1.0,
+                )
+                if dist < engine.config.near_threshold:
+                    cluster.append(p2)
+                    used.add(p2.name)
+            if len(cluster) >= 2:
+                used.add(p1.name)
+                vname = f"variant_{len(engine.store.variants)}"
+                engine.store.register_variant(make_variant(cluster, name=vname))
+                promoted += 1
+        return promoted
+
     def seed_engine(self, engine: PatternEngine, context: dict | None = None, *, fallback_global: bool = True) -> int:
         target_sig = build_context_signature(context or {})
 
@@ -116,6 +148,7 @@ class PatternManager:
 
     def end_episode(self, engine: PatternEngine, context: dict | None = None) -> dict:
         promoted_names = self.promote_from(engine, context=context)
+        consolidated = self._consolidate_variants(engine)
         sig = build_context_signature(context or {})
 
         pruned = 0
@@ -141,6 +174,7 @@ class PatternManager:
         self.episode_count += 1
         return {
             "promoted": len(promoted_names),
+            "consolidated": consolidated,
             "archive_size": len(self.archive) + len(self.meta_archive),
             "leaf_archive": len(self.archive),
             "meta_archive": len(self.meta_archive),
