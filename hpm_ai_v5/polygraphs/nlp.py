@@ -53,7 +53,16 @@ class NLPPolygraphGenerator(PolygraphGenerator):
                 state=State(value=skeleton_values, context={**context, "view": "skeleton"})
             ))
             
-        # 4. Delta View (Structural changes)
+        # 4. Skeleton Bigram View (sequential ordering constraints)
+        ngrams = context.get("skeleton_ngrams", [])
+        if ngrams:
+            ngram_values = tuple(float(UnifiedVocabulary.get_id(ng)) for ng in ngrams)
+            views.append(PolygraphView(
+                name="skeleton_bigram_view",
+                state=State(value=ngram_values, context={**context, "view": "skeleton_bigram"})
+            ))
+
+        # 5. Delta View (Structural changes)
         if delta:
             views.append(PolygraphView(
                 name="delta_view",

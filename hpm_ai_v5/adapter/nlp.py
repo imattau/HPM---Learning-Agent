@@ -149,6 +149,29 @@ class SkeletonExtractor(Adapter):
 
 
 @dataclass(slots=True)
+class SkeletonNgramAdapter(Adapter):
+    """Encode skeleton as bigram/trigram transition IDs, capturing word-order constraints."""
+
+    name: str = "skeleton_ngram"
+    n: int = 2
+    requires: list[str] = field(default_factory=lambda: ["skeleton_extractor"])
+    provides: list[str] = field(default_factory=lambda: ["skeleton_ngrams", "state"])
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        skeleton = packet.context.get("skeleton", [])
+        if len(skeleton) < self.n:
+            return packet
+        ngrams = [
+            "_".join(skeleton[i : i + self.n])
+            for i in range(len(skeleton) - self.n + 1)
+        ]
+        packet.context["skeleton_ngrams"] = ngrams
+        # Store in context only — polygraph picks this up via skeleton_bigram_view.
+        # Not appended to packet.states to avoid displacing the skeleton state in the main engine.
+        return packet
+
+
+@dataclass(slots=True)
 class DeltaEncoder(Adapter):
     """Compute structural deltas between consecutive skeleton states."""
 

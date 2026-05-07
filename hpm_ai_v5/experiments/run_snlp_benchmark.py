@@ -8,11 +8,12 @@ import numpy as np
 
 from hpm_ai_v5.adapter import AdapterPacket
 from hpm_ai_v5.adapter.nlp import (
-    NLPTokenizer, 
-    CanonicalPhraser, 
-    SkeletonExtractor, 
+    NLPTokenizer,
+    CanonicalPhraser,
+    SkeletonExtractor,
+    SkeletonNgramAdapter,
     DeltaEncoder,
-    KnowledgeBaseLookup
+    KnowledgeBaseLookup,
 )
 from hpm_ai_v5.adapter.clt import UnifiedVocabulary
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
@@ -46,6 +47,7 @@ class SNLPBenchmark:
         )
         self.pipeline.register_preprocessor(CanonicalPhraser())
         self.pipeline.register_preprocessor(SkeletonExtractor())
+        self.pipeline.register_preprocessor(SkeletonNgramAdapter())
         self.pipeline.register_preprocessor(DeltaEncoder())
         self.pipeline.register_preprocessor(KnowledgeBaseLookup())
         
