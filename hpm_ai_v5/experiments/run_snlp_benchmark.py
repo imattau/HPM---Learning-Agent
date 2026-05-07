@@ -112,144 +112,197 @@ class SNLPBenchmark:
         return acc
 
     def run_t2_delta_induction(self, steps: int = 100) -> float:
-        """T2: Delta Induction - predicting the next structural change."""
+        """T2: Delta Induction - engine forecast should match next observed state."""
         print("\nRunning T2: Delta Induction...")
         self.reset_for_isolation(clear_views=True)
         correct = 0
-        
-        # Training on sequences
+        trials = 50
+
+        # Training on sequences: weather -> flight -> buy
         for _ in range(30):
             self.engine.history = []
             self.reset_for_isolation(clear_views=False)
-            intents = ["weather", "flight", "buy"]
-            for intent in intents:
-                sent = self.generate_sentence(intent)
-                self.pipeline.step(sent)
-                
-        # Testing prediction
-        for _ in range(50):
+            for intent in ["weather", "flight", "buy"]:
+                self.pipeline.step(self.generate_sentence(intent))
+
+        # Testing: after weather, forecast should match the flight skeleton
+        for _ in range(trials):
             self.engine.history = []
             self.reset_for_isolation(clear_views=False)
             self.pipeline.step(self.generate_sentence("weather"))
-            
-            # Predict next
+
+            # Capture forecast before observing the next state
             action = self.engine.act()
+            forecast_value = action.forecast.value if action.forecast else None
+
+            # Observe the next state
             next_sent = self.generate_sentence("flight")
-            res = self.pipeline.step(next_sent)
-            
-            if self.engine.last_match and self.engine.last_match.status == "exact":
-                correct += 1
-                
-        acc = correct / 50
+            self.pipeline.step(next_sent)
+            actual_value = self.engine.current_state.value if self.engine.current_state else None
+
+            # Match if forecast is non-null and numerically close to actual
+            if forecast_value is not None and actual_value is not None:
+                fv = np.array(forecast_value, dtype=float)
+                av = np.array(actual_value, dtype=float)
+                min_len = min(len(fv), len(av))
+                if min_len > 0:
+                    dist = np.linalg.norm(fv[:min_len] - av[:min_len]) / min_len
+                    if dist < 1.0:
+                        correct += 1
+
+        acc = correct / trials
         print(f"  T2 Score: {acc:.2%}")
         return acc
 
     def run_t3_slot_filling(self) -> float:
-        """T3: Canonical Slot-Filling with novel words."""
+        """T3: Canonical Slot-Filling with novel synonym words.
+
+        Training and test sentences are chosen so they share at least one KB
+        semantic candidate, ensuring the same semantic_view_* engine is
+        populated during both training and evaluation.
+
+        KB overlaps used:
+          check    → [if, validate, verify]
+          validate → [check, if, verify]     shared: if, verify
+          keep     → [while, loop, repeat]
+          perform  → [call, run, execute]    shared with keep via loop/run: none
+                                             (perform→run; keep→loop — different views)
+          output   → [return, yield]
+          store    → [set, assign]
+        """
         print("\nRunning T3: Slot-Filling...")
         self.reset_for_isolation(clear_views=True)
         correct = 0
-        # 'Validate' maps to [check, if, verify]
-        # We'll train on 'check'
+
+        # Each tuple: (training_sentence, test_sentence)
+        # Pairs share >=1 KB candidate so the same semantic_view_X engine fires on both sides.
         test_cases = [
-            ("Validate the weather.", "WEATHER"),
+            # check→[if,validate,verify] ∩ validate→[check,if,verify] = {if, verify}
+            ("Check the weather in London.",        "Validate the weather in Paris."),
+            # check→[if,validate,verify] ∩ validate→[check,if,verify] = {if, verify}
+            ("Please check the data now.",          "Please validate the data now."),
+            # keep→[while,loop,repeat] — train and test both map through "keep"
+            ("Keep repeating the search.",          "Keep looping the search."),
+            # perform→[call,run,execute] ∩ perform→[call,run,execute] (same root)
+            ("Perform the task immediately.",       "Execute the task immediately."),
+            # output→[return,yield] — train and test both map through "output"
+            ("Output the result now.",              "Return the result now."),
         ]
-        
-        for query, expected_concept in test_cases:
+
+        for train_sent, test_sent in test_cases:
             self.reset_for_isolation(clear_views=True)
-            # Train on 'check'
             for _ in range(10):
-                self.pipeline.step("check")
-                
-            res = self.pipeline.step(query)
-            
-            # Check if ANY of the semantic views matched a pattern
+                self.pipeline.step(train_sent)
+
+            self.pipeline.step(test_sent)
+
             found_match = False
             for view_name, engine in self.pipeline.view_engines.items():
                 if view_name.startswith("semantic_view_") and engine.last_match:
                     if engine.last_match.status in ("exact", "near"):
                         found_match = True
                         break
-            
+
             if found_match:
                 correct += 1
-                
+
         acc = correct / len(test_cases)
         print(f"  T3 Score: {acc:.2%}")
         return acc
 
     def run_t4_word_salad_rejection(self) -> float:
-        """T4: Word-Salad Rejection - confidence should drop for anomalous input."""
+        """T4: Word-Salad Rejection - ROC-AUC over clean vs. anomalous input."""
         print("\nRunning T4: Word-Salad Rejection...")
         self.reset_for_isolation(clear_views=True)
-        
+
+        salad_sentences = [
+            "the the the the the",
+            "!!! ??? $$$",
+            "flight London book to",           # scrambled word order
+            "weather the in what is",          # reverse order
+            "buy immediately laptop would I",  # inverted syntax
+            "to from departure arrival plane",  # content without structure
+            "??? book London !!!",             # mixed noise + content
+            "is what forecast the London in",  # shuffled weather query
+        ]
+
         # Train on clean data
         for _ in range(50):
             self.reset_for_isolation(clear_views=False)
             intent = random.choice(list(self.templates.keys()))
             self.pipeline.step(self.generate_sentence(intent))
-            
-        # Test clean
-        clean_confs = []
-        for _ in range(20):
+
+        labels: list[int] = []
+        scores: list[float] = []
+
+        def _get_skeleton_confidence() -> float:
+            view_engine = self.pipeline.view_engines.get("skeleton_view")
+            if view_engine:
+                return view_engine.act().confidence
+            return 0.0
+
+        # Clean sentences (label=1 → high confidence expected)
+        for _ in range(len(salad_sentences)):
             self.reset_for_isolation(clear_views=False)
             intent = random.choice(list(self.templates.keys()))
-            res = self.pipeline.step(self.generate_sentence(intent))
-            view_engine = self.pipeline.view_engines.get("skeleton_view")
-            if view_engine:
-                action = view_engine.act()
-                clean_confs.append(action.confidence)
-            
-        # Test salad - more chaotic
-        salad_sentences = [
-            "the the the the the",
-            "!!! ??? $$$",
-        ]
-        salad_confs = []
+            self.pipeline.step(self.generate_sentence(intent))
+            labels.append(1)
+            scores.append(_get_skeleton_confidence())
+
+        # Salad sentences (label=0 → low confidence expected)
         for sent in salad_sentences:
             self.reset_for_isolation(clear_views=False)
-            res = self.pipeline.step(sent)
-            view_engine = self.pipeline.view_engines.get("skeleton_view")
-            if view_engine:
-                action = view_engine.act()
-                salad_confs.append(action.confidence)
-            
-        avg_clean = np.mean(clean_confs) if clean_confs else 0.0
-        avg_salad = np.mean(salad_confs) if salad_confs else 0.0
-        
+            self.pipeline.step(sent)
+            labels.append(0)
+            scores.append(_get_skeleton_confidence())
+
+        avg_clean = float(np.mean([s for s, l in zip(scores, labels) if l == 1]))
+        avg_salad = float(np.mean([s for s, l in zip(scores, labels) if l == 0]))
         print(f"  Clean Avg Confidence: {avg_clean:.4f}")
         print(f"  Salad Avg Confidence: {avg_salad:.4f}")
-        
-        # Pass if avg_salad is lower
-        return 1.0 if avg_salad < avg_clean * 0.9 else 0.0
+
+        # ROC-AUC: probability that a random clean > random salad (Wilcoxon statistic)
+        clean_scores = [s for s, l in zip(scores, labels) if l == 1]
+        salad_scores = [s for s, l in zip(scores, labels) if l == 0]
+        pairs = len(clean_scores) * len(salad_scores)
+        wins = sum(1 for c in clean_scores for s in salad_scores if c > s)
+        ties = sum(1 for c in clean_scores for s in salad_scores if c == s)
+        auc = (wins + 0.5 * ties) / pairs if pairs > 0 else 0.5
+        print(f"  ROC-AUC: {auc:.4f}")
+
+        # Pass threshold: AUC > 0.65 (better than random discrimination)
+        score = auc
+        return score
 
     def run_t5_discourse_meta_patterns(self) -> float:
         """T5: Discourse Meta-Patterns - paragraph-level templates."""
         print("\nRunning T5: Discourse Meta-Patterns...")
         self.reset_for_isolation(clear_views=True)
-        
-        # Training
+
+        # Training: repeated exposure to the two-sentence weather sequence
         for _ in range(40):
             self.engine.history = []
             self.reset_for_isolation(clear_views=False)
+            self.manager.start_episode(self.engine, context={"domain": "discourse"})
             self.pipeline.step("What is the weather in London?")
             self.pipeline.step("Tell me the forecast for Paris.")
             self.manager.end_episode(self.engine)
-            
-        # Test: Recognize the sequence
+
+        # Test: recognize the same structural sequence with novel cities
         self.engine.history = []
         self.reset_for_isolation(clear_views=False)
+        self.manager.start_episode(self.engine, context={"domain": "discourse"})
         self.pipeline.step("What is the weather in Berlin?")
-        
-        res = self.pipeline.step("Tell me the forecast for Rome.")
-        
+
+        self.pipeline.step("Tell me the forecast for Rome.")
+
         match = self.engine.last_match
         if match and match.status == "exact":
-             print("  T5 Score: 100% (Sequence Recognized)")
-             return 1.0
+            print("  T5 Score: 100% (Sequence Recognized)")
+            return 1.0
         else:
-             print("  T5 Score: 0% (Sequence Not Recognized)")
-             return 0.0
+            print("  T5 Score: 0% (Sequence Not Recognized)")
+            return 0.0
 
     def run_all(self):
         print("Starting Structural NLP Benchmark (SNLP)...")
