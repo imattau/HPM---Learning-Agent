@@ -918,6 +918,86 @@ performance.
 **Rule**: measure the average of the last half of episodes (or a fixed eval window) as
 the benchmark criterion. This reflects the converged policy, not the training curriculum.
 
+---
+
+## NLP Agent Development (from SNLP Benchmark)
+
+### `act().confidence` is not a discriminative signal
+
+The `Action.confidence` value returned by `PatternEngine.act()` decays monotonically
+over time as patterns age — it does not reflect match quality. Using it to distinguish
+familiar from unfamiliar input produces near-random results.
+
+**Rule**: use `engine.last_match.status` or `view_engine.last_match.status` for
+discrimination tasks. Values: `"exact"`, `"near"`, `None`. Assign scores (1.0 / 0.5 /
+0.0) from status, not from `confidence`.
+
+### `act().forecast` is a single-token state, not a full skeleton prediction
+
+The forecast returned by `act()` is a one-element tuple representing the first token of
+the anticipated next pattern. Comparing it numerically to a multi-element actual state
+via L2 distance gives only partial prefix signal.
+
+**Rule**: to measure whether the engine anticipated the next observation, observe the
+next state then check `last_match.status`. Do not compare forecast and actual values
+numerically unless the state representation is known to be fixed-length and aligned.
+
+### Polygraph view namespace is the agent's working memory index
+
+The polygraph creates named view engines (e.g. `semantic_view_check`,
+`skeleton_bigram_view`). For a test sentence to match a trained pattern, the *same
+named view engine* must have been populated during training. Isolated seed words and
+full sentences generate different view keys from the KB lookup.
+
+**Rule**: training and test inputs must generate overlapping view names. For semantic
+slot-filling, train on full sentences whose KB candidates overlap with the test
+sentences' KB candidates.
+
+### Task isolation requires PatternStore resets, not just view engine clears
+
+`reset_for_isolation(clear_views=True)` clears the view engine dict but leaves
+`engine.store` intact. Patterns from one task silently contaminate the next.
+
+**Rule**: between independent benchmark tasks, reset
+`engine.store = PatternStore(config=self.config)`.
+
+### PatternStore has a saturation regime
+
+With `max_patterns=512`, training beyond ~100 episodes on a small corpus causes old
+patterns to be evicted and recognition degrades. More training hurts past this point.
+
+**Rule**: tune `max_patterns` per corpus size. Set training episodes to fill but not
+overflow the store. Monitor for the inflection point where recognition drops as episodes
+increase.
+
+### Sequential ordering requires bigram skeletons; unigrams are insufficient
+
+Single POS-group skeletons collapse ordering information — valid and scrambled sentences
+can produce identical unigram skeleton tuples. Discriminating them requires at least
+bigram transitions (e.g. `"P_V"`, `"V_D"`).
+
+`SkeletonNgramAdapter` produces bigrams in `context["skeleton_ngrams"]`; the polygraph
+exposes them as `skeleton_bigram_view`. The ngram state must be stored in context only
+— not appended to `packet.states` — to avoid displacing the primary skeleton state in
+the main engine.
+
+### Real spaCy models surface new POS tags requiring explicit mapping
+
+Switching from `spacy.blank("en")` to `en_core_web_sm` introduces tags the
+`SkeletonExtractor.POS_GROUP` did not handle: `AUX` → `"V"`, `PART` → `"R"`,
+`SYM` falls through as a raw string. Unhandled tags appear verbatim in the skeleton and
+prevent near-match generalisation.
+
+**Rule**: audit any new domain input for unhandled POS tags before deploying a skeleton
+adapter.
+
+### Small synthetic corpora produce measurement variance, not learning failure
+
+The SNLP benchmark (9 sentence templates, 3 intent classes) is sufficient for
+structural pattern learning. Run-to-run variance of ~10 percentage points on T1
+(skeleton recognition) reflects stochastic test sampling, not architectural
+instability. Report a range across multiple runs, not a single score.
+
 ### Multi-view ensemble voting converges faster than single Q-table
 
 With 5 views voting with polygraph-score weights, the CartPole Q-table ensemble reaches
