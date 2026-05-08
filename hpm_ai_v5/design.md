@@ -953,6 +953,21 @@ full sentences generate different view keys from the KB lookup.
 slot-filling, train on full sentences whose KB candidates overlap with the test
 sentences' KB candidates.
 
+### Semantic view engines explode on large corpora
+
+`NLPPolygraphGenerator` creates one `semantic_view_<cand>` engine per WordNet
+candidate per utterance. With 5 candidates × 10 tokens = up to 50 new view engines
+per utterance. Each view engine is a full `PatternEngine` that runs `observe()` on
+every subsequent step. After thousands of utterances this becomes the dominant cost.
+
+Observed on ATIS: 24 view engines after 11 utterances → thousands after full corpus.
+Switching to `StructuralNLPPolygraphGenerator` (skeleton + bigram views only) reduced
+to 2 view engines and cut per-utterance time from ~13ms to ~10ms.
+
+**Rule**: choose the polygraph generator to match what the benchmark actually uses.
+If semantic views are not consumed for prediction, use `StructuralNLPPolygraphGenerator`.
+Only use `NLPPolygraphGenerator` when semantic slot-filling views are actively needed.
+
 ### Task isolation requires PatternStore resets, not just view engine clears
 
 `reset_for_isolation(clear_views=True)` clears the view engine dict but leaves
