@@ -43,7 +43,8 @@ class ATISBenchmark:
         self.pipeline.register_preprocessor(KnowledgeBaseLookup())
         self.intent_adapter = IntentLabelAdapter()
         self.pipeline.register_preprocessor(self.intent_adapter)
-        self.pattern_intent: dict[str, str] = {}  # pattern_name -> intent
+        self.pattern_intent: dict[str, str] = {}        # pattern_name -> winning intent
+        self._intent_votes: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     def _reset(self):
         self.engine.current_state = None
@@ -51,6 +52,7 @@ class ATISBenchmark:
         self.pipeline.view_engines.clear()
         self.engine.store = PatternStore(config=self.config)
         self.pattern_intent.clear()
+        self._intent_votes.clear()
         for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
             if hasattr(adapter, "reset"):
                 adapter.reset()
@@ -66,10 +68,7 @@ class ATISBenchmark:
         self.pipeline.step(text)
         for engine in [self.engine] + list(self.pipeline.view_engines.values()):
             if engine.last_match and engine.last_match.pattern:
-                # First-wins: don't overwrite — cross-intent near-matches corrupt the mapping
-                pname = engine.last_match.pattern.name
-                if pname not in self.pattern_intent:
-                    self.pattern_intent[pname] = intent
+                self._intent_votes[engine.last_match.pattern.name][intent] += 1
 
     def _predict_intent(self) -> str | None:
         """Vote across primary + all view engines using O(1) pattern_intent lookup."""
@@ -105,6 +104,11 @@ class ATISBenchmark:
                 self._train_utterance(item["text"], item["intent"])
             if self.consolidation:
                 self.manager.end_episode(self.engine)
+            # Resolve majority vote: pattern owned by intent with most matches
+            self.pattern_intent = {
+                pname: max(votes, key=votes.__getitem__)
+                for pname, votes in self._intent_votes.items()
+            }
             self.manager.save(self._CHECKPOINT)
             intent_path.parent.mkdir(parents=True, exist_ok=True)
             intent_path.write_text(json.dumps(self.pattern_intent))
