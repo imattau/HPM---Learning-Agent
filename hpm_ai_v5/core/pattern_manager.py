@@ -95,9 +95,17 @@ class PatternManager:
         threshold = engine.config.max_patterns * engine.config.consolidation_threshold
         if len(engine.store.patterns) < threshold:
             return 0
+        # Use dedicated consolidation distance if set; fall back to near_threshold
+        cluster_dist = (
+            engine.config.consolidation_distance
+            if engine.config.consolidation_distance is not None
+            else engine.config.near_threshold
+        )
         patterns = list(engine.store.patterns)
         used: set[str] = set()
         promoted = 0
+        to_remove: list[str] = []
+
         for i, p1 in enumerate(patterns):
             if p1.name in used:
                 continue
@@ -110,7 +118,7 @@ class PatternManager:
                     canonicalization_mode=engine.store.canonicalization_mode,
                     distance_scale=engine.store.distance_scale or 1.0,
                 )
-                if dist < engine.config.near_threshold:
+                if dist < cluster_dist:
                     cluster.append(p2)
                     used.add(p2.name)
             if len(cluster) >= 2:
@@ -118,6 +126,15 @@ class PatternManager:
                 vname = f"variant_{len(engine.store.variants)}"
                 engine.store.register_variant(make_variant(cluster, name=vname))
                 promoted += 1
+                to_remove.extend([p.name for p in cluster])
+
+        # Actually remove consolidated patterns to free up space
+        for name in to_remove:
+            # We don't use store.remove because we want to keep them in the archive/manager
+            # but they should leave the engine's "hot" patterns list.
+            engine.store.patterns = [p for p in engine.store.patterns if p.name != name]
+            engine.store._pattern_index.pop(name, None)
+
         return promoted
 
     def seed_engine(self, engine: PatternEngine, context: dict | None = None, *, fallback_global: bool = True) -> int:

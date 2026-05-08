@@ -20,3 +20,4 @@ class CoreConfig:
     context_memory_limit: int = 8
     max_sequences: int = 256
     consolidation_threshold: float = 0.8
+    consolidation_distance: float | None = None  # None = use near_threshold

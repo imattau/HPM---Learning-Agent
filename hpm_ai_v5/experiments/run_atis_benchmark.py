@@ -23,6 +23,7 @@ class ATISBenchmark:
             history_limit=100,
             near_threshold=1.5,
             consolidation_threshold=0.8,
+            consolidation_distance=0.8,  # tighter clustering than match threshold
         )
         self.engine = PatternEngine(config=self.config)
         self.manager = PatternManager(promotion_threshold=0.01)
@@ -86,8 +87,7 @@ class ATISBenchmark:
         print("\nB1: Intent Recognition...")
         self._reset()
         random.shuffle(train)
-        # Scale training down to 1000 for development speed
-        train_set = train[:1000]
+        train_set = train
         self.manager.start_episode(self.engine)
         for item in train_set:
             self._train_utterance(item["text"], item["intent"])
