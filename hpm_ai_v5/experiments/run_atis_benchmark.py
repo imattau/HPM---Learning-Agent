@@ -5,14 +5,14 @@ from collections import defaultdict
 
 from hpm_ai_v5.adapter.nlp import (
     NLPTokenizer, CanonicalPhraser, NamedEntityCanonicaliser, SkeletonExtractor,
-    SkeletonNgramAdapter, KnowledgeBaseLookup, StartOfEpisodeAdapter,
+    SkeletonNgramAdapter, StartOfEpisodeAdapter,
 )
 from hpm_ai_v5.adapter.atis import load_atis, IntentLabelAdapter
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
 from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore
 from hpm_ai_v5.core.config import CoreConfig
 from hpm_ai_v5.pipeline import HPMPipeline
-from hpm_ai_v5.polygraphs.nlp import NLPPolygraphGenerator
+from hpm_ai_v5.polygraphs.nlp import StructuralNLPPolygraphGenerator
 
 
 class ATISBenchmark:
@@ -32,7 +32,7 @@ class ATISBenchmark:
             preprocessor=NLPTokenizer(),
             engine=self.engine,
             postprocessor=ValidationOnlyAdapter(),
-            polygraph_generator=NLPPolygraphGenerator(),
+            polygraph_generator=StructuralNLPPolygraphGenerator(),
             polygraph_confidence_skip=1.1,
         )
         self.pipeline.register_preprocessor(StartOfEpisodeAdapter())
@@ -40,7 +40,6 @@ class ATISBenchmark:
         self.pipeline.register_preprocessor(NamedEntityCanonicaliser())
         self.pipeline.register_preprocessor(SkeletonExtractor())
         self.pipeline.register_preprocessor(SkeletonNgramAdapter())
-        self.pipeline.register_preprocessor(KnowledgeBaseLookup())
         self.intent_adapter = IntentLabelAdapter()
         self.pipeline.register_preprocessor(self.intent_adapter)
         self.pattern_intent: dict[str, str] = {}        # pattern_name -> winning intent

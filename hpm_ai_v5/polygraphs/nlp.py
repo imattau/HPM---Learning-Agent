@@ -28,61 +28,106 @@ class NLPPolygraphGenerator(PolygraphGenerator):
         delta = context.get("delta", ())
         
         views = []
+        # Origin state for all structural views
+        origin = State(value=(), context={**context, "view": "origin"})
         
         # 1. Token View (Raw surface tokens)
         if tokens:
             token_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in tokens)
+            v_state = State(value=token_values, context={**context, "view": "tokens"})
             views.append(PolygraphView(
                 name="token_view",
-                state=State(value=token_values, context={**context, "view": "tokens"})
+                state=v_state,
+                states=[origin, v_state]
             ))
         
         # 2. Canonical View (Synonym-normalized tokens)
         if canonical_tokens:
             canonical_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in canonical_tokens)
+            v_state = State(value=canonical_values, context={**context, "view": "canonical"})
             views.append(PolygraphView(
                 name="canonical_view",
-                state=State(value=canonical_values, context={**context, "view": "canonical"})
+                state=v_state,
+                states=[origin, v_state]
             ))
         
         # 3. Skeleton View (POS-based structure)
         if skeleton:
             skeleton_values = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
+            v_state = State(value=skeleton_values, context={**context, "view": "skeleton"})
             views.append(PolygraphView(
                 name="skeleton_view",
-                state=State(value=skeleton_values, context={**context, "view": "skeleton"})
+                state=v_state,
+                states=[origin, v_state]
             ))
             
         # 4. Skeleton Bigram View (sequential ordering constraints)
         ngrams = context.get("skeleton_ngrams", [])
         if ngrams:
             ngram_values = tuple(float(UnifiedVocabulary.get_id(ng)) for ng in ngrams)
+            v_state = State(value=ngram_values, context={**context, "view": "skeleton_bigram"})
             views.append(PolygraphView(
                 name="skeleton_bigram_view",
-                state=State(value=ngram_values, context={**context, "view": "skeleton_bigram"})
+                state=v_state,
+                states=[origin, v_state]
             ))
 
         # 5. Delta View (Structural changes)
         if delta:
+            v_state = State(value=delta, context={**context, "view": "delta"})
             views.append(PolygraphView(
                 name="delta_view",
-                state=State(value=delta, context={**context, "view": "delta"})
+                state=v_state,
+                states=[origin, v_state]
             ))
         
         # 5. Semantic View (Synonym/Semantic Candidate View)
-        # We try to map ALL tokens to their semantic candidates' canonical IDs if possible
-        # For simplicity in this benchmark, we just use the candidates directly.
         candidates = context.get("semantic_candidates", [])
         if candidates:
-            # We take the first candidate as the primary hypothesis for the state value
-            # This allows matching against patterns learned from that candidate.
-            for cand in candidates[:3]: # Try first few as separate views? 
-                # Actually, PolygraphGenerator expects a list of views.
-                # We can have multiple semantic views!
+            for cand in candidates[:3]:
                 cand_id = float(UnifiedVocabulary.get_id(cand))
+                v_state = State(value=(cand_id,), context={**context, "view": "semantic", "candidate": cand})
                 views.append(PolygraphView(
                     name=f"semantic_view_{cand}",
-                    state=State(value=(cand_id,), context={**context, "view": "semantic", "candidate": cand})
+                    state=v_state,
+                    states=[origin, v_state]
                 ))
             
+        return views
+
+
+@dataclass(slots=True)
+class StructuralNLPPolygraphGenerator(PolygraphGenerator):
+    """Lightweight NLP polygraph — skeleton and bigram views only.
+
+    Use instead of NLPPolygraphGenerator when semantic candidate views would
+    cause view engine explosion (e.g. large corpora with WordNet KB lookup).
+    """
+
+    name: str = "structural_nlp_polygraph"
+
+    def generate(self, raw: Any, *, context: dict[str, Any] | None = None) -> list[PolygraphView]:
+        if not isinstance(raw, str):
+            token_id = float(UnifiedVocabulary.get_id(str(raw)))
+            return [PolygraphView(name="token_view", state=State(value=(token_id,), context={**(context or {}), "view": "tokens"}))]
+
+        context = context or {}
+        skeleton = context.get("skeleton", [])
+        ngrams = context.get("skeleton_ngrams", [])
+        views = []
+
+        if skeleton:
+            skeleton_values = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
+            views.append(PolygraphView(
+                name="skeleton_view",
+                state=State(value=skeleton_values, context={**context, "view": "skeleton"}),
+            ))
+
+        if ngrams:
+            ngram_values = tuple(float(UnifiedVocabulary.get_id(ng)) for ng in ngrams)
+            views.append(PolygraphView(
+                name="skeleton_bigram_view",
+                state=State(value=ngram_values, context={**context, "view": "skeleton_bigram"}),
+            ))
+
         return views
