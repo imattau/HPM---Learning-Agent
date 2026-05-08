@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pickle  # local-only checkpoints of trusted learned patterns
+import pathlib
 from .engine import PatternEngine
 from .pattern import Pattern
 from .variant import make_variant
@@ -32,15 +34,16 @@ class PatternManager:
         self,
         promotion_threshold: float = 1.0,
         min_support: int = 2,
-        max_archive_size: int = 512,
-        max_meta_archive_size: int = 128, # V5 Extension
+        max_archive_size: int | None = None,
+        max_meta_archive_size: int | None = None,
         retrieval_top_k: int = 8,
         archive_decay_rate: float = 0.05,
     ) -> None:
         self.promotion_threshold = promotion_threshold
         self.min_support = min_support
+        # None = dynamically match engine.config.max_patterns at prune time
         self.max_archive_size = max_archive_size
-        self.max_meta_archive_size = max_meta_archive_size # V5 Extension
+        self.max_meta_archive_size = max_meta_archive_size
         self.retrieval_top_k = retrieval_top_k
         self.archive_decay_rate = archive_decay_rate
 
@@ -74,18 +77,19 @@ class PatternManager:
                     self.archive_signatures[meta.name] = sig
                 promoted.append(meta.name)
 
-        # 3. Prune Archives
-        if len(self.archive) > self.max_archive_size:
+        # 3. Prune Archives — sizes default to engine.config.max_patterns when None
+        max_leaf = self.max_archive_size if self.max_archive_size is not None else engine.config.max_patterns
+        max_meta = self.max_meta_archive_size if self.max_meta_archive_size is not None else max(32, engine.config.max_patterns // 8)
+
+        if len(self.archive) > max_leaf:
             ordered = sorted(self.archive.items(), key=lambda item: item[1].utility)
-            to_remove = len(self.archive) - self.max_archive_size
-            for name, _ in ordered[:to_remove]:
+            for name, _ in ordered[:len(self.archive) - max_leaf]:
                 del self.archive[name]
                 self.archive_signatures.pop(name, None)
-                
-        if len(self.meta_archive) > self.max_meta_archive_size:
+
+        if len(self.meta_archive) > max_meta:
             ordered_meta = sorted(self.meta_archive.items(), key=lambda item: item[1].utility)
-            to_remove_meta = len(self.meta_archive) - self.max_meta_archive_size
-            for name, _ in ordered_meta[:to_remove_meta]:
+            for name, _ in ordered_meta[:len(self.meta_archive) - max_meta]:
                 del self.meta_archive[name]
                 self.archive_signatures.pop(name, None)
 
@@ -209,6 +213,33 @@ class PatternManager:
             "episode": self.episode_count,
             "context_signature": sig,
         }
+
+    def save(self, path: str | pathlib.Path) -> None:
+        """Persist archive to disk. Saves archive, meta_archive, signatures, counts."""
+        p = pathlib.Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "wb") as f:
+            pickle.dump({
+                "archive": self.archive,
+                "meta_archive": self.meta_archive,
+                "archive_signatures": self.archive_signatures,
+                "retrieval_counts": self.retrieval_counts,
+                "episode_count": self.episode_count,
+            }, f)
+
+    def load(self, path: str | pathlib.Path) -> bool:
+        """Load archive from disk. Returns True if loaded, False if file not found."""
+        p = pathlib.Path(path)
+        if not p.exists():
+            return False
+        with open(p, "rb") as f:
+            state = pickle.load(f)
+        self.archive = state["archive"]
+        self.meta_archive = state.get("meta_archive", {})
+        self.archive_signatures = state.get("archive_signatures", {})
+        self.retrieval_counts = state.get("retrieval_counts", {})
+        self.episode_count = state.get("episode_count", 0)
+        return True
 
     def stats(self) -> dict:
         top_leaf = sorted(self.archive.values(), key=lambda p: p.utility, reverse=True)[:3]

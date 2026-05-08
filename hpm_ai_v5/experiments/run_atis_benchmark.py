@@ -83,16 +83,29 @@ class ATISBenchmark:
                 intent_votes[intent] += weight * match.pattern.utility
         return max(intent_votes, key=intent_votes.__getitem__) if intent_votes else None
 
+    _CHECKPOINT = "checkpoints/atis_manager.pkl"
+    _INTENT_CHECKPOINT = "checkpoints/atis_intent.json"
+
     def run_b1(self, train: list[dict], test: list[dict]) -> float:
+        import json, pathlib
         print("\nB1: Intent Recognition...")
         self._reset()
-        random.shuffle(train)
-        train_set = train
-        self.manager.start_episode(self.engine)
-        for item in train_set:
-            self._train_utterance(item["text"], item["intent"])
-        if self.consolidation:
-            self.manager.end_episode(self.engine)
+        intent_path = pathlib.Path(self._INTENT_CHECKPOINT)
+        if self.manager.load(self._CHECKPOINT) and intent_path.exists():
+            self.pattern_intent = json.loads(intent_path.read_text())
+            self.manager.seed_engine(self.engine)
+            print(f"  Loaded from checkpoint ({len(self.pattern_intent)} patterns mapped)")
+        else:
+            random.shuffle(train)
+            self.manager.start_episode(self.engine)
+            for item in train:
+                self._train_utterance(item["text"], item["intent"])
+            if self.consolidation:
+                self.manager.end_episode(self.engine)
+            self.manager.save(self._CHECKPOINT)
+            intent_path.parent.mkdir(parents=True, exist_ok=True)
+            intent_path.write_text(json.dumps(self.pattern_intent))
+            print(f"  Trained and saved checkpoint ({len(self.pattern_intent)} patterns)")
         
         correct = 0
         total = len(test)
