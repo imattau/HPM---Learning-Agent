@@ -81,7 +81,10 @@ class PatternStore:
     def top_k(self, observation: Any, k: int = 3) -> list[Pattern]:
         candidate = _as_tuple(observation)
         mode = self.canonicalization_mode or self.config.canonicalization_mode
-        canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=mode))
+        if candidate and all(isinstance(item, (int, float)) for item in candidate):
+            canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=mode))
+        else:
+            canon_candidate = canonicalize_sequence(candidate, mode=mode)
         
         # Search both leaf and meta patterns
         all_candidates = self.patterns + self.meta_patterns
@@ -109,21 +112,19 @@ class PatternStore:
             canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=mode))
             scale = self.distance_scale or self.config.distance_scale
 
-            best = min(
-                all_candidates,
-                key=lambda pattern: pattern.distance(
+            best_dist = float("inf")
+            best = None
+            for pattern in all_candidates:
+                d = pattern.distance(
                     candidate,
                     canonicalization_mode=mode,
                     distance_scale=scale,
                     canon_candidate=canon_candidate,
-                ),
-            )
-            distance = best.distance(
-                candidate,
-                canonicalization_mode=mode,
-                distance_scale=scale,
-                canon_candidate=canon_candidate,
-            )
+                )
+                if d < best_dist:
+                    best_dist = d
+                    best = pattern
+            distance = best_dist
             if distance <= self.exact_threshold:
                 return MatchResult(status="exact", pattern=best, distance=distance, residual=())
             if distance <= self.near_threshold:
@@ -135,10 +136,13 @@ class PatternStore:
             for v in self.variants.values():
                 if not v.centroid:
                     continue
-                c = candidate[:len(v.centroid)]
-                vdist = float(np.linalg.norm(
-                    np.array(c, dtype=float) - np.array(v.centroid, dtype=float)
-                ))
+                # Truncate both to minimum length for variable-length NLP matching
+                min_len = min(len(candidate), len(v.centroid))
+                if min_len == 0:
+                    continue
+                c_vec = np.array(candidate[:min_len], dtype=float)
+                v_vec = np.array(v.centroid[:min_len], dtype=float)
+                vdist = float(np.linalg.norm(c_vec - v_vec))
                 if vdist < best_vdist:
                     best_vdist = vdist
                     best_variant = v

@@ -112,22 +112,35 @@ class StructuralNLPPolygraphGenerator(PolygraphGenerator):
             return [PolygraphView(name="token_view", state=State(value=(token_id,), context={**(context or {}), "view": "tokens"}))]
 
         context = context or {}
+        tokens = context.get("tokens", [])
+        canonical_tokens = context.get("canonical_tokens", [])
         skeleton = context.get("skeleton", [])
         ngrams = context.get("skeleton_ngrams", [])
         views = []
+        origin = State(value=(), context={**context, "view": "origin"})
 
+        # 1. Token view — discriminates specific surface forms
+        if tokens:
+            token_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in tokens)
+            v_state = State(value=token_values, context={**context, "view": "tokens"})
+            views.append(PolygraphView(name="token_view", state=v_state, states=[origin, v_state]))
+
+        # 2. Canonical view — synonym-normalised tokens
+        if canonical_tokens:
+            canonical_values = tuple(float(UnifiedVocabulary.get_id(t)) for t in canonical_tokens)
+            v_state = State(value=canonical_values, context={**context, "view": "canonical"})
+            views.append(PolygraphView(name="canonical_view", state=v_state, states=[origin, v_state]))
+
+        # 3. Skeleton view — POS-based structure
         if skeleton:
             skeleton_values = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
-            views.append(PolygraphView(
-                name="skeleton_view",
-                state=State(value=skeleton_values, context={**context, "view": "skeleton"}),
-            ))
+            v_state = State(value=skeleton_values, context={**context, "view": "skeleton"})
+            views.append(PolygraphView(name="skeleton_view", state=v_state, states=[origin, v_state]))
 
+        # 4. Skeleton bigram view — sequential ordering constraints
         if ngrams:
             ngram_values = tuple(float(UnifiedVocabulary.get_id(ng)) for ng in ngrams)
-            views.append(PolygraphView(
-                name="skeleton_bigram_view",
-                state=State(value=ngram_values, context={**context, "view": "skeleton_bigram"}),
-            ))
+            v_state = State(value=ngram_values, context={**context, "view": "skeleton_bigram"})
+            views.append(PolygraphView(name="skeleton_bigram_view", state=v_state, states=[origin, v_state]))
 
         return views

@@ -84,9 +84,9 @@ class CodeRecognitionBenchmark:
             
             if res.polygraph_scores:
                 for view_name in view_patterns:
-                    view_engine = self.pipeline.view_engines.get(view_name)
-                    if view_engine and view_engine.last_match and view_engine.last_match.pattern:
-                        view_patterns[view_name].add(view_engine.last_match.pattern.name)
+                    match = self.pipeline.view_matches.get(view_name)
+                    if match and match.pattern:
+                        view_patterns[view_name].add(match.pattern.name)
                             
         return view_patterns
 
@@ -134,8 +134,8 @@ class CodeRecognitionBenchmark:
         print("Running Idiom Discovery...")
         self.engine.store.patterns = []
         self.pattern_manager.archive = {}
-        for ve in self.pipeline.view_engines.values():
-            ve.store.patterns = []
+        self.pipeline.view_engines.clear()
+        self.pipeline.view_matches.clear()
         
         for code in corpus:
             self._feed_code_sequence(code, clear_history=False)

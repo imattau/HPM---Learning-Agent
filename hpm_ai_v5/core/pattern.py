@@ -89,32 +89,27 @@ class Pattern:
         candidate = _as_tuple(observation)
         if not self.template:
             return float(len(candidate))
-        if all(isinstance(item, Real) for item in candidate + self.template):
-            if canon_candidate is None:
-                canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=canonicalization_mode))
-            
-            tpl = self.canonical_template(canonicalization_mode=canonicalization_mode)
-            
-            # Weighted Mean Abs Error using precision
-            limit = min(len(tpl), len(canon_candidate))
-            if not limit:
-                return float(abs(len(tpl) - len(canon_candidate)))
-            
-            total = 0.0
-            total_weight = 0.0
-            for i in range(limit):
-                weight = self.precision[i] if i < len(self.precision) else 1.0
-                total += abs(float(tpl[i]) - float(canon_candidate[i])) * weight
-                total_weight += weight
-            
-            scale = max(1.0, float(distance_scale))
-            avg_err = (total / total_weight) / scale if total_weight > 0 else 0.0
-            length_penalty = abs(len(tpl) - len(canon_candidate)) / max(1.0, max(len(tpl), len(canon_candidate)))
-            return avg_err + length_penalty
-        
-        canon_obs = canonicalize_sequence(candidate, mode=canonicalization_mode) if canon_candidate is None else canon_candidate
-        canon_tpl = canonicalize_sequence(self.template, mode=canonicalization_mode)
-        return 1.0 if canon_obs != canon_tpl else 0.0
+        if canon_candidate is None:
+            canon_candidate = tuple(float(item) for item in canonicalize_sequence(candidate, mode=canonicalization_mode))
+
+        tpl = self.canonical_template(canonicalization_mode=canonicalization_mode)
+
+        # Weighted Mean Abs Error using precision
+        limit = min(len(tpl), len(canon_candidate))
+        if not limit:
+            return float(abs(len(tpl) - len(canon_candidate)))
+
+        total = 0.0
+        total_weight = 0.0
+        for i in range(limit):
+            weight = self.precision[i] if i < len(self.precision) else 1.0
+            total += abs(tpl[i] - canon_candidate[i]) * weight
+            total_weight += weight
+
+        scale = max(1.0, float(distance_scale))
+        avg_err = (total / total_weight) / scale if total_weight > 0 else 0.0
+        length_penalty = abs(len(tpl) - len(canon_candidate)) / max(1.0, max(len(tpl), len(canon_candidate)))
+        return avg_err + length_penalty
 
     def predict(self, state: State) -> State:
         """Predict a one-step continuation."""

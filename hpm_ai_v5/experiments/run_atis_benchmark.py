@@ -24,6 +24,8 @@ class ATISBenchmark:
             near_threshold=1.5,
             consolidation_threshold=0.8,
             consolidation_distance=0.8,
+            density_decay=0.0,
+            utility_decay=0.0,
         )
         self.engine = PatternEngine(config=self.config)
         self.manager = PatternManager(promotion_threshold=0.01)
@@ -49,6 +51,7 @@ class ATISBenchmark:
         self.engine.current_state = None
         self.engine.history = []
         self.pipeline.view_engines.clear()
+        self.pipeline.view_matches.clear()
         self.engine.store = PatternStore(config=self.config)
         self.pattern_intent.clear()
         self._intent_votes.clear()
@@ -65,15 +68,23 @@ class ATISBenchmark:
                 adapter.reset()
         self.intent_adapter.label = intent
         self.pipeline.step(text)
-        for engine in [self.engine] + list(self.pipeline.view_engines.values()):
-            if engine.last_match and engine.last_match.pattern:
-                self._intent_votes[engine.last_match.pattern.name][intent] += 1
+        
+        # Primary engine
+        if self.engine.last_match and self.engine.last_match.pattern:
+            self._intent_votes[self.engine.last_match.pattern.name][intent] += 1
+            
+        # View matches
+        for match in self.pipeline.view_matches.values():
+            if match and match.pattern:
+                self._intent_votes[match.pattern.name][intent] += 1
 
     def _predict_intent(self) -> str | None:
-        """Vote across primary + all view engines using O(1) pattern_intent lookup."""
+        """Vote across primary + all view matches using O(1) pattern_intent lookup."""
         intent_votes: dict[str, float] = defaultdict(float)
-        for engine in [self.engine] + list(self.pipeline.view_engines.values()):
-            match = engine.last_match
+        
+        matches = [self.engine.last_match] + list(self.pipeline.view_matches.values())
+        
+        for match in matches:
             if not match or not match.pattern:
                 continue
             weight = 1.0 if match.status == "exact" else 0.5 if match.status == "near" else 0.0

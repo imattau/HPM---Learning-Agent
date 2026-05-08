@@ -29,8 +29,7 @@ def test_pattern_manager_end_start_episode() -> None:
     assert "seeded" in start_summary
     # seeded patterns should now be in the new engine's store
     if start_summary["seeded"] > 0:
-        assert len(new_engine.store.patterns) > 0
-
+        assert len(new_engine.store.patterns) + len(new_engine.store.meta_patterns) > 0
 
 def test_context_signature_builder() -> None:
     assert build_context_signature({}) == "generic"

@@ -23,6 +23,21 @@ def build_context_signature(context: dict) -> str:
         parts.append(f"env:{context['env']}")
     if "intent_label" in context:
         parts.append(f"intent:{context['intent_label']}")
+    # Dominant period buckets
+    if "dominant_period" in context:
+        dp = context["dominant_period"]
+        if dp >= 4:
+            parts.append("period:4+")
+        else:
+            parts.append(f"period:{dp}")
+            
+    # Entropy buckets
+    if "entropy" in context:
+        ent = float(context["entropy"])
+        if ent > 0.7:
+            parts.append("entropy:high")
+        elif ent < 0.3:
+            parts.append("entropy:low")
     
     return ",".join(parts) if parts else "generic"
 
@@ -158,7 +173,9 @@ class PatternManager:
         if not candidates and fallback_global:
             candidates = all_candidates
 
-        top = sorted(candidates, key=lambda p: p.utility, reverse=True)[: self.retrieval_top_k]
+        # Use a balanced score for seeding to ensure high-support leaf patterns
+        # can compete with composite meta-patterns.
+        top = sorted(candidates, key=lambda p: p.utility + 0.1 * p.support, reverse=True)[: self.retrieval_top_k]
         injected = 0
         for pattern in top:
             if engine.store.get(pattern.name) is None:
@@ -254,3 +271,7 @@ class PatternManager:
             "top_leaf_patterns": [p.name for p in top_leaf],
             "top_meta_patterns": [p.name for p in top_meta],
         }
+
+    def archive_stats_by_signature(self) -> dict[str, int]:
+        from collections import Counter
+        return dict(Counter(self.archive_signatures.values()))

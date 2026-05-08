@@ -14,6 +14,7 @@ from hpm_ai_v5.adapter.nlp import (
     SkeletonNgramAdapter,
     DeltaEncoder,
     KnowledgeBaseLookup,
+    StartOfEpisodeAdapter,
 )
 from hpm_ai_v5.adapter.clt import UnifiedVocabulary
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
@@ -45,6 +46,7 @@ class SNLPBenchmark:
             polygraph_generator=NLPPolygraphGenerator(),
             polygraph_confidence_skip=1.1 # Force polygraph evaluation
         )
+        self.pipeline.register_preprocessor(StartOfEpisodeAdapter())
         self.pipeline.register_preprocessor(CanonicalPhraser())
         self.pipeline.register_preprocessor(SkeletonExtractor())
         self.pipeline.register_preprocessor(SkeletonNgramAdapter())
@@ -78,6 +80,7 @@ class SNLPBenchmark:
         self.engine.history = []
         if clear_views:
             self.pipeline.view_engines.clear()
+            self.pipeline.view_matches.clear()
             # Wipe learned patterns so tasks don't contaminate each other
             self.engine.store = PatternStore(config=self.config)
         for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
@@ -106,9 +109,9 @@ class SNLPBenchmark:
             res = self.pipeline.step(sent)
             
             # Check if skeleton view matched
-            view_engine = self.pipeline.view_engines.get("skeleton_view")
-            if view_engine and view_engine.last_match:
-                if view_engine.last_match.status in ("exact", "near"):
+            match = self.pipeline.view_matches.get("skeleton_view")
+            if match:
+                if match.status in ("exact", "near"):
                     correct += 1
                 
         acc = correct / total
@@ -152,11 +155,10 @@ class SNLPBenchmark:
 
             # A good forecast means the engine had a pattern that anticipated the
             # next skeleton — proxy: skeleton_view matched the flight sentence
-            skeleton_engine = self.pipeline.view_engines.get("skeleton_view")
+            match = self.pipeline.view_matches.get("skeleton_view")
             if (
-                skeleton_engine
-                and skeleton_engine.last_match
-                and skeleton_engine.last_match.status in ("exact", "near")
+                match
+                and match.status in ("exact", "near")
             ):
                 correct += 1
 
@@ -209,9 +211,9 @@ class SNLPBenchmark:
             self.pipeline.step(test_sent)
 
             found_match = False
-            for view_name, engine in self.pipeline.view_engines.items():
-                if view_name.startswith("semantic_view_") and engine.last_match:
-                    if engine.last_match.status in ("exact", "near"):
+            for view_name, match in self.pipeline.view_matches.items():
+                if view_name.startswith("semantic_view_") and match:
+                    if match.status in ("exact", "near"):
                         found_match = True
                         break
 
@@ -250,12 +252,12 @@ class SNLPBenchmark:
         def _get_skeleton_confidence() -> float:
             # Use match status: 1.0=exact, 0.5=near, 0.0=no match or no view
             # act() confidence decays over time and has no discriminative power here.
-            view_engine = self.pipeline.view_engines.get("skeleton_bigram_view")
-            if view_engine is None or view_engine.last_match is None:
+            match = self.pipeline.view_matches.get("skeleton_bigram_view")
+            if match is None:
                 return 0.0
-            if view_engine.last_match.status == "exact":
+            if match.status == "exact":
                 return 1.0
-            if view_engine.last_match.status == "near":
+            if match.status == "near":
                 return 0.5
             return 0.0
 

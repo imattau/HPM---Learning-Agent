@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from .adapter import AdapterPacket, AdapterRegistry
 from .core import Action, PatternEngine
+from .core.store import MatchResult
 from .core.evaluator import PolygraphAgreement, PolygraphEvaluator, PolygraphScore
 from .preprocessors.base import PreprocessedInput, Preprocessor
 from .polygraphs.base import PolygraphGenerator
 from .postprocessors.base import Postprocessor
+from .core.state import State
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,9 +52,11 @@ class HPMPipeline:
         self.polygraph_min_patterns = polygraph_min_patterns
         self.polygraph_confidence_skip = polygraph_confidence_skip
         self._step_count: int = 0
-        self._cached_polygraph_scores: dict | None = None
-        self._cached_selected_view: str | None = None
+        self._cached_polygraph_scores = None
+        self._cached_selected_view = None
         self.view_engines: dict[str, PatternEngine] = {}
+        self.view_matches: dict[str, MatchResult] = {}
+        self._view_pattern_names: dict[str, set[str]] = defaultdict(set)
         self.preprocessing_pipeline = AdapterRegistry()
         self.postprocessing_pipeline = AdapterRegistry()
         self.preprocessing_pipeline.register(preprocessor)
@@ -100,20 +105,92 @@ class HPMPipeline:
             if should_run_polygraph:
                 views = self.polygraph_generator.generate(raw, context=preprocessed.context)
                 polygraph_scores = {}
+                self.view_matches = {}
+
+                # Save primary engine state to avoid contamination from views
+                primary_state = self.engine.current_state
+                primary_history = list(self.engine.history)
+                primary_trace = list(self.engine.pattern_trace)
+                primary_last_match = self.engine.last_match
+
                 # Observe and score all views cheaply
                 for view in views:
-                    engine = self.view_engines.setdefault(view.name, PatternEngine())
-                    # If view generator provided multiple states, observe them all
+                    # Reset engine state for this view
+                    # Use a fresh start for each view to ensure it can learn from origin
+                    self.engine.current_state = State(value=())
+                    self.engine.history = []
+                    self.engine.pattern_trace = []
+
+                    # Tier 1: Fast path - observe through primary engine (shared store)
                     if hasattr(view, "states") and view.states:
-                        for s in view.states:
-                            engine.observe(s)
+                        # Establish origin for multi-state views
+                        self.engine.current_state = None
+                        for i, s in enumerate(view.states):
+                            is_last = (i == len(view.states) - 1)
+                            match = self.engine.observe(s, update_state=not is_last)
                     else:
-                        engine.observe(view.state)
-                    polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
+                        match = self.engine.observe(view.state, update_state=False)
+                    
+                    if match is not None:
+                        self.view_matches[view.name] = match
+                    else:
+                        # Fallback for single-state views or first-step observations
+                        # where observe() returns None but we still want a match result
+                        # against the pattern store.
+                        direct_match = self.engine.store.match(view.state.value)
+                        if direct_match:
+                            self.view_matches[view.name] = direct_match
+                            match = direct_match
+
+                    if match and match.pattern:
+                        self._view_pattern_names[view.name].add(match.pattern.name)
+
+                    # Tier 2: Use existing engine or heuristic score
+                    if view.name in self.view_engines:
+                        engine = self.view_engines[view.name]
+                        if hasattr(view, "states") and view.states:
+                            for s in view.states:
+                                engine.observe(s)
+                        else:
+                            engine.observe(view.state)
+                        polygraph_scores[view.name] = self.polygraph_evaluator.score_engine(engine)
+                    else:
+                        # Heuristic score for selection when no engine exists
+                        if match and match.pattern:
+                            p = match.pattern
+                            # fragmentation proxy: how many patterns learned for this view signature
+                            fragmentation = float(len(self._view_pattern_names[view.name]))
+                            
+                            score_val = (self.polygraph_evaluator.alpha * 1.0 + 
+                                         self.polygraph_evaluator.beta * p.density - 
+                                         self.polygraph_evaluator.gamma * fragmentation)
+                            polygraph_scores[view.name] = PolygraphScore(
+                                concentration=1.0, average_density=p.density, fragmentation=fragmentation, score=score_val
+                            )
+                        else:
+                            polygraph_scores[view.name] = PolygraphScore(0.0, 0.0, 0.0, 0.0)
+
+                # Restore primary engine state
+                self.engine.current_state = primary_state
+                self.engine.history = primary_history
+                self.engine.pattern_trace = primary_trace
+                self.engine.last_match = primary_last_match
 
                 selected_view = self.polygraph_evaluator.select_view(polygraph_scores)
                 if selected_view is None and views:
                     selected_view = views[0].name
+
+                # Tier 2: Create full engine only for selected view if needed for act()
+                if selected_view is not None and selected_view not in self.view_engines:
+                    selected_view_obj = next((v for v in views if v.name == selected_view), None)
+                    if selected_view_obj:
+                        engine = PatternEngine(config=self.engine.config)
+                        if hasattr(selected_view_obj, "states") and selected_view_obj.states:
+                            for s in selected_view_obj.states:
+                                engine.observe(s)
+                        else:
+                            engine.observe(selected_view_obj.state)
+                        self.view_engines[selected_view] = engine
 
                 # Only call act() on the selected view engine
                 if selected_view is not None and selected_view in self.view_engines:

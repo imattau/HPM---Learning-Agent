@@ -190,13 +190,14 @@ class PatternEngine:
         )
         return self.store.add(meta)
 
-    def observe(self, state: State) -> MatchResult | None:
+    def observe(self, state: State, *, update_state: bool = True) -> MatchResult | None:
         """Observe a new state and update the pattern store from the delta."""
 
         if self.current_state is None:
-            self.current_state = state
-            self._record_history(state)
-            self.last_match = None
+            if update_state:
+                self.current_state = state
+                self._record_history(state)
+                self.last_match = None
             return None
 
         delta = Delta.between(self.current_state.value, state.value, level="state")
@@ -233,10 +234,13 @@ class PatternEngine:
         self._reward_matching_sequences(utility_boost, context_signature)
         self._apply_decay()
         self.store.prune()
-        self.current_state = state
-        self._record_history(state)
+        
+        if update_state:
+            self.current_state = state
+            self._record_history(state)
+            self._record_pattern_name(match.pattern, context_signature)
+            
         self.last_match = match
-        self._record_pattern_name(match.pattern, context_signature)
         return match
 
     def retrieve(self, observation, top_k: int = 3) -> list[Pattern]:

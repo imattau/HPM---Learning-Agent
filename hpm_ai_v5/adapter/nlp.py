@@ -93,6 +93,7 @@ class CanonicalPhraser(Adapter):
     provides: list[str] = field(default_factory=lambda: ["canonical_tokens", "state"])
     
     _lemma_to_concept: dict[str, str] = field(default_factory=dict, init=False)
+    _wordnet_cache: dict[str, str] = field(default_factory=dict, init=False)
 
     def __post_init__(self):
         for concept, lemmas in self.concept_map.items():
@@ -103,23 +104,25 @@ class CanonicalPhraser(Adapter):
         # 1. Hardcoded map override
         if lemma in self._lemma_to_concept:
             return self._lemma_to_concept[lemma]
-        
-        # 2. WordNet Lemma Normalization (Zero-shot)
+
+        # 2. WordNet Lemma Normalization (cached)
+        if lemma in self._wordnet_cache:
+            return self._wordnet_cache[lemma]
+
+        result = lemma.upper()
         try:
             import nltk
             if "/home/mattthomson/nltk_data" not in nltk.data.path:
                 nltk.data.path.append("/home/mattthomson/nltk_data")
             from nltk.corpus import wordnet
-            
-            # Find the most frequent synset's primary lemma
             synsets = wordnet.synsets(lemma)
             if synsets:
-                primary = synsets[0].lemmas()[0].name().replace("_", " ").upper()
-                return primary
+                result = synsets[0].lemmas()[0].name().replace("_", " ").upper()
         except Exception:
             pass
-            
-        return lemma.upper()
+
+        self._wordnet_cache[lemma] = result
+        return result
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         lemmas = packet.context.get("lemmas", [])
@@ -294,11 +297,14 @@ class KnowledgeBaseLookup(Adapter):
     max_candidates: int = 5
     requires: list[str] = field(default_factory=lambda: ["nlp_tokenizer"])
     provides: list[str] = field(default_factory=lambda: ["semantic_candidates"])
+    _cache: dict[str, list[str]] = field(default_factory=dict, init=False)
 
     def _synonyms(self, token: str) -> list[str]:
+        if token in self._cache:
+            return self._cache[token]
+        result: list[str] = []
         try:
             import nltk
-            # Ensure nltk knows where the data is
             if "/home/mattthomson/nltk_data" not in nltk.data.path:
                 nltk.data.path.append("/home/mattthomson/nltk_data")
             from nltk.corpus import wordnet
@@ -308,9 +314,11 @@ class KnowledgeBaseLookup(Adapter):
                     name = lemma.name().replace("_", " ").lower()
                     if name != token:
                         syns.add(name)
-            return list(syns)[: self.max_candidates]
+            result = list(syns)[: self.max_candidates]
         except Exception:
-            return []
+            pass
+        self._cache[token] = result
+        return result
 
     def run(self, packet: AdapterPacket) -> AdapterPacket:
         tokens = packet.context.get("tokens", [])
