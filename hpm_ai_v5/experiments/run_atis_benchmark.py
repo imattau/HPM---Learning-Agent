@@ -66,7 +66,10 @@ class ATISBenchmark:
         self.pipeline.step(text)
         for engine in [self.engine] + list(self.pipeline.view_engines.values()):
             if engine.last_match and engine.last_match.pattern:
-                self.pattern_intent[engine.last_match.pattern.name] = intent
+                # First-wins: don't overwrite — cross-intent near-matches corrupt the mapping
+                pname = engine.last_match.pattern.name
+                if pname not in self.pattern_intent:
+                    self.pattern_intent[pname] = intent
 
     def _predict_intent(self) -> str | None:
         """Vote across primary + all view engines using O(1) pattern_intent lookup."""
