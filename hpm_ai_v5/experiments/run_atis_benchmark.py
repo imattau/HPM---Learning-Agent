@@ -57,6 +57,10 @@ class ATISBenchmark:
     def _train_utterance(self, text: str, intent: str):
         self.engine.current_state = None
         self.engine.history = []
+        # Reset stateful adapters between unrelated utterances (SNLP lesson)
+        for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
+            if hasattr(adapter, "reset"):
+                adapter.reset()
         self.intent_adapter.label = intent
         self.pipeline.step(text)
         for engine in [self.engine] + list(self.pipeline.view_engines.values()):
@@ -103,24 +107,38 @@ class ATISBenchmark:
     def _run_and_predict(self, text: str) -> str | None:
         self.engine.current_state = None
         self.engine.history = []
+        for adapter in self.pipeline.preprocessing_pipeline.adapters.values():
+            if hasattr(adapter, "reset"):
+                adapter.reset()
         self.intent_adapter.label = None
         self.pipeline.step(text)
         return self._predict_intent()
 
     def run_b2(self, train: list[dict], test: list[dict]) -> float:
-        print("\nB2: Slot Generalisation...")
-        train_tokens: set[str] = set()
-        for item in train:
-            train_tokens.update(item["text"].lower().split())
-        
-        novel = [i for i in test if any(w not in train_tokens for w in i["text"].lower().split())]
+        """B2: generalise to utterances with novel named entities (GPE, ORG, LOC).
+        Uses spaCy NER to find test utterances containing entity types not seen
+        in training — the meaningful novelty criterion from SNLP T3 lessons.
+        """
+        print("\nB2: Slot Generalisation (novel named entities)...")
+        entity_types = {"GPE", "ORG", "LOC", "FAC"}
+        # Reuse the tokenizer's loaded model
+        nlp = self.pipeline.preprocessing_pipeline.adapters["nlp_tokenizer"].nlp
+
+        def _entity_set(text: str) -> set[str]:
+            return {ent.text.lower() for ent in nlp(text).ents if ent.label_ in entity_types}
+
+        train_entities: set[str] = set()
+        for item in train[:1000]:  # same subset as B1 training
+            train_entities.update(_entity_set(item["text"]))
+
+        novel = [i for i in test if _entity_set(i["text"]) - train_entities]
         if not novel:
-            print("  No novel-token items — skipping")
+            print("  No novel-entity items — skipping")
             return 0.0
 
         correct = sum(1 for item in novel if self._run_and_predict(item["text"]) == item["intent"])
         acc = correct / len(novel)
-        print(f"  Accuracy: {acc:.2%} ({correct}/{len(novel)} novel-token items)")
+        print(f"  Accuracy: {acc:.2%} ({correct}/{len(novel)} novel-entity items)")
         return acc
 
     def run_b3(self, train: list[dict]) -> dict:
