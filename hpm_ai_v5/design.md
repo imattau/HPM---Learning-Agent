@@ -993,12 +993,26 @@ later training examples overwrite earlier assignments, silently corrupting the m
 Observed on ATIS with 4,978 utterances: B1 accuracy degraded from 69% (1,000
 utterances) to 57% (4,978 utterances) due to progressive overwriting.
 
-**Rule**: use first-wins assignment for any external label dict keyed by pattern name.
-Never overwrite an existing entry — the first utterance to claim a pattern owns it.
+**Rule**: use majority-vote assignment — count how many training utterances from each
+intent match each pattern, then assign the intent with the most matches after training.
+This is more robust than first-wins (avoids locking in an early low-quality near-match).
+
 ```python
-if pattern.name not in self.pattern_intent:
-    self.pattern_intent[pattern.name] = intent
+# During training:
+self._intent_votes[pattern.name][intent] += 1
+# After training:
+self.pattern_intent = {
+    pname: max(votes, key=votes.__getitem__)
+    for pname, votes in self._intent_votes.items()
+}
 ```
+
+**Why not use `pattern.context_memory`?** Context signatures include the full packet
+context (tokens, skeleton, semantic_candidates, ent_types, etc.), making them unique
+per utterance. Density never accumulates for a specific intent label — each utterance
+creates a distinct low-density entry. `context_memory` is useful for context-sensitive
+pattern selection but not for intent recovery. For intent recovery, an external vote
+counter is required.
 
 ### Sequential ordering requires bigram skeletons; unigrams are insufficient
 
