@@ -18,12 +18,12 @@ from hpm_ai_v5.polygraphs.nlp import NLPPolygraphGenerator
 class ATISBenchmark:
     def __init__(self, consolidation: bool = True):
         self.config = CoreConfig(
-            max_patterns=2048,
-            max_sequences=512,
+            max_patterns=8192,
+            max_sequences=1024,
             history_limit=100,
             near_threshold=1.5,
             consolidation_threshold=0.8,
-            consolidation_distance=0.8,  # tighter clustering than match threshold
+            consolidation_distance=0.8,
         )
         self.engine = PatternEngine(config=self.config)
         self.manager = PatternManager(promotion_threshold=0.01)
