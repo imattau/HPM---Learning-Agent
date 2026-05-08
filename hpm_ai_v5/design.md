@@ -983,6 +983,23 @@ re-introduce the same eviction problem at the long-term memory layer.
 persist the archive. Retraining from scratch on every run wastes time and means
 the store never benefits from cross-episode consolidation.
 
+### Broad near_threshold causes intent contamination in external label tracking
+
+When `near_threshold` is set high (e.g. 1.5 for ATIS), cross-intent near-matches
+are common — a "flight" utterance can match a pattern originally learned for
+"airfare". If a benchmark uses an external dict mapping `pattern_name → intent`,
+later training examples overwrite earlier assignments, silently corrupting the mapping.
+
+Observed on ATIS with 4,978 utterances: B1 accuracy degraded from 69% (1,000
+utterances) to 57% (4,978 utterances) due to progressive overwriting.
+
+**Rule**: use first-wins assignment for any external label dict keyed by pattern name.
+Never overwrite an existing entry — the first utterance to claim a pattern owns it.
+```python
+if pattern.name not in self.pattern_intent:
+    self.pattern_intent[pattern.name] = intent
+```
+
 ### Sequential ordering requires bigram skeletons; unigrams are insufficient
 
 Single POS-group skeletons collapse ordering information — valid and scrambled sentences
