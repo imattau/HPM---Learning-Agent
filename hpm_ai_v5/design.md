@@ -963,12 +963,25 @@ sentences' KB candidates.
 
 ### PatternStore has a saturation regime
 
-With `max_patterns=512`, training beyond ~100 episodes on a small corpus causes old
-patterns to be evicted and recognition degrades. More training hurts past this point.
+When `max_patterns` is too small for the corpus, eviction silently removes useful
+patterns mid-training. More training data then *hurts* — later examples evict earlier
+ones, erasing learned intent/structure associations.
 
-**Rule**: tune `max_patterns` per corpus size. Set training episodes to fill but not
-overflow the store. Monitor for the inflection point where recognition drops as episodes
-increase.
+Observed on ATIS: training 4,978 utterances with `max_patterns=2048` filled the store
+to 1,887 (92%), dropped B1 accuracy from 69% → 55%. Raising to `max_patterns=8192`
+restored performance.
+
+**Rule**: `max_patterns` must scale with corpus size. A safe heuristic: at least 2×
+the number of training examples. Monitor final store occupancy — if >85% at end of
+training, the store is undersized.
+
+**Rule**: `PatternManager.max_archive_size` defaults to `None` (= match engine's
+`max_patterns`). Do not set it smaller than the store or archive pruning will
+re-introduce the same eviction problem at the long-term memory layer.
+
+**Rule**: for repeated benchmark runs, use `PatternManager.save()` / `load()` to
+persist the archive. Retraining from scratch on every run wastes time and means
+the store never benefits from cross-episode consolidation.
 
 ### Sequential ordering requires bigram skeletons; unigrams are insufficient
 
