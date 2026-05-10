@@ -93,32 +93,37 @@ class ContextualAgent(SocialAgent):
         if len(contexts) > 1:
             self.perceive(contexts, list(self.context_cells.values()), context={})
 
-    def predict_next(self, context_tokens: Sequence[str]) -> Optional[str]:
-        if len(context_tokens) < self.context_length:
-            return None
-
-        key = tuple(context_tokens[-self.context_length :])
-        ctx_cell = self.context_cells.get(key)
-        if ctx_cell is None:
-            return self.predict_next_nearest(context_tokens)
-
-        best_word = None
-        best_weight = -1.0
+    def _distribution_from_context_cell(self, ctx_cell: Cell) -> List[Tuple[str, float]]:
         weights = self.get_weights()
+        candidates: List[Tuple[str, float]] = []
         for idx, pattern in enumerate(self.patterns):
             if pattern.source is None or pattern.target is None:
                 continue
             if pattern.source.name != ctx_cell.name:
                 continue
             weight = float(weights[idx]) if idx < len(weights) else 0.0
-            if weight > best_weight:
-                best_weight = weight
-                best_word = pattern.target.name.removeprefix("word_")
-        return best_word
+            candidates.append((pattern.target.name.removeprefix("word_"), weight))
 
-    def predict_next_nearest(self, context_tokens: Sequence[str]) -> Optional[str]:
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        return candidates
+
+    def predict_next_distribution(self, context_tokens: Sequence[str]) -> List[Tuple[str, float]]:
+        if len(context_tokens) < self.context_length:
+            return []
+
+        key = tuple(context_tokens[-self.context_length :])
+        ctx_cell = self.context_cells.get(key)
+        if ctx_cell is not None:
+            return self._distribution_from_context_cell(ctx_cell)
+        return self.predict_next_nearest_distribution(context_tokens)
+
+    def predict_next(self, context_tokens: Sequence[str]) -> Optional[str]:
+        candidates = self.predict_next_distribution(context_tokens)
+        return candidates[0][0] if candidates else None
+
+    def predict_next_nearest_distribution(self, context_tokens: Sequence[str]) -> List[Tuple[str, float]]:
         if len(context_tokens) < self.context_length or not self.context_cells:
-            return None
+            return []
 
         token_cells = [self._get_or_create_word_cell(token) for token in context_tokens[-self.context_length :]]
         query = np.mean([cell.as_numpy() for cell in token_cells], axis=0)
@@ -132,18 +137,10 @@ class ContextualAgent(SocialAgent):
                 best_context = ctx_cell
 
         if best_context is None:
-            return None
+            return []
 
-        best_word = None
-        best_weight = -1.0
-        weights = self.get_weights()
-        for idx, pattern in enumerate(self.patterns):
-            if pattern.source is None or pattern.target is None:
-                continue
-            if pattern.source.name != best_context.name:
-                continue
-            weight = float(weights[idx]) if idx < len(weights) else 0.0
-            if weight > best_weight:
-                best_weight = weight
-                best_word = pattern.target.name.removeprefix("word_")
-        return best_word
+        return self._distribution_from_context_cell(best_context)
+
+    def predict_next_nearest(self, context_tokens: Sequence[str]) -> Optional[str]:
+        candidates = self.predict_next_nearest_distribution(context_tokens)
+        return candidates[0][0] if candidates else None

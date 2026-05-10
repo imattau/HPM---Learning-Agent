@@ -18,6 +18,7 @@ from hpm_ai_v6.agents.semantic_agent import SemanticAgent
 from hpm_ai_v6.agents.causal_agent import CausalAgent
 from hpm_ai_v6.agents.active_learning_agent import ActiveLearningAgent, ActiveCorpus
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
+from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
 
 class MultiAgentReader:
@@ -62,6 +63,13 @@ class MultiAgentReader:
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
             contextual_agent=self.contextual_agent,
+        )
+        self.response_agent = ResponseGenerationAgent(
+            contextual_agent=self.contextual_agent,
+            word_agent=self.word_agent,
+            phrase_agent=self.phrase_agent,
+            semantic_agent=self.semantic_agent,
+            tag_fn=self._get_tags,
         )
         
         # Simple POS lookup for demonstration
@@ -433,6 +441,10 @@ class MultiAgentReader:
         print(f"  Semantic Agent Top Theme: {best_semantic_pattern.name if best_semantic_pattern else 'None'}")
         print(f"  Causal Agent Top Insights: {causal_insights}")
         print(f"  Utility Next-Word Guess: {self.utility_agent.predict_next_word(text)}")
+        print(f"  Response Generation: {self.response_agent.generate(text, max_length=12)}")
+
+    def generate(self, seed_text: str, max_length: int = 50, temperature: float = 0.0) -> str:
+        return self.response_agent.generate(seed_text, max_length=max_length, temperature=temperature)
 
 if __name__ == "__main__":
     reader = MultiAgentReader("hpm_ai_v6/data/corpus/alice_mini.txt")
