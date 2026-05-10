@@ -16,6 +16,9 @@ class PolygraphView:
     state: State
     context: dict[str, Any] = field(default_factory=dict)
     states: list[State] = field(default_factory=list)
+    leaf_keys: tuple[str, ...] = field(default_factory=tuple)
+    anchor_ids: tuple[str, ...] = field(default_factory=tuple)
+    concept_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
 class PolygraphGenerator(Protocol):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..adapter.clt import UnifiedVocabulary
+from ..shared_vocab import UnifiedVocabulary
 from ..core import State
 from .base import PolygraphGenerator, PolygraphView
 

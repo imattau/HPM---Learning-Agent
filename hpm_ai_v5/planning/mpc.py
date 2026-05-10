@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ..adapter import AdapterPacket
-from ..adapter.clt import UnifiedVocabulary
+from ..shared_vocab import UnifiedVocabulary
 from ..core import Pattern, PatternEngine, PatternManager
 
 

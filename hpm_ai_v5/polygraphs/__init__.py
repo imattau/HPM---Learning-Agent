@@ -16,6 +16,9 @@ def __getattr__(name: str):
     if name == "GridPolygraphGenerator":
         from .grid import GridPolygraphGenerator
         return GridPolygraphGenerator
+    if name == "InterconnectedNLPPolygraphGenerator":
+        from .nlp import InterconnectedNLPPolygraphGenerator
+        return InterconnectedNLPPolygraphGenerator
     if name == "TextPolygraphGenerator":
         from .text import TextPolygraphGenerator
         return TextPolygraphGenerator
@@ -27,6 +30,7 @@ __all__ = [
     "AudioPolygraphGenerator",
     "GraphPolygraphGenerator",
     "GridPolygraphGenerator",
+    "InterconnectedNLPPolygraphGenerator",
     "NumericPolygraphGenerator",
     "PolygraphGenerator",
     "PolygraphView",

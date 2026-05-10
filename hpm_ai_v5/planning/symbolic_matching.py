@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 from ..adapter import AdapterPacket
-from ..adapter.nlp import CanonicalPhraser, NLPTokenizer, ToolSchemaEncoder
+from ..adapter.nlp import CanonicalPhraser, NLPTokenizer
 from ..adapter.validation_only import ValidationOnlyAdapter
 from ..core import PatternEngine, PatternManager, State
 from ..core.config import CoreConfig
@@ -35,17 +36,18 @@ class SymbolicPatternMatchingBenchmark:
         self.manager = PatternManager(promotion_threshold=0.01, min_support=1)
         
         self.synonyms = {
-            "temperature": "weather",
-            "forecast": "weather",
-            "conditions": "weather",
-            "send": "email",
-            "mail": "email",
-            "compute": "calculate",
-            "add": "calculate",
+            "temperature": "WEATHER",
+            "forecast": "WEATHER",
+            "conditions": "WEATHER",
+            "send": "EMAIL",
+            "mail": "EMAIL",
+            "compute": "CALCULATE",
+            "add": "CALCULATE",
         }
         
         self.tokenizer = NLPTokenizer()
-        self.phraser = CanonicalPhraser(synonyms=self.synonyms)
+        self.phraser = CanonicalPhraser()
+        self.phraser._lemma_to_concept.update(self.synonyms)
         
         self.pipeline = HPMPipeline(
             preprocessor=self.tokenizer,
@@ -59,8 +61,11 @@ class SymbolicPatternMatchingBenchmark:
         self.pattern_metadata: dict[str, tuple[str | None, bool]] = {}
 
     def _get_canonical_sequence(self, query: str, placeholders: dict[str, str]) -> list[str]:
-        self.phraser.placeholders = placeholders
-        packet = AdapterPacket(raw=query)
+        normalized_query = query.lower()
+        for phrase, placeholder in sorted(placeholders.items(), key=lambda item: len(item[0]), reverse=True):
+            pattern = re.escape(phrase.lower())
+            normalized_query = re.sub(pattern, placeholder.lower(), normalized_query)
+        packet = AdapterPacket(raw=normalized_query)
         packet = self.pipeline.preprocessing_pipeline.run(packet, target_outputs=["canonical_phraser"])
         return packet.context.get("canonical_tokens", [])
 

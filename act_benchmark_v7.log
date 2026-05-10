@@ -1,0 +1,4 @@
+=== Phase 1: Training Source (Cartpole) - 50 eps ===
+Cartpole source trained. Result: success, Avg len: 387.5
+
+=== Phase 2: Training Acrobot from Scratch - 200 eps ===

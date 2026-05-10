@@ -7,7 +7,7 @@ from typing import Any
 
 from .base import PolygraphGenerator, PolygraphView
 from ..core.state import State
-from ..adapter.clt import UnifiedVocabulary
+from ..shared_vocab import UnifiedVocabulary
 
 
 @dataclass(slots=True)
@@ -114,6 +114,7 @@ class StructuralNLPPolygraphGenerator(PolygraphGenerator):
         context = context or {}
         tokens = context.get("tokens", [])
         canonical_tokens = context.get("canonical_tokens", [])
+        content_vector = context.get("content_vector", ())
         skeleton = context.get("skeleton", [])
         ngrams = context.get("skeleton_ngrams", [])
         views = []
@@ -131,7 +132,13 @@ class StructuralNLPPolygraphGenerator(PolygraphGenerator):
             v_state = State(value=canonical_values, context={**context, "view": "canonical"})
             views.append(PolygraphView(name="canonical_view", state=v_state, states=[origin, v_state]))
 
-        # 3. Skeleton view — POS-based structure
+        # 3. Content word view — mean-pooled unit vector of domain noun embeddings
+        #    Similar intents cluster in embedding space; MAE on unit vectors ≈ cosine distance
+        if content_vector:
+            v_state = State(value=content_vector, context={**context, "view": "content"})
+            views.append(PolygraphView(name="content_view", state=v_state, states=[origin, v_state]))
+
+        # 5. Skeleton view — POS-based structure
         if skeleton:
             skeleton_values = tuple(float(UnifiedVocabulary.get_id(s)) for s in skeleton)
             v_state = State(value=skeleton_values, context={**context, "view": "skeleton"})
@@ -144,3 +151,28 @@ class StructuralNLPPolygraphGenerator(PolygraphGenerator):
             views.append(PolygraphView(name="skeleton_bigram_view", state=v_state, states=[origin, v_state]))
 
         return views
+
+
+@dataclass(slots=True)
+class InterconnectedNLPPolygraphGenerator(PolygraphGenerator):
+    """Structural NLP polygraph with bridge-anchor metadata on each view."""
+
+    name: str = "interconnected_nlp_polygraph"
+
+    def generate(self, raw: Any, *, context: dict[str, Any] | None = None) -> list[PolygraphView]:
+        base_views = StructuralNLPPolygraphGenerator().generate(raw, context=context)
+        context = context or {}
+        view_anchor_map = context.get("atis_view_anchor_map", {})
+        enriched: list[PolygraphView] = []
+        for view in base_views:
+            metadata = view_anchor_map.get(view.name, {})
+            enriched.append(PolygraphView(
+                name=view.name,
+                state=view.state,
+                context=view.context,
+                states=view.states,
+                leaf_keys=tuple(metadata.get("leaf_keys", ())),
+                anchor_ids=tuple(metadata.get("anchor_ids", ())),
+                concept_ids=tuple(metadata.get("concept_ids", ())),
+            ))
+        return enriched

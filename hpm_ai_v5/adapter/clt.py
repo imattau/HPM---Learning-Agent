@@ -14,6 +14,7 @@ from tree_sitter import Language, Parser
 
 from .packet import AdapterPacket
 from ..core import State
+from ..shared_vocab import UnifiedVocabulary
 
 
 # Universal Vocabulary for Structural Invariants
@@ -59,17 +60,6 @@ TS_MAP = {
     "return_statement": U_RETURN,
     "method_invocation": U_CALL,
 }
-
-
-class UnifiedVocabulary:
-    """Shared mapping for string tokens to numeric IDs."""
-    _type_map: dict[str, float] = {}
-
-    @classmethod
-    def get_id(cls, name: str) -> float:
-        if name not in cls._type_map:
-            cls._type_map[name] = float(len(cls._type_map) + 1)
-        return cls._type_map[name]
 
 
 @dataclass(slots=True)

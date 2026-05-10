@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from hpm_ai_v5.adapter import AdapterPacket
-from hpm_ai_v5.adapter.clt import UnifiedASTFlattener, LanguageDetector, UnifiedVocabulary
+from hpm_ai_v5.adapter.clt import UnifiedASTFlattener, LanguageDetector
+from hpm_ai_v5.shared_vocab import UnifiedVocabulary
 from hpm_ai_v5.adapter.nlp import CanonicalPhraser, NLPTokenizer, NL2CodeBridgeAdapter, KnowledgeBaseLookup
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
 from hpm_ai_v5.core import PatternEngine, PatternManager, State

@@ -9,8 +9,8 @@ from typing import Any, Mapping, Sequence
 import spacy
 from .base import Adapter
 from .packet import AdapterPacket
-from .clt import UnifiedVocabulary
 from ..core.state import State
+from ..shared_vocab import UnifiedVocabulary
 
 
 @dataclass(slots=True)
@@ -49,6 +49,7 @@ class NLPTokenizer(Adapter):
         tokens = []
         pos_tags = []
         lemmas = []
+        token_vectors = []
 
         for token in doc:
             if token.is_punct or token.is_space:
@@ -56,7 +57,8 @@ class NLPTokenizer(Adapter):
             tokens.append(token.text.lower())
             pos_tags.append(token.pos_)
             lemmas.append(token.lemma_.lower())
-        
+            token_vectors.append(token.vector)
+
         ent_types = []
         for token in doc:
             if token.is_punct or token.is_space:
@@ -67,6 +69,7 @@ class NLPTokenizer(Adapter):
         packet.context["pos_tags"] = pos_tags
         packet.context["lemmas"] = lemmas
         packet.context["ent_types"] = ent_types
+        packet.context["token_vectors"] = token_vectors
         return packet
 
 
@@ -179,6 +182,55 @@ class NamedEntityCanonicaliser(Adapter):
         packet.context["tokens"] = new_tokens
         packet.context["lemmas"] = new_lemmas
         packet.context["canonical_tokens"] = new_canonical
+        return packet
+
+
+@dataclass(slots=True)
+class ContentWordExtractor(Adapter):
+    """Extract discriminative content words and their mean-pooled spaCy vector.
+
+    Filters tokens to NOUN/PROPN POS tags, excluding NE placeholder tags (GPE, ORG, etc.)
+    which carry no intent signal. Computes a mean-pooled embedding vector from the content
+    word vectors — semantically similar utterances produce geometrically close vectors,
+    making MAE distance meaningful for intent classification.
+    """
+
+    name: str = "content_word_extractor"
+    requires: list[str] = field(default_factory=lambda: ["ner_canonicaliser"])
+    provides: list[str] = field(default_factory=lambda: ["content_words", "content_vector"])
+
+    _NE_TAGS: frozenset[str] = field(
+        default_factory=lambda: frozenset({"GPE", "ORG", "DATE", "TIME", "PERSON", "FAC", "LOC", "QUANTITY"}),
+        init=False,
+    )
+
+    def run(self, packet: AdapterPacket) -> AdapterPacket:
+        import numpy as np
+        tokens = packet.context.get("tokens", [])
+        pos_tags = packet.context.get("pos_tags", [])
+        token_vectors = packet.context.get("token_vectors", [])
+
+        content_words = []
+        content_vecs = []
+        for i, (t, p) in enumerate(zip(tokens, pos_tags)):
+            if p in ("NOUN", "PROPN") and t not in self._NE_TAGS:
+                content_words.append(t)
+                if i < len(token_vectors):
+                    v = token_vectors[i]
+                    if v is not None and v.any():
+                        content_vecs.append(v)
+
+        packet.context["content_words"] = content_words
+
+        if content_vecs:
+            mean_vec = np.mean(content_vecs, axis=0)
+            norm = np.linalg.norm(mean_vec)
+            if norm > 0:
+                mean_vec = mean_vec / norm  # unit vector → cosine distance ≈ L2 distance
+            packet.context["content_vector"] = tuple(float(x) for x in mean_vec)
+        else:
+            packet.context["content_vector"] = ()
+
         return packet
 
 

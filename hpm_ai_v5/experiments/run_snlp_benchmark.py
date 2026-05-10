@@ -16,7 +16,7 @@ from hpm_ai_v5.adapter.nlp import (
     KnowledgeBaseLookup,
     StartOfEpisodeAdapter,
 )
-from hpm_ai_v5.adapter.clt import UnifiedVocabulary
+from hpm_ai_v5.shared_vocab import UnifiedVocabulary
 from hpm_ai_v5.adapter.validation_only import ValidationOnlyAdapter
 from hpm_ai_v5.core import PatternEngine, PatternManager, PatternStore, State
 from hpm_ai_v5.core.config import CoreConfig

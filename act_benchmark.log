@@ -1,0 +1,19 @@
+=== Phase 1: Training Source (Cartpole) - 50 eps ===
+Cartpole source trained. Result: success, Avg len: 492.6
+
+=== Phase 2: Training Acrobot from Scratch - 100 eps ===
+Acrobot scratch trained. Result: failure, Avg len: 500.0
+Goal reached in 0/100 episodes
+
+=== Phase 3: Transfer from Cartpole to Acrobot - 100 eps ===
+Running Zero-Shot Evaluation...
+Zero-shot avg len: 500.0
+Fine-tuning on Acrobot - 100 eps...
+Fine-tuned avg len: 500.0
+Goal reached in 0/100 episodes
+
+=== Phase 4: Catastrophic Forgetting Evaluation ===
+Cartpole performance after Acrobot training: 404.9
+Forgetting Ratio: 81.13%
+
+Benchmark completed in 2439.0s
