@@ -19,6 +19,9 @@ class EpistemicEvaluator(BaseEvaluator):
         nll = 0.0
         count = 0
         target_dim = cell.dim - 1
+
+        pop_index = {id(obj): idx for idx, obj in enumerate(population)}
+        pop_name_index = {obj.name: idx for idx, obj in enumerate(population)}
         
         probs = cell.predict_probs(population, temperature=temperature)
         for i in range(len(obs_seq) - 1):
@@ -28,20 +31,20 @@ class EpistemicEvaluator(BaseEvaluator):
             if cell.dim == 1:
                 if cell.source and curr.name == cell.source.name:
                     try:
-                        idx = population.index(next_obj)
+                        idx = pop_index.get(id(next_obj), pop_name_index[next_obj.name])
                         nll -= np.log(probs[idx] + 1e-9)
                         count += 1
-                    except (ValueError, IndexError):
+                    except (KeyError, IndexError):
                         nll += 5.0 # Penalty for unseen
                         count += 1
             else:
                 # Generalized for higher dims
                 if next_obj.dim == target_dim:
                     try:
-                        idx = population.index(next_obj)
+                        idx = pop_index.get(id(next_obj), pop_name_index[next_obj.name])
                         nll -= np.log(probs[idx] + 1e-9)
                         count += 1
-                    except (ValueError, IndexError):
+                    except (KeyError, IndexError):
                         nll += 5.0
                         count += 1
 

@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import copy
+import string
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.agents.social_agent import SocialAgent
 from hpm_ai_v6.hpm_model.fields.pattern_field import DynamicPatternField
@@ -28,22 +29,114 @@ class CausalAgent(SocialAgent):
         self.causal_patterns = []
         super().__init__(patterns=[], shared_field=shared_field, **kwargs)
 
+    @staticmethod
+    def _clean_words(text: str) -> List[str]:
+        return [w.strip(string.punctuation).lower() for w in text.split() if w.strip(string.punctuation)]
+
+    def _sequence_for_agent(self, agent_name: str, chunk: str) -> Tuple[List[Cell], List[Cell]]:
+        agent = self.other_agents.get(agent_name)
+        if agent is None:
+            return [], []
+
+        if agent_name == "char":
+            chars = [c for c in chunk.lower() if c in agent.char_cells]
+            seq = [agent.char_cells[c] for c in chars]
+            population = list(agent.char_cells.values())
+            return seq, population
+
+        if agent_name == "word":
+            words = self._clean_words(chunk)
+            population = list(agent.word_cells.values())
+            temp_cells = []
+            seq = []
+            for word in words:
+                if word in agent.word_cells:
+                    seq.append(agent.word_cells[word])
+                    continue
+
+                if population:
+                    proto = agent.word_cells.get("alice") or population[0]
+                    temp_embedding = proto.as_tensor() * 0.0
+                else:
+                    temp_embedding = np.zeros(16, dtype=float)
+                temp_cell = Cell(name=f"word_cf_{word}", dim=0, embedding=temp_embedding)
+                temp_cells.append(temp_cell)
+                seq.append(temp_cell)
+            population = population + temp_cells
+            return seq, population
+
+        if agent_name == "phrase":
+            words = self._clean_words(chunk)
+            tags = []
+            for word in words:
+                if word in {"alice", "rabbit", "sister", "book"}:
+                    tags.append("NOUN")
+                elif word in {"was", "get", "sitting", "having", "reading"}:
+                    tags.append("VERB")
+                elif word in {"tired", "sleepy", "natural"}:
+                    tags.append("ADJ")
+                elif word in {"very"}:
+                    tags.append("ADV")
+                elif word in {"the", "a"}:
+                    tags.append("DET")
+                elif word in {"of", "on", "by"}:
+                    tags.append("PREP")
+                elif word in {"and", "but"}:
+                    tags.append("CONJ")
+                elif word in {"her", "she", "it"}:
+                    tags.append("PRON")
+                else:
+                    tags.append("NOUN")
+            seq = [agent.pos_cells[t] for t in tags if t in agent.pos_cells]
+            population = list(agent.pos_cells.values())
+            return seq, population
+
+        if agent_name == "semantic":
+            cell = agent._get_or_create_sent_cell(chunk)
+            seq = [cell] if cell is not None else []
+            population = list(agent.sent_cells.values())
+            return seq, population
+
+        return [], []
+
     def _measure_surprise(self, agent_name: str, sequence: List[Any]) -> float:
         """
         Measures the average Negative Log-Likelihood (Surprise) of an agent on a sequence.
         """
         agent = self.other_agents.get(agent_name)
-        if not agent: return 0.0
-        
-        # We use the agent's epistemic evaluator directly
+        if not agent or not sequence or not agent.patterns:
+            return 0.0
+
+        chunk = sequence[0]
+        observation_seq, population = self._sequence_for_agent(agent_name, chunk)
+        if len(observation_seq) < 2 or not population:
+            return 0.0
+
+        field_amplifications = {}
+        if agent.shared_field is not None:
+            field_amplifications = agent.shared_field.get_amplifications(agent.patterns)
+
         total_nll = 0.0
-        count = 0
-        
-        # Simplified surprise metric: how much does the sequence deviate from the agent's patterns?
-        # For this demo, we'll use a mock LL check or the agent's perceive loop scores
-        # Here we'll return a random value influenced by agent type for the initial sketch
-        # In production, this would call agent.learner.epistemic.evaluate(...)
-        return np.random.rand() 
+        total_weight = 0.0
+        evaluator = agent.learner.epistemic
+        weights = agent.get_weights()
+        for idx, pattern in enumerate(agent.patterns):
+            context = {
+                "observation_seq": observation_seq,
+                "population": population,
+                "field_amplification": field_amplifications.get(pattern.name, 0.0),
+            }
+            result = evaluator.evaluate(pattern, context)
+            match_count = int(result.metadata.get("count", 0))
+            if match_count <= 0:
+                continue
+            weight = float(weights[idx]) if idx < len(weights) else 0.0
+            total_nll += float(result.metadata.get("nll", 0.0)) * max(weight, 1e-6)
+            total_weight += max(weight, 1e-6)
+
+        if total_weight == 0.0:
+            return 0.0
+        return total_nll / total_weight
 
     def perform_interventions(self, original_text_chunks: List[str]):
         """
@@ -59,7 +152,7 @@ class CausalAgent(SocialAgent):
             idx_to_swap = np.random.randint(0, len(words))
             original_word = words[idx_to_swap]
             # Simple counterfactual: replace with a generic noun
-            counterfactual_word = "REPLACED_TOKEN"
+            counterfactual_word = "suddenly"
             
             intervened_words = copy.copy(words)
             intervened_words[idx_to_swap] = counterfactual_word
@@ -77,7 +170,7 @@ class CausalAgent(SocialAgent):
                 effects[name] = effect
                 
                 # 3. If effect is significant, create a Causal Rule (2-cell)
-                if effect > 0.5: # Threshold for 'causal significance'
+                if effect > 0.005:
                     rule_name = f"causal_{original_word}_in_{name}"
                     rule = CausalRule(
                         name=rule_name,
