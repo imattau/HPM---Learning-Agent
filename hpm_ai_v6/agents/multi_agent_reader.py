@@ -174,27 +174,7 @@ class MultiAgentReader:
 
     def warm_start_from_cache(self, limit: Optional[int] = None) -> int:
         # Load shared cross-corpus patterns and warm-start every agent.
-        shared_patterns, shared_weights = self.pattern_store.load()
-        if shared_patterns:
-            for agent in self.agents.values():
-                if not hasattr(agent, "warm_start"):
-                    continue
-                # Filter to patterns whose embedding dimension matches the agent's
-                expected_dim = getattr(agent, "embedding_dim", None)
-                if expected_dim is not None:
-                    filtered = [
-                        (p, w) for p, w in zip(shared_patterns, shared_weights)
-                        if len(p.as_numpy()) == expected_dim
-                    ]
-                    if not filtered:
-                        continue
-                    agent_patterns, agent_weights = zip(*filtered)
-                else:
-                    agent_patterns, agent_weights = shared_patterns, shared_weights
-                try:
-                    agent.warm_start(list(agent_patterns), list(agent_weights))
-                except Exception:
-                    pass
+        self.pattern_store.load()  # populate in-memory store for ReasoningAgent use
 
         loaded = 0
         for name in ("char", "word", "contextual", "phrase", "semantic", "causal"):
