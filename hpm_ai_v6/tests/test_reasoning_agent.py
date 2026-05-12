@@ -1240,3 +1240,74 @@ def test_relation_cell_index_populated_after_refresh():
     ra = ReasoningAgent(reader)
     ra.refresh()
     assert "lexical_transition" in ra._relation_cell_index
+
+
+def test_sentence_word_bridge_edges_connect_word_to_sentence():
+    """Sentence cells containing a known word get bridge edges to/from that word cell."""
+    alice = Cell(name="word_alice", dim=0, embedding=[1.0, 0.0, 0.0])
+    rabbit = Cell(name="word_rabbit", dim=0, embedding=[0.0, 1.0, 0.0])
+    sent_cell = Cell(name="sent_abc123", dim=0, embedding=[0.5, 0.5, 0.0])
+
+    semantic_agent = StubAgent(
+        patterns=[],
+        weights=[],
+        lookup={"sent_abc123": sent_cell},
+        sent_text_by_name={"sent_abc123": "Alice followed the rabbit down the hole."},
+    )
+    word_agent = StubAgent(
+        patterns=[],
+        weights=[],
+        lookup={"word_alice": alice, "word_rabbit": rabbit},
+    )
+    reader = SimpleNamespace(agents={
+        "word": word_agent,
+        "semantic": semantic_agent,
+        "phrase": None, "contextual": None, "char": None, "causal": None,
+    })
+    ra = ReasoningAgent(reader, beam_width=5, max_depth=3)
+    ra.refresh()
+
+    alice_key = ra._cell_key(alice)
+    rabbit_key = ra._cell_key(rabbit)
+    sent_key = ra._cell_key(sent_cell)
+
+    # word_alice should have a bridge edge to the sentence
+    alice_edges = ra._edge_index.get(alice_key, [])
+    alice_targets = {e.target_key for e in alice_edges}
+    assert sent_key in alice_targets, f"Expected sentence bridge from alice; got {alice_targets}"
+
+    # sentence should have a bridge edge to word_rabbit
+    sent_edges = ra._edge_index.get(sent_key, [])
+    sent_targets = {e.target_key for e in sent_edges}
+    assert rabbit_key in sent_targets, f"Expected bridge from sentence to rabbit; got {sent_targets}"
+
+
+def test_sentence_word_bridges_enable_alice_to_rabbit_path():
+    """With sentence bridges, beam search finds alice → sentence → rabbit."""
+    alice = Cell(name="word_alice", dim=0, embedding=[1.0, 0.0, 0.0])
+    rabbit = Cell(name="word_rabbit", dim=0, embedding=[0.0, 1.0, 0.0])
+    sent_cell = Cell(name="sent_abc123", dim=0, embedding=[0.5, 0.5, 0.0])
+
+    semantic_agent = StubAgent(
+        patterns=[],
+        weights=[],
+        lookup={"sent_abc123": sent_cell},
+        sent_text_by_name={"sent_abc123": "Alice followed the rabbit down the hole."},
+    )
+    word_agent = StubAgent(
+        patterns=[],
+        weights=[],
+        lookup={"word_alice": alice, "word_rabbit": rabbit},
+    )
+    reader = SimpleNamespace(agents={
+        "word": word_agent,
+        "semantic": semantic_agent,
+        "phrase": None, "contextual": None, "char": None, "causal": None,
+    })
+    ra = ReasoningAgent(reader, beam_width=5, max_depth=3)
+
+    path = ra._beam_search_path(alice, rabbit)
+    assert path is not None, "Expected a path alice → sentence → rabbit via bridges"
+    assert len(path) == 2
+    assert path[0].target.name == "sent_abc123"
+    assert path[1].target.name == "word_rabbit"

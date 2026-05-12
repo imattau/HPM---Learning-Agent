@@ -297,6 +297,67 @@ class ReasoningAgent:
                             relation="causal_semantic_reentry",
                         )
 
+    def _add_sentence_word_bridge_edges(
+        self,
+        edge_index: Dict[str, List[EdgeRecord]],
+        node_index: Dict[str, Cell],
+        sentence_labels: Dict[str, str],
+    ) -> None:
+        """Add bidirectional bridge edges between word cells and sentence cells.
+
+        For each sentence, any word token that resolves to a known word cell gets:
+          word_cell → sentence_cell  (word appears in sentence)
+          sentence_cell → word_cell  (sentence mentions this word)
+
+        This allows multi-hop paths like: word_alice → sentence → word_rabbit.
+        """
+        if not sentence_labels:
+            return
+
+        # Build word key → Cell lookup from node_index
+        word_cells: Dict[str, Cell] = {
+            key: cell
+            for key, cell in node_index.items()
+            if key.startswith("word:")
+        }
+        if not word_cells:
+            return
+
+        bridge_score = 0.45  # moderate confidence — structural, not learned
+
+        for sent_key, sent_text in sentence_labels.items():
+            sent_cell = node_index.get(sent_key)
+            if sent_cell is None:
+                continue
+
+            tokens = self._tokenize(sent_text)
+            for token in tokens:
+                word_key = f"word:{token}"
+                word_cell = word_cells.get(word_key)
+                if word_cell is None:
+                    continue
+
+                # word → sentence
+                self._add_edge_record(
+                    edge_index=edge_index,
+                    node_index=node_index,
+                    pattern=self._make_bridge_pattern(word_cell, sent_cell, "word_in_sentence"),
+                    score=bridge_score,
+                    raw_weight=bridge_score,
+                    agent_name="semantic",
+                    relation="word_in_sentence",
+                )
+                # sentence → word
+                self._add_edge_record(
+                    edge_index=edge_index,
+                    node_index=node_index,
+                    pattern=self._make_bridge_pattern(sent_cell, word_cell, "sentence_mentions_word"),
+                    score=bridge_score,
+                    raw_weight=bridge_score,
+                    agent_name="semantic",
+                    relation="sentence_mentions_word",
+                )
+
     def _build_analogy_cache(self, patterns: Sequence[Cell], top_k: int = 8) -> Dict[str, List[Tuple[float, Cell]]]:
         one_cells = [pattern for pattern in patterns if getattr(pattern, "dim", 0) == 1]
         cache: Dict[str, List[Tuple[float, Cell]]] = {}
@@ -629,6 +690,11 @@ class ReasoningAgent:
                         alias_index.setdefault(token, []).append(key)
 
         self._add_causal_bridge_edges(edge_index=edge_index, node_index=node_index)
+        self._add_sentence_word_bridge_edges(
+            edge_index=edge_index,
+            node_index=node_index,
+            sentence_labels=sentence_labels,
+        )
 
         # POS-tag enrichment: re-tag word agent edges with POS roles if syntactic agent available
         _syn_agent = self.reader.agents.get("syntactic") if hasattr(self.reader, "agents") else None
