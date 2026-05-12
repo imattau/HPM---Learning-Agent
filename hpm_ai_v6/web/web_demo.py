@@ -505,7 +505,7 @@ HTML_TEMPLATE = """
 
             <!-- Gutenberg sub-panel -->
             <div class="sub-panel" id="train-gutenberg">
-              <form method="post">
+              <form method="post" onsubmit="showFormResult(this)">
                 <input type="hidden" name="action" value="train_gutenberg">
                 <div class="field">
                   <label for="gutenberg_ids">Book IDs (comma-separated)</label>
@@ -522,7 +522,10 @@ HTML_TEMPLATE = """
                   </div>
                 </div>
                 <div class="btn-row">
-                  <button type="submit" class="btn btn-primary">Train from Gutenberg</button>
+                  <button type="submit" class="btn btn-primary">
+                    <span class="spinner"></span>
+                    Train from Gutenberg
+                  </button>
                 </div>
               </form>
 
@@ -530,14 +533,14 @@ HTML_TEMPLATE = """
                 <div class="cycle-title">Curated cycle</div>
                 <div class="cycle-desc">Runs the curated 11-book rotation continuously in the background.</div>
                 <div class="btn-row">
-                  <form method="post" style="display:contents">
-                    <input type="hidden" name="action" value="start_gutenberg_cycle">
-                    <button type="submit" class="btn btn-outline">&#9654; Run curated cycle</button>
-                  </form>
-                  <form method="post" style="display:contents">
-                    <input type="hidden" name="action" value="stop_gutenberg_cycle">
-                    <button type="submit" class="btn btn-danger">&#9632; Stop</button>
-                  </form>
+                  <button type="button" class="btn btn-outline" onclick="submitAction('start_gutenberg_cycle', this)">
+                    <span class="spinner"></span>
+                    &#9654; Run curated cycle
+                  </button>
+                  <button type="button" class="btn btn-danger" onclick="submitAction('stop_gutenberg_cycle', this)">
+                    <span class="spinner"></span>
+                    &#9632; Stop
+                  </button>
                 </div>
               </div>
             </div>
@@ -629,22 +632,33 @@ HTML_TEMPLATE = """
     // ── Accordion ──
     function toggleSection(id) {
       const el = document.getElementById(id);
+      if (!el) return;
       el.classList.toggle('open');
       try { localStorage.setItem('hpm_sec_' + id, el.classList.contains('open') ? '1' : '0'); } catch(e){}
     }
     ['sec-train','sec-generate','sec-reason'].forEach(function(id) {
       try {
         const v = localStorage.getItem('hpm_sec_' + id);
-        if (v === '0') document.getElementById(id).classList.remove('open');
+        const el = document.getElementById(id);
+        if (v === '0' && el) el.classList.remove('open');
       } catch(e){}
     });
 
     // ── Sub-tabs ──
     function showSub(group, name, pill) {
-      document.querySelectorAll('#train-links, #train-gutenberg').forEach(function(p){ p.classList.remove('active'); });
-      document.getElementById('train-' + name).classList.add('active');
+      const parent = pill.closest('.section-inner');
+      parent.querySelectorAll('.sub-panel').forEach(function(p){ p.classList.remove('active'); });
+      document.getElementById(group + '-' + name).classList.add('active');
       pill.closest('.pill-tabs').querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
       pill.classList.add('active');
+    }
+
+    // ── Form status ──
+    function showFormResult(form) {
+      const btn = form.querySelector('button[type="submit"]');
+      const spinner = form.querySelector('.spinner');
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.style.display = 'inline-block';
     }
 
     // ── AJAX: Generate ──
@@ -654,7 +668,7 @@ HTML_TEMPLATE = """
       const btn = document.getElementById('generate-btn');
       const spinner = document.getElementById('gen-spinner');
       btn.disabled = true;
-      spinner.style.display = 'block';
+      spinner.style.display = 'inline-block';
       try {
         const res = await fetch('/api/generate', {
           method: 'POST',
@@ -664,14 +678,14 @@ HTML_TEMPLATE = """
         const data = await res.json();
         const container = document.getElementById('generate-output');
         if (data.success) {
-          container.innerHTML = '<div class="output-card"><div class="output-card-header"><span class="output-label">Output</span><button class="copy-btn" onclick="copyText(\'gen-text-ajax\')">copy</button></div><div class="output-text" id="gen-text-ajax"></div></div>';
+          container.innerHTML = `<div class="output-card"><div class="output-card-header"><span class="output-label">Output</span><button class="copy-btn" onclick="copyText('gen-text-ajax')">copy</button></div><div class="output-text" id="gen-text-ajax"></div></div>`;
           document.getElementById('gen-text-ajax').textContent = data.generated;
         } else {
-          container.innerHTML = '<div class="result-card error"><span></span><button class="result-card-close" onclick="this.parentElement.remove()">&#10005;</button></div>';
-          container.querySelector('span').textContent = data.error || 'Unknown error.';
+          container.innerHTML = `<div class="result-card error"><span class="err-msg"></span><button class="result-card-close" onclick="this.parentElement.remove()">&#10005;</button></div>`;
+          container.querySelector('.err-msg').textContent = data.error || 'Unknown error.';
         }
       } catch(err) {
-        document.getElementById('generate-output').innerHTML = '<div class="result-card error"><span>Network error.</span></div>';
+        document.getElementById('generate-output').innerHTML = `<div class="result-card error"><span>Network error.</span></div>`;
       } finally {
         btn.disabled = false;
         spinner.style.display = 'none';
@@ -684,7 +698,7 @@ HTML_TEMPLATE = """
       const btn = document.getElementById('reason-btn');
       const spinner = document.getElementById('reason-spinner');
       btn.disabled = true;
-      spinner.style.display = 'block';
+      spinner.style.display = 'inline-block';
       try {
         const res = await fetch('/api/reason', {
           method: 'POST',
@@ -694,14 +708,14 @@ HTML_TEMPLATE = """
         const data = await res.json();
         const container = document.getElementById('reason-output');
         if (data.success) {
-          container.innerHTML = '<div class="output-card"><div class="output-card-header"><span class="output-label">Reasoning</span><button class="copy-btn" onclick="copyText(\'reason-text-ajax\')">copy</button></div><div class="output-text" id="reason-text-ajax"></div></div>';
+          container.innerHTML = `<div class="output-card"><div class="output-card-header"><span class="output-label">Reasoning</span><button class="copy-btn" onclick="copyText('reason-text-ajax')">copy</button></div><div class="output-text" id="reason-text-ajax"></div></div>`;
           document.getElementById('reason-text-ajax').textContent = data.reasoning;
         } else {
-          container.innerHTML = '<div class="result-card error"><span></span><button class="result-card-close" onclick="this.parentElement.remove()">&#10005;</button></div>';
+          container.innerHTML = `<div class="result-card error"><span></span><button class="result-card-close" onclick="this.parentElement.remove()">&#10005;</button></div>`;
           container.querySelector('span').textContent = data.error || 'Unknown error.';
         }
       } catch(err) {
-        document.getElementById('reason-output').innerHTML = '<div class="result-card error"><span>Network error.</span></div>';
+        document.getElementById('reason-output').innerHTML = `<div class="result-card error"><span>Network error.</span></div>`;
       } finally {
         btn.disabled = false;
         spinner.style.display = 'none';
@@ -713,6 +727,24 @@ HTML_TEMPLATE = """
       const el = document.getElementById(id);
       if (!el) return;
       navigator.clipboard.writeText(el.textContent).catch(function(){});
+    }
+
+    // ── Submit hidden-action form ──
+    function submitAction(action, btn) {
+      if (btn) {
+          btn.disabled = true;
+          const spinner = btn.querySelector('.spinner');
+          if (spinner) spinner.style.display = 'inline-block';
+      }
+      const form = document.createElement('form');
+      form.method = 'post';
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'action';
+      input.value = action;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
     }
 
     // ── Gutenberg cycle status ribbon ──
@@ -959,8 +991,10 @@ def api_generate():
     max_len = int(payload.get("max_len", 50))
     temperature = float(payload.get("temperature", 0.0))
 
+    if reader is None:
+        return jsonify({"success": False, "error": "Reader not ready — start the server via main()."}), 503
     try:
-        generated = reader.generate(seed, max_length=max_len, temperature=temperature) if reader is not None else ""
+        generated = reader.generate(seed, max_length=max_len, temperature=temperature)
         return jsonify({"success": True, "generated": generated})
     except Exception as exc:  # pragma: no cover - defensive demo path
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -1010,8 +1044,10 @@ def api_train():
 def api_reason():
     payload = request.get_json(silent=True) or {}
     question = payload.get("question", "Why did Alice follow the rabbit?")
+    if reader is None:
+        return jsonify({"success": False, "error": "Reader not ready — start the server via main()."}), 503
     try:
-        answer = reader.reason(question) if reader is not None else "Reader not ready."
+        answer = reader.reason(question)
         return jsonify({"success": True, "reasoning": answer})
     except Exception as exc:  # pragma: no cover - defensive demo path
         return jsonify({"success": False, "error": str(exc)}), 500
