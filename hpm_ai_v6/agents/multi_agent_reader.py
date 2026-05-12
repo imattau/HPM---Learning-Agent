@@ -173,6 +173,16 @@ class MultiAgentReader:
                 break
 
             loaded += agent.hydrate_patterns_from_archive(limit=remaining)
+
+        syn_agent = self.agents.get("syntactic")
+        if syn_agent is not None and hasattr(syn_agent, "load"):
+            cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
+            if os.path.exists(cache_path):
+                try:
+                    syn_agent.load(cache_path)
+                except Exception:
+                    pass
+
         return loaded
 
     @staticmethod
@@ -444,6 +454,12 @@ class MultiAgentReader:
         syn_agent = self.agents.get("syntactic")
         if syn_agent is not None and hasattr(syn_agent, "learn_from_corpus"):
             syn_agent.learn_from_corpus(sentences)
+            if hasattr(syn_agent, "save"):
+                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
+                try:
+                    syn_agent.save(cache_path)
+                except Exception:
+                    pass
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:

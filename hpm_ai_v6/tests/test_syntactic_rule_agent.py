@@ -271,3 +271,58 @@ class TestWiringIntegration:
         cat_sat = next((r for r in records if r.target.name == "word_sat"), None)
         assert cat_sat is not None, "Expected edge from word_cat to word_sat"
         assert cat_sat.relation == "pos_NOUN", f"Expected pos_NOUN, got {cat_sat.relation}"
+
+
+class TestPersistence:
+    """Tests for SyntacticRuleAgent save/load persistence."""
+
+    def _make_trained_agent(self):
+        nlp = make_mock_nlp([
+            [("the", "DET"), ("cat", "NOUN"), ("sat", "VERB")],
+            [("the", "DET"), ("dog", "NOUN"), ("ran", "VERB")],
+        ])
+        agent = SyntacticRuleAgent(min_prob=0.01, nlp=nlp)
+        agent.learn_from_corpus(["the cat sat", "the dog ran"])
+        return agent
+
+    def test_save_creates_json_file(self, tmp_path):
+        agent = self._make_trained_agent()
+        path = str(tmp_path / "cache" / "syntactic_rules.json")
+        agent.save(path)
+        import os
+        assert os.path.exists(path)
+
+    def test_save_and_load_restores_word_pos(self, tmp_path):
+        agent = self._make_trained_agent()
+        path = str(tmp_path / "syntactic_rules.json")
+        agent.save(path)
+
+        agent2 = SyntacticRuleAgent(min_prob=0.01)
+        agent2.load(path)
+        assert agent2.get_pos("the") == "DET"
+        assert agent2.get_pos("cat") == "NOUN"
+        assert agent2.get_pos("sat") == "VERB"
+
+    def test_save_and_load_restores_patterns(self, tmp_path):
+        agent = self._make_trained_agent()
+        path = str(tmp_path / "syntactic_rules.json")
+        agent.save(path)
+
+        agent2 = SyntacticRuleAgent(min_prob=0.01)
+        agent2.load(path)
+        assert len(agent2.patterns) == len(agent.patterns)
+
+    def test_save_and_load_restores_weights(self, tmp_path):
+        agent = self._make_trained_agent()
+        path = str(tmp_path / "syntactic_rules.json")
+        agent.save(path)
+
+        agent2 = SyntacticRuleAgent(min_prob=0.01)
+        agent2.load(path)
+        assert len(agent2.get_weights()) == len(agent.get_weights())
+
+    def test_load_nonexistent_raises(self, tmp_path):
+        agent = SyntacticRuleAgent(min_prob=0.01)
+        import pytest
+        with pytest.raises((FileNotFoundError, OSError)):
+            agent.load(str(tmp_path / "nonexistent.json"))

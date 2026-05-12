@@ -42,6 +42,7 @@ class SyntacticRuleAgent:
         self.patterns: List[Cell] = []
         self._weights: List[float] = []
         self._word_pos: Dict[str, str] = {}
+        self._probs: Dict[Tuple[str, str], float] = {}
         self._pos_node_cells: Dict[str, Cell] = {}
         self._pos_edge_cells: Dict[Tuple[str, str], Cell] = {}
 
@@ -92,6 +93,7 @@ class SyntacticRuleAgent:
                 bigram_counts[(seq[i], seq[i + 1])] += 1
 
         probs = self._compute_probs(bigram_counts)
+        self._probs = probs
         self._emit_rule_cells(probs)
 
     def _compute_probs(
@@ -175,6 +177,37 @@ class SyntacticRuleAgent:
                     )
                     self.patterns.append(rule)
                     self._weights.append(joint)
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        import json, os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        data = {
+            "min_prob": self.min_prob,
+            "word_pos": self._word_pos,
+            "probs": {f"{a}|{b}": v for (a, b), v in self._probs.items()},
+        }
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    def load(self, path: str) -> None:
+        import json
+        with open(path) as f:
+            data = json.load(f)
+        self.min_prob = data.get("min_prob", self.min_prob)
+        self._word_pos = data.get("word_pos", {})
+        self._probs = {
+            tuple(k.split("|", 1)): v
+            for k, v in data.get("probs", {}).items()
+        }
+        self.patterns = []
+        self._weights = []
+        self._pos_node_cells = {}
+        self._pos_edge_cells = {}
+        self._emit_rule_cells(self._probs)
 
     # ------------------------------------------------------------------
     # Edge tagging (advisory — EdgeRecord is a frozen dataclass)
