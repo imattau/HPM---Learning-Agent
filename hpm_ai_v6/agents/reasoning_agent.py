@@ -628,6 +628,32 @@ class ReasoningAgent:
 
         self._add_causal_bridge_edges(edge_index=edge_index, node_index=node_index)
 
+        # POS-tag enrichment: re-tag word agent edges with POS roles if syntactic agent available
+        _syn_agent = self.reader.agents.get("syntactic") if hasattr(self.reader, "agents") else None
+        if _syn_agent is not None and hasattr(_syn_agent, "get_pos"):
+            tagged_index: Dict[str, List[EdgeRecord]] = {}
+            for source_key, records in edge_index.items():
+                new_records = []
+                for rec in records:
+                    if rec.agent_name == "word" and rec.source.name.startswith("word_"):
+                        src_word = rec.source.name[len("word_"):]
+                        pos = _syn_agent.get_pos(src_word)
+                        if pos is not None:
+                            rec = EdgeRecord(
+                                pattern=rec.pattern,
+                                source=rec.source,
+                                target=rec.target,
+                                score=rec.score,
+                                raw_weight=rec.raw_weight,
+                                agent_name=rec.agent_name,
+                                source_key=rec.source_key,
+                                target_key=rec.target_key,
+                                relation=f"pos_{pos}",
+                            )
+                    new_records.append(rec)
+                tagged_index[source_key] = new_records
+            edge_index = tagged_index
+
         for records in edge_index.values():
             records.sort(key=lambda item: item.score, reverse=True)
 

@@ -1,7 +1,8 @@
 import os
 import sys
+import re
 import string
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Sequence
 import numpy as np
 import torch
 
@@ -17,6 +18,7 @@ from hpm_ai_v6.agents.phrase_agent import PhraseAgent
 from hpm_ai_v6.agents.semantic_agent import SemanticAgent
 from hpm_ai_v6.agents.causal_agent import CausalAgent
 from hpm_ai_v6.agents.active_learning_agent import ActiveLearningAgent, ActiveCorpus
+from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
@@ -26,17 +28,49 @@ class MultiAgentReader:
     Orchestrator for the Multi-Agent HPM Reading System.
     Coordinates Character, Word, Phrase, Semantic, and Causal agents.
     """
-    def __init__(self, corpus_path: str):
+    def __init__(
+        self,
+        corpus_path: str,
+        pattern_cache_dir: Optional[str] = None,
+        max_active_patterns: int = 1000,
+        warm_start: bool = True,
+        warm_start_limit: Optional[int] = None,
+    ):
         self.corpus_path = corpus_path
         self.shared_field = DynamicPatternField(influence_rate=0.1)
         self.institution = ReplicationInstitution(prune_ratio=0.1)
+        self.max_words_per_chunk = 32
+        self._known_corpus_sentences = 0
+        self._corpus_offset = os.path.getsize(corpus_path) if os.path.exists(corpus_path) else 0
+        self.pattern_cache_dir = pattern_cache_dir or self._default_pattern_cache_dir()
+        self.max_active_patterns = max_active_patterns
         
         # Initialize lower-level agents
-        self.char_agent = CharacterAgent(shared_field=self.shared_field)
-        self.word_agent = WordAgent(shared_field=self.shared_field)
-        self.contextual_agent = ContextualAgent(shared_field=self.shared_field)
-        self.phrase_agent = PhraseAgent(shared_field=self.shared_field)
-        self.semantic_agent = SemanticAgent(shared_field=self.shared_field)
+        self.char_agent = CharacterAgent(
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
+        )
+        self.word_agent = WordAgent(
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
+        )
+        self.contextual_agent = ContextualAgent(
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
+        )
+        self.phrase_agent = PhraseAgent(
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
+        )
+        self.semantic_agent = SemanticAgent(
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
+        )
         
         # Initialize Causal Agent, providing access to other agents
         self.causal_agent = CausalAgent(
@@ -46,7 +80,9 @@ class MultiAgentReader:
                 "phrase": self.phrase_agent,
                 "semantic": self.semantic_agent
             },
-            shared_field=self.shared_field
+            shared_field=self.shared_field,
+            pattern_cache_dir=self.pattern_cache_dir,
+            max_active_patterns=self.max_active_patterns,
         )
         self.active_learning_agent = ActiveLearningAgent(
             agents={
@@ -71,6 +107,23 @@ class MultiAgentReader:
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
         )
+        self.reasoning_agent = ReasoningAgent(self)
+        self.agents = {
+            "char": self.char_agent,
+            "word": self.word_agent,
+            "contextual": self.contextual_agent,
+            "phrase": self.phrase_agent,
+            "semantic": self.semantic_agent,
+            "causal": self.causal_agent,
+            "active_learning": self.active_learning_agent,
+            "utility": self.utility_agent,
+            "response": self.response_agent,
+            "reasoning": self.reasoning_agent,
+        }
+        self.warm_start = warm_start
+        self.warm_start_limit = warm_start_limit
+        if self.warm_start:
+            self.warm_start_from_cache(limit=self.warm_start_limit)
         
         # Simple POS lookup for demonstration
         self.pos_map = {
@@ -81,11 +134,135 @@ class MultiAgentReader:
             "and": "CONJ", "but": "CONJ", "of": "PREP", "on": "PREP", "by": "PREP"
         }
 
+    def __del__(self):
+        for agent in getattr(self, "agents", {}).values():
+            if hasattr(agent, "close_pager"):
+                try:
+                    agent.close_pager()
+                except Exception:
+                    pass
+
+    def close_pagers(self) -> None:
+        for agent in getattr(self, "agents", {}).values():
+            if hasattr(agent, "close_pager"):
+                try:
+                    agent.close_pager()
+                except Exception:
+                    pass
+
+    def _default_pattern_cache_dir(self) -> str:
+        corpus_dir = os.path.dirname(os.path.abspath(self.corpus_path)) or os.getcwd()
+        corpus_name = os.path.splitext(os.path.basename(self.corpus_path))[0]
+        return os.path.join(corpus_dir, ".hpm_pattern_cache", corpus_name)
+
     @staticmethod
     def _safe_best_pattern(agent: Any):
         if not getattr(agent, "patterns", None):
             return None
         return agent.get_best_pattern()
+
+    def warm_start_from_cache(self, limit: Optional[int] = None) -> int:
+        loaded = 0
+        for name in ("char", "word", "contextual", "phrase", "semantic", "causal"):
+            agent = self.agents.get(name)
+            if agent is None or not hasattr(agent, "hydrate_patterns_from_archive"):
+                continue
+
+            remaining = None if limit is None else max(limit - loaded, 0)
+            if remaining == 0:
+                break
+
+            loaded += agent.hydrate_patterns_from_archive(limit=remaining)
+        return loaded
+
+    @staticmethod
+    def _agent_learning_snapshot(agent: Any) -> Dict[str, Any]:
+        patterns = list(getattr(agent, "patterns", []) or [])
+        weights = []
+        if hasattr(agent, "get_weights"):
+            try:
+                weights = list(agent.get_weights())
+            except Exception:
+                weights = []
+
+        best_pattern = None
+        if hasattr(agent, "get_best_pattern"):
+            try:
+                best_pattern = agent.get_best_pattern()
+            except Exception:
+                best_pattern = None
+
+        best_weight = max((float(weight) for weight in weights), default=0.0)
+        return {
+            "patterns": len(patterns),
+            "weights": len(weights),
+            "best_pattern": getattr(best_pattern, "name", None),
+            "best_weight": best_weight,
+        }
+
+    def maintenance_cycle(
+        self,
+        sentences: Sequence[str],
+        *,
+        hydrate_limit: Optional[int] = None,
+        retrain_epochs: int = 1,
+        enable_causal: bool = False,
+        agent_names: Optional[Sequence[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Hydrate archived patterns, run another learning pass, and report per-agent changes.
+        """
+        sentences_list = list(sentences)
+        tracked_names = list(agent_names or ("char", "word", "contextual", "phrase", "semantic", "causal"))
+        before = {
+            name: self._agent_learning_snapshot(self.agents[name])
+            for name in tracked_names
+            if self.agents.get(name) is not None
+        }
+
+        loaded = self.warm_start_from_cache(limit=hydrate_limit)
+
+        after_hydrate = {
+            name: self._agent_learning_snapshot(self.agents[name])
+            for name in tracked_names
+            if self.agents.get(name) is not None
+        }
+
+        for _ in range(max(retrain_epochs, 1)):
+            self.train_sequence(sentences_list, enable_causal=enable_causal)
+
+        after_train = {
+            name: self._agent_learning_snapshot(self.agents[name])
+            for name in tracked_names
+            if self.agents.get(name) is not None
+        }
+
+        report: Dict[str, Dict[str, Any]] = {}
+        for name in tracked_names:
+            if self.agents.get(name) is None:
+                continue
+            before_snapshot = before.get(name, {})
+            hydrated_snapshot = after_hydrate.get(name, {})
+            after_snapshot = after_train.get(name, {})
+            pattern_delta = int(after_snapshot.get("patterns", 0)) - int(before_snapshot.get("patterns", 0))
+            best_weight_before = float(before_snapshot.get("best_weight", 0.0))
+            best_weight_after = float(after_snapshot.get("best_weight", 0.0))
+            report[name] = {
+                "before": before_snapshot,
+                "after_hydrate": hydrated_snapshot,
+                "after_train": after_snapshot,
+                "pattern_delta": pattern_delta,
+                "best_weight_delta": best_weight_after - best_weight_before,
+                "improved": pattern_delta > 0 or best_weight_after > best_weight_before,
+            }
+
+        report["_summary"] = {
+            "loaded": loaded,
+            "sentences": len(sentences_list),
+            "retrain_epochs": retrain_epochs,
+            "improved_agents": [name for name, data in report.items() if name != "_summary" and data.get("improved")],
+        }
+        return report
 
     def _get_tags(self, words: List[str]) -> List[str]:
         return [self.pos_map.get(w.lower(), "NOUN") for w in words]
@@ -135,6 +312,13 @@ class MultiAgentReader:
             if max_chunks is not None and total_chunks >= max_chunks:
                 break
 
+        return documents
+
+    def load_corpus(self, max_chunks: Optional[int] = None, max_words_per_chunk: Optional[int] = None) -> List[List[str]]:
+        if max_words_per_chunk is None:
+            max_words_per_chunk = self.max_words_per_chunk
+        documents = self._load_documents(max_chunks=max_chunks, max_words_per_chunk=max_words_per_chunk)
+        self._known_corpus_sentences = sum(len(document) for document in documents)
         return documents
 
     def _agent_sequence(self, agent_name: str, sentence: str) -> Tuple[List[Cell], List[Cell]]:
@@ -257,6 +441,10 @@ class MultiAgentReader:
             self.contextual_agent.process_words(clean_words)
             self.phrase_agent.process_tags(self._get_tags(clean_words))
 
+        syn_agent = self.agents.get("syntactic")
+        if syn_agent is not None and hasattr(syn_agent, "learn_from_corpus"):
+            syn_agent.learn_from_corpus(sentences)
+
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:
             return
@@ -290,7 +478,11 @@ class MultiAgentReader:
             print(f"Error: Corpus not found at {self.corpus_path}")
             return
 
+        if max_words_per_chunk is not None:
+            self.max_words_per_chunk = max_words_per_chunk
         documents = self._load_documents(max_chunks=max_chunks, max_words_per_chunk=max_words_per_chunk)
+        self._known_corpus_sentences = sum(len(document) for document in documents)
+        self._corpus_offset = os.path.getsize(self.corpus_path) if os.path.exists(self.corpus_path) else 0
         chunks = [chunk for document in documents for chunk in document]
 
         print(f"Starting Hierarchical Multi-Agent Training on {len(chunks)} chunks...")
@@ -362,7 +554,11 @@ class MultiAgentReader:
             print(f"Error: Corpus not found at {self.corpus_path}")
             return
 
+        if max_words_per_chunk is not None:
+            self.max_words_per_chunk = max_words_per_chunk
         documents = self._load_documents(max_chunks=max_chunks, max_words_per_chunk=max_words_per_chunk)
+        self._known_corpus_sentences = sum(len(document) for document in documents)
+        self._corpus_offset = os.path.getsize(self.corpus_path) if os.path.exists(self.corpus_path) else 0
         chunks = [chunk for document in documents for chunk in document]
 
         print(f"Starting Active Hierarchical Multi-Agent Training on {len(chunks)} chunks...")
@@ -445,6 +641,38 @@ class MultiAgentReader:
 
     def generate(self, seed_text: str, max_length: int = 50, temperature: float = 0.0) -> str:
         return self.response_agent.generate(seed_text, max_length=max_length, temperature=temperature)
+
+    def reason(self, question: str) -> str:
+        return self.reasoning_agent.reason(question)
+
+    def retrain_on_new_data(self, epochs: int = 1):
+        """Incrementally train on sentences appended to the corpus since the last load/train."""
+        if not os.path.exists(self.corpus_path):
+            print(f"Error: Corpus not found at {self.corpus_path}")
+            return 0
+
+        current_size = os.path.getsize(self.corpus_path)
+        if current_size <= self._corpus_offset:
+            print("No new corpus sentences to retrain on.")
+            return 0
+
+        with open(self.corpus_path, "r", encoding="utf-8") as handle:
+            handle.seek(self._corpus_offset)
+            tail_text = handle.read()
+
+        raw_blocks = [block.strip() for block in re.split(r"\n\s*\n|\n", tail_text) if block.strip()]
+        new_sentences = [block for block in raw_blocks if block]
+        if not new_sentences:
+            self._corpus_offset = current_size
+            print("No new corpus sentences to retrain on.")
+            return 0
+
+        print(f"Retraining on {len(new_sentences)} new sentences...")
+        for _ in range(epochs):
+            self.train_sequence(new_sentences, enable_causal=False)
+        self._known_corpus_sentences += len(new_sentences)
+        self._corpus_offset = current_size
+        return len(new_sentences)
 
 if __name__ == "__main__":
     reader = MultiAgentReader("hpm_ai_v6/data/corpus/alice_mini.txt")

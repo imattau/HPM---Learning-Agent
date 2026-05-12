@@ -201,3 +201,73 @@ class TestReasoningAgentIntegration:
 
         weights = [w for w, _ in ra._forward_rule_patterns]
         assert weights == sorted(weights, reverse=True)
+
+
+class TestWiringIntegration:
+    """Tests for wiring SyntacticRuleAgent into MultiAgentReader and ReasoningAgent."""
+
+    def test_train_sequence_calls_syntactic_learn_from_corpus(self):
+        """MultiAgentReader.train_sequence should call syntactic agent's learn_from_corpus."""
+        from unittest.mock import MagicMock, patch
+        import tempfile, os
+
+        # Create a minimal corpus file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("cat sat\n")
+            corpus_path = f.name
+
+        try:
+            nlp = make_mock_nlp([
+                [("cat", "NOUN"), ("sat", "VERB")],
+            ])
+            syn_agent = SyntacticRuleAgent(min_prob=0.01, nlp=nlp)
+
+            from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
+            reader = MultiAgentReader(corpus_path=corpus_path, warm_start=False)
+            reader.agents["syntactic"] = syn_agent
+
+            # Call train_sequence — should invoke learn_from_corpus on syn_agent
+            reader.train_sequence(["cat sat"])
+
+            # After training, syntactic agent should have POS info
+            assert syn_agent.get_pos("cat") == "NOUN"
+        finally:
+            os.unlink(corpus_path)
+
+    def test_reasoning_agent_enriches_word_edges_with_pos_relation(self):
+        """After refresh(), word agent edges for known-POS words have relation='pos_<TAG>'."""
+        import numpy as np
+        from types import SimpleNamespace
+        from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent, EdgeRecord
+        from hpm_ai_v6.hpm_model.core.cell import Cell
+
+        alpha = Cell(name="word_cat", dim=0, embedding=[1, 0, 0])
+        beta = Cell(name="word_sat", dim=0, embedding=[0, 1, 0])
+        edge = Cell(
+            name="w_cat->sat", dim=1,
+            embedding=np.array(beta.as_numpy()) - np.array(alpha.as_numpy()),
+            source=alpha, target=beta,
+        )
+
+        class StubWordAgent:
+            patterns = [edge]
+            def get_weights(self): return [0.5]
+            def _paging_lookup(self): return {"word_cat": alpha, "word_sat": beta}
+
+        nlp = make_mock_nlp([[("cat", "NOUN"), ("sat", "VERB")]])
+        syn_agent = SyntacticRuleAgent(min_prob=0.01, nlp=nlp)
+        syn_agent.learn_from_corpus(["cat sat"])
+
+        reader = SimpleNamespace(agents={
+            "word": StubWordAgent(),
+            "syntactic": syn_agent,
+        })
+        ra = ReasoningAgent(reader)
+        ra.refresh()
+
+        # Find the edge from cat -> sat
+        cat_key = ra._cell_key(alpha)
+        records = ra._edge_index.get(cat_key, [])
+        cat_sat = next((r for r in records if r.target.name == "word_sat"), None)
+        assert cat_sat is not None, "Expected edge from word_cat to word_sat"
+        assert cat_sat.relation == "pos_NOUN", f"Expected pos_NOUN, got {cat_sat.relation}"
