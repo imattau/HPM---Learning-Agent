@@ -22,4 +22,6 @@ class LearningAgent(BaseHPMAgent):
             population=population,
             context=context
         )
+        if hasattr(self, "maybe_page_patterns"):
+            self.maybe_page_patterns()
         return scores

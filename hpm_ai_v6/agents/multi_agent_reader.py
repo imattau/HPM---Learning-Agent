@@ -19,6 +19,7 @@ from hpm_ai_v6.agents.semantic_agent import SemanticAgent
 from hpm_ai_v6.agents.causal_agent import CausalAgent
 from hpm_ai_v6.agents.active_learning_agent import ActiveLearningAgent, ActiveCorpus
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
+from hpm_ai_v6.agents.dependency_relation_agent import DependencyRelationAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
@@ -111,6 +112,7 @@ class MultiAgentReader:
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
         )
+        self.dependency_agent = DependencyRelationAgent()
         self.relation_registry = RelationRegistry(embedding_dim=64)
         self.relation_emitter = RelationPatternEmitter(embedding_dim=64)
         self.reasoning_agent = ReasoningAgent(self)
@@ -124,6 +126,7 @@ class MultiAgentReader:
             "active_learning": self.active_learning_agent,
             "utility": self.utility_agent,
             "response": self.response_agent,
+            "dependency": self.dependency_agent,
             "reasoning": self.reasoning_agent,
         }
         self.warm_start = warm_start
@@ -198,6 +201,15 @@ class MultiAgentReader:
             if os.path.exists(cache_path):
                 try:
                     syn_agent.load(cache_path)
+                except Exception:
+                    pass
+
+        dep_agent = self.agents.get("dependency")
+        if dep_agent is not None and hasattr(dep_agent, "load"):
+            cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.json")
+            if os.path.exists(cache_path):
+                try:
+                    dep_agent.load(cache_path)
                 except Exception:
                     pass
 
@@ -486,6 +498,16 @@ class MultiAgentReader:
                     syn_agent.save(cache_path)
                 except Exception:
                     pass
+
+        dep_agent = self.agents.get("dependency")
+        if dep_agent is not None and hasattr(dep_agent, "learn_from_corpus"):
+            try:
+                dep_agent.learn_from_corpus(sentences)
+                if hasattr(dep_agent, "save"):
+                    cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.json")
+                    dep_agent.save(cache_path)
+            except Exception:
+                pass
 
         # Merge all agent patterns into the shared PatternStore.
         for agent_name, agent in self.agents.items():

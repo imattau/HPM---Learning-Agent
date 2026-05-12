@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+import hashlib
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
@@ -45,22 +46,37 @@ class SemanticAgent(SocialAgent):
             self.emb_dim = self.encoder.get_sentence_embedding_dimension()
         
         self.sent_cells = {}
+        self.sent_text_by_name: Dict[str, str] = {}
         super().__init__(patterns=[], shared_field=shared_field, **kwargs)
 
+    @staticmethod
+    def _sentence_cell_name(sentence: str) -> str:
+        normalized = sentence.strip()
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+        return f"sent_{digest}"
+
     def _get_or_create_sent_cell(self, sentence: str):
-        # Use first 100 chars as key to handle potential long sentences
         key = sentence.strip()
-        if not key: return None
-        
+        if not key:
+            return None
+
         if key not in self.sent_cells:
             emb = self.encoder.encode(key)
-            self.sent_cells[key] = Cell(name=f"sent_{key[:30]}", dim=0, embedding=emb)
+            cell_name = self._sentence_cell_name(key)
+            self.sent_cells[key] = Cell(name=cell_name, dim=0, embedding=emb)
+            self.sent_text_by_name[cell_name] = key
         return self.sent_cells[key]
 
     def _ensure_pattern(self, src_cell: Cell, tgt_cell: Cell):
         name = f"sem_{src_cell.name}->{tgt_cell.name}"
         for p in self.patterns:
             if p.name == name: return p
+
+        query_embedding = tgt_cell.as_tensor() - src_cell.as_tensor()
+        restored = self.restore_pattern_from_archive(name, query_embedding=query_embedding)
+        if restored is not None:
+            self._refresh_learner()
+            return restored
         
         new_p = Cell(name=name, dim=1, embedding=tgt_cell.embedding - src_cell.embedding, 
                      source=src_cell, target=tgt_cell)
@@ -68,16 +84,21 @@ class SemanticAgent(SocialAgent):
         self._refresh_learner()
         return new_p
 
+    def _paging_lookup(self):
+        return {cell.name: cell for cell in self.sent_cells.values()}
+
     def _refresh_learner(self):
         from hpm_ai_v6.hpm_model.dynamics.meta_rule import MetaPatternRule
         from hpm_ai_v6.hpm_model.dynamics.learning import HPMLearner
         
-        old_weights = self.meta_rule.get_weights_tensor() if hasattr(self, 'meta_rule') else torch.zeros(0, dtype=torch.float32)
+        old_weights = self.get_weights_dict() if hasattr(self, 'meta_rule') else {}
         self.meta_rule = MetaPatternRule(patterns=self.patterns, learning_rate=0.2)
         
-        if len(old_weights) > 0:
+        if old_weights:
             new_weights = torch.ones(len(self.patterns), dtype=torch.float32) / (len(self.patterns) + 1e-9)
-            new_weights[:len(old_weights)] = old_weights
+            for i, pattern in enumerate(self.patterns):
+                if pattern.name in old_weights:
+                    new_weights[i] = float(old_weights[pattern.name])
             self.meta_rule.set_weights_tensor(new_weights / (new_weights.sum() + 1e-9))
             
         self.learner = HPMLearner(meta_rule=self.meta_rule)

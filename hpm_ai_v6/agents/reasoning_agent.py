@@ -180,7 +180,7 @@ class ReasoningAgent:
         return (7, -len(cell.name))
 
     def _iter_reasoning_agents(self) -> Iterable[Tuple[str, object]]:
-        for name in ("word", "contextual", "semantic", "phrase", "char", "causal", "syntactic"):
+        for name in ("word", "contextual", "semantic", "phrase", "char", "causal", "syntactic", "dependency"):
             agent = self.reader.agents.get(name)
             if agent is not None:
                 yield name, agent

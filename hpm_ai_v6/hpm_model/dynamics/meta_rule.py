@@ -102,4 +102,7 @@ class MetaPatternRule:
 
     def get_weights_dict(self) -> Dict[str, float]:
         """Returns a mapping of pattern names to their weights."""
-        return {p.name: float(self.weights[i]) for i, p in enumerate(self.patterns)}
+        return {
+            p.name: float(self._weights[i]) if i < len(self._weights) else 0.0
+            for i, p in enumerate(self.patterns)
+        }

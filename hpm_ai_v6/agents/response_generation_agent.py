@@ -19,6 +19,8 @@ class ResponseGenerationAgent:
         tag_fn,
         max_length: int = 50,
         stop_tokens: Optional[set[str]] = None,
+        repetition_penalty: float = 0.35,
+        recent_window: int = 6,
     ):
         self.contextual_agent = contextual_agent
         self.word_agent = word_agent
@@ -27,6 +29,8 @@ class ResponseGenerationAgent:
         self.tag_fn = tag_fn
         self.max_length = max_length
         self.stop_tokens = stop_tokens or {".", "!", "?"}
+        self.repetition_penalty = repetition_penalty
+        self.recent_window = max(1, recent_window)
         self.rng = random.Random(0)
 
     @staticmethod
@@ -63,6 +67,32 @@ class ResponseGenerationAgent:
         if top_k is not None:
             candidates = candidates[:top_k]
         return candidates
+
+    def _apply_repetition_penalty(
+        self,
+        prefix_tokens: Sequence[str],
+        candidates: List[Tuple[str, float]],
+    ) -> List[Tuple[str, float]]:
+        if not candidates or not prefix_tokens:
+            return candidates
+
+        last_token = prefix_tokens[-1]
+        recent_tokens = list(prefix_tokens[-self.recent_window :])
+        recent_counts = {token: recent_tokens.count(token) for token in set(recent_tokens)}
+
+        reranked: List[Tuple[str, float]] = []
+        for token, score in candidates:
+            adjusted = score
+            if token == last_token:
+                adjusted -= self.repetition_penalty * 2.0
+            if token in recent_counts:
+                adjusted -= self.repetition_penalty * recent_counts[token]
+
+            if len(prefix_tokens) >= 2 and token == prefix_tokens[-2]:
+                adjusted -= self.repetition_penalty
+
+            reranked.append((token, adjusted))
+        return reranked
 
     def _apply_phrase_bias(self, prefix_tokens: Sequence[str], candidates: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
         if not candidates or not self.phrase_agent.patterns:
@@ -130,6 +160,8 @@ class ResponseGenerationAgent:
         for _ in range(limit):
             prefix = " ".join(tokens)
             candidates = self.next_token_distribution(prefix)
+            candidates = self._apply_repetition_penalty(tokens, candidates)
+            candidates.sort(key=lambda item: item[1], reverse=True)
             next_token = self._sample(candidates, temperature=temperature)
             if next_token is None:
                 break

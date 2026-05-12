@@ -2,6 +2,8 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import copy
 import string
+import torch
+from pydantic import Field
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.agents.social_agent import SocialAgent
 from hpm_ai_v6.hpm_model.fields.pattern_field import DynamicPatternField
@@ -12,12 +14,35 @@ class CausalRule(Cell):
     Source: The intervention (e.g., 'replace X with Y').
     Target: The observed effect (e.g., 'Surprise in Phrase Agent').
     """
-    def __init__(self, name: str, intervention: str, effect_magnitude: float, agent_impacted: str, **kwargs):
-        # Encode the intervention metadata into the name so the rule stays compatible
-        # with the base Cell schema used throughout the HPM stack.
-        full_name = f"{name}|agent={agent_impacted}|effect={effect_magnitude:.4f}|do={intervention}"
+    intervention: str = ""
+    effect_magnitude: float = 0.0
+    agent_impacted: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    def __init__(
+        self,
+        name: str,
+        intervention: str,
+        effect_magnitude: float,
+        agent_impacted: str,
+        source: Optional[Cell] = None,
+        target: Optional[Cell] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
         emb = np.array([effect_magnitude])
-        super().__init__(name=full_name, dim=2, embedding=emb, **kwargs)
+        super().__init__(
+            name=name,
+            dim=2,
+            embedding=emb,
+            source=source,
+            target=target,
+            intervention=intervention,
+            effect_magnitude=effect_magnitude,
+            agent_impacted=agent_impacted,
+            metadata=metadata or {},
+            **kwargs,
+        )
 
 class CausalAgent(SocialAgent):
     """
@@ -27,6 +52,8 @@ class CausalAgent(SocialAgent):
     def __init__(self, other_agents: Dict[str, SocialAgent], shared_field: Optional[DynamicPatternField] = None, **kwargs):
         self.other_agents = other_agents
         self.causal_patterns = []
+        self.cause_cells: Dict[str, Cell] = {}
+        self.effect_cells: Dict[str, Cell] = {}
         super().__init__(patterns=[], shared_field=shared_field, **kwargs)
 
     @staticmethod
@@ -138,6 +165,26 @@ class CausalAgent(SocialAgent):
             return 0.0
         return total_nll / total_weight
 
+    def _get_or_create_cause_cell(self, original_word: str, counterfactual_word: str, position: int) -> Cell:
+        key = f"{original_word.lower()}->{counterfactual_word.lower()}@{position}"
+        if key not in self.cause_cells:
+            self.cause_cells[key] = Cell(
+                name=f"cause_{key}",
+                dim=0,
+                embedding=np.array([float(len(original_word)), float(position), 1.0], dtype=float),
+            )
+        return self.cause_cells[key]
+
+    def _get_or_create_effect_cell(self, original_word: str, agent_name: str) -> Cell:
+        key = f"{original_word.lower()}->{agent_name}"
+        if key not in self.effect_cells:
+            self.effect_cells[key] = Cell(
+                name=f"effect_{key}",
+                dim=0,
+                embedding=np.array([float(len(original_word)), float(len(agent_name)), 1.0], dtype=float),
+            )
+        return self.effect_cells[key]
+
     def perform_interventions(self, original_text_chunks: List[str]):
         """
         Main loop: Propose, Intervene, Measure, Learn.
@@ -172,11 +219,22 @@ class CausalAgent(SocialAgent):
                 # 3. If effect is significant, create a Causal Rule (2-cell)
                 if effect > 0.005:
                     rule_name = f"causal_{original_word}_in_{name}"
+                    cause_cell = self._get_or_create_cause_cell(original_word, counterfactual_word, idx_to_swap)
+                    effect_cell = self._get_or_create_effect_cell(original_word, name)
                     rule = CausalRule(
                         name=rule_name,
                         intervention=f"replace '{original_word}' at pos {idx_to_swap}",
                         effect_magnitude=effect,
-                        agent_impacted=name
+                        agent_impacted=name,
+                        source=cause_cell,
+                        target=effect_cell,
+                        metadata={
+                            "original_word": original_word.lower(),
+                            "counterfactual_word": counterfactual_word.lower(),
+                            "position": idx_to_swap,
+                            "agent_impacted": name,
+                            "effect_label": f"surprise in {name}",
+                        },
                     )
                     self.patterns.append(rule)
                     print(f"  [Causal Discovery] {rule_name}: Impact {effect:.4f}")
@@ -187,8 +245,20 @@ class CausalAgent(SocialAgent):
         from hpm_ai_v6.hpm_model.dynamics.meta_rule import MetaPatternRule
         from hpm_ai_v6.hpm_model.dynamics.learning import HPMLearner
         
+        old_weights = self.get_weights_dict() if hasattr(self, "meta_rule") else {}
         self.meta_rule = MetaPatternRule(patterns=self.patterns, learning_rate=0.1)
+        if old_weights:
+            weights = torch.ones(len(self.patterns), dtype=torch.float32) / (len(self.patterns) + 1e-9)
+            for i, pattern in enumerate(self.patterns):
+                if pattern.name in old_weights:
+                    weights[i] = float(old_weights[pattern.name])
+            self.meta_rule.set_weights_tensor(weights / (weights.sum() + 1e-9))
         self.learner = HPMLearner(meta_rule=self.meta_rule)
+
+    def _paging_lookup(self):
+        lookup = {cell.name: cell for cell in self.cause_cells.values()}
+        lookup.update({cell.name: cell for cell in self.effect_cells.values()})
+        return lookup
 
     def get_causal_insights(self) -> List[str]:
         """Returns the most robust causal rules discovered."""

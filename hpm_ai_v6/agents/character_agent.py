@@ -30,6 +30,12 @@ class CharacterAgent(SocialAgent):
         src = self.char_cells.get(src_char)
         tgt = self.char_cells.get(tgt_char)
         if not src or not tgt: return None
+
+        query_embedding = tgt.as_tensor() - src.as_tensor()
+        restored = self.restore_pattern_from_archive(name, query_embedding=query_embedding)
+        if restored is not None:
+            self._refresh_learner()
+            return restored
         
         new_p = Cell(name=name, dim=1, embedding=tgt.embedding - src.embedding, 
                      source=src, target=tgt)
@@ -38,17 +44,22 @@ class CharacterAgent(SocialAgent):
         self._refresh_learner()
         return new_p
 
+    def _paging_lookup(self):
+        return {cell.name: cell for cell in self.char_cells.values()}
+
     def _refresh_learner(self):
         # Logic to re-initialize internal MPR with updated pattern list
         from hpm_ai_v6.hpm_model.dynamics.meta_rule import MetaPatternRule
         from hpm_ai_v6.hpm_model.dynamics.learning import HPMLearner
         
-        old_weights = self.meta_rule.get_weights_tensor() if hasattr(self, 'meta_rule') else torch.zeros(0, dtype=torch.float32)
+        old_weights = self.get_weights_dict() if hasattr(self, 'meta_rule') else {}
         self.meta_rule = MetaPatternRule(patterns=self.patterns, learning_rate=0.2)
         
-        if len(old_weights) > 0:
+        if old_weights:
             new_weights = torch.ones(len(self.patterns), dtype=torch.float32) / (len(self.patterns) + 1e-9)
-            new_weights[:len(old_weights)] = old_weights
+            for i, pattern in enumerate(self.patterns):
+                if pattern.name in old_weights:
+                    new_weights[i] = float(old_weights[pattern.name])
             self.meta_rule.set_weights_tensor(new_weights / (new_weights.sum() + 1e-9))
             
         self.learner = HPMLearner(meta_rule=self.meta_rule)

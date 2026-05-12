@@ -21,6 +21,7 @@ class Cell(BaseModel):
     
     # Replicator dynamics weight
     weight: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def __hash__(self):
         return hash(self.name)

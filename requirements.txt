@@ -9,3 +9,7 @@ psutil>=5.9        # TieredForest: memory monitoring and disk paging
 Pillow>=10.0       # ImageDomain core
 librosa>=0.10.0    # AudioDomain core
 networkx>=3.0      # GraphDomain core
+Flask>=3.0         # Minimal web demo
+requests>=2.31     # Web agent fetching
+beautifulsoup4>=4.12  # Web agent HTML extraction
+feedparser>=6.0    # Web agent RSS ingestion
