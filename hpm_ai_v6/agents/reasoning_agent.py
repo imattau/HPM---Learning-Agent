@@ -337,11 +337,32 @@ class ReasoningAgent:
                 if word_cell is None:
                     continue
 
+                # Use a zero embedding for cross-dim bridge patterns
+                import numpy as _np
+                bridge_emb = _np.zeros(max(
+                    len(word_cell.as_numpy()), len(sent_cell.as_numpy())
+                ), dtype=float).tolist()
+
+                bridge_word_sent = Cell(
+                    name=self._bridge_pattern_name(word_key, sent_key, "word_in_sentence"),
+                    dim=1,
+                    embedding=bridge_emb,
+                    source=word_cell,
+                    target=sent_cell,
+                )
+                bridge_sent_word = Cell(
+                    name=self._bridge_pattern_name(sent_key, word_key, "sentence_mentions_word"),
+                    dim=1,
+                    embedding=bridge_emb,
+                    source=sent_cell,
+                    target=word_cell,
+                )
+
                 # word → sentence
                 self._add_edge_record(
                     edge_index=edge_index,
                     node_index=node_index,
-                    pattern=self._make_bridge_pattern(word_cell, sent_cell, "word_in_sentence"),
+                    pattern=bridge_word_sent,
                     score=bridge_score,
                     raw_weight=bridge_score,
                     agent_name="semantic",
@@ -351,7 +372,7 @@ class ReasoningAgent:
                 self._add_edge_record(
                     edge_index=edge_index,
                     node_index=node_index,
-                    pattern=self._make_bridge_pattern(sent_cell, word_cell, "sentence_mentions_word"),
+                    pattern=bridge_sent_word,
                     score=bridge_score,
                     raw_weight=bridge_score,
                     agent_name="semantic",
