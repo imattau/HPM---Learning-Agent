@@ -68,6 +68,7 @@ class ReasoningAgent:
         self._transient_rule_edge_index: Dict[str, List[EdgeRecord]] = {}
         self._forward_rule_patterns: List[Tuple[float, Cell]] = []
         self._dirty: bool = True
+        self._relation_registry = getattr(reader, "relation_registry", None)
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -1043,6 +1044,15 @@ class ReasoningAgent:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
+                    if self._relation_registry is not None:
+                        try:
+                            coherence = self._relation_registry.coherence_score(
+                                edge.source.as_numpy(), edge.relation, edge.target.as_numpy()
+                            )
+                            bonus = 0.5 + 0.5 * max(coherence, 0.0)
+                            edge_cost /= bonus
+                        except Exception:
+                            pass
                     new_cost = cost + edge_cost
                     previous_best = best_seen_cost.get(edge.target_key)
                     if previous_best is not None and new_cost >= previous_best:
@@ -1724,6 +1734,15 @@ class ReasoningAgent:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
+                    if self._relation_registry is not None:
+                        try:
+                            coherence = self._relation_registry.coherence_score(
+                                edge.source.as_numpy(), edge.relation, edge.target.as_numpy()
+                            )
+                            bonus = 0.5 + 0.5 * max(coherence, 0.0)
+                            edge_cost /= bonus
+                        except Exception:
+                            pass
                     new_cost = cost + edge_cost
                     previous_best = best_seen_cost.get(edge.target_key)
                     # Allow re-visiting goal via different routes
@@ -1761,6 +1780,34 @@ class ReasoningAgent:
                 seen.add(sig)
                 unique.append(path)
         return unique
+
+    def _predict_missing_edge(
+        self, source: "Cell", relation_name: str, top_k: int = 5
+    ) -> "List[Tuple[float, Cell]]":
+        """Use TransE prediction to find likely targets for (source, relation)."""
+        import numpy as np
+        self._ensure_fresh()
+        if self._relation_registry is None:
+            return []
+        try:
+            src_vec = source.as_numpy()
+            predicted = self._relation_registry.predict_target(src_vec, relation_name)
+        except Exception:
+            return []
+        scored = []
+        for key, cell in self._node_index.items():
+            try:
+                cell_vec = cell.as_numpy()
+                norm_p = np.linalg.norm(predicted)
+                norm_c = np.linalg.norm(cell_vec)
+                if norm_p < 1e-9 or norm_c < 1e-9:
+                    continue
+                sim = float(np.dot(predicted, cell_vec) / (norm_p * norm_c))
+                scored.append((sim, cell))
+            except Exception:
+                continue
+        scored.sort(reverse=True)
+        return scored[:top_k]
 
     def _select_path(self, start: Cell, goal: Cell, method: str = "auto") -> Optional[List[PathStep]]:
         if method == "backward":

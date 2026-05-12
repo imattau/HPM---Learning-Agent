@@ -23,6 +23,7 @@ from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.storage.pattern_store import PatternStore
+from hpm_ai_v6.hpm_model.storage.relation_registry import RelationRegistry
 
 class MultiAgentReader:
     """
@@ -109,6 +110,7 @@ class MultiAgentReader:
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
         )
+        self.relation_registry = RelationRegistry(embedding_dim=64)
         self.reasoning_agent = ReasoningAgent(self)
         self.agents = {
             "char": self.char_agent,
@@ -196,6 +198,10 @@ class MultiAgentReader:
                     syn_agent.load(cache_path)
                 except Exception:
                     pass
+
+        reg_path = os.path.join(self.pattern_cache_dir, "relation_registry.json")
+        if os.path.exists(reg_path):
+            self.relation_registry.load(reg_path)
 
         return loaded
 
@@ -492,6 +498,27 @@ class MultiAgentReader:
                 pass
         self.pattern_store.save()
         self.flush_all()
+
+        # Update relation registry from agent edges
+        for agent_name, agent in self.agents.items():
+            if agent is None:
+                continue
+            relation = agent_name
+            for pattern in getattr(agent, "patterns", []):
+                source = getattr(pattern, "source", None)
+                target = getattr(pattern, "target", None)
+                if source is None or target is None:
+                    continue
+                try:
+                    self.relation_registry.update(
+                        relation,
+                        source.as_numpy(),
+                        target.as_numpy(),
+                    )
+                except Exception:
+                    pass
+        reg_path = os.path.join(self.pattern_cache_dir, "relation_registry.json")
+        self.relation_registry.save(reg_path)
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:
