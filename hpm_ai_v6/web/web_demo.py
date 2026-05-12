@@ -787,9 +787,9 @@ def _corpus_path() -> str:
 def _build_reader() -> MultiAgentReader:
     local_reader = MultiAgentReader(_corpus_path(), warm_start=True)
     local_reader.train(
-        episodes=1,
-        max_chunks=2,
-        max_words_per_chunk=32,
+        episodes=2,
+        max_chunks=50,
+        max_words_per_chunk=120,
         enable_pruning=False,
         enable_causal=False,
     )
@@ -908,7 +908,7 @@ def index():
     urls = ""
     rss_url = ""
     top_k = 20
-    min_score = 0.5
+    min_score = 0.05
     gutenberg_ids = ", ".join(str(book_id) for book_id in DatasetTrainingAgent.curated_gutenberg_book_ids())
     gutenberg_top_k = 12
     gutenberg_min_score = 0.05
@@ -1006,7 +1006,7 @@ def api_train():
     urls = payload.get("urls", [])
     rss_url = payload.get("rss_url", "")
     top_k = int(payload.get("top_k", 20))
-    min_score = float(payload.get("min_score", 0.5))
+    min_score = float(payload.get("min_score", 0.05))
     gutenberg_ids = payload.get("gutenberg_ids", [])
     gutenberg_top_k = int(payload.get("gutenberg_top_k", top_k))
     gutenberg_min_score = float(payload.get("gutenberg_min_score", min_score))
