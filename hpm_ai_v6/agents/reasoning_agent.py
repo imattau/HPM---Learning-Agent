@@ -69,6 +69,7 @@ class ReasoningAgent:
         self._forward_rule_patterns: List[Tuple[float, Cell]] = []
         self._dirty: bool = True
         self._relation_registry = getattr(reader, "relation_registry", None)
+        self._relation_cell_index: Dict[str, Cell] = {}
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -678,6 +679,12 @@ class ReasoningAgent:
         self._explicit_rule_index = self._build_explicit_rule_index(all_patterns, pattern_weights)
         self._transient_rule_edge_index = self._build_transient_rule_edge_index(self._explicit_rule_index)
         self._forward_rule_patterns = self._build_forward_rule_patterns(all_patterns, pattern_weights)
+        self._relation_cell_index = {
+            pattern.name.removeprefix("rel_"): pattern
+            for pattern in all_patterns
+            if getattr(pattern, "dim", 0) == 2
+            and getattr(pattern, "name", "").startswith("rel_")
+        }
         self._dirty = False
 
     def _choose_cell(self, candidates: Sequence[str]) -> Optional[Cell]:
@@ -1044,7 +1051,23 @@ class ReasoningAgent:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
-                    if self._relation_registry is not None:
+                    rel_cell = self._relation_cell_index.get(edge.relation)
+                    if rel_cell is not None:
+                        try:
+                            import numpy as np
+                            rel_emb = rel_cell.as_numpy()
+                            src_emb = edge.source.as_numpy()
+                            tgt_emb = edge.target.as_numpy()
+                            predicted = src_emb + rel_emb
+                            np_p = np.linalg.norm(predicted)
+                            nt = np.linalg.norm(tgt_emb)
+                            if np_p > 1e-9 and nt > 1e-9:
+                                coherence = float(np.dot(predicted, tgt_emb) / (np_p * nt))
+                                bonus = 0.5 + 0.5 * max(coherence, 0.0)
+                                edge_cost /= bonus
+                        except Exception:
+                            pass
+                    elif self._relation_registry is not None:
                         try:
                             coherence = self._relation_registry.coherence_score(
                                 edge.source.as_numpy(), edge.relation, edge.target.as_numpy()
@@ -1734,7 +1757,23 @@ class ReasoningAgent:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
-                    if self._relation_registry is not None:
+                    rel_cell = self._relation_cell_index.get(edge.relation)
+                    if rel_cell is not None:
+                        try:
+                            import numpy as np
+                            rel_emb = rel_cell.as_numpy()
+                            src_emb = edge.source.as_numpy()
+                            tgt_emb = edge.target.as_numpy()
+                            predicted = src_emb + rel_emb
+                            np_p = np.linalg.norm(predicted)
+                            nt = np.linalg.norm(tgt_emb)
+                            if np_p > 1e-9 and nt > 1e-9:
+                                coherence = float(np.dot(predicted, tgt_emb) / (np_p * nt))
+                                bonus = 0.5 + 0.5 * max(coherence, 0.0)
+                                edge_cost /= bonus
+                        except Exception:
+                            pass
+                    elif self._relation_registry is not None:
                         try:
                             coherence = self._relation_registry.coherence_score(
                                 edge.source.as_numpy(), edge.relation, edge.target.as_numpy()
@@ -1787,11 +1826,15 @@ class ReasoningAgent:
         """Use TransE prediction to find likely targets for (source, relation)."""
         import numpy as np
         self._ensure_fresh()
-        if self._relation_registry is None:
-            return []
         try:
             src_vec = source.as_numpy()
-            predicted = self._relation_registry.predict_target(src_vec, relation_name)
+            rel_cell = self._relation_cell_index.get(relation_name)
+            if rel_cell is not None:
+                predicted = src_vec + np.asarray(rel_cell.as_numpy(), dtype=np.float32)
+            elif self._relation_registry is not None:
+                predicted = self._relation_registry.predict_target(src_vec, relation_name)
+            else:
+                return []
         except Exception:
             return []
         scored = []

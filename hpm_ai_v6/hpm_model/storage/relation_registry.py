@@ -1,8 +1,7 @@
 from __future__ import annotations
-import json
-import os
 from typing import Dict, List, Tuple
 import numpy as np
+from hpm_ai_v6.hpm_model.core.cell import Cell
 
 
 class RelationRegistry:
@@ -79,19 +78,17 @@ class RelationRegistry:
             return 0.0
         return float(np.dot(predicted, tgt) / (np_pred * nt))
 
-    def save(self, path: str) -> None:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        data = {k: v.tolist() for k, v in self._embeddings.items()}
-        with open(path, "w") as f:
-            json.dump({"embedding_dim": self.embedding_dim, "embeddings": data}, f)
+    def populate_from_cells(self, cells: List[Cell]) -> None:
+        """Load relation embeddings from dim-2 cells with 'rel_' prefix names."""
+        for cell in cells:
+            name = getattr(cell, "name", "")
+            if name.startswith("rel_"):
+                relation_name = name[4:]  # strip "rel_"
+                self._embeddings[relation_name] = np.asarray(cell.as_numpy(), dtype=np.float32)
 
-    def load(self, path: str) -> None:
-        if not os.path.exists(path):
-            return
-        with open(path) as f:
-            data = json.load(f)
-        self.embedding_dim = int(data.get("embedding_dim", self.embedding_dim))
-        self._embeddings = {
-            k: np.array(v, dtype=np.float32)
-            for k, v in data.get("embeddings", {}).items()
-        }
+    def to_cells(self) -> List[Tuple[Cell, float]]:
+        """Export relation embeddings as dim-2 cells."""
+        return [
+            (Cell(name=f"rel_{name}", dim=2, embedding=emb.tolist()), 1.0)
+            for name, emb in self._embeddings.items()
+        ]

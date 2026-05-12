@@ -24,6 +24,7 @@ from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.storage.pattern_store import PatternStore
 from hpm_ai_v6.hpm_model.storage.relation_registry import RelationRegistry
+from hpm_ai_v6.hpm_model.storage.relation_pattern_emitter import RelationPatternEmitter
 
 class MultiAgentReader:
     """
@@ -111,6 +112,7 @@ class MultiAgentReader:
             tag_fn=self._get_tags,
         )
         self.relation_registry = RelationRegistry(embedding_dim=64)
+        self.relation_emitter = RelationPatternEmitter(embedding_dim=64)
         self.reasoning_agent = ReasoningAgent(self)
         self.agents = {
             "char": self.char_agent,
@@ -199,9 +201,13 @@ class MultiAgentReader:
                 except Exception:
                     pass
 
-        reg_path = os.path.join(self.pattern_cache_dir, "relation_registry.json")
-        if os.path.exists(reg_path):
-            self.relation_registry.load(reg_path)
+        # Hydrate relation registry from dim-2 cells in word agent's pager
+        rel_cells = [
+            p for p in getattr(self.word_agent, "patterns", [])
+            if getattr(p, "dim", 0) == 2 and getattr(p, "name", "").startswith("rel_")
+        ]
+        if rel_cells:
+            self.relation_registry.populate_from_cells(rel_cells)
 
         return loaded
 
@@ -499,26 +505,34 @@ class MultiAgentReader:
         self.pattern_store.save()
         self.flush_all()
 
-        # Update relation registry from agent edges
-        for agent_name, agent in self.agents.items():
+        # Feed edges through emitter to produce dim-2 relation cells
+        agent_relation_map = {
+            "word": "lexical_transition", "phrase": "syntactic_transition",
+            "semantic": "semantic_transition", "contextual": "contextual_prediction",
+            "char": "character_transition", "causal": "causal_relation",
+        }
+        for agent_name, relation_name in agent_relation_map.items():
+            agent = self.agents.get(agent_name)
             if agent is None:
                 continue
-            relation = agent_name
             for pattern in getattr(agent, "patterns", []):
-                source = getattr(pattern, "source", None)
-                target = getattr(pattern, "target", None)
-                if source is None or target is None:
+                src = getattr(pattern, "source", None)
+                tgt = getattr(pattern, "target", None)
+                if src is None or tgt is None:
                     continue
                 try:
-                    self.relation_registry.update(
-                        relation,
-                        source.as_numpy(),
-                        target.as_numpy(),
-                    )
+                    self.relation_emitter.observe(src, relation_name, tgt)
                 except Exception:
                     pass
-        reg_path = os.path.join(self.pattern_cache_dir, "relation_registry.json")
-        self.relation_registry.save(reg_path)
+
+        # Store relation cells in word_agent's pattern list for pager persistence
+        for rel_cell, _ in self.relation_emitter.get_relation_cells():
+            if rel_cell not in self.word_agent.patterns:
+                self.word_agent.patterns.append(rel_cell)
+
+        # Update registry from emitter
+        rel_cells = [c for c, _ in self.relation_emitter.get_relation_cells()]
+        self.relation_registry.populate_from_cells(rel_cells)
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:

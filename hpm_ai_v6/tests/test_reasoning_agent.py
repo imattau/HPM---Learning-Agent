@@ -1228,3 +1228,15 @@ def test_reasoning_agent_stores_relation_registry_from_reader():
     )
     ra = ReasoningAgent(reader, beam_width=3, max_depth=2)
     assert ra._relation_registry is reg
+
+
+def test_relation_cell_index_populated_after_refresh():
+    from types import SimpleNamespace
+    from hpm_ai_v6.hpm_model.core.cell import Cell
+    rel_cell = Cell(name="rel_lexical_transition", dim=2, embedding=[0.1, 0.2, 0.3])
+    stub = StubAgent(patterns=[rel_cell], weights=[1.0], lookup={})
+    reader = SimpleNamespace(agents={"word": stub, "phrase": None, "contextual": None,
+                                      "semantic": None, "char": None, "causal": None})
+    ra = ReasoningAgent(reader)
+    ra.refresh()
+    assert "lexical_transition" in ra._relation_cell_index

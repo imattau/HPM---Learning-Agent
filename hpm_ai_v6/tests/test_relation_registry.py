@@ -20,25 +20,31 @@ def test_update_moves_embedding_toward_target():
     assert np.allclose(emb, expected, atol=0.1)
 
 
-def test_save_load_round_trip(tmp_path):
+def test_populate_from_cells():
+    from hpm_ai_v6.hpm_model.storage.relation_pattern_emitter import RelationPatternEmitter
+    from hpm_ai_v6.hpm_model.core.cell import Cell
+    emitter = RelationPatternEmitter(embedding_dim=4)
+    src = Cell(name="word_a", dim=0, embedding=[1, 0, 0, 0])
+    tgt = Cell(name="word_b", dim=0, embedding=[0, 1, 0, 0])
+    for _ in range(20):
+        emitter.observe(src, "lexical_transition", tgt)
+    cells = [c for c, _ in emitter.get_relation_cells()]
+
+    reg = RelationRegistry(embedding_dim=4)
+    reg.populate_from_cells(cells)
+    emb = reg.get_or_create("lexical_transition")
+    assert emb.shape == (4,)
+    expected = np.array([0, 1, 0, 0]) - np.array([1, 0, 0, 0])
+    assert np.allclose(emb, expected, atol=0.2)
+
+
+def test_to_cells_returns_dim2_cells():
+    from hpm_ai_v6.hpm_model.core.cell import Cell
     reg = RelationRegistry(embedding_dim=4)
     reg.get_or_create("lexical_transition")
-    reg.update("lexical_transition", np.zeros(4), np.ones(4), lr=0.5)
-    path = str(tmp_path / "reg.json")
-    reg.save(path)
-    reg2 = RelationRegistry(embedding_dim=4)
-    reg2.load(path)
-    np.testing.assert_allclose(
-        reg2.get_or_create("lexical_transition"),
-        reg.get_or_create("lexical_transition"),
-        atol=1e-6,
-    )
-
-
-def test_load_nonexistent_returns_empty():
-    reg = RelationRegistry(embedding_dim=4)
-    reg.load("/tmp/nonexistent_12345.json")  # should not raise
-    assert len(reg._embeddings) == 0
+    cells = reg.to_cells()
+    assert all(c.dim == 2 for c, _ in cells)
+    assert all(c.name.startswith("rel_") for c, _ in cells)
 
 
 def test_similarity_same_relation_is_one():
