@@ -22,6 +22,7 @@ from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
+from hpm_ai_v6.hpm_model.storage.pattern_store import PatternStore
 
 class MultiAgentReader:
     """
@@ -44,6 +45,7 @@ class MultiAgentReader:
         self._corpus_offset = os.path.getsize(corpus_path) if os.path.exists(corpus_path) else 0
         self.pattern_cache_dir = pattern_cache_dir or self._default_pattern_cache_dir()
         self.max_active_patterns = max_active_patterns
+        self.pattern_store = PatternStore(cache_dir=self.pattern_cache_dir)
         
         # Initialize lower-level agents
         self.char_agent = CharacterAgent(
@@ -162,6 +164,16 @@ class MultiAgentReader:
         return agent.get_best_pattern()
 
     def warm_start_from_cache(self, limit: Optional[int] = None) -> int:
+        # Load shared cross-corpus patterns and warm-start every agent.
+        shared_patterns, shared_weights = self.pattern_store.load()
+        if shared_patterns:
+            for agent in self.agents.values():
+                if hasattr(agent, "warm_start"):
+                    try:
+                        agent.warm_start(shared_patterns, shared_weights)
+                    except Exception:
+                        pass
+
         loaded = 0
         for name in ("char", "word", "contextual", "phrase", "semantic", "causal"):
             agent = self.agents.get(name)
@@ -460,6 +472,23 @@ class MultiAgentReader:
                     syn_agent.save(cache_path)
                 except Exception:
                     pass
+
+        # Merge all agent patterns into the shared PatternStore.
+        for agent_name, agent in self.agents.items():
+            patterns = list(getattr(agent, "patterns", None) or [])
+            if not patterns:
+                continue
+            try:
+                weights = list(agent.get_weights())
+            except Exception:
+                continue
+            if len(weights) != len(patterns):
+                continue
+            try:
+                self.pattern_store.merge(patterns, weights, agent_name)
+            except Exception:
+                pass
+        self.pattern_store.save()
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:
