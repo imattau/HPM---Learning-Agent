@@ -152,6 +152,15 @@ class MultiAgentReader:
                 except Exception:
                     pass
 
+    def flush_all(self) -> None:
+        """Flush all agent pattern pagers to disk without closing them."""
+        for agent in self.agents.values():
+            if hasattr(agent, "flush_pager"):
+                try:
+                    agent.flush_pager()
+                except Exception:
+                    pass
+
     def _default_pattern_cache_dir(self) -> str:
         corpus_dir = os.path.dirname(os.path.abspath(self.corpus_path)) or os.getcwd()
         corpus_name = os.path.splitext(os.path.basename(self.corpus_path))[0]
@@ -489,6 +498,7 @@ class MultiAgentReader:
             except Exception:
                 pass
         self.pattern_store.save()
+        self.flush_all()
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:
