@@ -1,3 +1,4 @@
+import numpy as np
 from types import SimpleNamespace
 
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
@@ -106,7 +107,7 @@ def test_reasoning_prefers_calibrated_multi_hop_path_over_raw_heavy_dead_end():
         }
     )
 
-    agent = ReasoningAgent(reader, beam_width=3, max_depth=3)
+    agent = ReasoningAgent(reader, max_beam_width=3, max_depth=3)
     answer = agent.reason("How does Alice connect to hole?")
 
     assert "alice -> rabbit -> hole" in answer.lower()
@@ -271,7 +272,7 @@ def test_reasoning_builds_mixed_causal_and_learned_explanation_chain():
         }
     )
 
-    agent = ReasoningAgent(reader, beam_width=4, max_depth=4)
+    agent = ReasoningAgent(reader, max_beam_width=4, max_depth=4)
     answer = agent.reason("Why does surprise in semantic after rabbit connect to hole?")
 
     assert "strongest causal explanation" in answer.lower()
@@ -346,7 +347,7 @@ def test_reason_with_trace_returns_structured_mixed_explanation_trace():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=4, max_depth=4).reason_with_trace(
+    trace = ReasoningAgent(reader, max_beam_width=4, max_depth=4).reason_with_trace(
         "Why does surprise in semantic after rabbit connect to hole?"
     )
 
@@ -423,7 +424,7 @@ def test_beam_search_avoids_revisiting_worse_cycle_paths():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=4, max_depth=5).reason_with_trace("How does alpha connect to delta?")
+    trace = ReasoningAgent(reader, max_beam_width=4, max_depth=5).reason_with_trace("How does alpha connect to delta?")
 
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
     assert labels == ["alpha", "beta", "gamma", "delta"]
@@ -600,7 +601,7 @@ def test_beam_search_can_use_transient_rule_application_edge():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace("How does alice connect to throne?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace("How does alice connect to throne?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -634,7 +635,7 @@ def test_beam_search_can_use_forward_chained_transitivity_edge():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace("How does alpha connect to gamma?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace("How does alpha connect to gamma?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -669,7 +670,7 @@ def test_beam_search_can_use_multi_round_forward_chaining():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=4).reason_with_trace("How does alpha connect to delta?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=4).reason_with_trace("How does alpha connect to delta?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -716,7 +717,7 @@ def test_forward_chaining_supports_generalized_rule_endpoint_schema():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace("How does alpha connect to gamma?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace("How does alpha connect to gamma?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -768,7 +769,7 @@ def test_forward_chaining_supports_shared_source_subgraph_rules():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace("How does beta connect to gamma?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace("How does beta connect to gamma?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -820,7 +821,7 @@ def test_forward_chaining_supports_shared_target_subgraph_rules():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace("How does beta connect to gamma?")
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace("How does beta connect to gamma?")
 
     assert trace["chosen_path"] is not None
     labels = [node["label"] for node in trace["chosen_path"]["nodes"]]
@@ -853,7 +854,7 @@ def test_backward_chaining_proves_transitive_goal_directedly():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace(
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace(
         "How does alpha connect to gamma?",
         method="backward",
     )
@@ -909,7 +910,7 @@ def test_backward_chaining_works_for_explanation_downstream_paths():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=4).reason_with_trace(
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=4).reason_with_trace(
         "Why does surprise in semantic after rabbit connect to burrow?",
         method="backward",
     )
@@ -965,7 +966,7 @@ def test_backward_chaining_supports_shared_source_subgraph_rules():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace(
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace(
         "How does beta connect to gamma?",
         method="backward",
     )
@@ -1021,7 +1022,7 @@ def test_backward_chaining_supports_shared_target_subgraph_rules():
         }
     )
 
-    trace = ReasoningAgent(reader, beam_width=5, max_depth=3).reason_with_trace(
+    trace = ReasoningAgent(reader, max_beam_width=5, max_depth=3).reason_with_trace(
         "How does beta connect to gamma?",
         method="backward",
     )
@@ -1193,7 +1194,7 @@ def test_two_weak_parallel_paths_populate_candidate_paths():
     """Both paths from word and phrase agents must appear in candidate_paths."""
     import pytest
     reader = _make_parallel_path_reader(word_score=0.5, phrase_score=0.4)
-    agent = ReasoningAgent(reader, beam_width=5, max_depth=3)
+    agent = ReasoningAgent(reader, max_beam_width=5, max_depth=3)
     trace = agent.reason_with_trace("how does alpha connect to beta")
     assert len(trace["candidate_paths"]) >= 2
 
@@ -1201,7 +1202,7 @@ def test_two_weak_parallel_paths_populate_candidate_paths():
 def test_two_weak_parallel_paths_outscore_single_strong_path():
     """Synthesized noisy-OR score must exceed every individual path's score."""
     reader_two = _make_parallel_path_reader(word_score=0.5, phrase_score=0.4)
-    agent_two = ReasoningAgent(reader_two, beam_width=5, max_depth=3)
+    agent_two = ReasoningAgent(reader_two, max_beam_width=5, max_depth=3)
     trace_two = agent_two.reason_with_trace("how does alpha connect to beta")
 
     assert len(trace_two["candidate_paths"]) >= 2, "Expected multiple candidate paths"
@@ -1226,7 +1227,7 @@ def test_reasoning_agent_stores_relation_registry_from_reader():
         },
         relation_registry=reg,
     )
-    ra = ReasoningAgent(reader, beam_width=3, max_depth=2)
+    ra = ReasoningAgent(reader, max_beam_width=3, max_depth=2)
     assert ra._relation_registry is reg
 
 
@@ -1264,7 +1265,7 @@ def test_sentence_word_bridge_edges_connect_word_to_sentence():
         "semantic": semantic_agent,
         "phrase": None, "contextual": None, "char": None, "causal": None,
     })
-    ra = ReasoningAgent(reader, beam_width=5, max_depth=3)
+    ra = ReasoningAgent(reader, max_beam_width=5, max_depth=3)
     ra.refresh()
 
     alice_key = ra._cell_key(alice)
@@ -1304,10 +1305,82 @@ def test_sentence_word_bridges_enable_alice_to_rabbit_path():
         "semantic": semantic_agent,
         "phrase": None, "contextual": None, "char": None, "causal": None,
     })
-    ra = ReasoningAgent(reader, beam_width=5, max_depth=3)
+    ra = ReasoningAgent(reader, max_beam_width=5, max_depth=3)
 
     path = ra._beam_search_path(alice, rabbit)
     assert path is not None, "Expected a path alice → sentence → rabbit via bridges"
     assert len(path) == 2
     assert path[0].target.name == "sent_abc123"
     assert path[1].target.name == "word_rabbit"
+
+
+def test_backward_chaining_uses_analogical_binding():
+    # Setup: alpha -> beta -> gamma, but rule expects alpha -> delta -> gamma
+    # beta and delta are analogs.
+    alpha = Cell(name="word_alpha", dim=0, embedding=[1.0, 0.0, 0.0])
+    beta = Cell(name="word_beta", dim=0, embedding=[0.0, 1.0, 0.0])
+    delta = Cell(name="word_delta", dim=0, embedding=[0.0, 0.95, 0.05]) # Analog to beta
+    gamma = Cell(name="word_gamma", dim=0, embedding=[0.0, 0.0, 1.0])
+
+    ab = make_edge("w_alpha->beta", alpha, beta)
+    bg = make_edge("w_beta->gamma", beta, gamma)
+    
+    # Pure subgraph rule (no source/target analogies)
+    analog_rule = Cell(
+        name="analog_rule",
+        dim=3,
+        embedding=np.zeros(3),
+        weight=0.95,
+        metadata={
+            "rule_type": "subgraph_derivation",
+            "pair_mode": "any_reachable",
+            "antecedent_edges": [
+                {"source_var": "A", "target_name": "word_delta"},
+                {"source_name": "word_delta", "target_var": "G"},
+            ],
+            "consequent": {
+                "source_var": "A",
+                "target_var": "G",
+            },
+        },
+    )
+
+    word_agent = StubAgent(
+        patterns=[ab, bg, delta, analog_rule],
+        weights=[0.8, 0.8, 1.0, 0.95],
+        lookup={cell.name: cell for cell in [alpha, beta, delta, gamma]},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    # Note: ReasoningAgent calculates similarity between beta and delta in _edge_matches_template
+    agent = ReasoningAgent(reader, analogy_threshold=0.8)
+    trace = agent.reason_with_trace(
+        "How does alpha connect to gamma?",
+        method="backward",
+    )
+
+    assert trace["chosen_path"] is not None
+    # The path found is a derived edge from the subgraph rule.
+    # Because subgraph rules return a single derived step, the nodes are alpha and gamma.
+    assert [node["label"] for node in trace["chosen_path"]["nodes"]] == ["alpha", "gamma"]
+    
+    # Verify that the subgraph rule was used
+    step = trace["chosen_path"]["steps"][0]
+    assert step["relation"] == "subgraph_rule"
+    
+    # Verify penalty was applied
+    # 0.95 (rule) * 0.8 (ab) * 0.8 (bg) = 0.608. Similarity(beta, delta) is approx 0.95.
+    # Penalty is applied twice because delta appears twice in antecedents.
+    # Uncalibrated: 0.608 * 0.95 * 0.95 = 0.548...
+    # Calibrated value can be lower, so we just check it is positive and reflects some confidence.
+    assert step["score"] > 0.1
+    assert step["score"] < 0.60

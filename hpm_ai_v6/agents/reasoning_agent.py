@@ -52,11 +52,21 @@ class ReasoningAgent:
         "what", "when", "where", "why", "with", "you",
     }
 
-    def __init__(self, reader, beam_width: int = 5, max_depth: int = 4, analogy_threshold: float = 0.85):
+    def __init__(
+        self,
+        reader,
+        max_beam_width: int = 5,
+        min_beam_width: int = 2,
+        max_depth: int = 4,
+        analogy_threshold: float = 0.85,
+        pruning_threshold: float = 0.01,
+    ):
         self.reader = reader
-        self.beam_width = beam_width
+        self.max_beam_width = max_beam_width
+        self.min_beam_width = min_beam_width
         self.max_depth = max_depth
         self.analogy_threshold = analogy_threshold
+        self.pruning_threshold = pruning_threshold
         self._edge_index: Dict[str, List[EdgeRecord]] = {}
         self._node_index: Dict[str, Cell] = {}
         self._alias_index: Dict[str, List[str]] = {}
@@ -552,11 +562,40 @@ class ReasoningAgent:
 
         for endpoint_name, cell in (("source", edge.source), ("target", edge.target)):
             exact_key = template.get(f"{endpoint_name}_key")
-            if exact_key and self._cell_key(cell) != str(exact_key):
-                return None
             exact_name = template.get(f"{endpoint_name}_name")
+            
+            # Check exact match first
+            is_exact_match = True
+            if exact_key and self._cell_key(cell) != str(exact_key):
+                is_exact_match = False
             if exact_name and cell.name != str(exact_name):
-                return None
+                is_exact_match = False
+
+            if not is_exact_match:
+                # Attempt analogical match if exact match fails
+                analog_found = False
+                target_cell = None
+                if exact_key:
+                    target_cell = self._node_index.get(str(exact_key))
+                if not target_cell and exact_name:
+                    # Search node_index for a cell with matching name
+                    for c in self._node_index.values():
+                        if c.name == str(exact_name):
+                            target_cell = c
+                            break
+                
+                if target_cell:
+                    try:
+                        sim = target_cell.similarity(cell)
+                        if sim >= self.analogy_threshold:
+                            analog_found = True
+                            penalty *= max(sim, 0.5)
+                    except Exception:
+                        pass
+                
+                if not analog_found:
+                    return None
+
             var_name = template.get(f"{endpoint_name}_var")
             if isinstance(var_name, str) and var_name:
                 bound = next_bindings.get(var_name)
@@ -1134,7 +1173,7 @@ class ReasoningAgent:
                     + list(forward_edges.get(node_name, []))
                 )
                 combined_edges.sort(key=lambda item: item.score, reverse=True)
-                for edge in combined_edges[: self.beam_width]:
+                for edge in combined_edges[: self.max_beam_width]:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
@@ -1186,7 +1225,7 @@ class ReasoningAgent:
                 break
 
             next_beams.sort(key=lambda item: item[0])
-            beams = next_beams[: self.beam_width]
+            beams = next_beams[: self.max_beam_width]
 
             for cost, path, node_name in beams:
                 if node_name == goal_key and cost < best_cost:
@@ -1496,7 +1535,7 @@ class ReasoningAgent:
             first_source = bindings.get(self._var_name(first["source"])) if self._is_var(first["source"]) else None
             first_target = bindings.get(self._var_name(first["target"])) if self._is_var(first["target"]) else None
             candidate_first_edges = self._candidate_edges_for_goal(facts, source=first_source, target=first_target)
-            for first_edge in candidate_first_edges[: self.beam_width]:
+            for first_edge in candidate_first_edges[: self.max_beam_width]:
                 local_bindings = dict(bindings)
                 for spec, concrete in ((first["source"], first_edge.source), (first["target"], first_edge.target)):
                     if self._is_var(spec):
@@ -1546,7 +1585,7 @@ class ReasoningAgent:
                         best_path = candidate_path
                     continue
                 candidate_second_edges = self._candidate_edges_for_goal(facts, source=second_source, target=second_target)
-                for second_edge in candidate_second_edges[: self.beam_width]:
+                for second_edge in candidate_second_edges[: self.max_beam_width]:
                     final_bindings = dict(local_bindings)
                     valid = True
                     for spec, concrete in ((second["source"], second_edge.source), (second["target"], second_edge.target)):
@@ -1679,7 +1718,7 @@ class ReasoningAgent:
             outgoing = self._edge_index.get(start_key, [])
             if not outgoing:
                 return f"I found {self._cell_display(start)}, but no strong outgoing transitions to reason from yet."
-            top = outgoing[: self.beam_width]
+            top = outgoing[: self.max_beam_width]
             items = ", ".join(
                 f"{self._cell_display(edge.target)} [{edge.agent_name}, score={edge.score:.2f}]"
                 for edge in top
@@ -1840,7 +1879,7 @@ class ReasoningAgent:
                     + list(forward_edges.get(node_name, []))
                 )
                 combined_edges.sort(key=lambda item: item.score, reverse=True)
-                for edge in combined_edges[: self.beam_width]:
+                for edge in combined_edges[: self.max_beam_width]:
                     if any(step.target_key == edge.target_key for step in path):
                         continue
                     edge_cost = -math.log(max(edge.score, 1e-9))
@@ -1892,7 +1931,7 @@ class ReasoningAgent:
             if not next_beams:
                 break
             next_beams.sort(key=lambda item: item[0])
-            beams = next_beams[: self.beam_width]
+            beams = next_beams[: self.max_beam_width]
             for cost, path, node_name in beams:
                 if node_name == goal_key:
                     found.append(path)
@@ -2116,7 +2155,7 @@ class ReasoningAgent:
             outgoing = self._edge_index.get(self._cell_key(start), [])
             trace["evidence"] = [
                 {"target": self._cell_display(edge.target), "agent": edge.agent_name, "relation": edge.relation, "score": edge.score}
-                for edge in outgoing[: self.beam_width]
+                for edge in outgoing[: self.max_beam_width]
             ]
             trace["answer"] = self._path_answer(question, start, None, method=method)
             return trace
