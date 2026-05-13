@@ -7,6 +7,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from hpm_ai_v6.hpm_model.core.cell import Cell
 
+@dataclass
+class ReasoningSignal:
+    uncertain_concepts: List[str]
+    high_value_paths: List[object]
+    suggested_focus_words: List[str]
+    derived_edges: List[Tuple[Cell, Cell, float]]
 
 @dataclass(frozen=True)
 class EdgeRecord:
@@ -1987,6 +1993,55 @@ class ReasoningAgent:
         if path:
             return path
         return self._backward_chain_path(start, goal)
+
+    def reflect(self, queries: List[str], top_k_paths: int = 5) -> "ReasoningSignal":
+        """
+        Process a query batch and return a ReasoningSignal for learning feedback.
+        Called by MultiAgentReader.maintenance_cycle after training.
+        """
+        if not queries:
+            return ReasoningSignal(
+                uncertain_concepts=[], high_value_paths=[],
+                suggested_focus_words=[], derived_edges=[],
+            )
+        self._ensure_fresh()
+        uncertain: List[str] = []
+        high_value: List[object] = []
+        derived: List[Tuple[Cell, Cell, float]] = []
+
+        for query in queries:
+            try:
+                trace = self.reason_with_trace(query)
+            except Exception:
+                continue
+
+            if trace.get("chosen_path") is None:
+                # No path found — record uncertain concepts
+                for term in trace.get("terms", []):
+                    cell = self._resolve_cell(term)
+                    if cell is not None and term not in uncertain:
+                        uncertain.append(term)
+            else:
+                # Path found — check for multi-hop derivable edges
+                for path_trace in trace.get("candidate_paths", [])[:top_k_paths]:
+                    steps = path_trace.get("steps", [])
+                    if len(steps) >= 2:
+                        first_src_key = steps[0].get("source_key")
+                        last_tgt_key = steps[-1].get("target_key")
+                        src_cell = self._node_index.get(first_src_key)
+                        tgt_cell = self._node_index.get(last_tgt_key)
+                        score = path_trace.get("combined_score", 0.0)
+                        if src_cell and tgt_cell and score > 0.1:
+                            derived.append((src_cell, tgt_cell, float(score)))
+
+        uncertain = list(dict.fromkeys(uncertain))[:20]  # deduplicate, cap at 20
+
+        return ReasoningSignal(
+            uncertain_concepts=uncertain,
+            high_value_paths=high_value,
+            suggested_focus_words=uncertain,
+            derived_edges=derived,
+        )
 
     def reason_with_trace(self, question: str, method: str = "auto") -> Dict[str, Any]:
         if not question.strip():
