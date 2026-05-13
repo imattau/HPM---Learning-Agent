@@ -1,0 +1,17 @@
+--- hpm_ai_v6/agents/reasoning_agent.py
++++ hpm_ai_v6/agents/reasoning_agent.py
+@@ -6,6 +6,13 @@
+ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+ 
+ from hpm_ai_v6.hpm_model.core.cell import Cell
++from dataclasses import dataclass, field
++
++@dataclass
++class ReasoningSignal:
++    uncertain_concepts: List[str]
++    high_value_paths: List[object]  # List[List[PathStep]] — kept as traces
++    suggested_focus_words: List[str]
++    derived_edges: List[Tuple[Cell, Cell, float]]  # (source, target, score)
+ 
+ 
+ @dataclass(frozen=True)

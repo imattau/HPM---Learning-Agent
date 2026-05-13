@@ -61,6 +61,9 @@ class PhraseAgent(SocialAgent):
         self.learner = HPMLearner(meta_rule=self.meta_rule)
 
     def process_tags(self, tags: List[str]):
+        if self.pos_cells:
+            sample_dim = next(iter(self.pos_cells.values())).as_numpy().shape[0]
+            self.drop_incompatible_patterns(sample_dim)
         seq = [self.pos_cells[t] for t in tags if t in self.pos_cells]
         for i in range(len(tags)-1):
             if tags[i] in self.pos_cells and tags[i+1] in self.pos_cells:

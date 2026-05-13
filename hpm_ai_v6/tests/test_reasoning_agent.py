@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from types import SimpleNamespace
 
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
@@ -278,6 +279,228 @@ def test_reasoning_builds_mixed_causal_and_learned_explanation_chain():
     assert "strongest causal explanation" in answer.lower()
     assert "downstream chain:" in answer.lower()
     assert "surprise in semantic after rabbit -> rabbit -> hole" in answer.lower()
+
+
+def test_abductive_explain_single_cause_returns_minimal_subgraph():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 1.0, 0.0])
+    pattern = make_edge("w_rain->flood", rain, flood)
+    word_agent = StubAgent(
+        patterns=[pattern],
+        weights=[0.8],
+        lookup={rain.name: rain, flood.name: flood},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    agent = ReasoningAgent(reader)
+    subgraphs = agent.abductive_explain("flood")
+
+    assert len(subgraphs) == 1
+    best = subgraphs[0]
+    assert best.effect.name == "word_flood"
+    assert [cell.name for cell in best.root_causes] == ["word_rain"]
+    assert len(best.edges) == 1
+    assert best.depth == 1
+    assert best.plausibility == pytest.approx(1.0, abs=1e-9)
+
+
+def test_abductive_explain_chain_prefers_short_root_to_effect_path():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 1.0, 0.0])
+    damage = Cell(name="word_damage", dim=0, embedding=[0.0, 0.0, 1.0])
+    patterns = [
+        make_edge("w_rain->flood", rain, flood),
+        make_edge("w_flood->damage", flood, damage),
+    ]
+    word_agent = StubAgent(
+        patterns=patterns,
+        weights=[0.8, 0.8],
+        lookup={cell.name: cell for cell in [rain, flood, damage]},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    agent = ReasoningAgent(reader)
+    subgraphs = agent.abductive_explain("damage")
+
+    assert len(subgraphs) == 1
+    best = subgraphs[0]
+    assert [cell.name for cell in best.root_causes] == ["word_rain"]
+    assert [edge.pattern.name for edge in best.edges] == ["w_rain->flood", "w_flood->damage"]
+    assert best.depth == 2
+    assert best.plausibility < 1.0
+
+
+def test_abductive_explain_multiple_causes_merges_independent_roots():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    wind = Cell(name="word_wind", dim=0, embedding=[0.0, 1.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 0.0, 1.0])
+    patterns = [
+        make_edge("w_rain->flood", rain, flood),
+        make_edge("w_wind->flood", wind, flood),
+    ]
+    word_agent = StubAgent(
+        patterns=patterns,
+        weights=[0.8, 0.8],
+        lookup={cell.name: cell for cell in [rain, wind, flood]},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    agent = ReasoningAgent(reader)
+    subgraphs = agent.abductive_explain("flood")
+
+    assert len(subgraphs) >= 1
+    best = subgraphs[0]
+    assert {cell.name for cell in best.root_causes} == {"word_rain", "word_wind"}
+    assert len(best.edges) == 2
+    assert best.depth == 1
+
+
+def test_abductive_explain_returns_top_k():
+    a = Cell(name="word_a", dim=0, embedding=[1.0, 0.0, 0.0])
+    b = Cell(name="word_b", dim=0, embedding=[0.0, 1.0, 0.0])
+    c = Cell(name="word_c", dim=0, embedding=[0.0, 0.0, 1.0])
+    d = Cell(name="word_d", dim=0, embedding=[1.0, 1.0, 0.0])
+    patterns = [
+        make_edge("w_a->d", a, d),
+        make_edge("w_b->d", b, d),
+        make_edge("w_c->d", c, d),
+    ]
+    word_agent = StubAgent(
+        patterns=patterns,
+        weights=[0.8, 0.8, 0.8],
+        lookup={cell.name: cell for cell in [a, b, c, d]},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    agent = ReasoningAgent(reader)
+    subgraphs = agent.abductive_explain("d", top_k=2)
+
+    assert len(subgraphs) == 2
+
+
+def test_plausibility_penalises_depth():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 1.0, 0.0])
+    damage = Cell(name="word_damage", dim=0, embedding=[0.0, 0.0, 1.0])
+    storm = Cell(name="word_storm", dim=0, embedding=[1.0, 1.0, 0.0])
+    patterns = [
+        make_edge("w_rain->flood", rain, flood),
+        make_edge("w_flood->damage", flood, damage),
+        make_edge("w_storm->damage", storm, damage),
+    ]
+    word_agent = StubAgent(
+        patterns=patterns,
+        weights=[0.8, 0.8, 0.8],
+        lookup={cell.name: cell for cell in [rain, flood, damage, storm]},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    agent = ReasoningAgent(reader)
+    subgraphs = agent.abductive_explain("damage", top_k=2)
+
+    assert len(subgraphs) == 2
+    assert subgraphs[0].depth == 1
+    assert subgraphs[1].depth == 2
+    assert subgraphs[0].plausibility > subgraphs[1].plausibility
+
+
+def test_reason_with_trace_why_intent_uses_abductive_explain():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 1.0, 0.0])
+    pattern = make_edge("w_rain->flood", rain, flood)
+    word_agent = StubAgent(
+        patterns=[pattern],
+        weights=[0.8],
+        lookup={rain.name: rain, flood.name: flood},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    trace = ReasoningAgent(reader).reason_with_trace("Why did flood happen?")
+
+    assert trace["explanation_method"] == "abductive_explain"
+    assert trace["explanatory_subgraph"]["effect"]["label"] == "flood"
+    assert trace["explanatory_subgraph"]["root_causes"][0]["label"] == "rain"
+    assert trace["chosen_path"]["nodes"][0]["label"] == "rain"
+
+
+def test_reason_with_trace_how_did_triggers_abductive_explain():
+    rain = Cell(name="word_rain", dim=0, embedding=[1.0, 0.0, 0.0])
+    flood = Cell(name="word_flood", dim=0, embedding=[0.0, 1.0, 0.0])
+    pattern = make_edge("w_rain->flood", rain, flood)
+    word_agent = StubAgent(
+        patterns=[pattern],
+        weights=[0.8],
+        lookup={rain.name: rain, flood.name: flood},
+    )
+    reader = SimpleNamespace(
+        agents={
+            "word": word_agent,
+            "contextual": None,
+            "semantic": None,
+            "phrase": None,
+            "char": None,
+            "causal": None,
+        }
+    )
+
+    trace = ReasoningAgent(reader).reason_with_trace("How did flood happen?")
+
+    assert trace["explanation_method"] == "abductive_explain"
+    assert trace["mode"] == "explanation"
 
 
 def test_reason_with_trace_returns_structured_path_trace():

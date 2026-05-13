@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from types import SimpleNamespace
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,6 +30,72 @@ class StubAgent:
 
     def _paging_lookup(self):
         return dict(self._lookup)
+
+
+@dataclass(frozen=True)
+class FeedbackABCaseResult:
+    query: str
+    before_has_path: bool
+    after_has_path: bool
+    before_steps: int
+    after_steps: int
+    before_latency_ms: float
+    after_latency_ms: float
+
+
+@dataclass
+class FeedbackABReport:
+    case_results: List[FeedbackABCaseResult]
+    derived_edges_added: int
+    focus_words: List[str]
+
+    @property
+    def total_cases(self) -> int:
+        return len(self.case_results)
+
+    @property
+    def before_path_rate(self) -> float:
+        return sum(1 for case in self.case_results if case.before_has_path) / max(len(self.case_results), 1)
+
+    @property
+    def after_path_rate(self) -> float:
+        return sum(1 for case in self.case_results if case.after_has_path) / max(len(self.case_results), 1)
+
+    @property
+    def before_avg_steps(self) -> float:
+        return sum(case.before_steps for case in self.case_results) / max(len(self.case_results), 1)
+
+    @property
+    def after_avg_steps(self) -> float:
+        return sum(case.after_steps for case in self.case_results) / max(len(self.case_results), 1)
+
+    @property
+    def improved_cases(self) -> int:
+        return sum(
+            1
+            for case in self.case_results
+            if case.after_has_path and (
+                not case.before_has_path or case.after_steps < case.before_steps
+            )
+        )
+
+    def render_text(self) -> str:
+        lines = [
+            f"cases={self.total_cases}",
+            f"derived_edges_added={self.derived_edges_added}",
+            f"focus_words={','.join(self.focus_words) if self.focus_words else '-'}",
+            f"before_path_rate={self.before_path_rate:.3f}",
+            f"after_path_rate={self.after_path_rate:.3f}",
+            f"before_avg_steps={self.before_avg_steps:.2f}",
+            f"after_avg_steps={self.after_avg_steps:.2f}",
+            f"improved_cases={self.improved_cases}",
+        ]
+        for case in self.case_results:
+            lines.append(
+                f"AB query={case.query!r} before(path={case.before_has_path},steps={case.before_steps},latency_ms={case.before_latency_ms:.2f}) "
+                f"after(path={case.after_has_path},steps={case.after_steps},latency_ms={case.after_latency_ms:.2f})"
+            )
+        return "\n".join(lines)
 
 
 def make_edge(name, source, target):
@@ -184,6 +252,89 @@ def build_synthetic_benchmark_cases() -> List[ReasoningBenchmarkCase]:
     ]
 
 
+def build_feedback_loop_reader():
+    alpha = Cell(name="word_alpha", dim=0, embedding=[1.0, 0.0, 0.0])
+    beta = Cell(name="word_beta", dim=0, embedding=[0.0, 1.0, 0.0])
+    gamma = Cell(name="word_gamma", dim=0, embedding=[0.0, 0.0, 1.0])
+    rabbit = Cell(name="word_rabbit", dim=0, embedding=[0.2, 0.8, 0.2])
+    hole = Cell(name="word_hole", dim=0, embedding=[0.1, 0.2, 0.9])
+
+    tmp_corpus = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "corpus", "alice_mini.txt")
+    reader = MultiAgentReader(tmp_corpus, warm_start=False)
+
+    edge_alpha_beta = make_edge("w_alpha->beta", alpha, beta)
+    edge_beta_gamma = make_edge("w_beta->gamma", beta, gamma)
+    edge_rabbit_hole = make_edge("w_rabbit->hole", rabbit, hole)
+    reader.word_agent.patterns = [edge_alpha_beta, edge_beta_gamma, edge_rabbit_hole]
+    reader.word_agent.word_cells = {
+        "alpha": alpha,
+        "beta": beta,
+        "gamma": gamma,
+        "rabbit": rabbit,
+        "hole": hole,
+    }
+    reader.word_agent._refresh_learner()
+    reader.reasoning_agent.invalidate()
+    return reader
+
+
+def run_reasoning_feedback_ab(
+    reader: MultiAgentReader,
+    queries: Sequence[str],
+    *,
+    reflect_queries: Sequence[str] | None = None,
+) -> FeedbackABReport:
+    query_list = list(queries)
+    reflection_queries = list(reflect_queries or query_list)
+    before_traces = []
+    case_results: List[FeedbackABCaseResult] = []
+
+    for query in query_list:
+        start = time.perf_counter()
+        trace = reader.reasoning_agent.reason_with_trace(query)
+        before_latency_ms = (time.perf_counter() - start) * 1000.0
+        before_traces.append((query, trace, before_latency_ms))
+
+    signal = reader.reasoning_agent.reflect(reflection_queries)
+    added = 0
+    seen = {pattern.name for pattern in reader.word_agent.patterns}
+    for src, tgt, score in signal.derived_edges:
+        name = f"derived_{src.name}_{tgt.name}"
+        if name not in seen:
+            added += 1
+        reader._reinforce_edge(src, tgt, score)
+        seen.add(name)
+
+    after_traces = {}
+    for query in query_list:
+        start = time.perf_counter()
+        trace = reader.reasoning_agent.reason_with_trace(query)
+        after_latency_ms = (time.perf_counter() - start) * 1000.0
+        after_traces[query] = (trace, after_latency_ms)
+
+    for query, before_trace, before_latency_ms in before_traces:
+        after_trace, after_latency_ms = after_traces[query]
+        before_steps = len((before_trace.get("chosen_path") or {}).get("steps") or [])
+        after_steps = len((after_trace.get("chosen_path") or {}).get("steps") or [])
+        case_results.append(
+            FeedbackABCaseResult(
+                query=query,
+                before_has_path=bool(before_trace.get("chosen_path")),
+                after_has_path=bool(after_trace.get("chosen_path")),
+                before_steps=before_steps,
+                after_steps=after_steps,
+                before_latency_ms=before_latency_ms,
+                after_latency_ms=after_latency_ms,
+            )
+        )
+
+    return FeedbackABReport(
+        case_results=case_results,
+        derived_edges_added=added,
+        focus_words=list(signal.suggested_focus_words),
+    )
+
+
 def _split_story_sentences(text: str) -> List[str]:
     sentences = [chunk.strip() for chunk in re.split(r"(?<=[.!?])\s+", text) if len(chunk.strip()) > 20]
     return [
@@ -276,10 +427,26 @@ def corpus_pattern_cache_dir(corpus_path: str) -> str:
 
 
 def build_corpus_reasoning_agent(corpus_path: str, train_sentence_limit: int = 12, training_epochs: int = 2) -> ReasoningAgent:
+    reader = build_corpus_feedback_reader(
+        corpus_path,
+        train_sentence_limit=train_sentence_limit,
+        training_epochs=training_epochs,
+        warm_start=True,
+    )
+    return reader.reasoning_agent
+
+
+def build_corpus_feedback_reader(
+    corpus_path: str,
+    train_sentence_limit: int = 12,
+    training_epochs: int = 2,
+    *,
+    warm_start: bool = True,
+) -> MultiAgentReader:
     reader = MultiAgentReader(
         corpus_path,
         pattern_cache_dir=corpus_pattern_cache_dir(corpus_path),
-        warm_start=True,
+        warm_start=warm_start,
     )
     expected_edges = [
         ("alice", "rabbit"),
@@ -312,7 +479,7 @@ def build_corpus_reasoning_agent(corpus_path: str, train_sentence_limit: int = 1
         )
         if not edge_report["missing"]:
             break
-    return reader.reasoning_agent
+    return reader
 
 
 def build_corpus_benchmark_cases() -> List[ReasoningBenchmarkCase]:
@@ -348,6 +515,13 @@ def build_corpus_benchmark_cases() -> List[ReasoningBenchmarkCase]:
     ]
 
 
+def build_corpus_feedback_queries() -> List[str]:
+    return [
+        "How does alice connect to hole?",
+        "How does rabbit connect to hole?",
+    ]
+
+
 def main() -> None:
     agent = build_synthetic_reasoning_agent()
     evaluator = ReasoningEvaluator(agent)
@@ -355,8 +529,24 @@ def main() -> None:
     print("== Synthetic Benchmark ==")
     print(synthetic_report.render_text())
 
+    feedback_reader = build_feedback_loop_reader()
+    feedback_report = run_reasoning_feedback_ab(
+        feedback_reader,
+        queries=["How does alpha connect to gamma?"],
+    )
+    print("\n== Feedback A/B Benchmark ==")
+    print(feedback_report.render_text())
+
     corpus_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "corpus", "alice_mini.txt")
-    corpus_agent = build_corpus_reasoning_agent(corpus_path)
+    corpus_feedback_reader = build_corpus_feedback_reader(corpus_path)
+    corpus_feedback_report = run_reasoning_feedback_ab(
+        corpus_feedback_reader,
+        queries=build_corpus_feedback_queries(),
+    )
+    print("\n== Corpus Feedback A/B Benchmark ==")
+    print(corpus_feedback_report.render_text())
+
+    corpus_agent = corpus_feedback_reader.reasoning_agent
     corpus_evaluator = ReasoningEvaluator(corpus_agent)
     corpus_report = corpus_evaluator.evaluate_cases(build_corpus_benchmark_cases())
     print("\n== Corpus Benchmark ==")

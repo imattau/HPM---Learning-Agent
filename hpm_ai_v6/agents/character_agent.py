@@ -66,6 +66,9 @@ class CharacterAgent(SocialAgent):
 
     def process_text(self, text: str):
         text = text.lower()
+        if self.char_cells:
+            sample_dim = next(iter(self.char_cells.values())).as_numpy().shape[0]
+            self.drop_incompatible_patterns(sample_dim)
         seq = []
         for i in range(len(text)-1):
             c1, c2 = text[i], text[i+1]

@@ -62,6 +62,8 @@ class WordAgent(SocialAgent):
 
     def process_words(self, words: List[str]):
         seq = [self._get_or_create_word_cell(w) for w in words]
+        if seq:
+            self.drop_incompatible_patterns(seq[0].as_numpy().shape[0])
         for i in range(len(words)-1):
             self._ensure_pattern(words[i], words[i+1])
             

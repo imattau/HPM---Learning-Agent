@@ -109,6 +109,9 @@ class SemanticAgent(SocialAgent):
         for s in sentences:
             cell = self._get_or_create_sent_cell(s)
             if cell: seq.append(cell)
+
+        if seq:
+            self.drop_incompatible_patterns(seq[0].as_numpy().shape[0])
             
         for i in range(len(seq)-1):
             self._ensure_pattern(seq[i], seq[i+1])

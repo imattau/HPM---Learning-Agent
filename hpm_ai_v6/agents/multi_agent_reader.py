@@ -18,6 +18,7 @@ from hpm_ai_v6.agents.phrase_agent import PhraseAgent
 from hpm_ai_v6.agents.semantic_agent import SemanticAgent
 from hpm_ai_v6.agents.causal_agent import CausalAgent
 from hpm_ai_v6.agents.active_learning_agent import ActiveLearningAgent, ActiveCorpus
+from hpm_ai_v6.agents.temporal_agent import TemporalAgent
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
 from hpm_ai_v6.agents.dependency_relation_agent import DependencyRelationAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
@@ -113,9 +114,11 @@ class MultiAgentReader:
             tag_fn=self._get_tags,
         )
         self.dependency_agent = DependencyRelationAgent()
+        self.temporal_agent = TemporalAgent()
         self.relation_registry = RelationRegistry(embedding_dim=64)
         self.relation_emitter = RelationPatternEmitter(embedding_dim=64)
         self.reasoning_agent = ReasoningAgent(self)
+        self._focus_words: set[str] = set()
         self.agents = {
             "char": self.char_agent,
             "word": self.word_agent,
@@ -127,6 +130,7 @@ class MultiAgentReader:
             "utility": self.utility_agent,
             "response": self.response_agent,
             "dependency": self.dependency_agent,
+            "temporal": self.temporal_agent,
             "reasoning": self.reasoning_agent,
         }
         self.warm_start = warm_start
@@ -248,10 +252,35 @@ class MultiAgentReader:
             "best_weight": best_weight,
         }
 
+    def _reinforce_edge(self, source: Cell, target: Cell, score: float) -> None:
+        """Inject a reasoning-derived edge into the word agent when embeddings align."""
+        try:
+            src_emb = source.as_numpy()
+            tgt_emb = target.as_numpy()
+        except Exception:
+            return
+        if src_emb.shape != tgt_emb.shape:
+            return
+
+        pattern = Cell(
+            name=f"derived_{source.name}_{target.name}",
+            dim=1,
+            embedding=(tgt_emb - src_emb).tolist(),
+            source=source,
+            target=target,
+            weight=float(score),
+        )
+        existing_names = {p.name for p in getattr(self.word_agent, "patterns", [])}
+        if pattern.name not in existing_names:
+            self.word_agent.patterns.append(pattern)
+            if getattr(self, "reasoning_agent", None) is not None:
+                self.reasoning_agent.invalidate()
+
     def maintenance_cycle(
         self,
         sentences: Sequence[str],
         *,
+        query_batch: Optional[List[str]] = None,
         hydrate_limit: Optional[int] = None,
         retrain_epochs: int = 1,
         enable_causal: bool = False,
@@ -310,6 +339,20 @@ class MultiAgentReader:
             "retrain_epochs": retrain_epochs,
             "improved_agents": [name for name, data in report.items() if name != "_summary" and data.get("improved")],
         }
+
+        if query_batch and getattr(self, "reasoning_agent", None) is not None:
+            try:
+                signal = self.reasoning_agent.reflect(query_batch)
+                for src, tgt, score in signal.derived_edges:
+                    self._reinforce_edge(src, tgt, score)
+                if signal.suggested_focus_words:
+                    self._focus_words = set(signal.suggested_focus_words)
+                elif not hasattr(self, "_focus_words"):
+                    self._focus_words = set()
+            except Exception:
+                if not hasattr(self, "_focus_words"):
+                    self._focus_words = set()
+
         return report
 
     def _get_tags(self, words: List[str]) -> List[str]:
@@ -323,6 +366,19 @@ class MultiAgentReader:
 
     def _split_sentences(self, text: str) -> List[str]:
         return [c.strip() for c in text.split(".") if len(c.strip()) > 10]
+
+    def _prioritize_sentences(self, sentences: Sequence[str]) -> List[str]:
+        prioritized = list(sentences)
+        focus_words = getattr(self, "_focus_words", set())
+        if not focus_words:
+            return prioritized
+
+        def has_focus(sentence: str) -> bool:
+            sentence_words = set(self._clean_words(sentence))
+            return bool(sentence_words & focus_words)
+
+        prioritized.sort(key=has_focus, reverse=True)
+        return prioritized
 
     def _load_documents(
         self,
@@ -477,6 +533,7 @@ class MultiAgentReader:
         return metrics
 
     def train_sequence(self, sentences: List[str], enable_causal: bool = False):
+        sentences = self._prioritize_sentences(sentences)
         if len(sentences) > 1:
             self.semantic_agent.process_sentences(sentences)
         if enable_causal:
@@ -555,6 +612,9 @@ class MultiAgentReader:
         # Update registry from emitter
         rel_cells = [c for c, _ in self.relation_emitter.get_relation_cells()]
         self.relation_registry.populate_from_cells(rel_cells)
+
+        if getattr(self, "temporal_agent", None) is not None:
+            self.temporal_agent.update_temporal_cells(list(getattr(self.causal_agent, "patterns", []) or []))
 
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:

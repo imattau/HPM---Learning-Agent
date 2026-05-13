@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from hpm_ai_v6.hpm_model.core.cell import Cell
+from hpm_ai_v6.hpm_model.core.temporal_cell import TemporalCell
 
 @dataclass
 class ReasoningSignal:
@@ -40,6 +41,15 @@ class PathStep:
     relation: str
 
 
+@dataclass
+class ExplanatorySubgraph:
+    effect: Cell
+    root_causes: List[Cell]
+    edges: List[EdgeRecord]
+    plausibility: float
+    depth: int
+
+
 class ReasoningAgent:
     """
     Lightweight reasoning layer over the learned HPM pattern graph.
@@ -62,12 +72,15 @@ class ReasoningAgent:
         self,
         reader,
         max_beam_width: int = 5,
+        beam_width: Optional[int] = None,
         min_beam_width: int = 2,
         max_depth: int = 4,
         analogy_threshold: float = 0.85,
         pruning_threshold: float = 0.01,
     ):
         self.reader = reader
+        if beam_width is not None:
+            max_beam_width = beam_width
         self.max_beam_width = max_beam_width
         self.min_beam_width = min_beam_width
         self.max_depth = max_depth
@@ -886,6 +899,8 @@ class ReasoningAgent:
     _EXPLANATION_TOKENS = frozenset({"why", "because", "reason", "explain", "cause", "due"})
     _ANALOGY_TOKENS = frozenset({"analog", "analogous", "similar", "compare", "alike", "correspond"})
     _CONNECTION_TOKENS = frozenset({"how", "connect", "lead", "path", "relate", "link", "between", "reach"})
+    _TEMPORAL_SEQUENCE_TOKENS = frozenset({"when", "after", "before", "sequence", "then", "next"})
+    _TEMPORAL_OVERLAP_TOKENS = frozenset({"while", "during", "simultaneously", "overlap", "concurrent", "concurrently"})
 
     def _parse_question(self, question: str) -> Dict[str, object]:
         tokens = set(re.findall(r"[a-z]+", self._normalize(question)))
@@ -893,6 +908,11 @@ class ReasoningAgent:
 
         if tokens & self._EXPLANATION_TOKENS:
             return {"type": "path", "terms": terms, "mode": "explanation"}
+        if tokens & self._TEMPORAL_OVERLAP_TOKENS:
+            return {"type": "temporal_overlap", "terms": terms, "mode": "overlap"}
+        if tokens & self._TEMPORAL_SEQUENCE_TOKENS or "between" in tokens:
+            mode = "between" if "between" in tokens else "sequence"
+            return {"type": "temporal_sequence", "terms": terms, "mode": mode}
         if tokens & self._ANALOGY_TOKENS:
             return {"type": "analogy", "terms": terms}
         if tokens & self._CONNECTION_TOKENS:
@@ -974,6 +994,254 @@ class ReasoningAgent:
         if word_goals:
             return word_goals[-1]
         return goals[-1]
+
+    def _iter_edges(self) -> Iterable[EdgeRecord]:
+        seen: set[Tuple[str, str, str, str]] = set()
+        for records in self._edge_index.values():
+            for edge in records:
+                key = (edge.source_key, edge.target_key, edge.pattern.name, edge.relation)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield edge
+        for records in self._transient_rule_edge_index.values():
+            for edge in records:
+                key = (edge.source_key, edge.target_key, edge.pattern.name, edge.relation)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield edge
+
+    def _incoming_edges(self, target_key: str) -> List[EdgeRecord]:
+        incoming = [edge for edge in self._iter_edges() if edge.target_key == target_key]
+        structural_relations = {
+            "causal_anchor",
+            "causal_reentry",
+            "causal_semantic_reentry",
+            "word_in_sentence",
+            "sentence_mentions_word",
+        }
+        structural = [edge for edge in incoming if edge.relation in structural_relations]
+        if len(structural) < len(incoming):
+            incoming = [edge for edge in incoming if edge.relation not in structural_relations]
+        incoming.sort(key=lambda edge: (edge.score, edge.raw_weight), reverse=True)
+        return incoming
+
+    def _resolve_abductive_effect(self, terms: Sequence[str]) -> Optional[Cell]:
+        effect = self._pick_explanation_endpoint(terms)
+        if effect is not None:
+            return effect
+        for term in reversed(list(terms)):
+            resolved = self._resolve_cell(term)
+            if resolved is not None:
+                return resolved
+        return None
+
+    @staticmethod
+    def _is_abductive_question(question: str) -> bool:
+        normalized = question.lower()
+        return bool(re.search(r"\b(why|explain|reason for|what caused|how did)\b", normalized))
+
+    def _abductive_paths(
+        self,
+        effect_key: str,
+        max_depth: int,
+        visiting: Optional[set[str]] = None,
+    ) -> List[List[EdgeRecord]]:
+        if max_depth <= 0:
+            return []
+        visiting = set(visiting or set())
+        if effect_key in visiting:
+            return []
+        visiting.add(effect_key)
+
+        incoming = self._incoming_edges(effect_key)
+        if not incoming:
+            return []
+
+        paths: List[List[EdgeRecord]] = []
+        for edge in incoming:
+            if edge.source_key in visiting:
+                continue
+            if edge.relation == "causal_relation" and edge.source_key.startswith("cause:"):
+                paths.append([edge])
+                continue
+            if max_depth == 1:
+                paths.append([edge])
+                continue
+            upstream = self._abductive_paths(edge.source_key, max_depth - 1, visiting=visiting)
+            if not upstream:
+                paths.append([edge])
+                continue
+            for candidate in upstream:
+                paths.append(list(candidate) + [edge])
+        return paths
+
+    @staticmethod
+    def _edge_path_identity(path: Sequence[EdgeRecord]) -> Tuple[Tuple[str, str, str, str], ...]:
+        return tuple((edge.source_key, edge.target_key, edge.pattern.name, edge.relation) for edge in path)
+
+    def _merge_path_group(self, paths: Sequence[Sequence[EdgeRecord]], effect: Cell) -> ExplanatorySubgraph:
+        ordered_edges: List[EdgeRecord] = []
+        seen_edges: set[Tuple[str, str, str, str]] = set()
+        root_causes: List[Cell] = []
+        seen_roots: set[str] = set()
+
+        for path in paths:
+            if not path:
+                continue
+            root = path[0].source
+            root_key = self._cell_key(root)
+            if root_key not in seen_roots:
+                seen_roots.add(root_key)
+                root_causes.append(root)
+            for edge in path:
+                edge_key = (edge.source_key, edge.target_key, edge.pattern.name, edge.relation)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                ordered_edges.append(edge)
+
+        depth = max((len(path) for path in paths), default=0)
+        plausibility = self._score_explanation(ordered_edges, depth)
+        return ExplanatorySubgraph(
+            effect=effect,
+            root_causes=root_causes,
+            edges=ordered_edges,
+            plausibility=plausibility,
+            depth=depth,
+        )
+
+    def _abductive_subgraphs(self, effect: Cell, max_depth: int = 4, top_k: int = 3) -> List[ExplanatorySubgraph]:
+        raw_paths = self._abductive_paths(self._cell_key(effect), max_depth=max_depth)
+        if not raw_paths:
+            return []
+
+        grouped_paths: List[List[List[EdgeRecord]]] = [[path] for path in raw_paths]
+        depth_groups: Dict[int, List[List[EdgeRecord]]] = {}
+        for path in raw_paths:
+            depth_groups.setdefault(len(path), []).append(path)
+        for paths in depth_groups.values():
+            if len(paths) > 1:
+                grouped_paths.append(paths)
+
+        candidates: List[ExplanatorySubgraph] = []
+        seen: set[Tuple[Tuple[str, str, str, str], ...]] = set()
+        for group in grouped_paths:
+            subgraph = self._merge_path_group(group, effect)
+            if not subgraph.edges:
+                continue
+            identity = self._edge_path_identity(subgraph.edges)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            candidates.append(subgraph)
+
+        candidates.sort(key=lambda item: (item.plausibility, len(item.edges), -item.depth), reverse=True)
+        return candidates[:top_k]
+
+    def _score_explanation(self, edges: List[EdgeRecord], depth: int) -> float:
+        scores = [edge.score for edge in edges]
+        raw = self._noisy_or_score(scores)
+        return raw / max(depth, 1)
+
+    def _representative_abductive_path(self, subgraph: ExplanatorySubgraph) -> List[PathStep]:
+        if not subgraph.edges:
+            return []
+
+        by_source: Dict[str, List[EdgeRecord]] = {}
+        for edge in subgraph.edges:
+            by_source.setdefault(edge.source_key, []).append(edge)
+        for edges in by_source.values():
+            edges.sort(key=lambda edge: edge.score, reverse=True)
+
+        root_keys = {self._cell_key(cell) for cell in subgraph.root_causes}
+        start = next((edge for edge in subgraph.edges if edge.source_key in root_keys), subgraph.edges[0])
+        path: List[PathStep] = []
+        current = start
+        visited: set[str] = set()
+
+        for _ in range(max(subgraph.depth, 1)):
+            path.append(
+                PathStep(
+                    source=current.source,
+                    pattern=current.pattern,
+                    target=current.target,
+                    score=current.score,
+                    raw_weight=current.raw_weight,
+                    agent_name=current.agent_name,
+                    source_key=current.source_key,
+                    target_key=current.target_key,
+                    relation=current.relation,
+                )
+            )
+            visited.add(current.source_key)
+            if current.target_key == self._cell_key(subgraph.effect):
+                break
+            next_edges = [edge for edge in by_source.get(current.target_key, []) if edge.target_key not in visited]
+            if not next_edges:
+                break
+            current = next_edges[0]
+        return path
+
+    def _explanatory_subgraph_trace(self, subgraph: ExplanatorySubgraph) -> Dict[str, Any]:
+        return {
+            "effect": self._cell_ref(subgraph.effect),
+            "root_causes": [self._cell_ref(cell) for cell in subgraph.root_causes],
+            "edges": [
+                {
+                    "source": self._cell_ref(edge.source),
+                    "target": self._cell_ref(edge.target),
+                    "pattern": edge.pattern.name,
+                    "score": float(edge.score),
+                    "relation": edge.relation,
+                    "agent": edge.agent_name,
+                }
+                for edge in subgraph.edges
+            ],
+            "plausibility": float(subgraph.plausibility),
+            "depth": int(subgraph.depth),
+        }
+
+    def _abductive_answer(self, subgraph: ExplanatorySubgraph, terms: Sequence[str]) -> str:
+        if not subgraph.edges:
+            return f"I found {self._cell_display(subgraph.effect)}, but no causal evidence chain for it yet."
+
+        if len(subgraph.edges) == 1 and len(subgraph.root_causes) == 1 and subgraph.depth == 1:
+            edge = subgraph.edges[0]
+            rule = edge.pattern
+            intervention = getattr(rule, "intervention", self._cell_display(edge.source))
+            agent_impacted = getattr(rule, "agent_impacted", edge.target.name)
+            effect_mag = getattr(rule, "effect_magnitude", edge.raw_weight)
+            original_word = getattr(rule, "metadata", {}).get("original_word", self._cell_display(edge.source))
+            return (
+                f"The strongest causal explanation is that changing {original_word} triggers {self._cell_display(subgraph.effect)}. "
+                f"Evidence: {intervention}; impacted agent={agent_impacted}; causal score={edge.score:.2f}; effect={effect_mag:.4f}."
+            )
+
+        representative = self._representative_abductive_path(subgraph)
+        rendered = " -> ".join(self._cell_display(step.source) for step in representative)
+        if representative:
+            rendered = f"{rendered} -> {self._cell_display(representative[-1].target)}"
+        else:
+            rendered = self._cell_display(subgraph.effect)
+
+        root_labels = ", ".join(self._cell_display(cell) for cell in subgraph.root_causes)
+        evidence = "; ".join(
+            f"{self._cell_display(edge.source)} -[{edge.relation}/{edge.agent_name}:{edge.score:.2f}]-> {self._cell_display(edge.target)}"
+            for edge in subgraph.edges
+        )
+        return (
+            f"The most plausible explanation for {self._cell_display(subgraph.effect)} is rooted in {root_labels} via {rendered}. "
+            f"Evidence: {evidence}. Plausibility={subgraph.plausibility:.4f}."
+        )
+
+    def abductive_explain(self, effect: str, max_depth: int = 4, top_k: int = 3) -> List[ExplanatorySubgraph]:
+        self._ensure_fresh()
+        effect_cell = self._resolve_cell(effect)
+        if effect_cell is None:
+            return []
+        return self._abductive_subgraphs(effect_cell, max_depth=max_depth, top_k=top_k)
 
     def _best_causal_edge_for_effect(self, effect: Cell) -> Optional[EdgeRecord]:
         effect_key = self._cell_key(effect)
@@ -2043,6 +2311,187 @@ class ReasoningAgent:
             derived_edges=derived,
         )
 
+    def _temporal_agent(self) -> Optional[Any]:
+        agent = self.reader.agents.get("temporal") if hasattr(self.reader, "agents") else None
+        if agent is not None:
+            return agent
+        return getattr(self.reader, "temporal_agent", None)
+
+    @staticmethod
+    def _temporal_cell_trace(cell: TemporalCell) -> Dict[str, Any]:
+        return {
+            "name": cell.name,
+            "cause": cell.cause.name,
+            "effect": cell.effect.name,
+            "onset_weight": float(cell.onset_weight),
+            "duration_weight": float(cell.duration_weight),
+            "lapsed": bool(cell.lapsed),
+        }
+
+    def _resolve_temporal_anchor(self, token_or_phrase: str) -> Optional[Cell]:
+        resolved = self._resolve_cells(token_or_phrase)
+        if resolved:
+            for cell in resolved:
+                if cell.name.startswith("word_"):
+                    return cell
+            return resolved[0]
+        return self._resolve_cell(token_or_phrase)
+
+    def _temporal_concept_tokens(self, concept: str) -> List[str]:
+        tokens = {
+            self._normalize(concept),
+            concept.strip().lower(),
+        }
+        resolved = self._resolve_temporal_anchor(concept)
+        if resolved is not None:
+            tokens.add(resolved.name.lower())
+            tokens.add(self._strip_prefix(resolved.name).lower())
+        tokens.update(self._tokenize(concept))
+        return [token for token in tokens if token]
+
+    def _temporal_cell_matches(self, cell: TemporalCell, concept: str) -> bool:
+        tokens = self._temporal_concept_tokens(concept)
+        if not tokens:
+            return False
+        haystacks = [
+            cell.cause.name.lower(),
+            cell.effect.name.lower(),
+            self._cell_display(cell.cause).lower(),
+            self._cell_display(cell.effect).lower(),
+        ]
+        for token in tokens:
+            if any(token in haystack for haystack in haystacks):
+                return True
+        return False
+
+    def _temporal_cells_for_concept(self, concept: str, include_lapsed: bool = False) -> List[TemporalCell]:
+        temporal_agent = self._temporal_agent()
+        if temporal_agent is None:
+            return []
+        index = getattr(temporal_agent, "temporal_index", {}) or {}
+        matched: List[TemporalCell] = []
+        seen: set[str] = set()
+        for cells in index.values():
+            for cell in cells:
+                if not include_lapsed and cell.lapsed:
+                    continue
+                if cell.name in seen:
+                    continue
+                if self._temporal_cell_matches(cell, concept):
+                    seen.add(cell.name)
+                    matched.append(cell)
+        matched.sort(key=lambda cell: (cell.duration_weight, -cell.onset_weight, cell.name))
+        return matched
+
+    def temporal_sequence(self, concept: str, include_lapsed: bool = False) -> List[TemporalCell]:
+        self._ensure_fresh()
+        return self._temporal_cells_for_concept(concept, include_lapsed=include_lapsed)
+
+    def temporal_overlap(self, concept: str, include_lapsed: bool = False) -> List[TemporalCell]:
+        self._ensure_fresh()
+        temporal_agent = self._temporal_agent()
+        if temporal_agent is None:
+            return []
+
+        matching = self._temporal_cells_for_concept(concept, include_lapsed=include_lapsed)
+        overlaps: List[TemporalCell] = []
+        seen: set[str] = set()
+        for cell in matching:
+            for concurrent in getattr(cell, "concurrent", []) or []:
+                if not include_lapsed and concurrent.lapsed:
+                    continue
+                if concurrent.name in seen:
+                    continue
+                seen.add(concurrent.name)
+                overlaps.append(concurrent)
+        overlaps.sort(key=lambda cell: (cell.duration_weight, -cell.onset_weight, cell.name))
+        return overlaps
+
+    def temporal_between(self, start: str, end: str, include_lapsed: bool = False) -> List[TemporalCell]:
+        self._ensure_fresh()
+        temporal_agent = self._temporal_agent()
+        start_anchor = self._resolve_temporal_anchor(start)
+        end_anchor = self._resolve_temporal_anchor(end)
+        if temporal_agent is None or start_anchor is None or end_anchor is None:
+            return []
+
+        index = getattr(temporal_agent, "temporal_index", {}) or {}
+        start_candidates = self._temporal_cells_for_concept(start, include_lapsed=include_lapsed)
+        end_candidates = self._temporal_cells_for_concept(end, include_lapsed=include_lapsed)
+        start_cell = start_candidates[0] if start_candidates else None
+        end_cell = end_candidates[0] if end_candidates else None
+        end_tokens = self._temporal_concept_tokens(end)
+
+        def matches_end(cell: Cell) -> bool:
+            haystacks = [cell.name.lower(), self._cell_display(cell).lower()]
+            return any(token in haystack for token in end_tokens for haystack in haystacks)
+
+        if start_cell is None or end_cell is None:
+            fallback = self._beam_search_path(start_anchor, end_anchor)
+            if not fallback:
+                return []
+            synthesized = TemporalCell(
+                name=f"temporal:{start_anchor.name}->{end_anchor.name}",
+                dim=3,
+                weight=1.0,
+                embedding=start_anchor.as_numpy() * 0.0,
+                cause=start_anchor,
+                effect=end_anchor,
+                onset_weight=max((step.score for step in fallback), default=0.0),
+                duration_weight=float(len(fallback)),
+            )
+            synthesized.lapsed = synthesized.onset_weight < 0.01
+            return [synthesized]
+
+        path: List[TemporalCell] = []
+        current = start_cell
+        visited: set[str] = {current.name}
+        max_steps = max(getattr(temporal_agent, "max_depth", self.max_depth), 1)
+
+        for _ in range(max_steps):
+            current_effect = current.effect if isinstance(current, TemporalCell) else current
+            if matches_end(current_effect):
+                break
+            current_key = current.cause.name if isinstance(current, TemporalCell) else current.name
+            candidates = [
+                cell
+                for cell in index.get(current_key, [])
+                if include_lapsed or not cell.lapsed
+            ]
+            candidates.sort(key=lambda cell: (-cell.onset_weight, cell.duration_weight, cell.name))
+            next_cell = None
+            for candidate in candidates:
+                if candidate.effect.name in visited:
+                    continue
+                next_cell = candidate
+                break
+            if next_cell is None:
+                break
+            path.append(next_cell)
+            visited.add(next_cell.effect.name)
+            current = next_cell.effect
+            if matches_end(current):
+                return path
+
+        if path and matches_end(path[-1].effect):
+            return path
+
+        fallback = self._beam_search_path(start_anchor, end_anchor)
+        if not fallback:
+            return path
+        synthesized = TemporalCell(
+            name=f"temporal:{start_anchor.name}->{end_anchor.name}",
+            dim=3,
+            weight=1.0,
+            embedding=start_anchor.as_numpy() * 0.0,
+            cause=start_anchor,
+            effect=end_anchor,
+            onset_weight=max((step.score for step in fallback), default=0.0),
+            duration_weight=float(len(fallback)),
+        )
+        synthesized.lapsed = synthesized.onset_weight < 0.01
+        return path + [synthesized] if path else [synthesized]
+
     def reason_with_trace(self, question: str, method: str = "auto") -> Dict[str, Any]:
         if not question.strip():
             return {
@@ -2073,6 +2522,52 @@ class ReasoningAgent:
             "evidence": [],
             "answer": "",
         }
+
+        if parsed["type"] in {"temporal_sequence", "temporal_overlap"}:
+            anchor = next((self._resolve_temporal_anchor(term) for term in terms if self._resolve_temporal_anchor(term) is not None), None)
+            if parsed["type"] == "temporal_overlap":
+                cells = self.temporal_overlap(anchor.name if anchor is not None else question)
+                trace["temporal_cells"] = [self._temporal_cell_trace(cell) for cell in cells]
+                if anchor is None:
+                    trace["answer"] = "I could not match enough temporal structure in that question."
+                elif cells:
+                    trace["answer"] = (
+                        f"While {self._cell_display(anchor)} was active, the overlapping intervals were: "
+                        + ", ".join(f"{cell.cause.name}->{cell.effect.name}" for cell in cells)
+                    )
+                else:
+                    trace["answer"] = f"I found {self._cell_display(anchor)}, but no overlapping temporal intervals yet."
+                return trace
+
+            if parsed.get("mode") == "between" and len(terms) >= 2:
+                start = self._resolve_temporal_anchor(terms[0])
+                end = self._resolve_temporal_anchor(terms[-1])
+                if start is not None and end is not None:
+                    cells = self.temporal_between(start.name, end.name)
+                    trace["temporal_cells"] = [self._temporal_cell_trace(cell) for cell in cells]
+                    if cells:
+                        trace["answer"] = (
+                            f"Between {self._cell_display(start)} and {self._cell_display(end)}, the temporal chain is: "
+                            + ", ".join(f"{cell.cause.name}->{cell.effect.name}" for cell in cells)
+                        )
+                    else:
+                        trace["answer"] = f"I could not find a temporal chain between {self._cell_display(start)} and {self._cell_display(end)}."
+                    return trace
+
+            anchor = next((self._resolve_temporal_anchor(term) for term in terms if self._resolve_temporal_anchor(term) is not None), None)
+            if anchor is None:
+                trace["answer"] = "I could not match enough temporal structure in that question."
+                return trace
+            cells = self.temporal_sequence(anchor.name)
+            trace["temporal_cells"] = [self._temporal_cell_trace(cell) for cell in cells]
+            if cells:
+                trace["answer"] = (
+                    f"The temporal sequence for {self._cell_display(anchor)} is: "
+                    + ", ".join(f"{cell.cause.name}->{cell.effect.name}" for cell in cells)
+                )
+            else:
+                trace["answer"] = f"I found {self._cell_display(anchor)}, but no temporal intervals yet."
+            return trace
 
         if parsed["type"] == "analogy":
             source, target = self._pick_analogy_endpoints(terms)
@@ -2142,8 +2637,9 @@ class ReasoningAgent:
             trace["answer"] = f"The closest learned analogies to {self._cell_display(source)} are: {items}."
             return trace
 
-        if parsed.get("mode") == "explanation":
-            effect = self._pick_explanation_endpoint(terms)
+        if parsed.get("mode") == "explanation" or self._is_abductive_question(question):
+            trace["mode"] = "explanation"
+            effect = self._resolve_abductive_effect(terms)
             trace["anchors"]["effect"] = self._cell_ref(effect)
             if effect is None:
                 start, goal = self._pick_path_endpoints_with_fallback(question, terms)
@@ -2164,41 +2660,38 @@ class ReasoningAgent:
                 trace["answer"] = self._path_answer(question, start, goal, method=method)
                 return trace
 
-            best_edge = self._best_causal_edge_for_effect(effect)
-            if best_edge is None:
+            subgraphs = self.abductive_explain(effect.name, max_depth=self.max_depth, top_k=3)
+            if not subgraphs:
                 trace["answer"] = f"I found {self._cell_display(effect)}, but no causal evidence chain for it yet."
                 return trace
 
-            cause_step = PathStep(
-                source=best_edge.source,
-                pattern=best_edge.pattern,
-                target=best_edge.target,
-                score=best_edge.score,
-                raw_weight=best_edge.raw_weight,
-                agent_name=best_edge.agent_name,
-                source_key=best_edge.source_key,
-                target_key=best_edge.target_key,
-                relation=best_edge.relation,
-            )
-            cause_trace = self._path_to_trace([cause_step])
-            trace["candidate_paths"].append(cause_trace)
+            best_subgraph = subgraphs[0]
+            cause_path = self._representative_abductive_path(best_subgraph)
+            if cause_path:
+                cause_trace = self._path_to_trace(cause_path)
+                trace["candidate_paths"].append(cause_trace)
+                trace["chosen_path"] = cause_trace
+                trace["evidence"] = list(cause_trace["steps"])
+            else:
+                trace["chosen_path"] = None
+                trace["evidence"] = []
+
+            trace["explanation_method"] = "abductive_explain"
+            trace["explanatory_subgraph"] = self._explanatory_subgraph_trace(best_subgraph)
             goal = self._pick_explanation_goal(terms, effect)
             trace["anchors"]["goal"] = self._cell_ref(goal)
             downstream_path = self._select_path(effect, goal, method=method) if goal is not None else None
             if downstream_path:
                 downstream_trace = self._path_to_trace(downstream_path)
                 trace["candidate_paths"].append(downstream_trace)
-                trace["chosen_path"] = self._path_to_trace([cause_step] + list(downstream_path))
-            else:
-                trace["chosen_path"] = cause_trace
-            rule = best_edge.pattern
-            trace["evidence"] = [{
-                "intervention": getattr(rule, "intervention", self._cell_display(best_edge.source)),
-                "agent_impacted": getattr(rule, "agent_impacted", best_edge.target.name),
-                "effect_magnitude": getattr(rule, "effect_magnitude", best_edge.raw_weight),
-                "original_word": getattr(rule, "metadata", {}).get("original_word", self._cell_display(best_edge.source)),
-            }]
-            trace["answer"] = self._explanation_answer(terms)
+                if cause_path:
+                    trace["chosen_path"] = self._path_to_trace(cause_path + list(downstream_path))
+                else:
+                    trace["chosen_path"] = downstream_trace
+            answer = self._abductive_answer(best_subgraph, terms)
+            if downstream_path and len(best_subgraph.edges) == 1 and len(best_subgraph.root_causes) == 1:
+                answer = self._explanation_answer(terms)
+            trace["answer"] = answer
             return trace
 
         start, goal = self._pick_path_endpoints_with_fallback(question, terms)

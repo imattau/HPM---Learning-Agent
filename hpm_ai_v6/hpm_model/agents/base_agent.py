@@ -66,6 +66,39 @@ class BaseHPMAgent(ABC):
     def _paging_lookup(self) -> Dict[str, Cell]:
         return {}
 
+    @staticmethod
+    def _embedding_dim(value: Any) -> Optional[int]:
+        try:
+            vec = Cell._to_numpy(value)
+        except Exception:
+            return None
+        if vec.ndim != 1:
+            return None
+        return int(vec.shape[0])
+
+    def _pattern_matches_dim(self, pattern: Cell, expected_dim: int) -> bool:
+        pattern_dim = self._embedding_dim(pattern.embedding)
+        if pattern_dim != expected_dim:
+            return False
+        for endpoint in (pattern.source, pattern.target):
+            if endpoint is None:
+                continue
+            endpoint_dim = self._embedding_dim(endpoint.embedding)
+            if endpoint_dim is not None and endpoint_dim != expected_dim:
+                return False
+        return True
+
+    def drop_incompatible_patterns(self, expected_dim: int) -> int:
+        if expected_dim <= 0:
+            return 0
+        kept = [pattern for pattern in self.patterns if self._pattern_matches_dim(pattern, expected_dim)]
+        removed = len(self.patterns) - len(kept)
+        if removed:
+            self.patterns = kept
+            if hasattr(self, "_refresh_learner"):
+                self._refresh_learner()
+        return removed
+
     def warm_start(self, patterns: List[Cell], weights: List[float]) -> None:
         """Seed the agent with a list of patterns and their weights."""
         if not patterns:
@@ -105,14 +138,23 @@ class BaseHPMAgent(ABC):
         query_embedding: Optional[Any] = None,
         min_similarity: float = 0.7,
     ) -> Optional[Cell]:
+        expected_dim = self._embedding_dim(query_embedding) if query_embedding is not None else None
+
         if self.pattern_pager is None:
             return None
 
-        for pattern in self.patterns:
+        for pattern in list(self.patterns):
             if pattern.name == name:
+                if expected_dim is not None and not self._pattern_matches_dim(pattern, expected_dim):
+                    self.patterns = [candidate for candidate in self.patterns if candidate.name != pattern.name]
+                    if hasattr(self, "_refresh_learner"):
+                        self._refresh_learner()
+                    break
                 return pattern
 
         restored = self.pattern_pager.load(name, self._paging_lookup())
+        if restored is not None and expected_dim is not None and not self._pattern_matches_dim(restored, expected_dim):
+            restored = None
         if restored is None and query_embedding is not None:
             restored = self.pattern_pager.load_nearest(
                 query_embedding,
@@ -120,6 +162,8 @@ class BaseHPMAgent(ABC):
                 min_similarity=min_similarity,
                 exclude_names=[name],
             )
+            if restored is not None and expected_dim is not None and not self._pattern_matches_dim(restored, expected_dim):
+                restored = None
         if restored is None:
             return None
 

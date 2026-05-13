@@ -95,6 +95,10 @@ class ContextualAgent(SocialAgent):
         if len(words) <= self.context_length:
             return
 
+        if self.word_cells:
+            sample_dim = next(iter(self.word_cells.values())).as_numpy().shape[0]
+            self.drop_incompatible_patterns(sample_dim)
+
         contexts: List[Cell] = []
         for end_idx in range(self.context_length, len(words)):
             context_tokens = words[end_idx - self.context_length : end_idx]
