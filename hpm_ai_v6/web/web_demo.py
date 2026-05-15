@@ -13,7 +13,7 @@ import sys
 import threading
 from typing import Optional
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_file
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -21,12 +21,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
 from hpm_ai_v6.agents.dataset_training_agent import DatasetTrainingAgent
 from hpm_ai_v6.agents.web_agent import WebAgent
+from hpm_ai_v6.agents.quiz_agent import QuizAgent as _QuizAgent
 
 
 app = Flask(__name__)
 reader: Optional[MultiAgentReader] = None
 web_agent: Optional[WebAgent] = None
 dataset_agent: Optional[DatasetTrainingAgent] = None
+_quiz_agent: Optional[_QuizAgent] = None
+_quiz_state: dict = {}  # keyed by question id -> QuizQuestion
 gutenberg_cycle_thread: Optional[threading.Thread] = None
 gutenberg_cycle_stop_event = threading.Event()
 gutenberg_cycle_state = {
@@ -38,7 +41,56 @@ gutenberg_cycle_state = {
     "books_processed": 0,
     "chapter_added": 0,
 }
+wikipedia_cycle_thread: Optional[threading.Thread] = None
+wikipedia_cycle_stop_event = threading.Event()
+wikipedia_cycle_state = {
+    "active": False,
+    "message": "Idle.",
+    "topic": None,
+    "page_title": None,
+    "phase": "idle",
+    "topics_processed": 0,
+    "pages_added": 0,
+}
+wikipedia_topics_state = {
+    "topics_text": "",
+    "topics": [],
+    "message": "No Wikipedia topics generated yet.",
+}
 CORPUS_LABEL = "alice_mini.txt"
+
+
+def _build_reason_trace(question: str) -> dict:
+    if reader is None:
+        return {
+            "question": question,
+            "intent": "unavailable",
+            "mode": "unavailable",
+            "method": "auto",
+            "answer": "Reader not ready.",
+        }
+    reasoning_agent = getattr(reader, "reasoning_agent", None)
+    if reasoning_agent is not None:
+        return reasoning_agent.reason_with_trace(question)
+    return {
+        "question": question,
+        "intent": "path",
+        "mode": "default",
+        "method": "auto",
+        "answer": reader.reason(question),
+    }
+
+
+def _reasoning_index_status() -> dict:
+    if reader is None:
+        return {"state": "unavailable", "dirty": False}
+    reasoning_agent = getattr(reader, "reasoning_agent", None)
+    if reasoning_agent is None or not hasattr(reasoning_agent, "index_status"):
+        return {"state": "unavailable", "dirty": False}
+    try:
+        return reasoning_agent.index_status()
+    except Exception:
+        return {"state": "unknown", "dirty": False}
 
 
 HTML_TEMPLATE = """
@@ -201,6 +253,10 @@ HTML_TEMPLATE = """
       border: 1px solid var(--border2);
       color: var(--muted);
     }
+    .section-badge.state-ready { color: var(--accent); border-color: rgba(0,229,160,0.35); background: var(--success-dim); }
+    .section-badge.state-indexing { color: #ffd166; border-color: rgba(255,209,102,0.35); background: rgba(255,209,102,0.10); }
+    .section-badge.state-dirty { color: #ffb84d; border-color: rgba(255,184,77,0.35); background: rgba(255,184,77,0.10); }
+    .section-badge.state-error { color: var(--danger); border-color: rgba(255,92,92,0.35); background: var(--danger-dim); }
     .chevron {
       color: var(--muted);
       font-size: 0.8rem;
@@ -375,6 +431,13 @@ HTML_TEMPLATE = """
       white-space: pre-wrap;
       line-height: 1.7;
     }
+    .output-meta {
+      margin-top: 10px;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
 
     /* ── Inline result cards ── */
     .result-card {
@@ -401,6 +464,121 @@ HTML_TEMPLATE = """
     }
     .result-card-close:hover { opacity: 1; }
 
+    /* ── Analysis sidebar ── */
+    .sidebar-toggle {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 200;
+    }
+    .sidebar-overlay.open { display: block; }
+    .sidebar {
+      position: fixed;
+      top: 0; right: -420px;
+      width: 420px;
+      height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 201;
+      display: flex;
+      flex-direction: column;
+      transition: right 0.3s ease;
+      overflow: hidden;
+    }
+    .sidebar.open { right: 0; }
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sidebar-title {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .sidebar-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      padding: 0;
+    }
+    .sidebar-close:hover { color: var(--text); }
+    .sidebar-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    .sidebar-actions {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .analysis-section {
+      margin-bottom: 24px;
+    }
+    .analysis-section-title {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .analysis-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    .analysis-label { color: var(--muted); }
+    .analysis-value { color: var(--text); font-weight: 600; }
+    .analysis-value.accent { color: var(--accent); }
+    .hub-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }
+    .hub-name { color: var(--text); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hub-meta { color: var(--muted); font-size: 0.7rem; }
+    .analysis-timestamp {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-top: 16px;
+      text-align: center;
+    }
+    .analysis-empty {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 40px 0;
+    }
+
     /* ── Gutenberg cycle sub-section ── */
     .cycle-panel {
       margin-top: 20px;
@@ -420,6 +598,13 @@ HTML_TEMPLATE = """
       color: var(--muted);
       margin-bottom: 14px;
     }
+    .cycle-status {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--accent);
+      margin-top: 10px;
+      min-height: 1.25em;
+    }
   </style>
 </head>
 <body>
@@ -429,6 +614,7 @@ HTML_TEMPLATE = """
     <div class="header-logo">HPM v6</div>
     <div class="header-meta">
       <span class="badge">{{ corpus }}</span>
+      <button class="sidebar-toggle" onclick="toggleSidebar()">&#9782; Analyse</button>
       <div class="status-dot" title="Reader ready"></div>
     </div>
   </header>
@@ -450,19 +636,20 @@ HTML_TEMPLATE = """
         <div class="section-header" onclick="toggleSection('sec-train')">
           <span class="step-num">01</span>
           <span class="section-title">Train</span>
-          <span class="section-badge">web links &amp; gutenberg</span>
+          <span class="section-badge">web links, gutenberg &amp; wikipedia</span>
           <span class="chevron">&#9660;</span>
         </div>
         <div class="section-body">
           <div class="section-inner">
             <div class="pill-tabs">
-              <button type="button" class="pill active" onclick="showSub('train', 'links', this)">Web Links</button>
-              <button type="button" class="pill" onclick="showSub('train', 'gutenberg', this)">Gutenberg</button>
+              <button type="button" class="pill active" onclick="return showSub('train', 'links', this, event)">Web Links</button>
+              <button type="button" class="pill" onclick="return showSub('train', 'gutenberg', this, event)">Gutenberg</button>
+              <button type="button" class="pill" onclick="return showSub('train', 'wikipedia', this, event)">Wikipedia</button>
             </div>
 
             <!-- Web Links sub-panel -->
             <div class="sub-panel active" id="train-links">
-              <form method="post" onsubmit="showFormResult(this)">
+              <form method="post" onsubmit="showFormResult(this, event)">
                 <input type="hidden" name="action" value="train_links">
                 <div class="field">
                   <label for="urls">URLs (one per line)</label>
@@ -505,7 +692,7 @@ HTML_TEMPLATE = """
 
             <!-- Gutenberg sub-panel -->
             <div class="sub-panel" id="train-gutenberg">
-              <form method="post" onsubmit="showFormResult(this)">
+              <form method="post" onsubmit="showFormResult(this, event)">
                 <input type="hidden" name="action" value="train_gutenberg">
                 <div class="field">
                   <label for="gutenberg_ids">Book IDs (comma-separated)</label>
@@ -531,7 +718,7 @@ HTML_TEMPLATE = """
 
               <div class="cycle-panel">
                 <div class="cycle-title">Curated cycle</div>
-                <div class="cycle-desc">Runs the curated 11-book rotation continuously in the background.</div>
+                <div class="cycle-desc">Reads Gutenberg sequentially from book 1, chapter by chapter. Resumes from last checkpoint.</div>
                 <div class="btn-row">
                   <button type="button" class="btn btn-outline" onclick="submitAction('start_gutenberg_cycle', this)">
                     <span class="spinner"></span>
@@ -543,6 +730,42 @@ HTML_TEMPLATE = """
                   </button>
                 </div>
               </div>
+            </div>
+
+            <!-- Wikipedia sub-panel -->
+            <div class="sub-panel" id="train-wikipedia">
+              <form method="post" onsubmit="showFormResult(this, event)">
+                <input type="hidden" name="action" value="generate_wikipedia_topics" id="wikipedia-action">
+                <div class="field">
+                  <label for="wikipedia_topics">Topics</label>
+                  <textarea id="wikipedia_topics" name="wikipedia_topics" placeholder="Generate topics from learned patterns and edit before starting.">{{ wikipedia_topics }}</textarea>
+                </div>
+                <div class="form-row">
+                  <div class="field">
+                    <label for="wikipedia_top_k">Top sentences</label>
+                    <input type="number" id="wikipedia_top_k" name="wikipedia_top_k" value="{{ wikipedia_top_k }}" min="1" max="500">
+                  </div>
+                  <div class="field">
+                    <label for="wikipedia_min_score">Min entropy score</label>
+                    <input type="number" id="wikipedia_min_score" name="wikipedia_min_score" value="{{ wikipedia_min_score }}" min="0" step="0.05">
+                  </div>
+                </div>
+                <div class="btn-row">
+                  <button type="button" class="btn btn-outline" onclick="submitWikipediaAction('generate_wikipedia_topics', this)">
+                    <span class="spinner"></span>
+                    Generate topics
+                  </button>
+                  <button type="button" class="btn btn-primary" onclick="submitWikipediaAction('start_wikipedia_cycle', this)">
+                    <span class="spinner"></span>
+                    &#9654; Start Wikipedia cycle
+                  </button>
+                  <button type="button" class="btn btn-danger" onclick="submitWikipediaAction('stop_wikipedia_cycle', this)">
+                    <span class="spinner"></span>
+                    &#9632; Stop
+                  </button>
+                </div>
+                <div class="cycle-status" id="wikipedia-cycle-status">{{ wikipedia_cycle_message }}</div>
+              </form>
             </div>
           </div>
         </div>
@@ -595,7 +818,7 @@ HTML_TEMPLATE = """
         <div class="section-header" onclick="toggleSection('sec-reason')">
           <span class="step-num">03</span>
           <span class="section-title">Reason</span>
-          <span class="section-badge">question answering</span>
+          <span class="section-badge" id="reasoning-index-badge">question answering</span>
           <span class="chevron">&#9660;</span>
         </div>
         <div class="section-body">
@@ -618,6 +841,14 @@ HTML_TEMPLATE = """
                   <button class="copy-btn" onclick="copyText('reason-text')">copy</button>
                 </div>
                 <div class="output-text" id="reason-text">{{ reasoning }}</div>
+                {% if reasoning_trace %}
+                <div class="output-meta">
+                  intent={{ reasoning_trace.intent }} | mode={{ reasoning_trace.mode }} | method={{ reasoning_trace.method }}
+                  {% if reasoning_trace.explanation_method %}
+                  | explanation={{ reasoning_trace.explanation_method }}
+                  {% endif %}
+                </div>
+                {% endif %}
               </div>
               {% endif %}
             </div>
@@ -627,6 +858,23 @@ HTML_TEMPLATE = """
 
     </div><!-- /accordion -->
   </main>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+  <div class="sidebar" id="analysis-sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Pattern Analysis</span>
+      <button class="sidebar-close" onclick="toggleSidebar()">&#10005;</button>
+    </div>
+    <div class="sidebar-body" id="analysis-body">
+      <div class="analysis-empty">Click "Generate Snapshot" to analyse learned patterns.</div>
+    </div>
+    <div class="sidebar-actions">
+      <button type="button" class="btn btn-primary" id="analyse-btn" onclick="runAnalysis()" style="width:100%">
+        <span class="spinner" id="analyse-spinner"></span>
+        Generate Snapshot
+      </button>
+    </div>
+  </div>
 
   <script>
     // ── Accordion ──
@@ -643,22 +891,81 @@ HTML_TEMPLATE = """
         if (v === '0' && el) el.classList.remove('open');
       } catch(e){}
     });
+    try {
+      const savedTrain = localStorage.getItem('hpm_train_train');
+      const trainSection = document.getElementById('sec-train');
+      if (savedTrain && trainSection) {
+        const target = document.getElementById('train-' + savedTrain);
+        if (target) {
+          trainSection.querySelectorAll('.sub-panel').forEach(function(p){ p.classList.remove('active'); });
+          target.classList.add('active');
+          trainSection.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
+          const activePill = Array.from(trainSection.querySelectorAll('.pill')).find(function(p){
+            return (p.textContent || '').trim().toLowerCase().indexOf(savedTrain) === 0 ||
+              (savedTrain === 'links' && (p.textContent || '').trim().toLowerCase().indexOf('web links') === 0);
+          });
+          if (activePill) activePill.classList.add('active');
+        }
+      }
+    } catch(e) {}
+
+    renderReasoningStatus({{ reasoning_index_status | tojson }});
+    refreshReasoningStatus();
+    renderWikipediaStatus({{ wikipedia_cycle_state | tojson }});
+    refreshWikipediaStatus();
 
     // ── Sub-tabs ──
-    function showSub(group, name, pill) {
-      const parent = pill.closest('.section-inner');
-      parent.querySelectorAll('.sub-panel').forEach(function(p){ p.classList.remove('active'); });
-      document.getElementById(group + '-' + name).classList.add('active');
-      pill.closest('.pill-tabs').querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
-      pill.classList.add('active');
+    function showSub(group, name, pill, event) {
+      if (event && event.preventDefault) event.preventDefault();
+      const section = document.getElementById('sec-' + group);
+      if (!section) return false;
+      section.querySelectorAll('.sub-panel').forEach(function(p){ p.classList.remove('active'); });
+      const target = document.getElementById(group + '-' + name);
+      if (target) target.classList.add('active');
+      section.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
+      if (pill) pill.classList.add('active');
+      try { localStorage.setItem('hpm_train_' + group, name); } catch(e){}
+      return false;
     }
 
     // ── Form status ──
-    function showFormResult(form) {
-      const btn = form.querySelector('button[type="submit"]');
-      const spinner = form.querySelector('.spinner');
+    function showFormResult(form, event) {
+      const btn = event && event.submitter ? event.submitter : form.querySelector('button[type="submit"]');
+      const spinner = btn ? btn.querySelector('.spinner') : form.querySelector('.spinner');
       if (btn) btn.disabled = true;
       if (spinner) spinner.style.display = 'inline-block';
+    }
+
+    // ── Reasoning index status ──
+    let reasoningStatusTimer = null;
+    function renderReasoningStatus(status) {
+      const badge = document.getElementById('reasoning-index-badge');
+      if (!badge || !status) return;
+      const state = status.state || 'unknown';
+      badge.className = 'section-badge state-' + state;
+      if (state === 'indexing') {
+        badge.textContent = 'indexing reasoning graph';
+      } else if (state === 'ready') {
+        badge.textContent = 'reasoning ready';
+      } else if (state === 'dirty') {
+        badge.textContent = 'reasoning stale';
+      } else if (state === 'error') {
+        badge.textContent = 'reasoning error';
+      } else {
+        badge.textContent = 'question answering';
+      }
+    }
+
+    async function refreshReasoningStatus() {
+      try {
+        const res = await fetch('/api/reasoning_index_status', { method: 'GET' });
+        const data = await res.json();
+        renderReasoningStatus(data);
+        if (reasoningStatusTimer) clearTimeout(reasoningStatusTimer);
+        if (data && data.state === 'indexing') {
+          reasoningStatusTimer = setTimeout(refreshReasoningStatus, 2000);
+        }
+      } catch(e) {}
     }
 
     // ── AJAX: Generate ──
@@ -708,8 +1015,16 @@ HTML_TEMPLATE = """
         const data = await res.json();
         const container = document.getElementById('reason-output');
         if (data.success) {
-          container.innerHTML = `<div class="output-card"><div class="output-card-header"><span class="output-label">Reasoning</span><button class="copy-btn" onclick="copyText('reason-text-ajax')">copy</button></div><div class="output-text" id="reason-text-ajax"></div></div>`;
+          container.innerHTML = `<div class="output-card"><div class="output-card-header"><span class="output-label">Reasoning</span><button class="copy-btn" onclick="copyText('reason-text-ajax')">copy</button></div><div class="output-text" id="reason-text-ajax"></div><div class="output-meta" id="reason-meta-ajax"></div></div>`;
           document.getElementById('reason-text-ajax').textContent = data.reasoning;
+          const meta = document.getElementById('reason-meta-ajax');
+          const trace = data.trace || {};
+          const parts = [];
+          if (trace.intent) parts.push('intent=' + trace.intent);
+          if (trace.mode) parts.push('mode=' + trace.mode);
+          if (trace.method) parts.push('method=' + trace.method);
+          if (trace.explanation_method) parts.push('explanation=' + trace.explanation_method);
+          meta.textContent = parts.join(' | ');
         } else {
           container.innerHTML = `<div class="result-card error"><span></span><button class="result-card-close" onclick="this.parentElement.remove()">&#10005;</button></div>`;
           container.querySelector('span').textContent = data.error || 'Unknown error.';
@@ -727,6 +1042,20 @@ HTML_TEMPLATE = """
       const el = document.getElementById(id);
       if (!el) return;
       navigator.clipboard.writeText(el.textContent).catch(function(){});
+    }
+
+    function submitWikipediaAction(action, btn) {
+      const form = btn ? btn.closest('form') : null;
+      const hidden = document.getElementById('wikipedia-action');
+      if (hidden) hidden.value = action;
+      if (btn) {
+        btn.disabled = true;
+        const spinner = btn.querySelector('.spinner');
+        if (spinner) spinner.style.display = 'inline-block';
+      }
+      if (form) {
+        form.submit();
+      }
     }
 
     // ── Submit hidden-action form ──
@@ -748,6 +1077,8 @@ HTML_TEMPLATE = """
     }
 
     // ── Gutenberg cycle status ribbon ──
+    let cycleStatusTimer = null;
+
     async function refreshCycleStatus() {
       try {
         const res = await fetch('/api/gutenberg_cycle_status');
@@ -765,11 +1096,277 @@ HTML_TEMPLATE = """
           ribbonText.textContent = parts.join(' │ ');
         } else {
           ribbon.classList.remove('visible');
+          if (cycleStatusTimer) {
+            clearTimeout(cycleStatusTimer);
+            cycleStatusTimer = null;
+          }
+        }
+        if (data.active) {
+          if (cycleStatusTimer) clearTimeout(cycleStatusTimer);
+          cycleStatusTimer = setTimeout(refreshCycleStatus, 4000);
         }
       } catch(e) {}
     }
-    refreshCycleStatus();
-    setInterval(refreshCycleStatus, 4000);
+    if ({{ 'true' if cycle_active else 'false' }}) {
+      refreshCycleStatus();
+    }
+
+    // ── Wikipedia cycle status ──
+    let wikipediaStatusTimer = null;
+
+    function renderWikipediaStatus(status) {
+      const statusEl = document.getElementById('wikipedia-cycle-status');
+      const topicsEl = document.getElementById('wikipedia_topics');
+      if (topicsEl && status && Array.isArray(status.topics) && !topicsEl.value.trim()) {
+        topicsEl.value = status.topics.join('\\n');
+      }
+      if (!statusEl || !status) return;
+      const parts = [];
+      const state = status.phase || status.state || 'idle';
+      if (status.message) {
+        parts.push(status.message);
+      } else if (state === 'running' || status.active) {
+        parts.push('Wikipedia cycle running.');
+      } else {
+        parts.push('Wikipedia cycle idle.');
+      }
+      if (status.topic) parts.push('topic=' + status.topic);
+      if (status.page_title) parts.push('page=' + status.page_title);
+      if (status.topics_processed != null) parts.push('topics=' + status.topics_processed);
+      if (status.pages_added != null) parts.push('added=' + status.pages_added);
+      statusEl.textContent = parts.join(' | ');
+    }
+
+    async function refreshWikipediaStatus() {
+      try {
+        const res = await fetch('/api/wikipedia_cycle_status', { method: 'GET' });
+        const data = await res.json();
+        renderWikipediaStatus(data);
+        if (wikipediaStatusTimer) clearTimeout(wikipediaStatusTimer);
+        if (data && data.active) {
+          wikipediaStatusTimer = setTimeout(refreshWikipediaStatus, 2000);
+        }
+      } catch(e) {}
+    }
+
+    async function generateWikipediaTopics(btn) {
+      const spinner = document.getElementById('wiki-topics-spinner');
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.style.display = 'inline-block';
+      try {
+        const res = await fetch('/api/wikipedia_topics', { method: 'GET' });
+        const data = await res.json();
+        const topicsEl = document.getElementById('wikipedia_topics');
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (data.success) {
+          const topics = data.topics || [];
+          if (topicsEl) topicsEl.value = topics.join('\\n');
+          if (statusEl) {
+            statusEl.textContent = topics.length
+              ? 'Generated ' + topics.length + ' topic(s).'
+              : 'No topics generated yet.';
+          }
+        } else if (statusEl) {
+          statusEl.textContent = data.error || 'Could not generate topics.';
+        }
+      } catch (err) {
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (statusEl) statusEl.textContent = 'Network error while generating topics.';
+      } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = 'none';
+      }
+    }
+
+    async function startWikipediaCycle(btn) {
+      const spinner = document.getElementById('wiki-start-spinner');
+      const topicsEl = document.getElementById('wikipedia_topics');
+      const topKEl = document.getElementById('wikipedia_top_k');
+      const minScoreEl = document.getElementById('wikipedia_min_score');
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.style.display = 'inline-block';
+      try {
+        const topics = (topicsEl && topicsEl.value ? topicsEl.value : '')
+          .split(/\\r?\\n|,/)
+          .map(function(topic) { return topic.trim(); })
+          .filter(Boolean);
+        const res = await fetch('/api/wikipedia_cycle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            action: 'start',
+            topics: topics,
+            top_k: topKEl ? parseInt(topKEl.value || '8') : 8,
+            min_score: minScoreEl ? parseFloat(minScoreEl.value || '0.05') : 0.05,
+          })
+        });
+        const data = await res.json();
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (statusEl) statusEl.textContent = data.message || (data.success ? 'Wikipedia cycle started.' : 'Failed to start Wikipedia cycle.');
+        refreshWikipediaStatus();
+      } catch (err) {
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (statusEl) statusEl.textContent = 'Network error while starting Wikipedia cycle.';
+      } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = 'none';
+      }
+    }
+
+    async function stopWikipediaCycle(btn) {
+      const spinner = document.getElementById('wiki-stop-spinner');
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.style.display = 'inline-block';
+      try {
+        const res = await fetch('/api/wikipedia_cycle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action: 'stop'})
+        });
+        const data = await res.json();
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (statusEl) statusEl.textContent = data.message || (data.success ? 'Wikipedia cycle stopped.' : 'Failed to stop Wikipedia cycle.');
+        refreshWikipediaStatus();
+      } catch (err) {
+        const statusEl = document.getElementById('wikipedia-cycle-status');
+        if (statusEl) statusEl.textContent = 'Network error while stopping Wikipedia cycle.';
+      } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = 'none';
+      }
+    }
+
+    function toggleSidebar() {
+      const sidebar = document.getElementById('analysis-sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('open');
+    }
+
+    async function runAnalysis() {
+      const btn = document.getElementById('analyse-btn');
+      const spinner = document.getElementById('analyse-spinner');
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      try {
+        const res = await fetch('/api/pattern_analysis', { method: 'GET' });
+        const data = await res.json();
+        const body = document.getElementById('analysis-body');
+        if (!data.success) {
+          body.textContent = data.error || 'Analysis failed.';
+          return;
+        }
+        body.innerHTML = renderAnalysis(data.report);
+      } catch(err) {
+        document.getElementById('analysis-body').textContent = 'Network error.';
+      } finally {
+        btn.disabled = false;
+        spinner.style.display = 'none';
+      }
+    }
+
+    function renderAnalysis(r) {
+      const frag = document.createDocumentFragment();
+
+      function makeSection(title) {
+        const s = document.createElement('div');
+        s.className = 'analysis-section';
+        const t = document.createElement('div');
+        t.className = 'analysis-section-title';
+        t.textContent = title;
+        s.appendChild(t);
+        return s;
+      }
+
+      function makeRow(label, value) {
+        const d = document.createElement('div');
+        d.className = 'analysis-row';
+        const l = document.createElement('span');
+        l.className = 'analysis-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'analysis-value';
+        v.textContent = String(value);
+        d.appendChild(l);
+        d.appendChild(v);
+        return d;
+      }
+
+      const summary = makeSection('Summary');
+      summary.appendChild(makeRow('Total patterns', r.total_patterns));
+      summary.appendChild(makeRow('Unique nodes', r.total_nodes));
+      summary.appendChild(makeRow('Total edges', r.total_edges));
+      frag.appendChild(summary);
+
+      if (r.agents && Object.keys(r.agents).length) {
+        const sec = makeSection('Patterns by Agent');
+        const sorted = Object.entries(r.agents).sort(function(a,b){ return b[1].count - a[1].count; });
+        for (const [name, stats] of sorted) {
+          sec.appendChild(makeRow(name, stats.count));
+          if (stats.count > 0) {
+            const rr = document.createElement('div');
+            rr.className = 'analysis-row';
+            const l = document.createElement('span');
+            l.className = 'analysis-label';
+            l.style.paddingLeft = '12px';
+            l.textContent = 'weight range';
+            const v = document.createElement('span');
+            v.className = 'analysis-value';
+            v.style.fontSize = '0.72rem';
+            v.textContent = stats.weight_min.toFixed(3) + ' – ' + stats.weight_max.toFixed(3) + ' (mean ' + stats.weight_mean.toFixed(3) + ')';
+            rr.appendChild(l);
+            rr.appendChild(v);
+            sec.appendChild(rr);
+          }
+        }
+        frag.appendChild(sec);
+      }
+
+      if (r.relations && Object.keys(r.relations).length) {
+        const sec = makeSection('Relationship Types');
+        const sorted = Object.entries(r.relations).sort(function(a,b){ return b[1] - a[1]; });
+        for (const [rel, count] of sorted) {
+          sec.appendChild(makeRow(rel, count));
+        }
+        frag.appendChild(sec);
+      }
+
+      if (r.components) {
+        const sec = makeSection('Graph Structure');
+        sec.appendChild(makeRow('Connected components', r.components.count));
+        sec.appendChild(makeRow('Largest component', r.components.largest_size + ' nodes'));
+        sec.appendChild(makeRow('Isolated nodes', r.components.isolated_nodes));
+        frag.appendChild(sec);
+      }
+
+      if (r.top_hubs && r.top_hubs.length) {
+        const sec = makeSection('Top Hubs');
+        for (const hub of r.top_hubs) {
+          const entry = document.createElement('div');
+          entry.className = 'hub-entry';
+          const hn = document.createElement('div');
+          hn.className = 'hub-name';
+          hn.textContent = hub.node;
+          const hm = document.createElement('div');
+          hm.className = 'hub-meta';
+          hm.textContent = 'degree=' + hub.total_degree + ' (out=' + hub.out_degree + ' in=' + hub.in_degree + ') · ' + hub.top_relation;
+          entry.appendChild(hn);
+          entry.appendChild(hm);
+          sec.appendChild(entry);
+        }
+        frag.appendChild(sec);
+      }
+
+      const ts = new Date(r.generated_at * 1000).toLocaleTimeString();
+      const stamp = document.createElement('div');
+      stamp.className = 'analysis-timestamp';
+      stamp.textContent = 'Snapshot at ' + ts;
+      frag.appendChild(stamp);
+
+      const wrapper = document.createElement('div');
+      wrapper.appendChild(frag);
+      return wrapper.innerHTML;
+    }
   </script>
 </body>
 </html>
@@ -786,13 +1383,28 @@ def _corpus_path() -> str:
 
 def _build_reader() -> MultiAgentReader:
     local_reader = MultiAgentReader(_corpus_path(), warm_start=True)
-    local_reader.train(
-        episodes=2,
-        max_chunks=50,
-        max_words_per_chunk=120,
-        enable_pruning=False,
-        enable_causal=False,
-    )
+    if os.environ.get("HPM_WEB_DEMO_RETRAIN", "").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        local_reader.train(
+            episodes=2,
+            max_chunks=50,
+            max_words_per_chunk=120,
+            enable_pruning=False,
+            enable_causal=False,
+        )
+    reasoning_agent = getattr(local_reader, "reasoning_agent", None)
+    response_agent = getattr(local_reader, "response_agent", None)
+    if reasoning_agent is not None:
+        if hasattr(response_agent, "clear_reasoning_guidance_cache"):
+            response_agent.clear_reasoning_guidance_cache()
+
+        def _warm_reasoning_index() -> None:
+            try:
+                reasoning_agent.refresh()
+            finally:
+                if hasattr(response_agent, "clear_reasoning_guidance_cache"):
+                    response_agent.clear_reasoning_guidance_cache()
+
+        threading.Thread(target=_warm_reasoning_index, daemon=True).start()
     return local_reader
 
 
@@ -804,16 +1416,59 @@ def _build_dataset_agent(local_reader: MultiAgentReader) -> DatasetTrainingAgent
     return DatasetTrainingAgent(local_reader, corpus_path=_corpus_path(), min_sentence_len=20)
 
 
+def _build_quiz_agent(local_reader: MultiAgentReader) -> _QuizAgent:
+    reasoning_agent = getattr(local_reader, "reasoning_agent", None)
+    return _QuizAgent(local_reader, reasoning_agent)
+
+
+def _gutenberg_checkpoint_path() -> str:
+    corpus_dir = os.path.dirname(_corpus_path())
+    return os.path.join(corpus_dir, "gutenberg_progress.json")
+
+
+def _load_gutenberg_checkpoint() -> dict:
+    import json
+    path = _gutenberg_checkpoint_path()
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "book_id" in data and "chapter" in data:
+                return data
+        except Exception:
+            pass
+    return {"book_id": 1, "chapter": 1}
+
+
+def _save_gutenberg_checkpoint(book_id: int, chapter: int) -> None:
+    import json
+    path = _gutenberg_checkpoint_path()
+    try:
+        with open(path, "w") as f:
+            json.dump({"book_id": book_id, "chapter": chapter}, f)
+    except Exception:
+        pass
+
+
 def _start_gutenberg_cycle() -> str:
     global gutenberg_cycle_thread
     if dataset_agent is None:
         return "Dataset agent is not ready."
     if gutenberg_cycle_state["active"]:
-        return "Curated Gutenberg cycle is already running."
+        return "Gutenberg sequential cycle is already running."
+
+    checkpoint = _load_gutenberg_checkpoint()
+    start_book_id = checkpoint["book_id"]
+    start_chapter = checkpoint["chapter"]
 
     gutenberg_cycle_stop_event.clear()
     gutenberg_cycle_state["active"] = True
-    gutenberg_cycle_state["message"] = "Running curated Gutenberg cycle in the background."
+    if start_book_id == 1 and start_chapter == 1:
+        gutenberg_cycle_state["message"] = "Running Gutenberg sequential cycle from the beginning."
+    else:
+        gutenberg_cycle_state["message"] = (
+            f"Resuming Gutenberg sequential cycle from book {start_book_id}, chapter {start_chapter}."
+        )
 
     def _worker() -> None:
         try:
@@ -824,17 +1479,20 @@ def _start_gutenberg_cycle() -> str:
                 retrain_epochs=1,
                 split_on_paragraphs=False,
                 stop_event=gutenberg_cycle_stop_event,
-                repeat_books=True,
+                repeat_books=False,
                 report_progress=True,
                 progress_callback=_update_gutenberg_cycle_state,
                 maintenance_callback=_update_gutenberg_cycle_state,
+                start_book_id=start_book_id,
+                start_chapter=start_chapter,
+                checkpoint_callback=_save_gutenberg_checkpoint,
             )
             final_books = len(reports)
             gutenberg_cycle_state["message"] = (
-                f"Curated Gutenberg cycle stopped after {final_books} books."
+                f"Gutenberg sequential cycle stopped after {final_books} books."
             )
         except Exception as exc:  # pragma: no cover - defensive demo path
-            gutenberg_cycle_state["message"] = f"Curated Gutenberg cycle failed: {exc}"
+            gutenberg_cycle_state["message"] = f"Gutenberg sequential cycle failed: {exc}"
         finally:
             gutenberg_cycle_state["active"] = False
 
@@ -845,10 +1503,10 @@ def _start_gutenberg_cycle() -> str:
 
 def _stop_gutenberg_cycle() -> str:
     if not gutenberg_cycle_state["active"]:
-        return "Curated Gutenberg cycle is not running."
+        return "Gutenberg sequential cycle is not running."
     gutenberg_cycle_stop_event.set()
     gutenberg_cycle_state["phase"] = "stopping"
-    return "Stopping curated Gutenberg cycle."
+    return "Stopping Gutenberg sequential cycle."
 
 
 def _update_gutenberg_cycle_state(event: dict) -> None:
@@ -901,6 +1559,101 @@ def _update_gutenberg_cycle_state(event: dict) -> None:
         gutenberg_cycle_state["chapter_added"] = 0
 
 
+def _start_wikipedia_cycle(topics: Optional[list[str]] = None, top_k: int = 8, min_score: float = 0.05) -> str:
+    global wikipedia_cycle_thread
+    if dataset_agent is None:
+        return "Dataset agent is not ready."
+    if wikipedia_cycle_state["active"]:
+        return "Wikipedia cycle is already running."
+
+    topics = [topic.strip() for topic in (topics or []) if topic and topic.strip()]
+    if not topics:
+        topics = dataset_agent.generate_wikipedia_topics(max_topics=8)
+    if not topics:
+        return "No Wikipedia topics available yet."
+
+    wikipedia_topics_state["topics"] = list(topics)
+    wikipedia_topics_state["topics_text"] = "\n".join(topics)
+    wikipedia_topics_state["message"] = f"Generated {len(topics)} Wikipedia topics."
+
+    wikipedia_cycle_stop_event.clear()
+    wikipedia_cycle_state["active"] = True
+    wikipedia_cycle_state["message"] = f"Running Wikipedia cycle over {len(topics)} topic(s) in the background."
+    wikipedia_cycle_state["topics_processed"] = 0
+    wikipedia_cycle_state["pages_added"] = 0
+
+    def _worker() -> None:
+        try:
+            reports = dataset_agent.train_wikipedia_cycle(
+                topics=topics,
+                top_k_per_topic=top_k,
+                min_score=min_score,
+                retrain_epochs=1,
+                stop_event=wikipedia_cycle_stop_event,
+                repeat_topics=True,
+                report_progress=True,
+                progress_callback=_update_wikipedia_cycle_state,
+                maintenance_callback=_update_wikipedia_cycle_state,
+            )
+            wikipedia_cycle_state["message"] = f"Wikipedia cycle stopped after {len(reports)} topics."
+        except Exception as exc:  # pragma: no cover - defensive demo path
+            wikipedia_cycle_state["message"] = f"Wikipedia cycle failed: {exc}"
+        finally:
+            wikipedia_cycle_state["active"] = False
+
+    wikipedia_cycle_thread = threading.Thread(target=_worker, daemon=True)
+    wikipedia_cycle_thread.start()
+    return wikipedia_cycle_state["message"]
+
+
+def _stop_wikipedia_cycle() -> str:
+    if not wikipedia_cycle_state["active"]:
+        return "Wikipedia cycle is not running."
+    wikipedia_cycle_stop_event.set()
+    wikipedia_cycle_state["phase"] = "stopping"
+    return "Stopping Wikipedia cycle."
+
+
+def _update_wikipedia_cycle_state(event: dict) -> None:
+    event_type = event.get("type", "unknown")
+    if event_type == "topic_start":
+        wikipedia_cycle_state["topic"] = event.get("topic")
+        wikipedia_cycle_state["page_title"] = None
+        wikipedia_cycle_state["phase"] = "topic_start"
+        wikipedia_cycle_state["topics_processed"] = event.get("topics_processed", wikipedia_cycle_state["topics_processed"])
+    elif event_type == "topic_skip":
+        wikipedia_cycle_state["topic"] = event.get("topic", wikipedia_cycle_state["topic"])
+        wikipedia_cycle_state["page_title"] = None
+        wikipedia_cycle_state["phase"] = "topic_skip"
+    elif event_type == "page_start":
+        wikipedia_cycle_state["topic"] = event.get("topic", wikipedia_cycle_state["topic"])
+        wikipedia_cycle_state["page_title"] = event.get("page_title")
+        wikipedia_cycle_state["phase"] = "page_start"
+    elif event_type == "page_done":
+        wikipedia_cycle_state["topic"] = event.get("topic", wikipedia_cycle_state["topic"])
+        wikipedia_cycle_state["page_title"] = event.get("page_title", wikipedia_cycle_state["page_title"])
+        wikipedia_cycle_state["phase"] = "page_done"
+        wikipedia_cycle_state["pages_added"] = wikipedia_cycle_state.get("pages_added", 0) + int(event.get("added", 0))
+    elif event_type == "maintenance_done":
+        wikipedia_cycle_state["topic"] = event.get("topic", wikipedia_cycle_state["topic"])
+        wikipedia_cycle_state["phase"] = "maintenance_done"
+        maintenance_report = event.get("report", {})
+        summary = maintenance_report.get("_summary", {}) if isinstance(maintenance_report, dict) else {}
+        improved = ", ".join(summary.get("improved_agents", [])) or "none"
+        loaded = summary.get("loaded", 0)
+        wikipedia_cycle_state["message"] = (
+            f"Processed Wikipedia topic {wikipedia_cycle_state['topic']} with maintenance loaded {loaded} patterns; "
+            f"improved agents: {improved}."
+        )
+    elif event_type == "cycle_done":
+        wikipedia_cycle_state["phase"] = "cycle_done"
+        wikipedia_cycle_state["topics_processed"] = event.get("topics_processed", wikipedia_cycle_state["topics_processed"])
+    elif event_type == "topic_done":
+        wikipedia_cycle_state["topic"] = event.get("topic", wikipedia_cycle_state["topic"])
+        wikipedia_cycle_state["phase"] = "topic_done"
+        wikipedia_cycle_state["topics_processed"] = event.get("topics_processed", wikipedia_cycle_state["topics_processed"])
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     seed = "Alice was"
@@ -912,11 +1665,15 @@ def index():
     gutenberg_ids = ", ".join(str(book_id) for book_id in DatasetTrainingAgent.curated_gutenberg_book_ids())
     gutenberg_top_k = 12
     gutenberg_min_score = 0.05
+    wikipedia_topics = wikipedia_topics_state.get("topics_text", "")
+    wikipedia_top_k = 12
+    wikipedia_min_score = 0.05
     generated = None
     error = None
     training_message = None
     question = "Why did Alice follow the rabbit?"
     reasoning = None
+    reasoning_trace = None
 
     if request.method == "POST":
         action = request.form.get("action", "generate")
@@ -929,6 +1686,9 @@ def index():
         gutenberg_ids = request.form.get("gutenberg_ids", gutenberg_ids)
         gutenberg_top_k = int(request.form.get("gutenberg_top_k", gutenberg_top_k))
         gutenberg_min_score = float(request.form.get("gutenberg_min_score", gutenberg_min_score))
+        wikipedia_topics = request.form.get("wikipedia_topics", wikipedia_topics)
+        wikipedia_top_k = int(request.form.get("wikipedia_top_k", wikipedia_top_k))
+        wikipedia_min_score = float(request.form.get("wikipedia_min_score", wikipedia_min_score))
         question = request.form.get("question", question)
 
         try:
@@ -954,14 +1714,32 @@ def index():
                 training_message = _start_gutenberg_cycle()
             elif action == "stop_gutenberg_cycle":
                 training_message = _stop_gutenberg_cycle()
+            elif action == "start_wikipedia_cycle":
+                parsed_topics = [line.strip() for line in wikipedia_topics.splitlines() if line.strip()]
+                training_message = _start_wikipedia_cycle(parsed_topics, top_k=wikipedia_top_k, min_score=wikipedia_min_score)
+            elif action == "stop_wikipedia_cycle":
+                training_message = _stop_wikipedia_cycle()
+            elif action == "generate_wikipedia_topics":
+                generated_topics = dataset_agent.generate_wikipedia_topics(max_topics=8) if dataset_agent is not None else []
+                wikipedia_topics = "\n".join(generated_topics)
+                wikipedia_topics_state["topics"] = list(generated_topics)
+                wikipedia_topics_state["topics_text"] = wikipedia_topics
+                wikipedia_topics_state["message"] = (
+                    f"Generated {len(generated_topics)} Wikipedia topics from learned patterns."
+                    if generated_topics
+                    else "No Wikipedia topics were generated from learned patterns."
+                )
+                training_message = wikipedia_topics_state["message"]
             elif action == "reason":
-                reasoning = reader.reason(question) if reader is not None else "Reader not ready."
+                reasoning_trace = _build_reason_trace(question)
+                reasoning = reasoning_trace.get("answer") if reasoning_trace else "Reader not ready."
             else:
                 generated = reader.generate(seed, max_length=max_len) if reader is not None else None
         except Exception as exc:  # pragma: no cover - defensive demo path
             error = str(exc)
 
     cycle_message = gutenberg_cycle_state["message"]
+    cycle_active = gutenberg_cycle_state["active"]
 
     return render_template_string(
         HTML_TEMPLATE,
@@ -974,12 +1752,21 @@ def index():
         gutenberg_ids=gutenberg_ids,
         gutenberg_top_k=gutenberg_top_k,
         gutenberg_min_score=gutenberg_min_score,
+        wikipedia_topics=wikipedia_topics,
+        wikipedia_top_k=wikipedia_top_k,
+        wikipedia_min_score=wikipedia_min_score,
         generated=generated,
         error=error,
         training_message=training_message,
         question=question,
         reasoning=reasoning,
+        reasoning_trace=reasoning_trace,
+        reasoning_index_status=_reasoning_index_status(),
         cycle_message=cycle_message,
+        cycle_active=cycle_active,
+        wikipedia_cycle_message=wikipedia_cycle_state["message"],
+        wikipedia_cycle_state=wikipedia_cycle_state,
+        wikipedia_cycle_active=wikipedia_cycle_state["active"],
         corpus=CORPUS_LABEL,
     )
 
@@ -1047,10 +1834,15 @@ def api_reason():
     if reader is None:
         return jsonify({"success": False, "error": "Reader not ready — start the server via main()."}), 503
     try:
-        answer = reader.reason(question)
-        return jsonify({"success": True, "reasoning": answer})
+        trace = _build_reason_trace(question)
+        return jsonify({"success": True, "reasoning": trace.get("answer", ""), "trace": trace})
     except Exception as exc:  # pragma: no cover - defensive demo path
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/reasoning_index_status", methods=["GET"])
+def api_reasoning_index_status():
+    return jsonify({"success": True, **_reasoning_index_status()})
 
 
 @app.route("/api/gutenberg_cycle_status", methods=["GET"])
@@ -1067,12 +1859,143 @@ def api_gutenberg_cycle_status():
     })
 
 
+@app.route("/api/wikipedia_topics", methods=["GET"])
+def api_wikipedia_topics():
+    if dataset_agent is None:
+        return jsonify({"success": False, "error": "Dataset agent is not ready."}), 503
+    try:
+        topics = dataset_agent.generate_wikipedia_topics(max_topics=8)
+        wikipedia_topics_state["topics"] = list(topics)
+        wikipedia_topics_state["topics_text"] = "\n".join(topics)
+        wikipedia_topics_state["message"] = (
+            f"Generated {len(topics)} Wikipedia topics from learned patterns."
+            if topics
+            else "No Wikipedia topics were generated from learned patterns."
+        )
+        return jsonify({
+            "success": True,
+            "topics": topics,
+            "message": wikipedia_topics_state["message"],
+        })
+    except Exception as exc:  # pragma: no cover - defensive demo path
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/wikipedia_cycle", methods=["POST"])
+def api_wikipedia_cycle():
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("action", "start")).strip().lower()
+    topics = payload.get("topics", [])
+    top_k = int(payload.get("top_k", 8))
+    min_score = float(payload.get("min_score", 0.05))
+
+    try:
+        if action == "start":
+            if isinstance(topics, str):
+                topics = [line.strip() for line in topics.splitlines() if line.strip()]
+            message = _start_wikipedia_cycle(topics=topics, top_k=top_k, min_score=min_score)
+            return jsonify({"success": True, "message": message})
+        if action == "stop":
+            message = _stop_wikipedia_cycle()
+            return jsonify({"success": True, "message": message})
+        return jsonify({"success": False, "error": f"Unknown action: {action}"}), 400
+    except Exception as exc:  # pragma: no cover - defensive demo path
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/pattern_analysis", methods=["GET"])
+def api_pattern_analysis():
+    if reader is None:
+        return jsonify({"success": False, "error": "Reader not ready."}), 503
+    try:
+        report = reader.reasoning_agent.analyse_patterns()
+        return jsonify({"success": True, "report": report})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/wikipedia_cycle_status", methods=["GET"])
+def api_wikipedia_cycle_status():
+    return jsonify({
+        "success": True,
+        "active": wikipedia_cycle_state["active"],
+        "message": wikipedia_cycle_state["message"],
+        "topic": wikipedia_cycle_state["topic"],
+        "page_title": wikipedia_cycle_state["page_title"],
+        "phase": wikipedia_cycle_state["phase"],
+        "topics_processed": wikipedia_cycle_state["topics_processed"],
+        "pages_added": wikipedia_cycle_state["pages_added"],
+        "topics": wikipedia_topics_state.get("topics", []),
+    })
+
+
+@app.route("/api/quiz/generate", methods=["POST"])
+def api_quiz_generate():
+    global _quiz_state
+    if _quiz_agent is None:
+        return jsonify({"error": "Quiz agent not initialised"}), 503
+    data = request.get_json(force=True)
+    n = int(data.get("n", 5))
+    difficulty = data.get("difficulty", "easy")
+    source = data.get("source", "bank")
+    questions = _quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
+    _quiz_state = {q.id: q for q in questions}
+    return jsonify({
+        "questions": [
+            {"id": q.id, "question": q.question, "options": q.options,
+             "topic": q.topic, "difficulty": q.difficulty, "source": q.source}
+            for q in questions
+        ]
+    })
+
+
+@app.route("/api/quiz/submit", methods=["POST"])
+def api_quiz_submit():
+    data = request.get_json(force=True)
+    question_id = data.get("question_id")
+    answer_index = data.get("answer_index")
+    if question_id not in _quiz_state:
+        return jsonify({"error": "Unknown question id"}), 404
+    q = _quiz_state[question_id]
+    return jsonify({
+        "correct": answer_index == q.correct_index,
+        "correct_index": q.correct_index,
+        "explanation": q.explanation,
+    })
+
+
+@app.route("/api/quiz/train_gaps", methods=["POST"])
+def api_quiz_train_gaps():
+    data = request.get_json(force=True)
+    topics = data.get("topics", [])
+    if not topics:
+        return jsonify({"status": "ok", "message": "No topics to train on"})
+    msg = _start_wikipedia_cycle(topics=topics)
+    return jsonify({"status": "ok", "message": msg})
+
+
+@app.route("/api/quiz/banks/<difficulty>", methods=["GET"])
+def api_quiz_banks(difficulty):
+    if difficulty not in ("easy", "medium", "hard"):
+        return jsonify({"error": "Invalid difficulty"}), 400
+    bank_path = os.path.join(
+        os.path.dirname(__file__), "..", "data", "quiz_banks", f"{difficulty}.json"
+    )
+    return send_file(
+        bank_path,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=f"quiz_bank_{difficulty}.json",
+    )
+
+
 def main():
-    global reader, web_agent, dataset_agent
+    global reader, web_agent, dataset_agent, _quiz_agent
     print("Loading MultiAgentReader...")
     reader = _build_reader()
     web_agent = _build_web_agent(reader)
     dataset_agent = _build_dataset_agent(reader)
+    _quiz_agent = _build_quiz_agent(reader)
     print("Reader ready.")
     app.run(debug=True, host="0.0.0.0", port=5000)
 
