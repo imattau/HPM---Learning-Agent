@@ -57,12 +57,13 @@ def test_generate_question_returns_quiz_question():
     reader.top_concepts.return_value = ["photosynthesis", "gravity", "democracy"]
 
     reasoner = MagicMock()
-    reasoner.reason.return_value = (
+    reasoner.reason.side_effect = [
         '{"question": "What process do plants use to make food?", '
         '"options": ["Respiration", "Photosynthesis", "Fermentation", "Digestion"], '
         '"correct_index": 1, '
-        '"explanation": "Photosynthesis converts light energy into glucose."}'
-    )
+        '"explanation": "Photosynthesis converts light energy into glucose."}',
+        "YES"
+    ]
 
     agent = QuizAgent(reader, reasoner)
     q = agent.generate_question(topic=None, difficulty="easy")
@@ -88,3 +89,7 @@ def test_generate_question_rejected_by_verification():
     agent = QuizAgent(reader, reasoner)
     q = agent.generate_question(topic="gravity", difficulty="easy")
     assert q is None
+
+def test_quiz_agent_importable_from_package():
+    from hpm_ai_v6.agents import QuizAgent as QA
+    assert QA is not None

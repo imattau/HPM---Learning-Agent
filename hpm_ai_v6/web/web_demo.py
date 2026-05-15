@@ -2161,7 +2161,7 @@ def api_quiz_generate():
 def api_quiz_submit():
     data = request.get_json(force=True)
     question_id = data.get("question_id")
-    answer_index = data.get("answer_index")
+    answer_index = int(data.get("answer_index", -1))
     if question_id not in _quiz_state:
         return jsonify({"error": "Unknown question id"}), 404
     q = _quiz_state[question_id]
