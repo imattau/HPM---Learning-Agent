@@ -4,5 +4,7 @@ from hpm_ai_v6.agents.dataset_training_agent import DatasetTrainingAgent
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
 from hpm_ai_v6.agents.response_generation_agent import ResponseGenerationAgent
 from hpm_ai_v6.agents.temporal_agent import TemporalAgent
+from hpm_ai_v6.agents.syntactic_rule_agent import SyntacticRuleAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.web_agent import WebAgent
+from hpm_ai_v6.agents.quiz_agent import QuizAgent
