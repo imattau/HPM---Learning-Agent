@@ -1,0 +1,22 @@
+[
+  {"id":"e1","question":"What is the capital of France?","options":["London","Paris","Berlin","Rome"],"correct_index":1,"topic":"geography","explanation":"Paris is the capital and largest city of France."},
+  {"id":"e2","question":"How many days are in a week?","options":["5","6","7","8"],"correct_index":2,"topic":"general","explanation":"A week has 7 days."},
+  {"id":"e3","question":"What colour is the sky on a clear day?","options":["Green","Red","Blue","Yellow"],"correct_index":2,"topic":"science","explanation":"The sky appears blue due to Rayleigh scattering of sunlight."},
+  {"id":"e4","question":"Which planet is closest to the Sun?","options":["Venus","Earth","Mars","Mercury"],"correct_index":3,"topic":"astronomy","explanation":"Mercury is the innermost planet in the Solar System."},
+  {"id":"e5","question":"How many sides does a triangle have?","options":["2","3","4","5"],"correct_index":1,"topic":"mathematics","explanation":"A triangle is a polygon with exactly three sides."},
+  {"id":"e6","question":"What gas do plants absorb from the air?","options":["Oxygen","Nitrogen","Carbon dioxide","Hydrogen"],"correct_index":2,"topic":"biology","explanation":"Plants absorb carbon dioxide during photosynthesis."},
+  {"id":"e7","question":"Who wrote Romeo and Juliet?","options":["Charles Dickens","William Shakespeare","Jane Austen","Mark Twain"],"correct_index":1,"topic":"literature","explanation":"Romeo and Juliet was written by William Shakespeare around 1594-1596."},
+  {"id":"e8","question":"What is the largest ocean on Earth?","options":["Atlantic","Indian","Arctic","Pacific"],"correct_index":3,"topic":"geography","explanation":"The Pacific Ocean is the largest and deepest ocean, covering more than 165 million km2."},
+  {"id":"e9","question":"How many continents are there on Earth?","options":["5","6","7","8"],"correct_index":2,"topic":"geography","explanation":"Earth has 7 continents: Africa, Antarctica, Asia, Australia, Europe, North America, South America."},
+  {"id":"e10","question":"What is the chemical symbol for water?","options":["O2","CO2","H2O","NaCl"],"correct_index":2,"topic":"chemistry","explanation":"Water is H2O - two hydrogen atoms bonded to one oxygen atom."},
+  {"id":"e11","question":"Which country invented the telephone?","options":["USA","UK","France","Germany"],"correct_index":0,"topic":"history","explanation":"Alexander Graham Bell, working in the USA, is credited with inventing the telephone in 1876."},
+  {"id":"e12","question":"What is the boiling point of water at sea level in Celsius?","options":["90","95","100","110"],"correct_index":2,"topic":"science","explanation":"Water boils at 100 degrees Celsius at standard atmospheric pressure."},
+  {"id":"e13","question":"What language is spoken in Brazil?","options":["Spanish","English","French","Portuguese"],"correct_index":3,"topic":"geography","explanation":"Brazil is the only Portuguese-speaking country in South America."},
+  {"id":"e14","question":"How many legs does a spider have?","options":["6","8","10","12"],"correct_index":1,"topic":"biology","explanation":"Spiders are arachnids and have 8 legs."},
+  {"id":"e15","question":"What is the largest mammal in the world?","options":["Elephant","Blue whale","Giraffe","Hippopotamus"],"correct_index":1,"topic":"biology","explanation":"The blue whale is the largest animal ever known to have existed."},
+  {"id":"e16","question":"Which metal is liquid at room temperature?","options":["Iron","Gold","Mercury","Silver"],"correct_index":2,"topic":"chemistry","explanation":"Mercury (Hg) is the only metal that is liquid at standard room temperature."},
+  {"id":"e17","question":"What shape is the Earth?","options":["Flat","Perfect sphere","Oblate spheroid","Cube"],"correct_index":2,"topic":"science","explanation":"Earth is an oblate spheroid - slightly flattened at the poles and bulging at the equator."},
+  {"id":"e18","question":"What is 12 x 12?","options":["124","144","132","148"],"correct_index":1,"topic":"mathematics","explanation":"12 x 12 = 144."},
+  {"id":"e19","question":"Which organ pumps blood around the body?","options":["Liver","Kidney","Lung","Heart"],"correct_index":3,"topic":"biology","explanation":"The heart is the muscular organ that pumps blood through the circulatory system."},
+  {"id":"e20","question":"What is the currency of Japan?","options":["Yuan","Won","Yen","Ringgit"],"correct_index":2,"topic":"geography","explanation":"Japan currency is the Japanese Yen."}
+]
