@@ -2172,6 +2172,39 @@ def api_quiz_submit():
     })
 
 
+@app.route("/api/quiz/ai_answer", methods=["POST"])
+def api_quiz_ai_answer():
+    """Use ReasoningAgent to answer a quiz question automatically."""
+    data = request.get_json(force=True)
+    question_id = data.get("question_id")
+    if not question_id or question_id not in _quiz_state:
+        return jsonify({"error": "Unknown question_id"}), 400
+
+    q = _quiz_state[question_id]
+    reasoning_agent = getattr(reader, "reasoning_agent", None)
+    if reasoning_agent is None:
+        return jsonify({"error": "ReasoningAgent not available"}), 503
+
+    prompt = (
+        "Given this question and these 4 options, which is most likely correct based on "
+        "what you know? "
+        f"Question: {q.question}. "
+        f"Options: A) {q.options[0]} B) {q.options[1]} C) {q.options[2]} D) {q.options[3]}. "
+        "Reply with ONLY the letter (A, B, C, or D) followed by a brief explanation."
+    )
+    try:
+        response = reasoning_agent.reason(prompt)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
+    first_letter = next(
+        (ch for ch in response.strip().upper() if ch in letter_map), None
+    )
+    answer_index = letter_map.get(first_letter, 0)
+    return jsonify({"answer_index": answer_index, "reasoning": response})
+
+
 @app.route("/api/quiz/train_gaps", methods=["POST"])
 def api_quiz_train_gaps():
     data = request.get_json(force=True)
