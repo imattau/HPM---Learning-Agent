@@ -1308,6 +1308,15 @@ HTML_TEMPLATE = """
         body: JSON.stringify({question_id: q.id})
       });
       var aiData = await res.json();
+      if (!res.ok) {
+        var fb = document.getElementById('quiz-feedback');
+        fb.style.display = 'block';
+        fb.style.background = 'var(--danger-dim)';
+        fb.style.color = 'var(--danger)';
+        fb.textContent = 'AI error: ' + (aiData.error || res.status);
+        document.getElementById('quiz-next-btn').style.display = 'inline-block';
+        return;
+      }
       var aiIndex = (typeof aiData.answer_index === 'number') ? aiData.answer_index : 0;
 
       var labels = ['A', 'B', 'C', 'D'];
@@ -2239,7 +2248,9 @@ def api_quiz_ai_answer():
     first_letter = next(
         (ch for ch in response.strip().upper() if ch in letter_map), None
     )
-    answer_index = letter_map.get(first_letter, 0)
+    if first_letter is None:
+        return jsonify({"error": "Could not parse answer from AI response", "reasoning": response}), 422
+    answer_index = letter_map[first_letter]
     return jsonify({"answer_index": answer_index, "reasoning": response})
 
 
