@@ -856,6 +856,87 @@ HTML_TEMPLATE = """
         </div>
       </div>
 
+      <div class="section open" id="sec-quiz">
+        <div class="section-header" onclick="toggleSection('sec-quiz')">
+          <span class="step-num">04</span>
+          <span class="section-title">Quiz</span>
+          <span class="section-badge" id="quiz-badge">multi-choice</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="section-inner">
+            <div class="pill-tabs">
+              <button class="pill active" onclick="showTab('quiz','take')">Take Quiz</button>
+              <button class="pill" onclick="showTab('quiz','download')">Download Banks</button>
+            </div>
+
+            <div id="quiz-take" class="sub-panel active">
+              <div id="quiz-setup">
+                <div style="margin-bottom:12px">
+                  <label style="font-weight:600;display:block;margin-bottom:6px">Source</label>
+                  <label><input type="radio" name="quiz-source" value="bank" checked> Question Bank</label>
+                  &nbsp;&nbsp;
+                  <label><input type="radio" name="quiz-source" value="model"> Model-generated</label>
+                </div>
+                <div style="margin-bottom:12px">
+                  <label style="font-weight:600;display:block;margin-bottom:6px">Difficulty</label>
+                  <label><input type="radio" name="quiz-diff" value="easy" checked> Easy</label>
+                  &nbsp;&nbsp;
+                  <label><input type="radio" name="quiz-diff" value="medium"> Medium</label>
+                  &nbsp;&nbsp;
+                  <label><input type="radio" name="quiz-diff" value="hard"> Hard</label>
+                </div>
+                <div style="margin-bottom:16px">
+                  <label style="font-weight:600;display:block;margin-bottom:6px">Questions</label>
+                  <label><input type="radio" name="quiz-n" value="5" checked> 5</label>
+                  &nbsp;&nbsp;
+                  <label><input type="radio" name="quiz-n" value="10"> 10</label>
+                  &nbsp;&nbsp;
+                  <label><input type="radio" name="quiz-n" value="20"> 20</label>
+                </div>
+                <button class="btn" onclick="startQuiz()">Start Quiz</button>
+              </div>
+
+              <div id="quiz-play" style="display:none">
+                <div id="quiz-progress" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
+                <div style="height:4px;background:var(--surface2);border-radius:2px;margin-bottom:20px">
+                  <div id="quiz-progress-fill" style="height:4px;background:var(--accent);border-radius:2px;width:0%;transition:width 0.3s"></div>
+                </div>
+                <div id="quiz-question" style="font-size:16px;font-weight:600;margin-bottom:16px"></div>
+                <div id="quiz-options" style="display:flex;flex-direction:column;gap:8px"></div>
+                <div id="quiz-feedback" style="display:none;margin-top:16px;padding:12px;border-radius:6px;font-size:14px"></div>
+                <button id="quiz-next-btn" class="btn" style="display:none;margin-top:16px" onclick="nextQuestion()">Next &rarr;</button>
+              </div>
+
+              <div id="quiz-complete" style="display:none">
+                <h3 style="margin-bottom:12px">Quiz Complete</h3>
+                <div id="quiz-score" style="font-size:24px;font-weight:700;color:var(--accent);margin-bottom:16px"></div>
+                <div id="quiz-gap-list" style="margin-bottom:16px"></div>
+                <button id="train-gaps-btn" class="btn" style="display:none" onclick="trainGaps()">Train on gaps</button>
+                <div id="train-gaps-status" style="margin-top:10px;font-size:13px;color:var(--muted)"></div>
+              </div>
+            </div>
+
+            <div id="quiz-download" class="sub-panel" style="display:none">
+              <table style="width:100%;border-collapse:collapse">
+                <tr style="border-bottom:1px solid var(--border)">
+                  <td style="padding:12px 0"><strong>Easy</strong> &mdash; Single-concept factual recall</td>
+                  <td style="text-align:right"><a href="/api/quiz/banks/easy" download class="btn">Download</a></td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border)">
+                  <td style="padding:12px 0"><strong>Medium</strong> &mdash; Concept application and moderate inference</td>
+                  <td style="text-align:right"><a href="/api/quiz/banks/medium" download class="btn">Download</a></td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0"><strong>Hard</strong> &mdash; Relational reasoning across multiple concepts</td>
+                  <td style="text-align:right"><a href="/api/quiz/banks/hard" download class="btn">Download</a></td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /accordion -->
   </main>
 
@@ -884,7 +965,7 @@ HTML_TEMPLATE = """
       el.classList.toggle('open');
       try { localStorage.setItem('hpm_sec_' + id, el.classList.contains('open') ? '1' : '0'); } catch(e){}
     }
-    ['sec-train','sec-generate','sec-reason'].forEach(function(id) {
+    ['sec-train','sec-generate','sec-reason','sec-quiz'].forEach(function(id) {
       try {
         const v = localStorage.getItem('hpm_sec_' + id);
         const el = document.getElementById(id);
@@ -1147,6 +1228,133 @@ HTML_TEMPLATE = """
           wikipediaStatusTimer = setTimeout(refreshWikipediaStatus, 2000);
         }
       } catch(e) {}
+    }
+
+    // ── Quiz ──
+    function showTab(group, name) {
+      const section = document.getElementById('sec-' + group);
+      if (!section) return;
+      section.querySelectorAll('.sub-panel').forEach(function(p){ p.classList.remove('active'); });
+      const target = document.getElementById(group + '-' + name);
+      if (target) target.classList.add('active');
+      section.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
+      // find the pill that was clicked by matching the onclick call
+      section.querySelectorAll('.pill').forEach(function(p) {
+        if (p.getAttribute('onclick').indexOf("'" + name + "'") !== -1) {
+          p.classList.add('active');
+        }
+      });
+    }
+
+    var _quizQuestions = [];
+    var _quizIndex = 0;
+    var _quizCorrect = 0;
+    var _quizFailedTopics = [];
+
+    async function startQuiz() {
+      var source = document.querySelector('input[name="quiz-source"]:checked').value;
+      var diff   = document.querySelector('input[name="quiz-diff"]:checked').value;
+      var n      = parseInt(document.querySelector('input[name="quiz-n"]:checked').value);
+      document.getElementById('quiz-badge').textContent = 'loading…';
+      var res = await fetch('/api/quiz/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({n: n, difficulty: diff, source: source})
+      });
+      var data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      _quizQuestions = data.questions;
+      _quizIndex = 0; _quizCorrect = 0; _quizFailedTopics = [];
+      document.getElementById('quiz-setup').style.display = 'none';
+      document.getElementById('quiz-complete').style.display = 'none';
+      document.getElementById('quiz-play').style.display = 'block';
+      document.getElementById('quiz-badge').textContent = diff + ' · ' + source;
+      showQuestion();
+    }
+
+    function showQuestion() {
+      var q = _quizQuestions[_quizIndex];
+      var total = _quizQuestions.length;
+      document.getElementById('quiz-progress').textContent = 'Question ' + (_quizIndex + 1) + ' of ' + total;
+      document.getElementById('quiz-progress-fill').style.width = Math.round((_quizIndex / total) * 100) + '%';
+      document.getElementById('quiz-question').textContent = q.question;
+      document.getElementById('quiz-feedback').style.display = 'none';
+      document.getElementById('quiz-next-btn').style.display = 'none';
+      var labels = ['A', 'B', 'C', 'D'];
+      var optDiv = document.getElementById('quiz-options');
+      optDiv.innerHTML = '';
+      q.options.forEach(function(opt, i) {
+        var btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.style.textAlign = 'left';
+        btn.style.width = '100%';
+        btn.textContent = labels[i] + '. ' + opt;
+        btn.onclick = (function(idx){ return function(){ submitAnswer(idx); }; })(i);
+        optDiv.appendChild(btn);
+      });
+    }
+
+    async function submitAnswer(answerIndex) {
+      var q = _quizQuestions[_quizIndex];
+      document.getElementById('quiz-options').querySelectorAll('button').forEach(function(b){ b.disabled = true; });
+      var res = await fetch('/api/quiz/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: q.id, answer_index: answerIndex})
+      });
+      var data = await res.json();
+      var fb = document.getElementById('quiz-feedback');
+      var labels = ['A', 'B', 'C', 'D'];
+      fb.style.display = 'block';
+      if (data.correct) {
+        _quizCorrect++;
+        fb.style.background = 'var(--success-dim)';
+        fb.style.color = 'var(--accent)';
+        fb.innerHTML = '✓ Correct! ' + data.explanation;
+      } else {
+        _quizFailedTopics.push(q.topic);
+        fb.style.background = 'var(--danger-dim)';
+        fb.style.color = 'var(--danger)';
+        fb.innerHTML = '✗ Incorrect. Correct answer: ' + labels[data.correct_index] + '. ' + data.explanation;
+      }
+      document.getElementById('quiz-next-btn').style.display = 'inline-block';
+    }
+
+    function nextQuestion() {
+      _quizIndex++;
+      if (_quizIndex >= _quizQuestions.length) { showCompletion(); } else { showQuestion(); }
+    }
+
+    function showCompletion() {
+      document.getElementById('quiz-play').style.display = 'none';
+      document.getElementById('quiz-complete').style.display = 'block';
+      document.getElementById('quiz-progress-fill').style.width = '100%';
+      document.getElementById('quiz-score').textContent = _quizCorrect + ' / ' + _quizQuestions.length + ' correct';
+      var uniqueTopics = _quizFailedTopics.filter(function(t, i, a){ return a.indexOf(t) === i; });
+      var gapDiv = document.getElementById('quiz-gap-list');
+      var trainBtn = document.getElementById('train-gaps-btn');
+      if (uniqueTopics.length > 0) {
+        gapDiv.innerHTML = '<p style="color:var(--muted);margin-bottom:8px">Weak topics:</p>' +
+          uniqueTopics.map(function(t){ return '<span style="display:inline-block;padding:3px 10px;margin:3px;border-radius:4px;background:var(--surface2);font-size:13px">' + t + '</span>'; }).join('');
+        trainBtn.style.display = 'inline-block';
+        trainBtn.dataset.topics = JSON.stringify(uniqueTopics);
+      } else {
+        gapDiv.innerHTML = '<p style="color:var(--accent)">Perfect score — no gaps!</p>';
+      }
+    }
+
+    async function trainGaps() {
+      var btn = document.getElementById('train-gaps-btn');
+      var topics = JSON.parse(btn.dataset.topics);
+      btn.disabled = true;
+      document.getElementById('train-gaps-status').textContent = 'Starting training…';
+      var res = await fetch('/api/quiz/train_gaps', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({topics: topics})
+      });
+      var data = await res.json();
+      document.getElementById('train-gaps-status').textContent = data.message || 'Training started.';
     }
 
     async function generateWikipediaTopics(btn) {
