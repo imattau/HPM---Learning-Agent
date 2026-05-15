@@ -1280,42 +1280,80 @@ HTML_TEMPLATE = """
       document.getElementById('quiz-question').textContent = q.question;
       document.getElementById('quiz-feedback').style.display = 'none';
       document.getElementById('quiz-next-btn').style.display = 'none';
+
       var labels = ['A', 'B', 'C', 'D'];
       var optDiv = document.getElementById('quiz-options');
       optDiv.innerHTML = '';
       q.options.forEach(function(opt, i) {
-        var btn = document.createElement('button');
-        btn.className = 'btn';
-        btn.style.textAlign = 'left';
-        btn.style.width = '100%';
-        btn.textContent = labels[i] + '. ' + opt;
-        btn.onclick = (function(idx){ return function(){ submitAnswer(idx); }; })(i);
-        optDiv.appendChild(btn);
+        var lbl = document.createElement('div');
+        lbl.id = 'quiz-opt-' + i;
+        lbl.style.cssText = 'padding:10px 14px;border-radius:6px;background:var(--surface2);font-size:14px;';
+        lbl.textContent = labels[i] + '. ' + opt;
+        optDiv.appendChild(lbl);
       });
+
+      var fb = document.getElementById('quiz-feedback');
+      fb.style.display = 'block';
+      fb.style.background = 'var(--surface2)';
+      fb.style.color = 'var(--muted)';
+      fb.textContent = 'AI is thinking…';
+
+      setTimeout(function() { aiAnswer(q); }, 600);
     }
 
-    async function submitAnswer(answerIndex) {
-      var q = _quizQuestions[_quizIndex];
-      document.getElementById('quiz-options').querySelectorAll('button').forEach(function(b){ b.disabled = true; });
-      var res = await fetch('/api/quiz/submit', {
+    async function aiAnswer(q) {
+      var res = await fetch('/api/quiz/ai_answer', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({question_id: q.id, answer_index: answerIndex})
+        body: JSON.stringify({question_id: q.id})
       });
-      var data = await res.json();
-      var fb = document.getElementById('quiz-feedback');
+      var aiData = await res.json();
+      var aiIndex = (typeof aiData.answer_index === 'number') ? aiData.answer_index : 0;
+
       var labels = ['A', 'B', 'C', 'D'];
+      for (var i = 0; i < 4; i++) {
+        var el = document.getElementById('quiz-opt-' + i);
+        if (el) {
+          if (i === aiIndex) {
+            el.style.background = '#1e3a2e';
+            el.style.color = 'var(--accent)';
+            el.style.fontWeight = '600';
+          } else {
+            el.style.background = 'var(--surface2)';
+            el.style.color = '';
+            el.style.fontWeight = '';
+          }
+        }
+      }
+
+      var submitRes = await fetch('/api/quiz/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: q.id, answer_index: aiIndex})
+      });
+      var data = await submitRes.json();
+
+      var fb = document.getElementById('quiz-feedback');
       fb.style.display = 'block';
+      var reasoningSnippet = (aiData.reasoning || '').substring(0, 200);
       if (data.correct) {
         _quizCorrect++;
         fb.style.background = 'var(--success-dim)';
         fb.style.color = 'var(--accent)';
-        fb.innerHTML = '✓ Correct! ' + data.explanation;
+        fb.textContent = '✓ Correct! ' + data.explanation;
+        var note = document.createElement('span');
+        note.style.cssText = 'font-size:12px;opacity:0.8;margin-top:6px;display:block';
+        note.textContent = 'AI reasoning: ' + reasoningSnippet;
+        fb.appendChild(note);
       } else {
         _quizFailedTopics.push(q.topic);
         fb.style.background = 'var(--danger-dim)';
         fb.style.color = 'var(--danger)';
-        fb.innerHTML = '✗ Incorrect. Correct answer: ' + labels[data.correct_index] + '. ' + data.explanation;
+        fb.textContent = '✗ Incorrect. Correct answer: ' + labels[data.correct_index] + '. ' + data.explanation;
+        var note = document.createElement('span');
+        note.style.cssText = 'font-size:12px;opacity:0.8;margin-top:6px;display:block';
+        note.textContent = 'AI reasoning: ' + reasoningSnippet;
+        fb.appendChild(note);
       }
       document.getElementById('quiz-next-btn').style.display = 'inline-block';
     }
