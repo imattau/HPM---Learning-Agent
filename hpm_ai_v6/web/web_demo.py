@@ -1335,6 +1335,8 @@ HTML_TEMPLATE = """
         }
       }
 
+      var aiConfident = (aiData.confident !== false);
+
       var submitRes = await fetch('/api/quiz/submit', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1345,7 +1347,11 @@ HTML_TEMPLATE = """
       var fb = document.getElementById('quiz-feedback');
       fb.style.display = 'block';
       var reasoningSnippet = (aiData.reasoning || '').substring(0, 200);
-      if (data.correct) {
+      var guessLabel = aiConfident ? '' : ' (guessing — no learned path)';
+      if (!aiConfident) {
+        _quizFailedTopics.push(q.topic);
+      }
+      if (data.correct && aiConfident) {
         _quizCorrect++;
         fb.style.background = 'var(--success-dim)';
         fb.style.color = 'var(--accent)';
@@ -1354,11 +1360,20 @@ HTML_TEMPLATE = """
         note.style.cssText = 'font-size:12px;opacity:0.8;margin-top:6px;display:block';
         note.textContent = 'AI reasoning: ' + reasoningSnippet;
         fb.appendChild(note);
+      } else if (data.correct && !aiConfident) {
+        _quizCorrect++;
+        fb.style.background = 'var(--success-dim)';
+        fb.style.color = 'var(--accent)';
+        fb.textContent = '✓ Correct! ' + data.explanation + guessLabel;
+        var note = document.createElement('span');
+        note.style.cssText = 'font-size:12px;opacity:0.8;margin-top:6px;display:block;color:var(--warning,#c8a840)';
+        note.textContent = 'AI reasoning: ' + reasoningSnippet + ' [No learned path — counted as gap]';
+        fb.appendChild(note);
       } else {
-        _quizFailedTopics.push(q.topic);
+        if (aiConfident) { _quizFailedTopics.push(q.topic); }
         fb.style.background = 'var(--danger-dim)';
         fb.style.color = 'var(--danger)';
-        fb.textContent = '✗ Incorrect. Correct answer: ' + labels[data.correct_index] + '. ' + data.explanation;
+        fb.textContent = '✗ Incorrect. Correct answer: ' + labels[data.correct_index] + '. ' + data.explanation + guessLabel;
         var note = document.createElement('span');
         note.style.cssText = 'font-size:12px;opacity:0.8;margin-top:6px;display:block';
         note.textContent = 'AI reasoning: ' + reasoningSnippet;
@@ -2240,10 +2255,11 @@ def api_quiz_ai_answer():
         "Reply with ONLY the letter (A, B, C, or D) followed by a brief explanation."
     )
     try:
-        response = reasoning_agent.reason(prompt)
+        trace = reasoning_agent.reason_with_trace(prompt)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
+    response = trace.get("answer", "")
     letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
     first_letter = next(
         (ch for ch in response.strip().upper() if ch in letter_map), None
@@ -2251,7 +2267,8 @@ def api_quiz_ai_answer():
     if first_letter is None:
         return jsonify({"error": "Could not parse answer from AI response", "reasoning": response}), 422
     answer_index = letter_map[first_letter]
-    return jsonify({"answer_index": answer_index, "reasoning": response})
+    confident = bool(trace.get("candidate_paths")) or trace.get("chosen_path") is not None
+    return jsonify({"answer_index": answer_index, "reasoning": response, "confident": confident})
 
 
 @app.route("/api/quiz/train_gaps", methods=["POST"])
