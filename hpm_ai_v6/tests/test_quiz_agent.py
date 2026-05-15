@@ -51,3 +51,40 @@ def test_generate_quiz_bank_source():
     questions = agent.generate_quiz(n=5, difficulty="easy", source="bank")
     assert len(questions) == 5
     assert all(isinstance(q, QuizQuestion) for q in questions)
+
+def test_generate_question_returns_quiz_question():
+    reader = MagicMock()
+    reader.top_concepts.return_value = ["photosynthesis", "gravity", "democracy"]
+
+    reasoner = MagicMock()
+    reasoner.reason.return_value = (
+        '{"question": "What process do plants use to make food?", '
+        '"options": ["Respiration", "Photosynthesis", "Fermentation", "Digestion"], '
+        '"correct_index": 1, '
+        '"explanation": "Photosynthesis converts light energy into glucose."}'
+    )
+
+    agent = QuizAgent(reader, reasoner)
+    q = agent.generate_question(topic=None, difficulty="easy")
+
+    assert q is not None
+    assert isinstance(q, QuizQuestion)
+    assert len(q.options) == 4
+    assert 0 <= q.correct_index <= 3
+    assert q.source == "model"
+    assert q.difficulty == "easy"
+
+def test_generate_question_rejected_by_verification():
+    reader = MagicMock()
+    reader.top_concepts.return_value = ["gravity"]
+
+    reasoner = MagicMock()
+    # First call: generation; second call: verification returns NO
+    reasoner.reason.side_effect = [
+        '{"question": "Q?", "options": ["A","B","C","D"], "correct_index": 0, "explanation": "E"}',
+        "NO"
+    ]
+
+    agent = QuizAgent(reader, reasoner)
+    q = agent.generate_question(topic="gravity", difficulty="easy")
+    assert q is None
