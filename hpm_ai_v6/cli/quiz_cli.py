@@ -350,6 +350,66 @@ def main(argv: Optional[List[str]] = None) -> None:
 OPTION_KEYS = ["A", "B", "C", "D"]
 
 
+def _score_options(reasoning_agent, question: str, options_map: dict) -> tuple[str, bool, dict]:
+    """Score each option by direct edge lookup in the pattern graph.
+
+    For each option, counts edges from its node to question-keyword nodes.
+    The option with the most/strongest connections to question terms wins.
+    Falls back to reason_with_trace if graph has no edges at all.
+    """
+    reasoning_agent._ensure_fresh()
+    edge_index = getattr(reasoning_agent, "_edge_index", {})
+
+    # Extract meaningful keywords from the question
+    q_words = {w for w in question.lower().split()
+               if w not in _STOP_WORDS and len(w) > 2 and w.isalpha()}
+
+    scores: dict[str, float] = {}
+    for key, option_text in options_map.items():
+        if not option_text:
+            scores[key] = 0.0
+            continue
+        option_words = [w.lower() for w in option_text.split() if w.isalpha()]
+        total = 0.0
+        for opt_word in option_words:
+            # Find all edge index keys that contain this option word
+            for edge_key, records in edge_index.items():
+                if opt_word not in edge_key.lower():
+                    continue
+                # Score edges whose targets connect to question keywords
+                for rec in records:
+                    target_key = getattr(rec, "target_key", "") or ""
+                    target_name = target_key.split(":")[-1].lower()
+                    if any(qw in target_name for qw in q_words):
+                        total += float(getattr(rec, "score", getattr(rec, "raw_weight", 0.0)))
+        scores[key] = total
+
+    best_key = max(scores, key=lambda k: scores[k])
+    best_score = scores[best_key]
+    any_confident = best_score > 0.0
+
+    # Get a trace for the winning option for reinforcement/display
+    best_trace = reasoning_agent.reason_with_trace(f"{options_map[best_key]} {question}")
+
+    return best_key, any_confident, best_trace
+
+
+def _parse_letter_answer(answer_text: str, options_map: dict) -> str:
+    """Extract the first A/B/C/D letter from the reasoning agent's answer text.
+    Falls back to matching option values in the text, then A as last resort."""
+    import re as _re
+    # Look for a standalone letter A-D at the start of the answer
+    match = _re.search(r'\b([A-D])\b', answer_text.upper())
+    if match:
+        return match.group(1)
+    # Try matching option values in the answer text
+    answer_lower = answer_text.lower()
+    for key, value in options_map.items():
+        if value and value.lower() in answer_lower:
+            return key
+    return "A"
+
+
 def _extract_answer(trace: dict, options: dict) -> str:
     """Map reasoning trace output to an option key A/B/C/D."""
     # If the agent set an explicit 'answer' key, trust it.
@@ -445,15 +505,8 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Build a focused prompt for the reasoning agent
-        prompt = (
-            f"{q.question} "
-            + " ".join(f"{k}: {v}" for k, v in options_map.items() if v)
-        )
-        trace = reasoning_agent.reason_with_trace(prompt)
-
-        confident = bool(trace.get("candidate_paths") or trace.get("chosen_path"))
-        chosen = _extract_answer(trace, options_map)
+        # Score each option independently — pick the one with the most graph support
+        chosen, confident, trace = _score_options(reasoning_agent, q.question, options_map)
         correct = OPTION_KEYS[q.correct_index]
 
         confidence_label = "confident" if confident else yellow("guessing")
