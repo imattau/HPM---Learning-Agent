@@ -566,26 +566,20 @@ def main(argv: Optional[List[str]] = None) -> None:
         mastered.update(newly_mastered)
 
         if weak_topics:
-            # Train first on what the model actually got wrong — targeted queries
-            print(f"\nTraining on {len(weak_topics)} weak topic(s) from failed questions...")
-            train_on_weak_topics(reader, weak_topics, dataset_agent=dataset_agent, fetched_titles=fetched_titles)
-            reasoning_agent.invalidate()
-            # Seed the frontier from failures so future hops expand from relevant ground
             seeds = [label for label, _ in weak_topics]
-            frontier.add_learned_seeds(seeds, reader)
         else:
-            print(green("All topics answered confidently — expanding frontier for next round."))
-            # No failures: use uncertainty nomination to find growth areas
+            print(green("All topics answered confidently."))
             seeds = _nominate_uncertain_topics(
                 dataset_agent, reasoning_agent, n=4, pool_size=50, exclude=set()
             )
-            frontier.add_learned_seeds(seeds, reader)
-            next_topics = frontier.next_topics(reader, n=4)
-            if next_topics:
-                nominated_history.update(next_topics)
-                print(f"Frontier expanding into: {', '.join(next_topics)}")
-                train_on_weak_topics(reader, [(t, t) for t in next_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
-                reasoning_agent.invalidate()
+
+        frontier.add_learned_seeds(seeds, reader)
+        next_topics = frontier.next_topics(reader, n=4)
+        if next_topics:
+            nominated_history.update(next_topics)
+            print(f"\nFrontier training on: {', '.join(next_topics)}")
+            train_on_weak_topics(reader, [(t, t) for t in next_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
+            reasoning_agent.invalidate()
         frontier.increment_hop()
         frontier.save(frontier_path)
 
