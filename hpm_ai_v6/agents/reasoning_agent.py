@@ -1484,6 +1484,7 @@ class ReasoningAgent:
     def _forward_chain_edges(self, start_key: str, max_rounds: int = 3) -> Dict[str, List[EdgeRecord]]:
         if not self._forward_rule_patterns:
             return {}
+        _deadline = time.time() + 2.0  # hard 2-second budget
 
         base_edges: Dict[str, List[EdgeRecord]] = {}
         for source_key, records in self._edge_index.items():
@@ -1491,15 +1492,22 @@ class ReasoningAgent:
         for source_key, records in self._transient_rule_edge_index.items():
             base_edges.setdefault(source_key, []).extend(records)
 
+        _MAX_REACHABLE = 100
         reachable = {start_key}
         frontier = {start_key}
         for _ in range(self.max_depth):
+            if len(reachable) >= _MAX_REACHABLE:
+                break
             next_frontier = set()
             for node_key in frontier:
                 for edge in base_edges.get(node_key, []):
                     if edge.target_key not in reachable:
                         reachable.add(edge.target_key)
                         next_frontier.add(edge.target_key)
+                        if len(reachable) >= _MAX_REACHABLE:
+                            break
+                if len(reachable) >= _MAX_REACHABLE:
+                    break
             if not next_frontier:
                 break
             frontier = next_frontier
@@ -1513,9 +1521,11 @@ class ReasoningAgent:
             return {}
 
         for round_idx in range(max_rounds):
+            if time.time() > _deadline:
+                break
             added = False
             snapshot = {source_key: list(records) for source_key, records in current_edges.items()}
-            all_snapshot_edges = [edge for records in snapshot.values() for edge in records]
+            all_snapshot_edges = [edge for records in snapshot.values() for edge in records][:500]
             reachable_edges = [
                 edge
                 for edge in all_snapshot_edges
@@ -1592,7 +1602,7 @@ class ReasoningAgent:
                         if rule_type not in {"transitivity", "edge_derivation"} and "transitivity" not in getattr(rule, "name", "").lower():
                             continue
                         if pair_mode == "any_reachable":
-                            second_hops = all_snapshot_edges
+                            second_hops = all_snapshot_edges[:200]
                         else:
                             middle_key = first_edge.target_key
                             second_hops = snapshot.get(middle_key, [])

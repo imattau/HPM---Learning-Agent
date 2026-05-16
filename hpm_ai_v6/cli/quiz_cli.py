@@ -62,8 +62,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 # Corpus path (mirrors web_demo._corpus_path)
 # ---------------------------------------------------------------------------
 def _corpus_path() -> str:
-    # hpm_ai_v6/cli/quiz_cli.py → up two levels → package root
-    base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # hpm_ai_v6/cli/quiz_cli.py → up two levels → hpm_ai_v6
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(base, "data", "corpus", "alice_mini.txt")
     if not os.path.exists(path):
         raise FileNotFoundError(f"Corpus not found at {path}")
@@ -126,7 +126,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
     from hpm_ai_v6.agents.quiz_agent import QuizAgent
 
-    reader = MultiAgentReader(_corpus_path(), warm_start=True)
+    reader = MultiAgentReader(_corpus_path(), warm_start=True, warm_start_limit=500)
     reasoning_agent = getattr(reader, "reasoning_agent", None)
     if reasoning_agent is None:
         print(red("Error: reasoning_agent not found on MultiAgentReader."))
