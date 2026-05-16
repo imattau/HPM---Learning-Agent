@@ -120,16 +120,48 @@ class PatternPager:
         os.replace(tmp_path, path)
 
     def _append_journal(self, payload: Dict[str, object]) -> None:
+        # Skip journal append if it would grow beyond threshold — index is the durable store
+        try:
+            if os.path.exists(self.journal_path) and os.path.getsize(self.journal_path) > self._COMPACT_THRESHOLD_BYTES:
+                return
+        except OSError:
+            pass
         with open(self.journal_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload) + "\n")
 
     def _append_index(self, payload: Dict[str, object]) -> None:
-        with open(self.index_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
+        self._upsert_index(payload)
+        PatternPager._write_count += 1
+        if PatternPager._write_count % self._COMPACT_EVERY_N_WRITES == 0:
+            self._compact_index()
+        else:
+            with open(self.index_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload) + "\n")
 
     def _upsert_index(self, payload: Dict[str, object]) -> None:
         name = str(payload["name"])
         self._index[name] = payload
+
+    _COMPACT_THRESHOLD_BYTES = 10 * 1024 * 1024  # compact index when > 10MB
+    _COMPACT_EVERY_N_WRITES = 500  # also compact after N append calls
+    _write_count: int = 0
+
+    def _compact_index(self) -> None:
+        """Rewrite index.jsonl with only the current deduplicated entries."""
+        if not self._index:
+            return
+        tmp_path = self.index_path + ".compact_tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                for payload in self._index.values():
+                    handle.write(json.dumps(payload) + "\n")
+            os.replace(tmp_path, self.index_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     def _load_index(self) -> None:
         self._index = {}
@@ -146,6 +178,12 @@ class PatternPager:
                             continue
                         self._upsert_index(payload)
                 if self._index:
+                    # Compact if the file has grown too large
+                    try:
+                        if os.path.getsize(self.index_path) > self._COMPACT_THRESHOLD_BYTES:
+                            self._compact_index()
+                    except OSError:
+                        pass
                     return
             except FileNotFoundError:
                 pass

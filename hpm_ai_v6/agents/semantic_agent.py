@@ -35,19 +35,29 @@ class SemanticAgent(SocialAgent):
     Learns: 1-cells (semantic transitions), 2-cells (thematic analogies).
     """
     def __init__(self, model_name: str = 'all-MiniLM-L6-v2', shared_field: Optional[DynamicPatternField] = None, **kwargs):
-        # Prefer a local/cached sentence-transformers model, but stay runnable offline.
-        try:
-            self.encoder = SentenceTransformer(model_name, local_files_only=True)
-        except Exception:
-            self.encoder = _FallbackSentenceEncoder()
-        if hasattr(self.encoder, "get_embedding_dimension"):
-            self.emb_dim = self.encoder.get_embedding_dimension()
-        else:
-            self.emb_dim = self.encoder.get_sentence_embedding_dimension()
-        
+        self._model_name = model_name
+        self._encoder = None  # lazy — loaded on first use
+        self.emb_dim = 64  # default until encoder loads
         self.sent_cells = {}
         self.sent_text_by_name: Dict[str, str] = {}
         super().__init__(patterns=[], shared_field=shared_field, **kwargs)
+
+    @property
+    def encoder(self):
+        if self._encoder is None:
+            try:
+                self._encoder = SentenceTransformer(self._model_name, local_files_only=True)
+            except Exception:
+                self._encoder = _FallbackSentenceEncoder()
+            if hasattr(self._encoder, "get_embedding_dimension"):
+                self.emb_dim = self._encoder.get_embedding_dimension()
+            else:
+                self.emb_dim = self._encoder.get_sentence_embedding_dimension()
+        return self._encoder
+
+    @encoder.setter
+    def encoder(self, value):
+        self._encoder = value
 
     @staticmethod
     def _sentence_cell_name(sentence: str) -> str:

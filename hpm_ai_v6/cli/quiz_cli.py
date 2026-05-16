@@ -220,6 +220,31 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
     return all_sentences
 
 
+def _fetch_dictionary_sentences(word: str) -> list[str]:
+    """Fetch definitions and examples from Free Dictionary API."""
+    url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{urllib.parse.quote(word)}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+
+        sentences = []
+        if isinstance(data, list):
+            for entry in data:
+                for meaning in entry.get("meanings", []):
+                    pos = meaning.get("partOfSpeech", "word")
+                    for d in meaning.get("definitions", []):
+                        defn = d.get("definition", "")
+                        if defn:
+                            sentences.append(f"The {pos} '{word}' is defined as: {defn}")
+                        example = d.get("example", "")
+                        if example:
+                            sentences.append(f"An example of using '{word}' is: {example}")
+        return sentences
+    except Exception:
+        return []
+
+
 def _fetch_wordnet_sentences(word: str, max_senses: int = 4) -> list[str]:
     """Use NLTK WordNet to get definitions and example sentences for a word."""
     try:
@@ -256,8 +281,11 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
 
     def _acquire_topic(label: str, query: str) -> tuple[str, list[str]]:
         wiki = _fetch_wikipedia_sentences(query, fetched_titles=fetched_titles)
-        wnet = _fetch_wordnet_sentences(label)
-        return label, wiki + wnet
+        # Try Live API first, then local WordNet
+        lexical = _fetch_dictionary_sentences(label)
+        if not lexical:
+            lexical = _fetch_wordnet_sentences(label)
+        return label, wiki + lexical
 
     with ThreadPoolExecutor(max_workers=min(len(weak_topics), 4)) as pool:
         futures = {pool.submit(_acquire_topic, label, query): (label, query)
@@ -305,11 +333,7 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
 
     if all_sentences:
         reader.train_sequence(all_sentences, enable_causal=False)
-        # Reinforce newly learned patterns to boost their weights above the warm_start cutoff
-        try:
-            reader.maintenance_cycle(all_sentences, retrain_epochs=1, enable_causal=False)
-        except Exception:
-            pass
+        reader.flush_all()
         print(green(f"Training complete — {len(all_sentences)} sentences processed."))
     else:
         print(yellow("No novel sentences to train on — model already knows this content."))
@@ -362,7 +386,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     from hpm_ai_v6.agents.dataset_training_agent import DatasetTrainingAgent
 
     corpus = _corpus_path()
-    reader = MultiAgentReader(corpus, warm_start=True, warm_start_limit=500)
+    reader = MultiAgentReader(corpus, warm_start=False)  # on-demand retrieval from pager index
     reasoning_agent = getattr(reader, "reasoning_agent", None)
     if reasoning_agent is None:
         print(red("Error: reasoning_agent not found on MultiAgentReader."))
@@ -467,17 +491,13 @@ def _retrieve_relevant_patterns(reader, question: str, options_map: dict, top_k:
     return total_loaded
 
 
-def _score_options(reasoning_agent, question: str, options_map: dict) -> tuple[str, bool, dict]:
-    """Score each option by direct edge lookup in the pattern graph.
+def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool, dict]:
+    """Score each option by summing pattern weights from the pager index.
 
-    For each option, counts edges from its node to question-keyword nodes.
-    The option with the most/strongest connections to question terms wins.
-    Falls back to reason_with_trace if graph has no edges at all.
+    Scans each agent's in-memory pager index (no disk reads, no cell reconstruction).
+    Options whose words appear in more/heavier patterns score higher.
+    Newly trained patterns appear immediately — no warm_start needed.
     """
-    reasoning_agent._ensure_fresh()
-    edge_index = getattr(reasoning_agent, "_edge_index", {})
-
-    # Extract meaningful keywords from the question
     q_words = {w for w in question.lower().split()
                if w not in _STOP_WORDS and len(w) > 2 and w.isalpha()}
 
@@ -486,29 +506,25 @@ def _score_options(reasoning_agent, question: str, options_map: dict) -> tuple[s
         if not option_text:
             scores[key] = 0.0
             continue
-        option_words = [w.lower() for w in option_text.split() if w.isalpha()]
+        opt_words = [w.lower() for w in option_text.split() if w.isalpha() and len(w) > 1]
         total = 0.0
-        for opt_word in option_words:
-            # Find all edge index keys that contain this option word
-            for edge_key, records in edge_index.items():
-                if opt_word not in edge_key.lower():
-                    continue
-                # Score edges whose targets connect to question keywords
-                for rec in records:
-                    target_key = getattr(rec, "target_key", "") or ""
-                    target_name = target_key.split(":")[-1].lower()
-                    if any(qw in target_name for qw in q_words):
-                        total += float(getattr(rec, "score", getattr(rec, "raw_weight", 0.0)))
+        for agent in reader.agents.values():
+            pager = getattr(agent, "pattern_pager", None)
+            if pager is None:
+                continue
+            for payload in pager.iter_index_payloads():
+                name = str(payload.get("name", "")).lower()
+                weight = float(payload.get("weight", 0.0))
+                # Pattern must reference option word AND at least one question word
+                has_opt = any(w in name for w in opt_words)
+                has_q = any(qw in name for qw in q_words)
+                if has_opt and has_q:
+                    total += weight
         scores[key] = total
 
     best_key = max(scores, key=lambda k: scores[k])
-    best_score = scores[best_key]
-    any_confident = best_score > 0.0
-
-    # Get a trace for the winning option for reinforcement/display
-    best_trace = reasoning_agent.reason_with_trace(f"{options_map[best_key]} {question}")
-
-    return best_key, any_confident, best_trace
+    confident = scores[best_key] > 0.0
+    return best_key, confident, {"scores": scores}
 
 
 def _parse_letter_answer(answer_text: str, options_map: dict) -> str:
@@ -570,26 +586,8 @@ def _build_search_query(question: str, correct_answer: str) -> str:
 
 
 def _reinforce_trace(reasoning_agent, trace: dict, boost: bool) -> None:
-    """Strengthen (boost=True) or weaken (boost=False) edges from a reasoning trace."""
-    chosen_path = trace.get("chosen_path")
-    if not chosen_path:
-        return
-    steps = chosen_path if isinstance(chosen_path, list) else [chosen_path]
-    for step in steps:
-        source = getattr(step, "source", None)
-        target = getattr(step, "target", None)
-        score = getattr(step, "score", 0.0)
-        if source is None or target is None:
-            continue
-        new_score = float(score) * 1.5 if boost else float(score) * 0.3
-        try:
-            reasoning_agent.promote_reasoning_edge(source, target, max(new_score, 1e-6))
-        except Exception:
-            pass
-    try:
-        reasoning_agent.invalidate()
-    except Exception:
-        pass
+    """No-op: pager-based scoring doesn't use reasoning graph edges."""
+    pass
 
 
 def run_quiz(
@@ -622,13 +620,8 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Retrieve patterns relevant to this question from the archive before scoring
-        n_loaded = _retrieve_relevant_patterns(reader, q.question, options_map)
-        if n_loaded > 0:
-            reasoning_agent.invalidate()
-
-        # Score each option by direct edge-graph lookup
-        chosen, confident, trace = _score_options(reasoning_agent, q.question, options_map)
+        # Score each option by pager index lookup (no warm_start, no disk reads)
+        chosen, confident, trace = _score_options(reader, q.question, options_map)
         correct = OPTION_KEYS[q.correct_index]
 
         confidence_label = "confident" if confident else yellow("guessing")
