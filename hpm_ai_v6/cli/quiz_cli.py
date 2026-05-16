@@ -305,6 +305,11 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
 
     if all_sentences:
         reader.train_sequence(all_sentences, enable_causal=False)
+        # Reinforce newly learned patterns to boost their weights above the warm_start cutoff
+        try:
+            reader.maintenance_cycle(all_sentences, retrain_epochs=1, enable_causal=False)
+        except Exception:
+            pass
         print(green(f"Training complete — {len(all_sentences)} sentences processed."))
     else:
         print(yellow("No novel sentences to train on — model already knows this content."))
@@ -322,6 +327,14 @@ def _nominate_uncertain_topics(dataset_agent, reasoning_agent, n: int = 4,
     candidates = dataset_agent.generate_wikipedia_topics(max_topics=pool_size)
     if not candidates:
         return []
+
+    # Filter out POS tags, syntactic labels, and single-char tokens
+    _bad_prefixes = ("pos_", "word_", "ctx_", "sent_", "phrase_", "dep_")
+    candidates = [t for t in candidates
+                  if len(t) > 2
+                  and not t.lower().startswith(_bad_prefixes)
+                  and not t.startswith("Pos_")
+                  and t.replace("_", "").isalpha()]
 
     if exclude:
         candidates = [t for t in candidates if t not in exclude]
@@ -410,6 +423,48 @@ def main(argv: Optional[List[str]] = None) -> None:
 
 
 OPTION_KEYS = ["A", "B", "C", "D"]
+
+
+def _retrieve_relevant_patterns(reader, question: str, options_map: dict, top_k: int = 50) -> int:
+    """Load patterns relevant to question terms and options from each agent's archive.
+
+    Uses each agent's hydrate_patterns_from_archive with term-based pre-filtering
+    so that source/target Cell objects are correctly reconstructed via the agent's
+    own cell registry (populated by the minimal warm_start).
+    """
+    terms = {w.lower() for w in question.split() if w.isalpha() and len(w) > 2 and w.lower() not in _STOP_WORDS}
+    for opt in options_map.values():
+        terms.update(w.lower() for w in (opt or "").split() if w.isalpha() and len(w) > 2)
+
+    total_loaded = 0
+    for agent in reader.agents.values():
+        pager = getattr(agent, "pattern_pager", None)
+        if pager is None or not hasattr(agent, "hydrate_patterns_from_archive"):
+            continue
+        existing = {p.name for p in getattr(agent, "patterns", [])}
+        payloads = pager.iter_index_payloads()
+        # Filter to relevant names not already loaded
+        relevant = sorted(
+            [p for p in payloads
+             if any(t in str(p.get("name", "")).lower() for t in terms)
+             and str(p.get("name", "")) not in existing],
+            key=lambda p: float(p.get("weight", 0.0)),
+            reverse=True,
+        )[:top_k]
+
+        if not relevant:
+            continue
+
+        # Temporarily swap the index so hydrate_patterns_from_archive only sees relevant payloads
+        original_index = pager._index
+        try:
+            pager._index = {str(p.get("name", "")): p for p in relevant}
+            loaded = agent.hydrate_patterns_from_archive(limit=top_k)
+            total_loaded += loaded
+        finally:
+            pager._index = original_index
+
+    return total_loaded
 
 
 def _score_options(reasoning_agent, question: str, options_map: dict) -> tuple[str, bool, dict]:
@@ -567,7 +622,12 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Score each option independently — pick the one with the most graph support
+        # Retrieve patterns relevant to this question from the archive before scoring
+        n_loaded = _retrieve_relevant_patterns(reader, q.question, options_map)
+        if n_loaded > 0:
+            reasoning_agent.invalidate()
+
+        # Score each option by direct edge-graph lookup
         chosen, confident, trace = _score_options(reasoning_agent, q.question, options_map)
         correct = OPTION_KEYS[q.correct_index]
 
