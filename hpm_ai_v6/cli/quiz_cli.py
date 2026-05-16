@@ -539,6 +539,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     quiz_agent = QuizAgent(reader, reasoning_agent)
     dataset_agent = DatasetTrainingAgent(reader, corpus_path=corpus)
 
+    frontier_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  "data", "quiz_banks", "knowledge_frontier.json")
+    frontier = KnowledgeFrontier.load(frontier_path)
+
     mastered: set[str] = set()  # question ids answered correctly + confidently
     nominated_history: set[str] = set()  # all topics ever nominated across rounds
     fetched_titles: set[str] = set()  # all Wikipedia article titles fetched this session
@@ -569,16 +573,20 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         # Let the model nominate its own next learning topics — ranked by uncertainty
         print("\nAsking model what it needs to learn next...")
-        model_topics = _nominate_uncertain_topics(
-            dataset_agent, reasoning_agent, n=4, pool_size=20, exclude=nominated_history
+        seeds = _nominate_uncertain_topics(
+            dataset_agent, reasoning_agent, n=4, pool_size=50, exclude=set()
         )
-        if model_topics:
-            nominated_history.update(model_topics)
-            print(f"Model nominated (by uncertainty): {', '.join(model_topics)}")
-            train_on_weak_topics(reader, [(t, t) for t in model_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
+        frontier.add_learned_seeds(seeds, reader)
+        next_topics = frontier.next_topics(reader, n=4)
+        if next_topics:
+            nominated_history.update(next_topics)
+            print(f"Frontier nominated (by uncertainty): {', '.join(next_topics)}")
+            train_on_weak_topics(reader, [(t, t) for t in next_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
             reasoning_agent.invalidate()
         else:
-            print(yellow("Model could not nominate topics yet."))
+            print(yellow("Frontier could not nominate topics yet."))
+        frontier.increment_hop()
+        frontier.save(frontier_path)
 
         if not args.loop:
             break
