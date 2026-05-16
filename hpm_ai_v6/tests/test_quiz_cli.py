@@ -17,3 +17,77 @@ def test_parse_args_custom():
     assert args.difficulty == "hard"
     assert args.n == 10
     assert args.auto is True
+
+from unittest.mock import MagicMock, patch
+import io
+
+def _make_mock_question(correct_index=0):
+    q = MagicMock()
+    q.question = "What is the capital of France?"
+    q.options = ["Paris", "London", "Berlin", "Madrid"]
+    q.correct_index = correct_index
+    q.topic = "geography"
+    return q
+
+def test_run_quiz_correct_answer(capsys):
+    from hpm_ai_v6.cli.quiz_cli import run_quiz
+
+    mock_reader = MagicMock()
+    mock_quiz_agent = MagicMock()
+    mock_reasoning_agent = MagicMock()
+
+    question = _make_mock_question(correct_index=0)
+    mock_quiz_agent.generate_quiz.return_value = [question]
+
+    # reasoning_agent returns trace pointing to option A
+    mock_reasoning_agent.reason_with_trace.return_value = {
+        "candidate_paths": [{"label": "Paris"}],
+        "chosen_path": {"label": "Paris"},
+        "explanation": "Paris is the capital of France.",
+        "answer": "A",
+    }
+
+    score, weak = run_quiz(
+        reader=mock_reader,
+        quiz_agent=mock_quiz_agent,
+        reasoning_agent=mock_reasoning_agent,
+        n=1,
+        difficulty="easy",
+        source="bank",
+        auto=True,
+    )
+
+    assert score == 1
+    assert weak == []
+    captured = capsys.readouterr()
+    assert "Paris" in captured.out or "correct" in captured.out.lower()
+
+def test_run_quiz_wrong_answer_adds_weak_topic(capsys):
+    from hpm_ai_v6.cli.quiz_cli import run_quiz
+
+    mock_reader = MagicMock()
+    mock_quiz_agent = MagicMock()
+    mock_reasoning_agent = MagicMock()
+
+    question = _make_mock_question(correct_index=0)
+    mock_quiz_agent.generate_quiz.return_value = [question]
+
+    mock_reasoning_agent.reason_with_trace.return_value = {
+        "candidate_paths": [],
+        "chosen_path": None,
+        "explanation": "I don't know.",
+        "answer": "C",
+    }
+
+    score, weak = run_quiz(
+        reader=mock_reader,
+        quiz_agent=mock_quiz_agent,
+        reasoning_agent=mock_reasoning_agent,
+        n=1,
+        difficulty="easy",
+        source="bank",
+        auto=True,
+    )
+
+    assert score == 0
+    assert "geography" in weak
