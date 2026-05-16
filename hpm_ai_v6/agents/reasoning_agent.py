@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.core.temporal_cell import TemporalCell
+from hpm_ai_v6.hpm_model.storage.pattern_pager import PatternPager
 
 @dataclass
 class ReasoningSignal:
@@ -60,6 +62,8 @@ class ReasoningAgent:
     - 2-cell "analogies" approximated by embedding similarity over 1-cells
     """
 
+    FULL_REFRESH_EVERY: int = 5
+
     STOPWORDS = {
         "a", "an", "and", "are", "as", "at", "be", "because", "been", "but",
         "by", "did", "do", "does", "for", "from", "had", "has", "have", "how",
@@ -77,6 +81,7 @@ class ReasoningAgent:
         max_depth: int = 4,
         analogy_threshold: float = 0.85,
         pruning_threshold: float = 0.01,
+        pattern_cache_dir: Optional[str] = None,
     ):
         self.reader = reader
         if beam_width is not None:
@@ -97,6 +102,12 @@ class ReasoningAgent:
         self._transient_rule_edge_index: Dict[str, List[EdgeRecord]] = {}
         self._forward_rule_patterns: List[Tuple[float, Cell]] = []
         self._dirty: bool = True
+        self._refresh_state: str = "idle"
+        self._last_refresh_started_at: Optional[float] = None
+        self._last_refresh_finished_at: Optional[float] = None
+        self._last_pattern_counts: Dict[str, int] = {}
+        self._incremental_refresh_count: int = 0
+        self._reasoning_pager = PatternPager(pattern_cache_dir, "reasoning") if pattern_cache_dir else None
         self._relation_registry = getattr(reader, "relation_registry", None)
         self._relation_cell_index: Dict[str, Cell] = {}
 
@@ -706,131 +717,320 @@ class ReasoningAgent:
                 best_cell = cell
         return best_cell if best_score > 0.2 else None
 
+    def _current_pattern_counts(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for agent_name, agent in self._iter_reasoning_agents():
+            counts[agent_name] = len(list(getattr(agent, "patterns", []) or []))
+        return counts
+
     def invalidate(self) -> None:
-        self._dirty = True
+        current_counts = self._current_pattern_counts()
+        if current_counts != self._last_pattern_counts:
+            self._dirty = True
+            self._refresh_state = "dirty"
+
+    def _reader_lookup(self) -> Dict[str, Cell]:
+        lookup: Dict[str, Cell] = {}
+        for name, agent in self._iter_reasoning_agents():
+            paging_lookup = getattr(agent, "_paging_lookup", None)
+            if callable(paging_lookup):
+                try:
+                    lookup.update(paging_lookup())
+                except Exception:
+                    continue
+        return lookup
+
+    def _persisted_reasoning_patterns(self, lookup: Dict[str, Cell]) -> List[Cell]:
+        if self._reasoning_pager is None:
+            return []
+
+        patterns: List[Cell] = []
+        seen: set[str] = set()
+        payloads = sorted(
+            self._reasoning_pager.iter_index_payloads(),
+            key=lambda item: float(item.get("weight", 0.0)),
+            reverse=True,
+        )
+        for payload in payloads:
+            name = str(payload.get("name", ""))
+            if not name or name in seen:
+                continue
+            try:
+                pattern = self._reasoning_pager.load_from_payload(payload, lookup)
+            except Exception:
+                continue
+            seen.add(pattern.name)
+            patterns.append(pattern)
+        return patterns
+
+    def _reasoning_pattern_name(self, source: Cell, target: Cell) -> str:
+        return f"reasoning_{self._cell_key(source).replace(':', '_')}_to_{self._cell_key(target).replace(':', '_')}"
+
+    def promote_reasoning_edge(self, source: Cell, target: Cell, score: float) -> Optional[Cell]:
+        if self._reasoning_pager is None or score <= 0.0:
+            return None
+        pattern = Cell(
+            name=self._reasoning_pattern_name(source, target),
+            dim=1,
+            embedding=target.as_numpy() - source.as_numpy(),
+            source=source,
+            target=target,
+            weight=float(score),
+            metadata={"origin": "reasoning", "score": float(score)},
+        )
+        try:
+            self._reasoning_pager.save(pattern)
+            self._reasoning_pager.flush()
+        except Exception:
+            return None
+        return pattern
+
+    def flush_pager(self) -> None:
+        if self._reasoning_pager is not None:
+            try:
+                self._reasoning_pager.flush()
+            except Exception:
+                pass
+
+    def index_status(self) -> Dict[str, Any]:
+        return {
+            "state": self._refresh_state,
+            "dirty": self._dirty,
+            "last_refresh_started_at": self._last_refresh_started_at,
+            "last_refresh_finished_at": self._last_refresh_finished_at,
+        }
 
     def _ensure_fresh(self) -> None:
         if self._dirty:
             self.refresh()
 
+    def _incremental_refresh(self, current_counts: Dict[str, int]) -> None:
+        self._refresh_state = "indexing"
+        self._last_refresh_started_at = float(time.time())
+        try:
+            new_sentence_labels: Dict[str, str] = {}
+            for agent_name, agent in self._iter_reasoning_agents():
+                patterns = list(getattr(agent, "patterns", []) or [])
+                weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
+                lookup = getattr(agent, "_paging_lookup", lambda: {})()
+                calibrated = self._calibrate_scores(weights)
+                old_count = self._last_pattern_counts.get(agent_name, 0)
+                new_patterns = patterns[old_count:]
+                if not new_patterns:
+                    continue
+                for idx_offset, pattern in enumerate(new_patterns):
+                    idx = old_count + idx_offset
+                    self._all_patterns.append(pattern)
+                    if pattern.source is None or pattern.target is None:
+                        continue
+                    raw_weight = float(weights[idx]) if idx < len(weights) else float(getattr(pattern, "weight", 0.0))
+                    score = calibrated[idx] if idx < len(calibrated) else max(raw_weight, 1e-6)
+                    score = max(float(score), 1e-6)
+                    self._add_edge_record(
+                        edge_index=self._edge_index,
+                        node_index=self._node_index,
+                        pattern=pattern,
+                        score=score,
+                        raw_weight=raw_weight,
+                        agent_name=agent_name,
+                        relation=self._agent_relation(agent_name),
+                    )
+                for cell in lookup.values():
+                    key = self._cell_key(cell)
+                    if key in self._node_index:
+                        continue
+                    self._node_index[key] = cell
+                    alias = self._normalize(self._strip_prefix(cell.name))
+                    if alias:
+                        self._alias_index.setdefault(alias, []).append(key)
+                        self._alias_index.setdefault(self._normalize(cell.name), []).append(key)
+                    if key.startswith("sentence:") and hasattr(agent, "sent_text_by_name"):
+                        text = getattr(agent, "sent_text_by_name", {}).get(cell.name)
+                        if text:
+                            new_sentence_labels[key] = text
+                            self._sentence_labels[key] = text
+                            for token in self._tokenize(text):
+                                self._alias_index.setdefault(token, []).append(key)
+
+            if new_sentence_labels:
+                self._add_sentence_word_bridge_edges(
+                    edge_index=self._edge_index,
+                    node_index=self._node_index,
+                    sentence_labels=new_sentence_labels,
+                )
+
+            for records in self._edge_index.values():
+                records.sort(key=lambda item: item.score, reverse=True)
+
+            self._dirty = False
+            self._refresh_state = "ready"
+            self._last_refresh_finished_at = float(time.time())
+        finally:
+            if self._dirty:
+                self._refresh_state = "error"
+                self._last_refresh_finished_at = float(time.time())
+
     def refresh(self) -> None:
-        edge_index: Dict[str, List[EdgeRecord]] = {}
-        node_index: Dict[str, Cell] = {}
-        alias_index: Dict[str, List[str]] = {}
-        all_patterns: List[Cell] = []
-        sentence_labels: Dict[str, str] = {}
+        current_counts = self._current_pattern_counts()
+        if current_counts == self._last_pattern_counts and self._edge_index:
+            self._dirty = False
+            self._refresh_state = "ready"
+            return
+        has_prior_index = bool(self._edge_index)
+        do_full = not has_prior_index or self._incremental_refresh_count >= self.FULL_REFRESH_EVERY
+        if do_full:
+            self._full_refresh()
+            self._incremental_refresh_count = 0
+        else:
+            self._incremental_refresh(current_counts)
+            self._incremental_refresh_count += 1
+        self._last_pattern_counts = current_counts
 
-        for agent_name, agent in self._iter_reasoning_agents():
-            patterns = list(getattr(agent, "patterns", []) or [])
-            weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
-            lookup = getattr(agent, "_paging_lookup", lambda: {})()
-            calibrated = self._calibrate_scores(weights)
+    def _full_refresh(self) -> None:
+        self._refresh_state = "indexing"
+        self._last_refresh_started_at = float(time.time())
+        try:
+            edge_index: Dict[str, List[EdgeRecord]] = {}
+            node_index: Dict[str, Cell] = {}
+            alias_index: Dict[str, List[str]] = {}
+            all_patterns: List[Cell] = []
+            sentence_labels: Dict[str, str] = {}
 
-            for idx, pattern in enumerate(patterns):
+            for agent_name, agent in self._iter_reasoning_agents():
+                patterns = list(getattr(agent, "patterns", []) or [])
+                weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
+                lookup = getattr(agent, "_paging_lookup", lambda: {})()
+                calibrated = self._calibrate_scores(weights)
+
+                for idx, pattern in enumerate(patterns):
+                    all_patterns.append(pattern)
+                    if pattern.source is None or pattern.target is None:
+                        continue
+
+                    raw_weight = float(weights[idx]) if idx < len(weights) else float(getattr(pattern, "weight", 0.0))
+                    score = calibrated[idx] if idx < len(calibrated) else max(raw_weight, 1e-6)
+                    score = max(float(score), 1e-6)
+                    self._add_edge_record(
+                        edge_index=edge_index,
+                        node_index=node_index,
+                        pattern=pattern,
+                        score=score,
+                        raw_weight=raw_weight,
+                        agent_name=agent_name,
+                        relation=self._agent_relation(agent_name),
+                    )
+
+                for cell in lookup.values():
+                    key = self._cell_key(cell)
+                    node_index[key] = cell
+                    alias = self._normalize(self._strip_prefix(cell.name))
+                    if alias:
+                        alias_index.setdefault(alias, []).append(key)
+                        alias_index.setdefault(self._normalize(cell.name), []).append(key)
+                    if key.startswith("cause:"):
+                        for token in self._tokenize(alias.replace("->", " ").replace("@", " ")):
+                            alias_index.setdefault(token, []).append(key)
+                    if key.startswith("effect:"):
+                        effect_alias = alias.replace("->", " ")
+                        for token in self._tokenize(effect_alias):
+                            alias_index.setdefault(token, []).append(key)
+                    if key.startswith("sentence:") and hasattr(agent, "sent_text_by_name"):
+                        text = getattr(agent, "sent_text_by_name", {}).get(cell.name)
+                        if text:
+                            sentence_labels[key] = text
+                            for token in self._tokenize(text):
+                                alias_index.setdefault(token, []).append(key)
+                    if key.startswith("context:"):
+                        for token in self._tokenize(alias.replace("|", " ")):
+                            alias_index.setdefault(token, []).append(key)
+
+            reasoning_lookup = self._reader_lookup()
+            persisted_patterns = self._persisted_reasoning_patterns(reasoning_lookup)
+            for pattern in persisted_patterns:
                 all_patterns.append(pattern)
                 if pattern.source is None or pattern.target is None:
                     continue
-
-                raw_weight = float(weights[idx]) if idx < len(weights) else float(getattr(pattern, "weight", 0.0))
-                score = calibrated[idx] if idx < len(calibrated) else max(raw_weight, 1e-6)
-                score = max(float(score), 1e-6)
+                raw_weight = float(getattr(pattern, "weight", 0.0))
+                score = max(raw_weight, 1e-6)
                 self._add_edge_record(
                     edge_index=edge_index,
                     node_index=node_index,
                     pattern=pattern,
                     score=score,
                     raw_weight=raw_weight,
-                    agent_name=agent_name,
-                    relation=self._agent_relation(agent_name),
+                    agent_name="reasoning",
+                    relation="reasoning_persisted",
                 )
 
-            for cell in lookup.values():
-                key = self._cell_key(cell)
-                node_index[key] = cell
-                alias = self._normalize(self._strip_prefix(cell.name))
-                if alias:
-                    alias_index.setdefault(alias, []).append(key)
-                    alias_index.setdefault(self._normalize(cell.name), []).append(key)
-                if key.startswith("cause:"):
-                    for token in self._tokenize(alias.replace("->", " ").replace("@", " ")):
-                        alias_index.setdefault(token, []).append(key)
-                if key.startswith("effect:"):
-                    effect_alias = alias.replace("->", " ")
-                    for token in self._tokenize(effect_alias):
-                        alias_index.setdefault(token, []).append(key)
-                if key.startswith("sentence:") and hasattr(agent, "sent_text_by_name"):
-                    text = getattr(agent, "sent_text_by_name", {}).get(cell.name)
-                    if text:
-                        sentence_labels[key] = text
-                        for token in self._tokenize(text):
-                            alias_index.setdefault(token, []).append(key)
-                if key.startswith("context:"):
-                    for token in self._tokenize(alias.replace("|", " ")):
-                        alias_index.setdefault(token, []).append(key)
+            self._add_causal_bridge_edges(edge_index=edge_index, node_index=node_index)
+            self._add_sentence_word_bridge_edges(
+                edge_index=edge_index,
+                node_index=node_index,
+                sentence_labels=sentence_labels,
+            )
 
-        self._add_causal_bridge_edges(edge_index=edge_index, node_index=node_index)
-        self._add_sentence_word_bridge_edges(
-            edge_index=edge_index,
-            node_index=node_index,
-            sentence_labels=sentence_labels,
-        )
+            # POS-tag enrichment: re-tag word agent edges with POS roles if syntactic agent available
+            _syn_agent = self.reader.agents.get("syntactic") if hasattr(self.reader, "agents") else None
+            if _syn_agent is not None and hasattr(_syn_agent, "get_pos"):
+                tagged_index: Dict[str, List[EdgeRecord]] = {}
+                for source_key, records in edge_index.items():
+                    new_records = []
+                    for rec in records:
+                        if rec.agent_name == "word" and rec.source.name.startswith("word_"):
+                            src_word = rec.source.name[len("word_"):]
+                            pos = _syn_agent.get_pos(src_word)
+                            if pos is not None:
+                                rec = EdgeRecord(
+                                    pattern=rec.pattern,
+                                    source=rec.source,
+                                    target=rec.target,
+                                    score=rec.score,
+                                    raw_weight=rec.raw_weight,
+                                    agent_name=rec.agent_name,
+                                    source_key=rec.source_key,
+                                    target_key=rec.target_key,
+                                    relation=f"pos_{pos}",
+                                )
+                        new_records.append(rec)
+                    tagged_index[source_key] = new_records
+                edge_index = tagged_index
 
-        # POS-tag enrichment: re-tag word agent edges with POS roles if syntactic agent available
-        _syn_agent = self.reader.agents.get("syntactic") if hasattr(self.reader, "agents") else None
-        if _syn_agent is not None and hasattr(_syn_agent, "get_pos"):
-            tagged_index: Dict[str, List[EdgeRecord]] = {}
-            for source_key, records in edge_index.items():
-                new_records = []
-                for rec in records:
-                    if rec.agent_name == "word" and rec.source.name.startswith("word_"):
-                        src_word = rec.source.name[len("word_"):]
-                        pos = _syn_agent.get_pos(src_word)
-                        if pos is not None:
-                            rec = EdgeRecord(
-                                pattern=rec.pattern,
-                                source=rec.source,
-                                target=rec.target,
-                                score=rec.score,
-                                raw_weight=rec.raw_weight,
-                                agent_name=rec.agent_name,
-                                source_key=rec.source_key,
-                                target_key=rec.target_key,
-                                relation=f"pos_{pos}",
-                            )
-                    new_records.append(rec)
-                tagged_index[source_key] = new_records
-            edge_index = tagged_index
+            for records in edge_index.values():
+                records.sort(key=lambda item: item.score, reverse=True)
 
-        for records in edge_index.values():
-            records.sort(key=lambda item: item.score, reverse=True)
-
-        self._edge_index = edge_index
-        self._node_index = node_index
-        self._alias_index = alias_index
-        self._all_patterns = all_patterns
-        self._sentence_labels = sentence_labels
-        self._analogy_cache = self._build_analogy_cache(all_patterns)
-        pattern_weights = {
-            pattern.name: float(getattr(pattern, "weight", 0.0))
-            for pattern in all_patterns
-        }
-        for agent_name, agent in self._iter_reasoning_agents():
-            patterns = list(getattr(agent, "patterns", []) or [])
-            weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
-            for idx, pattern in enumerate(patterns):
-                if idx < len(weights):
-                    pattern_weights[pattern.name] = float(weights[idx])
-        self._explicit_analogy_index = self._build_explicit_analogy_index(all_patterns, pattern_weights)
-        self._explicit_rule_index = self._build_explicit_rule_index(all_patterns, pattern_weights)
-        self._transient_rule_edge_index = self._build_transient_rule_edge_index(self._explicit_rule_index)
-        self._forward_rule_patterns = self._build_forward_rule_patterns(all_patterns, pattern_weights)
-        self._relation_cell_index = {
-            pattern.name.removeprefix("rel_"): pattern
-            for pattern in all_patterns
-            if getattr(pattern, "dim", 0) == 2
-            and getattr(pattern, "name", "").startswith("rel_")
-        }
-        self._dirty = False
+            self._edge_index = edge_index
+            self._node_index = node_index
+            self._alias_index = alias_index
+            self._all_patterns = all_patterns
+            self._sentence_labels = sentence_labels
+            self._analogy_cache = self._build_analogy_cache(all_patterns)
+            pattern_weights = {
+                pattern.name: float(getattr(pattern, "weight", 0.0))
+                for pattern in all_patterns
+            }
+            for agent_name, agent in self._iter_reasoning_agents():
+                patterns = list(getattr(agent, "patterns", []) or [])
+                weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
+                for idx, pattern in enumerate(patterns):
+                    if idx < len(weights):
+                        pattern_weights[pattern.name] = float(weights[idx])
+            self._explicit_analogy_index = self._build_explicit_analogy_index(all_patterns, pattern_weights)
+            self._explicit_rule_index = self._build_explicit_rule_index(all_patterns, pattern_weights)
+            self._transient_rule_edge_index = self._build_transient_rule_edge_index(self._explicit_rule_index)
+            self._forward_rule_patterns = self._build_forward_rule_patterns(all_patterns, pattern_weights)
+            self._relation_cell_index = {
+                pattern.name.removeprefix("rel_"): pattern
+                for pattern in all_patterns
+                if getattr(pattern, "dim", 0) == 2
+                and getattr(pattern, "name", "").startswith("rel_")
+            }
+            self._dirty = False
+            self._refresh_state = "ready"
+            self._last_refresh_finished_at = float(time.time())
+        finally:
+            if self._dirty:
+                self._refresh_state = "error"
+                self._last_refresh_finished_at = float(time.time())
 
     def _choose_cell(self, candidates: Sequence[str]) -> Optional[Cell]:
         if not candidates:
@@ -1012,7 +1212,11 @@ class ReasoningAgent:
                 seen.add(key)
                 yield edge
 
-    def _incoming_edges(self, target_key: str) -> List[EdgeRecord]:
+    def _incoming_edges(
+        self,
+        target_key: str,
+        allowed_relations: Optional[set[str]] = None,
+    ) -> List[EdgeRecord]:
         incoming = [edge for edge in self._iter_edges() if edge.target_key == target_key]
         structural_relations = {
             "causal_anchor",
@@ -1021,16 +1225,23 @@ class ReasoningAgent:
             "word_in_sentence",
             "sentence_mentions_word",
         }
+        if allowed_relations is not None:
+            incoming = [edge for edge in incoming if edge.relation in allowed_relations]
         structural = [edge for edge in incoming if edge.relation in structural_relations]
         if len(structural) < len(incoming):
             incoming = [edge for edge in incoming if edge.relation not in structural_relations]
         incoming.sort(key=lambda edge: (edge.score, edge.raw_weight), reverse=True)
         return incoming
 
-    def _resolve_abductive_effect(self, terms: Sequence[str]) -> Optional[Cell]:
+    def _resolve_abductive_effect(self, terms: Sequence[str], question: str = "") -> Optional[Cell]:
         effect = self._pick_explanation_endpoint(terms)
         if effect is not None:
             return effect
+        sentence_cell = self._best_sentence_match(question)
+        if sentence_cell is not None:
+            return sentence_cell
+        if len(terms) > 1:
+            return None
         for term in reversed(list(terms)):
             resolved = self._resolve_cell(term)
             if resolved is not None:
@@ -1046,6 +1257,7 @@ class ReasoningAgent:
         self,
         effect_key: str,
         max_depth: int,
+        allowed_relations: Optional[set[str]] = None,
         visiting: Optional[set[str]] = None,
     ) -> List[List[EdgeRecord]]:
         if max_depth <= 0:
@@ -1055,7 +1267,7 @@ class ReasoningAgent:
             return []
         visiting.add(effect_key)
 
-        incoming = self._incoming_edges(effect_key)
+        incoming = self._incoming_edges(effect_key, allowed_relations=allowed_relations)
         if not incoming:
             return []
 
@@ -1069,7 +1281,12 @@ class ReasoningAgent:
             if max_depth == 1:
                 paths.append([edge])
                 continue
-            upstream = self._abductive_paths(edge.source_key, max_depth - 1, visiting=visiting)
+            upstream = self._abductive_paths(
+                edge.source_key,
+                max_depth - 1,
+                allowed_relations=allowed_relations,
+                visiting=visiting,
+            )
             if not upstream:
                 paths.append([edge])
                 continue
@@ -1112,8 +1329,18 @@ class ReasoningAgent:
             depth=depth,
         )
 
-    def _abductive_subgraphs(self, effect: Cell, max_depth: int = 4, top_k: int = 3) -> List[ExplanatorySubgraph]:
-        raw_paths = self._abductive_paths(self._cell_key(effect), max_depth=max_depth)
+    def _abductive_subgraphs(
+        self,
+        effect: Cell,
+        max_depth: int = 4,
+        top_k: int = 3,
+        allowed_relations: Optional[set[str]] = None,
+    ) -> List[ExplanatorySubgraph]:
+        raw_paths = self._abductive_paths(
+            self._cell_key(effect),
+            max_depth=max_depth,
+            allowed_relations=allowed_relations,
+        )
         if not raw_paths:
             return []
 
@@ -1304,7 +1531,8 @@ class ReasoningAgent:
                 consequent = metadata.get("consequent", {}) or {}
                 if not isinstance(antecedent_edges, list) or not isinstance(consequent, dict):
                     continue
-                candidate_edges = all_snapshot_edges if pair_mode == "any_reachable" else reachable_edges
+                _MAX_ANY_REACHABLE_CANDIDATES = 200
+                candidate_edges = all_snapshot_edges[:_MAX_ANY_REACHABLE_CANDIDATES] if pair_mode == "any_reachable" else reachable_edges
                 for matched_edges, bindings in self._match_subgraph_templates(antecedent_edges, candidate_edges):
                     derived_source = self._resolve_subgraph_consequent_cell(
                         consequent.get("source_var") or consequent.get("source_ref"),
@@ -1381,16 +1609,16 @@ class ReasoningAgent:
                             derived_target = self._resolve_rule_endpoint(derive_target_spec, first_edge, second_edge)
                             if derived_source is None or derived_target is None:
                                 continue
-                            source_key = self._cell_key(derived_source)
-                            target_key = self._cell_key(derived_target)
-                            if source_key == target_key:
+                            derived_source_key = self._cell_key(derived_source)
+                            derived_target_key = self._cell_key(derived_target)
+                            if derived_source_key == derived_target_key:
                                 continue
                             antecedent_support = min(first_edge.score, second_edge.score)
                             derived_score = max(rule_score * antecedent_support, 1e-6)
-                            previous = best_scores.get((source_key, target_key))
+                            previous = best_scores.get((derived_source_key, derived_target_key))
                             if previous is not None and derived_score <= previous:
                                 continue
-                            best_scores[(source_key, target_key)] = derived_score
+                            best_scores[(derived_source_key, derived_target_key)] = derived_score
                             pattern = Cell(
                                 name=f"forward_{rule.name}_r{round_idx}_{first_edge.pattern.name}_{second_edge.pattern.name}",
                                 dim=1,
@@ -1405,14 +1633,14 @@ class ReasoningAgent:
                                 score=derived_score,
                                 raw_weight=derived_score,
                                 agent_name="reasoning",
-                                source_key=source_key,
-                                target_key=target_key,
+                                source_key=derived_source_key,
+                                target_key=derived_target_key,
                                 relation="forward_chain",
                             )
-                            current_edges.setdefault(source_key, []).append(record)
-                            derived.setdefault(source_key, []).append(record)
-                            if target_key not in reachable:
-                                reachable.add(target_key)
+                            current_edges.setdefault(derived_source_key, []).append(record)
+                            derived.setdefault(derived_source_key, []).append(record)
+                            if derived_target_key not in reachable:
+                                reachable.add(derived_target_key)
                             added = True
             if not added:
                 break
@@ -2639,7 +2867,7 @@ class ReasoningAgent:
 
         if parsed.get("mode") == "explanation" or self._is_abductive_question(question):
             trace["mode"] = "explanation"
-            effect = self._resolve_abductive_effect(terms)
+            effect = self._resolve_abductive_effect(terms, question=question)
             trace["anchors"]["effect"] = self._cell_ref(effect)
             if effect is None:
                 start, goal = self._pick_path_endpoints_with_fallback(question, terms)
@@ -2660,7 +2888,12 @@ class ReasoningAgent:
                 trace["answer"] = self._path_answer(question, start, goal, method=method)
                 return trace
 
-            subgraphs = self.abductive_explain(effect.name, max_depth=self.max_depth, top_k=3)
+            subgraphs = self._abductive_subgraphs(
+                effect,
+                max_depth=self.max_depth,
+                top_k=3,
+                allowed_relations={"causal_relation", "causal_anchor", "causal_reentry", "causal_semantic_reentry", "reasoning_persisted"},
+            )
             if not subgraphs:
                 trace["answer"] = f"I found {self._cell_display(effect)}, but no causal evidence chain for it yet."
                 return trace
@@ -2740,3 +2973,121 @@ class ReasoningAgent:
 
     def reason(self, question: str, method: str = "auto") -> str:
         return str(self.reason_with_trace(question, method=method).get("answer", "I could not reason about that question."))
+
+    def analyse_patterns(self) -> dict:
+        """Return a structured snapshot of the current pattern graph."""
+        import time as _time
+        self._ensure_fresh()
+
+        total_patterns = len(self._all_patterns)
+        total_nodes = len(self._node_index)
+
+        # Count edges (sum of list lengths across all source keys)
+        total_edges = sum(len(v) for v in self._edge_index.values())
+
+        # Per-agent weight stats grouped by agent_name on EdgeRecords
+        agent_weights: Dict[str, List[float]] = {}
+        relation_counts: Dict[str, int] = {}
+        for records in self._edge_index.values():
+            for rec in records:
+                agent_weights.setdefault(rec.agent_name, []).append(rec.raw_weight)
+                relation_counts[rec.relation] = relation_counts.get(rec.relation, 0) + 1
+
+        agents: Dict[str, dict] = {}
+        for agent_name, weights in agent_weights.items():
+            if weights:
+                sorted_w = sorted(weights)
+                agents[agent_name] = {
+                    "count": len(weights),
+                    "weight_min": float(sorted_w[0]),
+                    "weight_max": float(sorted_w[-1]),
+                    "weight_mean": float(sum(weights) / len(weights)),
+                    "weight_median": float(sorted_w[len(sorted_w) // 2]),
+                }
+            else:
+                agents[agent_name] = {
+                    "count": 0,
+                    "weight_min": 0.0,
+                    "weight_max": 0.0,
+                    "weight_mean": 0.0,
+                    "weight_median": 0.0,
+                }
+
+        # Build out-degree and in-degree maps
+        out_degree: Dict[str, int] = {}
+        in_degree: Dict[str, int] = {}
+        out_relations: Dict[str, Dict[str, int]] = {}
+        for src_key, records in self._edge_index.items():
+            out_degree[src_key] = out_degree.get(src_key, 0) + len(records)
+            for rec in records:
+                in_degree[rec.target_key] = in_degree.get(rec.target_key, 0) + 1
+                out_relations.setdefault(src_key, {})
+                out_relations[src_key][rec.relation] = out_relations[src_key].get(rec.relation, 0) + 1
+
+        # Top 15 hubs by total degree
+        all_node_keys = set(out_degree) | set(in_degree)
+        hub_list = []
+        for nk in all_node_keys:
+            od = out_degree.get(nk, 0)
+            id_ = in_degree.get(nk, 0)
+            rels = out_relations.get(nk, {})
+            top_rel = max(rels, key=rels.get) if rels else ""
+            cell = self._node_index.get(nk)
+            display = self._cell_display(cell) if cell is not None else nk
+            hub_list.append({
+                "node": display,
+                "out_degree": od,
+                "in_degree": id_,
+                "total_degree": od + id_,
+                "top_relation": top_rel,
+            })
+        hub_list.sort(key=lambda h: h["total_degree"], reverse=True)
+        top_hubs = hub_list[:15]
+
+        # Connected components (BFS on undirected adjacency)
+        undirected: Dict[str, set] = {}
+        for src_key, records in self._edge_index.items():
+            undirected.setdefault(src_key, set())
+            for rec in records:
+                tgt = rec.target_key
+                undirected[src_key].add(tgt)
+                undirected.setdefault(tgt, set()).add(src_key)
+
+        visited: set = set()
+        component_sizes: List[int] = []
+        for start_node in undirected:
+            if start_node in visited:
+                continue
+            queue = [start_node]
+            visited.add(start_node)
+            size = 0
+            while queue:
+                cur = queue.pop()
+                size += 1
+                for nb in undirected[cur]:
+                    if nb not in visited:
+                        visited.add(nb)
+                        queue.append(nb)
+            component_sizes.append(size)
+
+        # Isolated nodes = nodes with no edges at all
+        isolated = sum(1 for nk in self._node_index if nk not in undirected)
+
+        component_sizes.sort(reverse=True)
+        components = {
+            "count": len(component_sizes),
+            "largest_size": component_sizes[0] if component_sizes else 0,
+            "isolated_nodes": isolated,
+            "top_components": component_sizes[:5],
+        }
+
+        return {
+            "generated_at": _time.time(),
+            "total_patterns": total_patterns,
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "agents": agents,
+            "relations": relation_counts,
+            "top_hubs": top_hubs,
+            "components": components,
+        }
