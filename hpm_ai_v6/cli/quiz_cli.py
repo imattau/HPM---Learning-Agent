@@ -115,16 +115,11 @@ def _search_wikipedia_title(query: str) -> Optional[str]:
     return None
 
 
-def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]:
-    """Search for *topic*, resolve to best article title, fetch intro sentences via Action API."""
-    title = _search_wikipedia_title(topic)
-    if not title:
-        return []
-
+def _fetch_wikipedia_full(title: str, max_sentences: int = 40) -> list[str]:
+    """Fetch full article extract for *title* and return up to max_sentences sentences."""
     params = urllib.parse.urlencode({
         "action": "query",
         "prop": "extracts",
-        "exintro": True,
         "explaintext": True,
         "titles": title,
         "format": "json"
@@ -137,16 +132,61 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]
         pages = data.get("query", {}).get("pages", {})
         if not pages:
             return []
-        
-        # Get the first page in the dictionary
         page = next(iter(pages.values()))
         extract = page.get("extract", "")
-        # Clean and split into sentences
         sentences = [s.strip() for s in extract.split(".") if len(s.strip()) > 20]
         return sentences[:max_sentences]
-    except Exception as exc:
-        print(yellow(f"  [Wikipedia fetch failed for '{topic}' (title: '{title}'): {exc}]"))
+    except Exception:
         return []
+
+
+def _fetch_wikipedia_related_titles(title: str, limit: int = 2) -> list[str]:
+    """Fetch up to *limit* related article titles from the article's links."""
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "prop": "links",
+        "titles": title,
+        "pllimit": "5",
+        "plnamespace": "0",
+        "format": "json"
+    })
+    url = f"https://en.wikipedia.org/w/api.php?{params}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        pages = data.get("query", {}).get("pages", {})
+        if not pages:
+            return []
+        page = next(iter(pages.values()))
+        links = page.get("links", [])
+        return [lnk["title"] for lnk in links[:limit]]
+    except Exception:
+        return []
+
+
+def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40) -> list[str]:
+    """Search for *topic*, resolve to best article title, fetch full article + 2 related articles."""
+    title = _search_wikipedia_title(topic)
+    if not title:
+        return []
+
+    all_sentences: list[str] = []
+
+    # Full article for the primary title
+    primary = _fetch_wikipedia_full(title, max_sentences=max_sentences)
+    if not primary:
+        print(yellow(f"  [Wikipedia fetch failed for '{topic}' (title: '{title}')]"))
+        return []
+    all_sentences.extend(primary)
+
+    # Follow up to 2 related article links and fetch their intros
+    related_titles = _fetch_wikipedia_related_titles(title, limit=2)
+    for rel_title in related_titles:
+        rel_sentences = _fetch_wikipedia_full(rel_title, max_sentences=10)
+        all_sentences.extend(rel_sentences)
+
+    return all_sentences
 
 
 def _fetch_wordnet_sentences(word: str, max_senses: int = 4) -> list[str]:
@@ -210,6 +250,35 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
         print(yellow("No novel sentences to train on — model already knows this content."))
 
 
+def _nominate_uncertain_topics(dataset_agent, n: int = 4, pool_size: int = 20,
+                               exclude: set[str] | None = None) -> list[str]:
+    """Nominate topics the model is most uncertain about (highest prediction entropy).
+
+    Gets a pool of candidate topics from the dataset agent, scores each with a
+    probe sentence, ranks by descending score (high entropy = uncertain), and
+    returns the top *n* that haven't been nominated before.
+    """
+    candidates = dataset_agent.generate_wikipedia_topics(max_topics=pool_size)
+    if not candidates:
+        return []
+
+    if exclude:
+        candidates = [t for t in candidates if t not in exclude]
+
+    scored: list[tuple[float, str]] = []
+    for topic in candidates:
+        try:
+            probe = f"{topic} is a subject worth understanding."
+            score = dataset_agent.score_sentence(probe)
+        except Exception:
+            score = 0.0
+        scored.append((score, topic))
+
+    # Descending by score: high entropy → model is most uncertain
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [topic for _, topic in scored[:n]]
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
 
@@ -229,6 +298,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     dataset_agent = DatasetTrainingAgent(reader, corpus_path=corpus)
 
     mastered: set[str] = set()  # question ids answered correctly + confidently
+    nominated_history: set[str] = set()  # all topics ever nominated across rounds
     round_num = 0
 
     while True:
@@ -254,12 +324,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         else:
             print(green("All topics answered confidently — no retraining needed."))
 
-        # Let the model nominate its own next learning topics from pattern gaps
+        # Let the model nominate its own next learning topics — ranked by uncertainty
         print("\nAsking model what it needs to learn next...")
-        model_topics = dataset_agent.generate_wikipedia_topics(max_topics=4)
+        model_topics = _nominate_uncertain_topics(
+            dataset_agent, n=4, pool_size=20, exclude=nominated_history
+        )
         if model_topics:
-            print(f"Model nominated: {', '.join(model_topics)}")
-            train_on_weak_topics(reader, [(t, t) for t in model_topics])
+            nominated_history.update(model_topics)
+            print(f"Model nominated (by uncertainty): {', '.join(model_topics)}")
+            train_on_weak_topics(reader, [(t, t) for t in model_topics], dataset_agent=dataset_agent)
             reasoning_agent.invalidate()
         else:
             print(yellow("Model could not nominate topics yet."))
