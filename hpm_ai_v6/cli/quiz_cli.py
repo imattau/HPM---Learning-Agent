@@ -156,14 +156,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     print("Building HPM reader...")
     from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
     from hpm_ai_v6.agents.quiz_agent import QuizAgent
+    from hpm_ai_v6.agents.dataset_training_agent import DatasetTrainingAgent
 
-    reader = MultiAgentReader(_corpus_path(), warm_start=True, warm_start_limit=500)
+    corpus = _corpus_path()
+    reader = MultiAgentReader(corpus, warm_start=True, warm_start_limit=500)
     reasoning_agent = getattr(reader, "reasoning_agent", None)
     if reasoning_agent is None:
         print(red("Error: reasoning_agent not found on MultiAgentReader."))
         sys.exit(1)
 
     quiz_agent = QuizAgent(reader, reasoning_agent)
+    dataset_agent = DatasetTrainingAgent(reader, corpus_path=corpus)
 
     mastered: set[str] = set()  # question ids answered correctly + confidently
     round_num = 0
@@ -190,6 +193,16 @@ def main(argv: Optional[List[str]] = None) -> None:
             reasoning_agent.invalidate()
         else:
             print(green("All topics answered confidently — no retraining needed."))
+
+        # Let the model nominate its own next learning topics from pattern gaps
+        print("\nAsking model what it needs to learn next...")
+        model_topics = dataset_agent.generate_wikipedia_topics(max_topics=4)
+        if model_topics:
+            print(f"Model nominated: {', '.join(model_topics)}")
+            train_on_weak_topics(reader, [(t, t) for t in model_topics])
+            reasoning_agent.invalidate()
+        else:
+            print(yellow("Model could not nominate topics yet."))
 
         if not args.loop:
             break
