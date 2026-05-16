@@ -234,11 +234,18 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
             continue
 
         if dataset_agent is not None:
-            # Score each sentence by entropy — skip ones the model already knows
-            novel = [s for s in sentences if dataset_agent.score_sentence(s) >= min_entropy]
-            skipped = len(sentences) - len(novel)
-            print(f"{len(novel)} novel sentences ({skipped} already known, skipped)")
-            all_sentences.extend(novel)
+            scored = [(dataset_agent.score_sentence(s), s) for s in sentences]
+            novel = [s for sc, s in scored if sc >= min_entropy]
+            if novel:
+                skipped = len(sentences) - len(novel)
+                print(f"{len(novel)} novel sentences ({skipped} already known, skipped)")
+                all_sentences.extend(novel)
+            else:
+                # No novel sentences — reinforce with the highest-entropy subset
+                scored.sort(key=lambda x: x[0], reverse=True)
+                reinforcement = [s for _, s in scored[:5]]
+                print(f"0 novel — reinforcing with {len(reinforcement)} highest-entropy sentences")
+                all_sentences.extend(reinforcement)
         else:
             print(f"{len(sentences)} sentences")
             all_sentences.extend(sentences)
