@@ -377,6 +377,150 @@ def _nominate_uncertain_topics(dataset_agent, reasoning_agent, n: int = 4,
     return [topic for _, topic in scored[:n]]
 
 
+# ── KnowledgeFrontier ────────────────────────────────────────────────────────
+
+import json as _json
+from pathlib import Path as _Path
+
+_STOPWORDS = {
+    "a", "an", "the", "of", "in", "on", "at", "to", "for", "and", "or",
+    "but", "is", "are", "was", "were", "be", "been", "being", "have",
+    "has", "had", "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "must", "can", "it", "its", "this", "that", "with",
+}
+
+_DEFAULT_FRONTIER_PATH = (
+    _Path(__file__).parent.parent / "data" / "quiz_banks" / "knowledge_frontier.json"
+)
+
+
+class KnowledgeFrontier:
+    """Progressively expands Wikipedia fetch targets via WordNet semantic graph.
+
+    Seeds come from _nominate_uncertain_topics(); the frontier is scored by
+    pager edge density so the sparsest (least-known) concepts are fetched first.
+    """
+
+    def __init__(self):
+        self.known_seeds: set[str] = set()
+        self.frontier: list[str] = []
+        self.exhausted: set[str] = set()
+        self.hop_depth: int = 1
+
+    # ── persistence ──────────────────────────────────────────────────────────
+
+    def save(self, path: str | None = None) -> None:
+        target = _Path(path) if path else _DEFAULT_FRONTIER_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "known_seeds": sorted(self.known_seeds),
+            "frontier": self.frontier,
+            "exhausted": sorted(self.exhausted),
+            "hop_depth": self.hop_depth,
+        }
+        target.write_text(_json.dumps(data, indent=2))
+
+    @classmethod
+    def load(cls, path: str | None = None) -> "KnowledgeFrontier":
+        target = _Path(path) if path else _DEFAULT_FRONTIER_PATH
+        kf = cls()
+        if not target.exists():
+            return kf
+        try:
+            data = _json.loads(target.read_text())
+            kf.known_seeds = set(data.get("known_seeds", []))
+            kf.frontier = data.get("frontier", [])
+            kf.exhausted = set(data.get("exhausted", []))
+            kf.hop_depth = int(data.get("hop_depth", 1))
+        except Exception:
+            pass  # corrupt file → fresh state
+        return kf
+
+    # ── hop depth ────────────────────────────────────────────────────────────
+
+    def increment_hop(self) -> None:
+        self.hop_depth = min(self.hop_depth + 1, 5)
+
+    # ── internal helpers ─────────────────────────────────────────────────────
+
+    def _wordnet_candidates(self, term: str, hop_depth: int | None = None) -> set[str]:
+        if hop_depth is None:
+            hop_depth = self.hop_depth
+        try:
+            from nltk.corpus import wordnet
+        except ImportError:
+            return set()
+
+        synsets = wordnet.synsets(term.lower().replace(" ", "_"))[:3]
+        candidates: set[str] = set()
+
+        def _name(syn) -> str:
+            return syn.lemmas()[0].name().replace("_", " ")
+
+        for syn in synsets:
+            for hop1 in syn.hypernyms() + syn.hyponyms():
+                candidates.add(_name(hop1))
+                if hop_depth >= 2:
+                    for hop2 in hop1.hypernyms() + hop1.hyponyms():
+                        candidates.add(_name(hop2))
+
+        # Filter noise
+        filtered = set()
+        for c in candidates:
+            if len(c) <= 1:
+                continue
+            if c.startswith("pos_") or c.startswith("word_"):
+                continue
+            if c.lower() in _STOPWORDS:
+                continue
+            filtered.add(c)
+        return filtered
+
+    def _edge_density(self, term: str, reader) -> int:
+        word = term.lower().split()[0]
+        count = 0
+        for agent in reader.agents.values():
+            pager = getattr(agent, "pattern_pager", None)
+            if pager is None:
+                continue
+            for payload in pager.iter_index_payloads():
+                if word in str(payload.get("name", "")).lower():
+                    count += 1
+        return count
+
+    # ── public API ───────────────────────────────────────────────────────────
+
+    def add_learned_seeds(self, terms: list[str], reader) -> None:
+        """Expand frontier from new seed terms via WordNet."""
+        for term in terms:
+            key = term.lower().strip()
+            if key in self.known_seeds:
+                continue
+            self.known_seeds.add(key)
+            candidates = self._wordnet_candidates(key, self.hop_depth)
+            # Remove already known / exhausted
+            candidates -= self.known_seeds
+            candidates -= self.exhausted
+            # Remove terms already in frontier
+            existing = set(self.frontier)
+            candidates -= existing
+            # Score by edge density (ascending = most to learn)
+            scored = sorted(candidates, key=lambda c: self._edge_density(c, reader))
+            self.frontier.extend(scored[:8])
+
+    def next_topics(self, reader, n: int = 4) -> list[str]:
+        """Return up to n frontier topics with the lowest edge density."""
+        if not self.frontier:
+            return []
+        # Re-score frontier live
+        scored = sorted(self.frontier, key=lambda c: self._edge_density(c, reader))
+        chosen = scored[:n]
+        # Remove chosen from frontier
+        chosen_set = set(chosen)
+        self.frontier = [t for t in self.frontier if t not in chosen_set]
+        return chosen
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
 
