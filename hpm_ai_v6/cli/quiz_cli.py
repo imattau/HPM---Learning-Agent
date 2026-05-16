@@ -165,26 +165,42 @@ def _fetch_wikipedia_related_titles(title: str, limit: int = 2) -> list[str]:
         return []
 
 
-def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40) -> list[str]:
-    """Search for *topic*, resolve to best article title, fetch full article + 2 related articles."""
+def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
+                               fetched_titles: set[str] | None = None) -> list[str]:
+    """Fetch Wikipedia content for *topic*, skipping already-fetched titles.
+
+    When the primary article has already been fetched, follows links to find
+    unvisited articles — exploring the link graph breadth-first.
+    """
+    if fetched_titles is None:
+        fetched_titles = set()
+
     title = _search_wikipedia_title(topic)
     if not title:
         return []
 
     all_sentences: list[str] = []
+    titles_to_fetch: list[str] = []
 
-    # Full article for the primary title
-    primary = _fetch_wikipedia_full(title, max_sentences=max_sentences)
-    if not primary:
-        print(yellow(f"  [Wikipedia fetch failed for '{topic}' (title: '{title}')]"))
-        return []
-    all_sentences.extend(primary)
+    if title not in fetched_titles:
+        titles_to_fetch.append(title)
+    else:
+        # Primary already known — find unvisited related titles
+        related = _fetch_wikipedia_related_titles(title, limit=8)
+        titles_to_fetch = [t for t in related if t not in fetched_titles][:3]
 
-    # Follow up to 2 related article links and fetch their intros
-    related_titles = _fetch_wikipedia_related_titles(title, limit=2)
-    for rel_title in related_titles:
-        rel_sentences = _fetch_wikipedia_full(rel_title, max_sentences=10)
-        all_sentences.extend(rel_sentences)
+    for t in titles_to_fetch:
+        sentences = _fetch_wikipedia_full(t, max_sentences=max_sentences)
+        if sentences:
+            fetched_titles.add(t)
+            all_sentences.extend(sentences)
+            # Also follow 2 links from each new article
+            for rel in _fetch_wikipedia_related_titles(t, limit=2):
+                if rel not in fetched_titles:
+                    rel_sentences = _fetch_wikipedia_full(rel, max_sentences=10)
+                    if rel_sentences:
+                        fetched_titles.add(rel)
+                        all_sentences.extend(rel_sentences)
 
     return all_sentences
 
@@ -207,7 +223,8 @@ def _fetch_wordnet_sentences(word: str, max_senses: int = 4) -> list[str]:
         return []
 
 
-def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_agent=None, min_entropy: float = 0.1) -> None:
+def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_agent=None,
+                         min_entropy: float = 0.1, fetched_titles: set[str] | None = None) -> None:
     """Fetch Wikipedia text and dictionary definitions for each weak topic, filter by novelty, and retrain.
 
     Each entry is (display_label, search_query). Sentences are scored by entropy
@@ -222,8 +239,8 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
     for label, query in weak_topics:
         print(f"  Acquiring '{label}' ...", end=" ", flush=True)
         
-        # 1. Fetch Encyclopedia Context
-        wiki_sentences = _fetch_wikipedia_sentences(query)
+        # 1. Fetch Encyclopedia Context (tracks visited titles to explore new links)
+        wiki_sentences = _fetch_wikipedia_sentences(query, fetched_titles=fetched_titles)
         
         # 2. Fetch Lexical Grounding
         dict_sentences = _fetch_wordnet_sentences(label)
@@ -241,11 +258,19 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
                 print(f"{len(novel)} novel sentences ({skipped} already known, skipped)")
                 all_sentences.extend(novel)
             else:
-                # No novel sentences — reinforce with the highest-entropy subset
-                scored.sort(key=lambda x: x[0], reverse=True)
-                reinforcement = [s for _, s in scored[:5]]
-                print(f"0 novel — reinforcing with {len(reinforcement)} highest-entropy sentences")
-                all_sentences.extend(reinforcement)
+                # No novel sentences — try exploring links for fresh content
+                link_sentences = _fetch_wikipedia_sentences(query, fetched_titles=fetched_titles)
+                link_scored = [(dataset_agent.score_sentence(s), s) for s in link_sentences] if link_sentences else []
+                link_novel = [s for sc, s in link_scored if sc >= min_entropy]
+                if link_novel:
+                    print(f"{len(link_novel)} novel sentences from linked articles")
+                    all_sentences.extend(link_novel)
+                else:
+                    # Still nothing novel — reinforce with highest-entropy subset
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    reinforcement = [s for _, s in scored[:5]]
+                    print(f"0 novel — reinforcing with {len(reinforcement)} highest-entropy sentences")
+                    all_sentences.extend(reinforcement)
         else:
             print(f"{len(sentences)} sentences")
             all_sentences.extend(sentences)
@@ -307,6 +332,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     mastered: set[str] = set()  # question ids answered correctly + confidently
     nominated_history: set[str] = set()  # all topics ever nominated across rounds
+    fetched_titles: set[str] = set()  # all Wikipedia article titles fetched this session
     round_num = 0
 
     while True:
@@ -327,7 +353,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         mastered.update(newly_mastered)
 
         if weak_topics:
-            train_on_weak_topics(reader, weak_topics, dataset_agent=dataset_agent)
+            train_on_weak_topics(reader, weak_topics, dataset_agent=dataset_agent, fetched_titles=fetched_titles)
             reasoning_agent.invalidate()
         else:
             print(green("All topics answered confidently — no retraining needed."))
@@ -340,7 +366,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         if model_topics:
             nominated_history.update(model_topics)
             print(f"Model nominated (by uncertainty): {', '.join(model_topics)}")
-            train_on_weak_topics(reader, [(t, t) for t in model_topics], dataset_agent=dataset_agent)
+            train_on_weak_topics(reader, [(t, t) for t in model_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
             reasoning_agent.invalidate()
         else:
             print(yellow("Model could not nominate topics yet."))
