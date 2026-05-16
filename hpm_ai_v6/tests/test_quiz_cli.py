@@ -91,3 +91,26 @@ def test_run_quiz_wrong_answer_adds_weak_topic(capsys):
 
     assert score == 0
     assert "geography" in weak
+
+def test_train_on_weak_topics_calls_train_sequence():
+    from hpm_ai_v6.cli.quiz_cli import train_on_weak_topics
+
+    mock_reader = MagicMock()
+
+    # Patch urllib fetch to return fake Wikipedia text
+    fake_wiki = "France is a country in Western Europe. Paris is its capital."
+    with patch("hpm_ai_v6.cli.quiz_cli._fetch_wikipedia_sentences") as mock_fetch:
+        mock_fetch.return_value = fake_wiki.split(". ")
+        train_on_weak_topics(mock_reader, ["geography"])
+
+    mock_reader.train_sequence.assert_called_once()
+    call_args = mock_reader.train_sequence.call_args[0][0]
+    assert isinstance(call_args, list)
+    assert len(call_args) > 0
+
+def test_train_on_weak_topics_empty_list():
+    from hpm_ai_v6.cli.quiz_cli import train_on_weak_topics
+
+    mock_reader = MagicMock()
+    train_on_weak_topics(mock_reader, [])
+    mock_reader.train_sequence.assert_not_called()

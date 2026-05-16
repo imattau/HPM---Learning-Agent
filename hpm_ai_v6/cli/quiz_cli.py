@@ -73,9 +73,81 @@ def _corpus_path() -> str:
 # ---------------------------------------------------------------------------
 # Stub main (filled out in Tasks 2 & 3)
 # ---------------------------------------------------------------------------
+import urllib.request
+import urllib.parse
+import json
+
+
+def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]:
+    """Fetch the Wikipedia intro for *topic* and return as a list of sentences."""
+    encoded = urllib.parse.quote(topic.replace(" ", "_"))
+    url = (
+        f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        extract = data.get("extract", "")
+        sentences = [s.strip() for s in extract.split(".") if len(s.strip()) > 20]
+        return sentences[:max_sentences]
+    except Exception as exc:
+        print(yellow(f"  [Wikipedia fetch failed for '{topic}': {exc}]"))
+        return []
+
+
+def train_on_weak_topics(reader, weak_topics: list[str]) -> None:
+    """Fetch Wikipedia text for each weak topic and retrain the reader."""
+    if not weak_topics:
+        return
+
+    print(f"\nTriggering Wikipedia training on: {', '.join(weak_topics)}")
+    all_sentences: list[str] = []
+    for topic in weak_topics:
+        print(f"  Fetching Wikipedia: {topic} ...", end=" ", flush=True)
+        sentences = _fetch_wikipedia_sentences(topic)
+        if sentences:
+            print(f"{len(sentences)} sentences")
+            all_sentences.extend(sentences)
+        else:
+            print("(no data)")
+
+    if all_sentences:
+        reader.train_sequence(all_sentences, enable_causal=False)
+        print(green(f"Training complete — {len(all_sentences)} sentences processed."))
+    else:
+        print(yellow("No Wikipedia data retrieved; skipping training."))
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
-    print(f"Quiz CLI — source={args.source} difficulty={args.difficulty} n={args.n} auto={args.auto}")
+
+    print("Building HPM reader...")
+    from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
+    from hpm_ai_v6.agents.quiz_agent import QuizAgent
+
+    reader = MultiAgentReader(_corpus_path(), warm_start=True)
+    reasoning_agent = getattr(reader, "reasoning_agent", None)
+    if reasoning_agent is None:
+        print(red("Error: reasoning_agent not found on MultiAgentReader."))
+        sys.exit(1)
+
+    quiz_agent = QuizAgent(reader, reasoning_agent)
+
+    score, weak_topics = run_quiz(
+        reader=reader,
+        quiz_agent=quiz_agent,
+        reasoning_agent=reasoning_agent,
+        n=args.n,
+        difficulty=args.difficulty,
+        source=args.source,
+        auto=args.auto,
+    )
+
+    if weak_topics:
+        train_on_weak_topics(reader, weak_topics)
+    else:
+        print(green("All topics answered confidently — no retraining needed."))
 
 
 OPTION_KEYS = ["A", "B", "C", "D"]
