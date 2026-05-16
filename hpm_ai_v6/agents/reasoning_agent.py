@@ -724,10 +724,8 @@ class ReasoningAgent:
         return counts
 
     def invalidate(self) -> None:
-        current_counts = self._current_pattern_counts()
-        if current_counts != self._last_pattern_counts:
-            self._dirty = True
-            self._refresh_state = "dirty"
+        self._dirty = True
+        self._refresh_state = "dirty"
 
     def _reader_lookup(self) -> Dict[str, Cell]:
         lookup: Dict[str, Cell] = {}
@@ -872,12 +870,11 @@ class ReasoningAgent:
 
     def refresh(self) -> None:
         current_counts = self._current_pattern_counts()
-        if current_counts == self._last_pattern_counts and self._edge_index:
-            self._dirty = False
+        if not self._dirty and current_counts == self._last_pattern_counts and self._edge_index:
             self._refresh_state = "ready"
             return
         has_prior_index = bool(self._edge_index)
-        do_full = not has_prior_index or self._incremental_refresh_count >= self.FULL_REFRESH_EVERY
+        do_full = not has_prior_index or self._dirty or self._incremental_refresh_count >= self.FULL_REFRESH_EVERY
         if do_full:
             self._full_refresh()
             self._incremental_refresh_count = 0
@@ -1240,8 +1237,6 @@ class ReasoningAgent:
         sentence_cell = self._best_sentence_match(question)
         if sentence_cell is not None:
             return sentence_cell
-        if len(terms) > 1:
-            return None
         for term in reversed(list(terms)):
             resolved = self._resolve_cell(term)
             if resolved is not None:
@@ -2902,7 +2897,11 @@ class ReasoningAgent:
                 effect,
                 max_depth=self.max_depth,
                 top_k=3,
-                allowed_relations={"causal_relation", "causal_anchor", "causal_reentry", "causal_semantic_reentry", "reasoning_persisted"},
+                allowed_relations={
+                    "causal_relation", "causal_anchor", "causal_reentry", 
+                    "causal_semantic_reentry", "reasoning_persisted",
+                    "lexical_transition", "semantic_transition"
+                },
             )
             if not subgraphs:
                 trace["answer"] = f"I found {self._cell_display(effect)}, but no causal evidence chain for it yet."

@@ -1,40 +1,54 @@
 # Session State Checkpoint
-Generated: 2026-05-13
-Reason: Context threshold exceeded (82%)
+Generated: 2026-05-17
+Reason: Context threshold exceeded (95%+)
 
 ## Execution Mode
-**Mode**: interactive
-**Auto-Continue**: false
+
+**Mode**: unattended
+**Auto-Continue**: true
+**Remaining Tasks**: [Task 8: Integrate KnowledgeFrontier into main() in quiz_cli.py]
+
+> **CRITICAL**: auto_continue: true — DO NOT pause for user confirmation. Complete all remaining work and commit.
 
 ## Current Task
-Brainstorming and speccing new reasoning capabilities for the HPM reasoning agent.
-The user was in a flow — last action was committing the abductive reasoning spec.
-Likely next: write the implementation plan for abductive reasoning, OR move to next capability.
+
+**Task 8**: Integrate `KnowledgeFrontier` into `main()` in `hpm_ai_v6/cli/quiz_cli.py`.
+
+Replace the current `_nominate_uncertain_topics` → directly train flow with frontier-driven fetch.
 
 ## Progress Summary
 
-### Completed this session:
-1. **Temporal reasoning** — fully implemented (user confirmed done)
-2. **Temporal reasoning spec** — `docs/superpowers/specs/2026-05-13-temporal-reasoning-design.md`
-3. **Temporal reasoning plan** — `docs/superpowers/plans/2026-05-13-temporal-reasoning.md`
-4. **Abductive reasoning spec** — `docs/superpowers/specs/2026-05-13-abductive-reasoning-design.md`
-   - ExplanatorySubgraph dataclass, abductive_explain(), reason_with_trace() intents
-   - Output: minimal explanatory subgraph, plausibility = noisy-OR / depth
+Tasks 1-7 complete and committed (last commit: 6faa1a15):
+- QuizBank JSON files, QuizAgent, quiz_cli.py, ReasoningAgent hang fix, PatternPager scaling fix, KnowledgeFrontier class, KnowledgeFrontier tests (19 tests)
 
-### Remaining reasoning capabilities (not yet specced):
-- Uncertainty quantification
-- Counterfactual reasoning
-- Negation / closed-world reasoning
+## Integration Pattern
 
-## Key Decisions
-- Temporal intervals: defined by causal transitions
-- TemporalAgent: separate agent (not folded into ReasoningAgent)
-- Abduction output: explanatory subgraph (not ranked list)
-- Branch: hpm-ai-v6
+After each quiz round in main(), replace the existing nominate+train block with:
+
+```python
+# Load frontier once at start of main():
+frontier_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "data", "quiz_banks", "knowledge_frontier.json")
+frontier = KnowledgeFrontier.load(frontier_path)
+
+# After quiz round, replace nominate+train block with:
+seeds = _nominate_uncertain_topics(dataset_agent, reasoning_agent, n=4,
+                                    pool_size=50, exclude=set())
+frontier.add_learned_seeds(seeds, reader)
+next_topics = frontier.next_topics(reader, n=4)
+if next_topics:
+    train_on_weak_topics(reader, [(t, t) for t in next_topics], fetched_titles, dataset_agent)
+frontier.increment_hop()
+frontier.save(frontier_path)
+```
 
 ## Continuation Instructions
-Wait for user's next message. They will either:
-- Say "write it" → write implementation plan for abductive reasoning spec
-- Name a new capability → brainstorm/spec it
 
-Read `docs/superpowers/specs/2026-05-13-abductive-reasoning-design.md` for abductive spec context.
+1. Run: `grep -n "class KnowledgeFrontier\|_nominate_uncertain_topics\|def main" hpm_ai_v6/cli/quiz_cli.py`
+2. Read the full main() function in quiz_cli.py
+3. Replace nominate+train block with frontier integration above
+4. Run: `python -m pytest hpm_ai_v6/tests/test_knowledge_frontier.py -v`
+5. Commit with message: "feat: integrate KnowledgeFrontier into quiz loop (Task 8)"
+
+Branch: hpm-ai-v6
+Working dir: /home/mattthomson/workspace/HPM---Learning-Agent

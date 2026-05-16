@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import atexit
-import hashlib
-import json
-import os
+import struct
 import threading
 from queue import Empty, Queue
 from typing import Dict, List, Optional, Sequence
@@ -13,12 +11,34 @@ import numpy as np
 from hpm_ai_v6.hpm_model.core.cell import Cell
 
 
+def _load_sqlite_vec(con):
+    """Load the sqlite-vec extension into an open connection."""
+    try:
+        import sqlite_vec
+        con.enable_load_extension(True)
+        sqlite_vec.load(con)
+        con.enable_load_extension(False)
+        return True
+    except Exception:
+        return False
+
+
+def _emb_to_bytes(arr: np.ndarray) -> bytes:
+    """Encode a float64 numpy array as float32 little-endian bytes for sqlite-vec."""
+    return arr.astype(np.float32).tobytes()
+
+
+def _bytes_to_emb(b: bytes) -> np.ndarray:
+    n = len(b) // 4
+    return np.array(struct.unpack(f"{n}f", b), dtype=float)
+
+
 class PatternPager:
     """
-    Minimal async disk-backed pattern archive.
+    Async disk-backed pattern archive using SQLite + sqlite-vec.
 
-    Spills the lowest-weight patterns to per-pattern JSON files on a background
-    worker so training does not wait on archive I/O.
+    Drops the lowest-weight patterns when active patterns exceed max_active_patterns.
+    Public API is identical to the previous JSONL-based implementation.
     """
 
     def __init__(
@@ -28,32 +48,86 @@ class PatternPager:
         max_active_patterns: int = 5000,
         spill_fraction: float = 0.25,
     ):
+        import os, sqlite3
         self.cache_dir = cache_dir
         self.agent_name = agent_name
         self.max_active_patterns = max_active_patterns
         self.spill_fraction = spill_fraction
-        self.archive_dir = os.path.join(self.cache_dir, self.agent_name)
+
+        self.archive_dir = os.path.join(cache_dir, agent_name)
         os.makedirs(self.archive_dir, exist_ok=True)
-        self.journal_path = os.path.join(self.archive_dir, "journal.jsonl")
-        self.index_path = os.path.join(self.archive_dir, "index.jsonl")
+        self.db_path = os.path.join(self.archive_dir, "patterns.db")
+
+        self._lock = threading.Lock()
+        self._pending: Dict[str, Dict[str, object]] = {}
+        self._vec_ready = False  # True once vec_patterns table is created
+        self._dim: Optional[int] = None  # fixed once first pattern written
+
+        self._con = self._open_connection()
+        self._init_schema()
 
         self._queue: "Queue[Optional[Dict[str, object]]]" = Queue()
-        self._pending: Dict[str, Dict[str, object]] = {}
-        self._index: Dict[str, Dict[str, object]] = {}
-        self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._worker = threading.Thread(target=self._writer_loop, daemon=True)
         self._worker.start()
-        self._replay_journal()
-        self._load_index()
         atexit.register(self.close)
+
+    def _open_connection(self):
+        import sqlite3
+        con = sqlite3.connect(self.db_path, check_same_thread=False)
+        _load_sqlite_vec(con)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA synchronous=NORMAL")
+        return con
+
+    def _init_schema(self):
+        with self._lock:
+            self._con.execute("""
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            self._con.execute("""
+                CREATE TABLE IF NOT EXISTS patterns (
+                    rowid   INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name    TEXT UNIQUE NOT NULL,
+                    dim     INTEGER NOT NULL,
+                    source  TEXT,
+                    target  TEXT,
+                    weight  REAL NOT NULL DEFAULT 1.0,
+                    embedding BLOB NOT NULL
+                )
+            """)
+            self._con.commit()
+            # Restore dim and vec table if patterns already exist
+            row = self._con.execute("SELECT value FROM meta WHERE key='dim'").fetchone()
+            if row:
+                self._dim = int(row[0])
+                self._ensure_vec_table(self._dim)
+
+    def _ensure_vec_table(self, dim: int) -> None:
+        """Create vec_patterns virtual table for given dim if not already created."""
+        if self._vec_ready:
+            return
+        try:
+            self._con.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_patterns USING vec0(
+                    embedding float[{dim}]
+                )
+            """)
+            self._con.commit()
+            self._vec_ready = True
+        except Exception:
+            pass  # sqlite-vec not available; load_nearest falls back to cosine scan
 
     @staticmethod
     def _serialize_cell(cell: Cell) -> Dict[str, object]:
+        emb = cell.as_numpy()
         return {
             "name": cell.name,
             "dim": cell.dim,
-            "embedding": cell.as_numpy().tolist(),
+            "embedding": emb.tolist(),
             "source": cell.source.name if cell.source is not None else None,
             "target": cell.target.name if cell.target is not None else None,
             "weight": float(cell.weight),
@@ -63,24 +137,23 @@ class PatternPager:
     def _deserialize_cell(payload: Dict[str, object], lookup: Dict[str, Cell]) -> Cell:
         source_name = payload.get("source")
         target_name = payload.get("target")
+        emb = payload.get("embedding")
+        if isinstance(emb, (bytes, bytearray)):
+            emb = _bytes_to_emb(emb)
+        else:
+            emb = np.asarray(emb, dtype=float)
         return Cell(
             name=str(payload["name"]),
             dim=int(payload["dim"]),
-            embedding=np.asarray(payload["embedding"], dtype=float),
-            source=lookup.get(str(source_name)) if source_name is not None else None,
-            target=lookup.get(str(target_name)) if target_name is not None else None,
+            embedding=emb,
+            source=lookup.get(str(source_name)) if source_name else None,
+            target=lookup.get(str(target_name)) if target_name else None,
             weight=float(payload.get("weight", 1.0)),
         )
-
-    def _path_for_name(self, name: str) -> str:
-        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()
-        return os.path.join(self.archive_dir, f"{digest}.json")
 
     @staticmethod
     def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9
-        if denom <= 0.0:
-            return 0.0
         return float(np.dot(a, b) / denom)
 
     @staticmethod
@@ -89,7 +162,6 @@ class PatternPager:
             return vector.astype(float, copy=False)
         try:
             import torch
-
             if isinstance(vector, torch.Tensor):
                 return vector.detach().cpu().numpy().astype(float, copy=False)
         except Exception:
@@ -102,7 +174,6 @@ class PatternPager:
                 payload = self._queue.get(timeout=0.1)
             except Empty:
                 continue
-
             try:
                 if payload is not None:
                     self._write_payload(payload)
@@ -113,169 +184,71 @@ class PatternPager:
 
     def _write_payload(self, payload: Dict[str, object]) -> None:
         name = str(payload["name"])
-        path = self._path_for_name(name)
-        tmp_path = f"{path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
-        os.replace(tmp_path, path)
-
-    def _append_journal(self, payload: Dict[str, object]) -> None:
-        # Skip journal append if it would grow beyond threshold — index is the durable store
-        try:
-            if os.path.exists(self.journal_path) and os.path.getsize(self.journal_path) > self._COMPACT_THRESHOLD_BYTES:
-                return
-        except OSError:
-            pass
-        with open(self.journal_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-
-    def _append_index(self, payload: Dict[str, object]) -> None:
-        self._upsert_index(payload)
-        PatternPager._write_count += 1
-        if PatternPager._write_count % self._COMPACT_EVERY_N_WRITES == 0:
-            self._compact_index()
+        dim = int(payload["dim"])
+        emb_list = payload.get("embedding")
+        if isinstance(emb_list, (bytes, bytearray)):
+            emb_arr = _bytes_to_emb(emb_list)
         else:
-            with open(self.index_path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload) + "\n")
+            emb_arr = np.asarray(emb_list, dtype=float)
+        emb_bytes = _emb_to_bytes(emb_arr)
 
-    def _upsert_index(self, payload: Dict[str, object]) -> None:
-        name = str(payload["name"])
-        self._index[name] = payload
+        with self._lock:
+            if self._dim is None:
+                self._dim = len(emb_arr)
+                self._con.execute("INSERT OR IGNORE INTO meta VALUES ('dim', ?)", (str(self._dim),))
+                self._ensure_vec_table(self._dim)
 
-    _COMPACT_THRESHOLD_BYTES = 10 * 1024 * 1024  # compact index when > 10MB
-    _COMPACT_EVERY_N_WRITES = 500  # also compact after N append calls
-    _write_count: int = 0
+            if len(emb_arr) != self._dim:
+                return  # incompatible dim, drop silently
 
-    def _compact_index(self) -> None:
-        """Rewrite index.jsonl with only the current deduplicated entries."""
-        if not self._index:
-            return
-        tmp_path = self.index_path + ".compact_tmp"
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as handle:
-                for payload in self._index.values():
-                    handle.write(json.dumps(payload) + "\n")
-            os.replace(tmp_path, self.index_path)
-        except Exception:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-
-    def _load_index(self) -> None:
-        self._index = {}
-        if os.path.exists(self.index_path):
-            try:
-                with open(self.index_path, "r", encoding="utf-8") as handle:
-                    for line in handle:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            payload = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        self._upsert_index(payload)
-                if self._index:
-                    # Compact if the file has grown too large
-                    try:
-                        if os.path.getsize(self.index_path) > self._COMPACT_THRESHOLD_BYTES:
-                            self._compact_index()
-                    except OSError:
-                        pass
-                    return
-            except FileNotFoundError:
-                pass
-
-        self._rebuild_index_from_archive()
-
-    def _rebuild_index_from_archive(self) -> None:
-        for fname in os.listdir(self.archive_dir):
-            if not fname.endswith(".json"):
-                continue
-            path = os.path.join(self.archive_dir, fname)
-            try:
-                with open(path, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
-            except (FileNotFoundError, json.JSONDecodeError):
-                continue
-            self._upsert_index(payload)
-
-        if self._index:
-            with open(self.index_path, "w", encoding="utf-8") as handle:
-                for payload in self._index.values():
-                    handle.write(json.dumps(payload) + "\n")
-
-    def _replay_journal(self) -> None:
-        if not os.path.exists(self.journal_path):
-            return
-
-        replayed: List[Dict[str, object]] = []
-        try:
-            with open(self.journal_path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        replayed.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        except FileNotFoundError:
-            return
-
-        for payload in replayed:
-            self._write_payload(payload)
-            self._append_index(payload)
-            self._upsert_index(payload)
-
-        try:
-            os.remove(self.journal_path)
-        except FileNotFoundError:
-            pass
+            self._con.execute(
+                "INSERT OR REPLACE INTO patterns(name, dim, source, target, weight, embedding) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (name, dim, payload.get("source"), payload.get("target"),
+                 float(payload.get("weight", 1.0)), emb_bytes),
+            )
+            if self._vec_ready:
+                rowid = self._con.execute(
+                    "SELECT rowid FROM patterns WHERE name=?", (name,)
+                ).fetchone()[0]
+                self._con.execute(
+                    "INSERT OR REPLACE INTO vec_patterns(rowid, embedding) VALUES (?, ?)",
+                    (rowid, emb_bytes),
+                )
+            self._con.commit()
 
     def enqueue_save(self, cell: Cell) -> None:
         payload = self._serialize_cell(cell)
         with self._lock:
-            self._pending[payload["name"]] = payload
-            self._append_journal(payload)
-            self._append_index(payload)
-            self._upsert_index(payload)
+            self._pending[str(payload["name"])] = payload
         self._queue.put(payload)
-
-    def close(self) -> None:
-        if self._stop_event.is_set():
-            return
-        self.flush()
-        self._stop_event.set()
-        self._queue.put(None)
-        if self._worker.is_alive():
-            self._worker.join(timeout=2.0)
-
-    def flush(self) -> None:
-        self._queue.join()
-
-    def has(self, name: str) -> bool:
-        return os.path.exists(self._path_for_name(name))
 
     def save(self, cell: Cell) -> None:
         self.enqueue_save(cell)
+
+    def has(self, name: str) -> bool:
+        with self._lock:
+            if name in self._pending:
+                return True
+            row = self._con.execute(
+                "SELECT 1 FROM patterns WHERE name=? LIMIT 1", (name,)
+            ).fetchone()
+            return row is not None
 
     def load(self, name: str, lookup: Dict[str, Cell]) -> Optional[Cell]:
         with self._lock:
             pending = self._pending.get(name)
         if pending is not None:
             return self._deserialize_cell(pending, lookup)
-
-        path = self._path_for_name(name)
-        if not os.path.exists(path):
+        with self._lock:
+            row = self._con.execute(
+                "SELECT name, dim, source, target, weight, embedding FROM patterns WHERE name=?",
+                (name,),
+            ).fetchone()
+        if row is None:
             return None
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except FileNotFoundError:
-            return None
+        payload = {"name": row[0], "dim": row[1], "source": row[2],
+                   "target": row[3], "weight": row[4], "embedding": row[5]}
         return self._deserialize_cell(payload, lookup)
 
     def load_nearest(
@@ -288,44 +261,76 @@ class PatternPager:
         query = self._to_numpy(query_embedding)
         if query.size == 0:
             return None
-
         exclude = set(exclude_names or [])
-        best_payload: Optional[Dict[str, object]] = None
+
+        # Try sqlite-vec KNN first
+        if self._vec_ready and self._dim and len(query) == self._dim:
+            try:
+                q_bytes = _emb_to_bytes(query)
+                rows = self._con.execute(
+                    "SELECT p.name, p.dim, p.source, p.target, p.weight, p.embedding "
+                    "FROM vec_patterns v JOIN patterns p ON v.rowid = p.rowid "
+                    "WHERE v.embedding MATCH ? AND k = 20 "
+                    "ORDER BY distance",
+                    (q_bytes,),
+                ).fetchall()
+                for row in rows:
+                    name = row[0]
+                    if name in exclude:
+                        continue
+                    emb = _bytes_to_emb(row[5])
+                    score = self._cosine_similarity(query, emb)
+                    if score >= min_similarity:
+                        payload = {"name": row[0], "dim": row[1], "source": row[2],
+                                   "target": row[3], "weight": row[4], "embedding": emb}
+                        return self._deserialize_cell(payload, lookup)
+                return None
+            except Exception:
+                pass  # fall through to full scan
+
+        # Fallback: full cosine scan
+        payloads = self.iter_index_payloads()
+        best_payload = None
         best_score = float("-inf")
-
-        with self._lock:
-            pending_items = list(self._pending.values())
-
-        candidates: List[Dict[str, object]] = []
-        candidates.extend(pending_items)
-        candidates.extend(self._index.values())
-
-        for payload in candidates:
+        for payload in payloads:
             name = str(payload.get("name", ""))
             if name in exclude:
                 continue
-
-            emb = payload.get("embedding")
-            if emb is None:
+            emb_raw = payload.get("embedding")
+            if emb_raw is None:
                 continue
-            candidate = np.asarray(emb, dtype=float)
+            if isinstance(emb_raw, (bytes, bytearray)):
+                candidate = _bytes_to_emb(emb_raw)
+            else:
+                candidate = np.asarray(emb_raw, dtype=float)
             if candidate.shape != query.shape:
                 continue
-
             score = self._cosine_similarity(query, candidate)
             if score > best_score:
                 best_score = score
                 best_payload = payload
-
         if best_payload is None or best_score < min_similarity:
             return None
         return self._deserialize_cell(best_payload, lookup)
 
     def iter_index_payloads(self) -> List[Dict[str, object]]:
         with self._lock:
-            payloads = list(self._index.values())
-            payloads.extend(self._pending.values())
-        return payloads
+            pending_vals = list(self._pending.values())
+            rows = self._con.execute(
+                "SELECT name, dim, source, target, weight, embedding FROM patterns"
+            ).fetchall()
+
+        persisted_names = {str(p["name"]) for p in pending_vals}
+        result = list(pending_vals)
+        for row in rows:
+            name = row[0]
+            if name not in persisted_names:
+                emb = _bytes_to_emb(row[5])
+                result.append({
+                    "name": name, "dim": row[1], "source": row[2],
+                    "target": row[3], "weight": row[4], "embedding": emb.tolist(),
+                })
+        return result
 
     def load_from_payload(self, payload: Dict[str, object], lookup: Dict[str, Cell]) -> Cell:
         return self._deserialize_cell(payload, lookup)
@@ -333,12 +338,25 @@ class PatternPager:
     def select_evictions(self, patterns: Sequence[Cell], weights: Sequence[float]) -> List[int]:
         if len(patterns) <= self.max_active_patterns:
             return []
-
         excess = len(patterns) - self.max_active_patterns
         spill_count = max(excess, int(len(patterns) * self.spill_fraction))
         spill_count = max(1, min(spill_count, len(patterns)))
-        weighted = sorted(
-            enumerate(weights),
-            key=lambda item: float(item[1]),
-        )
+        weighted = sorted(enumerate(weights), key=lambda item: float(item[1]))
         return [idx for idx, _ in weighted[:spill_count]]
+
+    def flush(self) -> None:
+        self._queue.join()
+
+    def close(self) -> None:
+        if self._stop_event.is_set():
+            return
+        self.flush()
+        self._stop_event.set()
+        self._queue.put(None)
+        if self._worker.is_alive():
+            self._worker.join(timeout=2.0)
+        with self._lock:
+            try:
+                self._con.close()
+            except Exception:
+                pass

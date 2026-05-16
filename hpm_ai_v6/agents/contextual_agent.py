@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Sequence, Tuple
+import hashlib
 import numpy as np
 import torch
 
@@ -32,6 +33,41 @@ class ContextualAgent(SocialAgent):
                 embedding=np.random.randn(16) * 0.1,
             )
         return self.word_cells[word]
+
+    @staticmethod
+    def _seed_embedding(token: str, dim: int = 16) -> np.ndarray:
+        digest = hashlib.sha1(token.encode("utf-8")).digest()
+        values = np.frombuffer(digest, dtype=np.uint8).astype(np.float32)
+        if values.size == 0:
+            return np.zeros(dim, dtype=np.float32)
+        tiled = np.resize(values / 255.0 - 0.5, dim)
+        return tiled.astype(np.float32) * 0.2
+
+    def rebuild_cells_from_patterns(self) -> None:
+        for pattern in self.patterns:
+            name = getattr(pattern, "name", "")
+            if not name.startswith("ctx_") or "->" not in name:
+                continue
+            context_part, next_word = name.removeprefix("ctx_").split("->", 1)
+            context_tokens = tuple(token for token in context_part.split("|") if token)
+            if not context_tokens:
+                continue
+            token_cells = [self._get_or_create_word_cell(token) for token in context_tokens]
+            context_cell = self.context_cells.get(context_tokens)
+            if context_cell is None:
+                embedding = np.mean([cell.as_numpy() for cell in token_cells], axis=0)
+                context_cell = Cell(name=f"ctx_{'|'.join(context_tokens)}", dim=0, embedding=embedding)
+                self.context_cells[context_tokens] = context_cell
+            next_cell = self.word_cells.get(next_word) or Cell(
+                name=f"word_{next_word}",
+                dim=0,
+                embedding=self._seed_embedding(next_word),
+            )
+            self.word_cells[next_word] = next_cell
+            if pattern.source is None:
+                pattern.source = context_cell
+            if pattern.target is None:
+                pattern.target = next_cell
 
     def _get_or_create_context_cell(self, tokens: Sequence[str]) -> Cell:
         key = tuple(tokens)

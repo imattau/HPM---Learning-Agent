@@ -626,14 +626,19 @@ def _retrieve_relevant_patterns(reader, question: str, options_map: dict, top_k:
         if not relevant:
             continue
 
-        # Temporarily swap the index so hydrate_patterns_from_archive only sees relevant payloads
-        original_index = pager._index
-        try:
-            pager._index = {str(p.get("name", "")): p for p in relevant}
-            loaded = agent.hydrate_patterns_from_archive(limit=top_k)
-            total_loaded += loaded
-        finally:
-            pager._index = original_index
+        lookup = agent._paging_lookup()
+        loaded = 0
+        for payload in relevant:
+            try:
+                pattern = pager.load_from_payload(payload, lookup)
+                agent.patterns.append(pattern)
+                loaded += 1
+            except Exception:
+                continue
+
+        if loaded > 0 and hasattr(agent, "_refresh_learner"):
+            agent._refresh_learner()
+        total_loaded += loaded
 
     return total_loaded
 
@@ -767,8 +772,18 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Score each option by pager index lookup (no warm_start, no disk reads)
-        chosen, confident, trace = _score_options(reader, q.question, options_map)
+        # Surgically retrieve relevant patterns for this question
+        _retrieve_relevant_patterns(reader, q.question, options_map)
+        
+        # Use reasoning agent for the final answer
+        trace = reasoning_agent.reason_with_trace(q.question)
+        chosen = _extract_answer(trace, options_map)
+        
+        # Confidence is derived from both the reasoning trace and the pattern index overlap
+        # (Using _score_options as a secondary grounding/confidence signal)
+        _, opt_confident, _ = _score_options(reader, q.question, options_map)
+        confident = opt_confident and trace.get("confidence", 0.0) > 0.3
+        
         correct = OPTION_KEYS[q.correct_index]
 
         confidence_label = "confident" if confident else yellow("guessing")

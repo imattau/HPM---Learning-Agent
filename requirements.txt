@@ -13,3 +13,4 @@ Flask>=3.0         # Minimal web demo
 requests>=2.31     # Web agent fetching
 beautifulsoup4>=4.12  # Web agent HTML extraction
 feedparser>=6.0    # Web agent RSS ingestion
+sqlite-vec>=0.1.6

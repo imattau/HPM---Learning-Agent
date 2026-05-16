@@ -4,6 +4,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from hpm_ai_v6.agents.utility_agent import UtilityAgent
 from hpm_ai_v6.agents.syntactic_rule_agent import SyntacticRuleAgent
 from hpm_ai_v6.hpm_model.core.cell import Cell
 
@@ -234,6 +235,38 @@ class TestWiringIntegration:
         finally:
             os.unlink(corpus_path)
 
+    def test_reader_exposes_syntactic_agent_by_default(self):
+        from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
+        import tempfile, os
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("cat sat\n")
+            corpus_path = f.name
+
+        try:
+            reader = MultiAgentReader(corpus_path=corpus_path, warm_start=False)
+            assert reader.agents["syntactic"] is reader.syntactic_agent
+            assert reader.utility_agent.syntactic_agent is reader.syntactic_agent
+        finally:
+            os.unlink(corpus_path)
+
+    def test_train_calls_syntactic_learn_from_corpus(self):
+        from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
+        from unittest.mock import patch
+        import tempfile, os
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("the cat sat.\n")
+            corpus_path = f.name
+
+        try:
+            reader = MultiAgentReader(corpus_path=corpus_path, warm_start=False)
+            with patch.object(reader.syntactic_agent, "learn_from_corpus") as mock_learn:
+                reader.train(episodes=1, max_chunks=1, max_words_per_chunk=10, enable_causal=False, enable_pruning=False)
+                mock_learn.assert_called()
+        finally:
+            os.unlink(corpus_path)
+
     def test_reasoning_agent_enriches_word_edges_with_pos_relation(self):
         """After refresh(), word agent edges for known-POS words have relation='pos_<TAG>'."""
         import numpy as np
@@ -271,6 +304,31 @@ class TestWiringIntegration:
         cat_sat = next((r for r in records if r.target.name == "word_sat"), None)
         assert cat_sat is not None, "Expected edge from word_cat to word_sat"
         assert cat_sat.relation == "pos_NOUN", f"Expected pos_NOUN, got {cat_sat.relation}"
+
+
+class TestUtilityGrammarPreference:
+    def test_utility_agent_prefers_syntactic_grammar_score(self):
+        class StubSyntactic:
+            def grammar_score(self, sentence):
+                return {"mean_nll": 0.125, "matched_patterns": 3.0}
+
+        class StubPhrase:
+            pos_cells = {}
+            patterns = []
+
+            def get_weights(self):
+                return []
+
+        utility = UtilityAgent(
+            word_agent=SimpleNamespace(word_cells={}, patterns=[], get_weights=lambda: []),
+            phrase_agent=StubPhrase(),
+            semantic_agent=SimpleNamespace(_get_or_create_sent_cell=lambda sentence: None),
+            tag_fn=lambda words: ["NOUN" for _ in words],
+            syntactic_agent=StubSyntactic(),
+        )
+
+        score = utility.grammar_score("the cat sat")
+        assert score == {"mean_nll": 0.125, "matched_patterns": 3.0}
 
 
 class TestPersistence:

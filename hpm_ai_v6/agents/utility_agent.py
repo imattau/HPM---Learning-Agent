@@ -10,11 +10,12 @@ class UtilityAgent:
     Provides simple practical tasks without training any patterns itself.
     """
 
-    def __init__(self, word_agent, phrase_agent, semantic_agent, tag_fn, contextual_agent=None):
+    def __init__(self, word_agent, phrase_agent, semantic_agent, tag_fn, contextual_agent=None, syntactic_agent=None):
         self.word_agent = word_agent
         self.phrase_agent = phrase_agent
         self.semantic_agent = semantic_agent
         self.contextual_agent = contextual_agent
+        self.syntactic_agent = syntactic_agent
         self.tag_fn = tag_fn
         self.epistemic = EpistemicEvaluator()
 
@@ -52,6 +53,12 @@ class UtilityAgent:
         return best_name
 
     def grammar_score(self, sentence: str) -> Dict[str, float]:
+        if self.syntactic_agent is not None and hasattr(self.syntactic_agent, "grammar_score"):
+            try:
+                return self.syntactic_agent.grammar_score(sentence)
+            except Exception:
+                pass
+
         tags = self.tag_fn(self._clean_words(sentence))
         seq = [self.phrase_agent.pos_cells[t] for t in tags if t in self.phrase_agent.pos_cells]
         population = list(self.phrase_agent.pos_cells.values())

@@ -229,6 +229,30 @@ class SyntacticRuleAgent:
         """Return the POS tag learned for a word, or None if unknown."""
         return self._word_pos.get(word.lower())
 
+    def grammar_score(self, sentence: str) -> Dict[str, float]:
+        """Return a simple grammar-fit score for a sentence under learned POS transitions."""
+        if not sentence.strip():
+            return {"mean_nll": 0.0, "matched_patterns": 0.0}
+
+        nlp = self._get_nlp()
+        doc = nlp(sentence)
+        tags = [tok.pos_ for tok in doc if tok.pos_ != "SPACE"]
+        if len(tags) < 2:
+            return {"mean_nll": 0.0, "matched_patterns": 0.0}
+
+        total_nll = 0.0
+        matched = 0
+        transitions = 0
+        for left, right in zip(tags, tags[1:]):
+            transitions += 1
+            prob = float(self._probs.get((left, right), 0.0))
+            if prob > 0.0:
+                matched += 1
+            total_nll -= float(np.log(max(prob, 1e-9)))
+
+        mean_nll = total_nll / max(transitions, 1)
+        return {"mean_nll": mean_nll, "matched_patterns": float(matched)}
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

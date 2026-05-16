@@ -281,3 +281,84 @@ def test_train_sequence_prunes_incompatible_word_patterns():
         assert all(len(pattern.as_numpy()) == len(alice.as_numpy()) for pattern in repaired)
         assert all(pattern.source is None or len(pattern.source.as_numpy()) == len(alice.as_numpy()) for pattern in repaired)
         assert all(pattern.target is None or len(pattern.target.as_numpy()) == len(rabbit.as_numpy()) for pattern in repaired)
+
+
+def test_reasoning_edge_persists_across_agent_restart():
+    from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        alice = Cell(name="word_alice", dim=0, embedding=[1, 0, 0])
+        rabbit = Cell(name="word_rabbit", dim=0, embedding=[0, 1, 0])
+        word_agent = StubAgent(
+            patterns=[],
+            weights=[],
+            lookup={"word_alice": alice, "word_rabbit": rabbit},
+        )
+        reader = SimpleNamespace(agents={
+            "word": word_agent,
+            "phrase": None,
+            "contextual": None,
+            "semantic": None,
+            "char": None,
+            "causal": None,
+        })
+
+        ra = ReasoningAgent(reader, pattern_cache_dir=tmp)
+        ra.promote_reasoning_edge(alice, rabbit, 0.9)
+
+        restarted = ReasoningAgent(reader, pattern_cache_dir=tmp)
+        restarted._ensure_fresh()
+
+        source_key = restarted._cell_key(alice)
+        targets = {
+            edge.target_key
+            for edge in restarted._edge_index.get(source_key, [])
+            if edge.relation == "reasoning_persisted"
+        }
+
+        assert restarted._cell_key(rabbit) in targets
+
+
+def test_explanation_prefers_causal_edges_over_contextual_bridges():
+    from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
+
+    effect = Cell(name="effect_follow_rabbit", dim=0, embedding=[0.0, 1.0, 0.0])
+    cause = Cell(name="cause_alice", dim=0, embedding=[1.0, 0.0, 0.0])
+    ctx_source = Cell(name="ctx_followed|rabbit", dim=0, embedding=[0.0, 0.0, 1.0])
+    ctx_cell = Cell(name="ctx_followed|rabbit", dim=0, embedding=[0.0, 0.0, 1.0])
+    causal_edge = Cell(
+        name="cause_alice->effect_follow_rabbit",
+        dim=1,
+        embedding=(effect.as_numpy() - cause.as_numpy()).tolist(),
+        source=cause,
+        target=effect,
+        weight=0.9,
+    )
+    contextual_edge = Cell(
+        name="ctx_followed|rabbit->effect_follow_rabbit",
+        dim=1,
+        embedding=(effect.as_numpy() - ctx_source.as_numpy()).tolist(),
+        source=ctx_source,
+        target=effect,
+        weight=1.0,
+    )
+    reader = SimpleNamespace(agents={
+        "word": StubAgent(patterns=[], weights=[], lookup={"effect_follow_rabbit": effect, "cause_alice": cause}),
+        "contextual": StubAgent(patterns=[contextual_edge], weights=[1.0], lookup={"effect_follow_rabbit": effect, "ctx_followed|rabbit": ctx_cell}),
+        "phrase": None,
+        "semantic": None,
+        "char": None,
+        "causal": StubAgent(patterns=[causal_edge], weights=[0.9], lookup={"effect_follow_rabbit": effect, "cause_alice": cause}),
+    })
+
+    agent = ReasoningAgent(reader)
+    trace = agent.reason_with_trace("Why follow rabbit?")
+
+    assert trace["intent"] == "path"
+    assert trace["mode"] == "explanation"
+    assert trace["chosen_path"] is not None
+    relations = [step["relation"] for step in trace["chosen_path"]["steps"]]
+    assert relations == ["causal_relation"]
+    assert "contextual_prediction" not in relations
+    assert "causal" in trace["answer"].lower()

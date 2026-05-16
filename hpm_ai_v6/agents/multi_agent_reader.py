@@ -19,6 +19,7 @@ from hpm_ai_v6.agents.semantic_agent import SemanticAgent
 from hpm_ai_v6.agents.causal_agent import CausalAgent
 from hpm_ai_v6.agents.active_learning_agent import ActiveLearningAgent, ActiveCorpus
 from hpm_ai_v6.agents.temporal_agent import TemporalAgent
+from hpm_ai_v6.agents.syntactic_rule_agent import SyntacticRuleAgent
 from hpm_ai_v6.agents.reasoning_agent import ReasoningAgent
 from hpm_ai_v6.agents.dependency_relation_agent import DependencyRelationAgent
 from hpm_ai_v6.agents.utility_agent import UtilityAgent
@@ -72,6 +73,7 @@ class MultiAgentReader:
             pattern_cache_dir=self.pattern_cache_dir,
             max_active_patterns=self.max_active_patterns,
         )
+        self.syntactic_agent = SyntacticRuleAgent()
         self.semantic_agent = SemanticAgent(
             shared_field=self.shared_field,
             pattern_cache_dir=self.pattern_cache_dir,
@@ -84,7 +86,8 @@ class MultiAgentReader:
                 "char": self.char_agent,
                 "word": self.word_agent,
                 "phrase": self.phrase_agent,
-                "semantic": self.semantic_agent
+                "syntactic": self.syntactic_agent,
+                "semantic": self.semantic_agent,
             },
             shared_field=self.shared_field,
             pattern_cache_dir=self.pattern_cache_dir,
@@ -95,6 +98,7 @@ class MultiAgentReader:
                 "char": self.char_agent,
                 "word": self.word_agent,
                 "phrase": self.phrase_agent,
+                "syntactic": self.syntactic_agent,
                 "semantic": self.semantic_agent,
             },
             tag_fn=self._get_tags,
@@ -105,25 +109,28 @@ class MultiAgentReader:
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
             contextual_agent=self.contextual_agent,
+            syntactic_agent=self.syntactic_agent,
         )
+        self.reasoning_agent = ReasoningAgent(self, pattern_cache_dir=self.pattern_cache_dir)
         self.response_agent = ResponseGenerationAgent(
             contextual_agent=self.contextual_agent,
             word_agent=self.word_agent,
             phrase_agent=self.phrase_agent,
             semantic_agent=self.semantic_agent,
             tag_fn=self._get_tags,
+            reasoning_agent=self.reasoning_agent,
         )
         self.dependency_agent = DependencyRelationAgent()
         self.temporal_agent = TemporalAgent()
         self.relation_registry = RelationRegistry(embedding_dim=64)
         self.relation_emitter = RelationPatternEmitter(embedding_dim=64)
-        self.reasoning_agent = ReasoningAgent(self)
         self._focus_words: set[str] = set()
         self.agents = {
             "char": self.char_agent,
             "word": self.word_agent,
             "contextual": self.contextual_agent,
             "phrase": self.phrase_agent,
+            "syntactic": self.syntactic_agent,
             "semantic": self.semantic_agent,
             "causal": self.causal_agent,
             "active_learning": self.active_learning_agent,
@@ -174,8 +181,7 @@ class MultiAgentReader:
 
     def _default_pattern_cache_dir(self) -> str:
         corpus_dir = os.path.dirname(os.path.abspath(self.corpus_path)) or os.getcwd()
-        corpus_name = os.path.splitext(os.path.basename(self.corpus_path))[0]
-        return os.path.join(corpus_dir, ".hpm_pattern_cache", corpus_name)
+        return os.path.join(corpus_dir, ".hpm_pattern_cache")
 
     @staticmethod
     def _safe_best_pattern(agent: Any):
@@ -224,6 +230,17 @@ class MultiAgentReader:
         ]
         if rel_cells:
             self.relation_registry.populate_from_cells(rel_cells)
+
+        if hasattr(self.word_agent, "rebuild_word_cells_from_patterns"):
+            try:
+                self.word_agent.rebuild_word_cells_from_patterns()
+            except Exception:
+                pass
+        if hasattr(self.contextual_agent, "rebuild_cells_from_patterns"):
+            try:
+                self.contextual_agent.rebuild_cells_from_patterns()
+            except Exception:
+                pass
 
         return loaded
 
@@ -274,6 +291,13 @@ class MultiAgentReader:
         if pattern.name not in existing_names:
             self.word_agent.patterns.append(pattern)
             if getattr(self, "reasoning_agent", None) is not None:
+                if hasattr(self.reasoning_agent, "promote_reasoning_edge"):
+                    try:
+                        self.reasoning_agent.promote_reasoning_edge(source, target, score)
+                    except Exception:
+                        pass
+                if hasattr(self.response_agent, "clear_reasoning_guidance_cache"):
+                    self.response_agent.clear_reasoning_guidance_cache()
                 self.reasoning_agent.invalidate()
 
     def maintenance_cycle(
@@ -568,6 +592,8 @@ class MultiAgentReader:
 
         # Merge all agent patterns into the shared PatternStore.
         for agent_name, agent in self.agents.items():
+            if agent_name == "syntactic":
+                continue
             patterns = list(getattr(agent, "patterns", None) or [])
             if not patterns:
                 continue
@@ -616,6 +642,18 @@ class MultiAgentReader:
         if getattr(self, "temporal_agent", None) is not None:
             self.temporal_agent.update_temporal_cells(list(getattr(self.causal_agent, "patterns", []) or []))
 
+    def _learn_syntactic_rules(self, sentences: Sequence[str]) -> None:
+        syn_agent = self.agents.get("syntactic")
+        if syn_agent is None or not hasattr(syn_agent, "learn_from_corpus"):
+            return
+        try:
+            syn_agent.learn_from_corpus(list(sentences))
+            if hasattr(syn_agent, "save"):
+                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
+                syn_agent.save(cache_path)
+        except Exception:
+            pass
+
     def train_sequence_active(self, sentences: List[str], enable_causal: bool = False):
         if not sentences:
             return
@@ -636,6 +674,7 @@ class MultiAgentReader:
             self.word_agent.process_words(clean_words)
             self.contextual_agent.process_words(clean_words)
             self.phrase_agent.process_tags(self._get_tags(clean_words))
+        self._learn_syntactic_rules(semantic_seen)
 
     def train(
         self,
@@ -681,6 +720,8 @@ class MultiAgentReader:
                 # 5. Phrase Agent: Process POS tags
                 tags = self._get_tags(clean_words)
                 self.phrase_agent.process_tags(tags)
+
+            self._learn_syntactic_rules(chunks)
 
             # 6. Global Field Update
             agents = [self.char_agent, self.word_agent, self.contextual_agent, self.phrase_agent, self.semantic_agent, self.causal_agent]
@@ -760,6 +801,8 @@ class MultiAgentReader:
                 self.contextual_agent.process_words(clean_words)
                 self.phrase_agent.process_tags(self._get_tags(clean_words))
 
+            self._learn_syntactic_rules(selected_chunks or chunks)
+
             agents = [self.char_agent, self.word_agent, self.contextual_agent, self.phrase_agent, self.semantic_agent, self.causal_agent]
             all_patterns = []
             all_weights_list = []
@@ -816,6 +859,9 @@ class MultiAgentReader:
     def reason(self, question: str) -> str:
         return self.reasoning_agent.reason(question)
 
+    def analyse_patterns(self) -> dict:
+        return self.reasoning_agent.analyse_patterns()
+
     def retrain_on_new_data(self, epochs: int = 1):
         """Incrementally train on sentences appended to the corpus since the last load/train."""
         if not os.path.exists(self.corpus_path):
@@ -843,6 +889,8 @@ class MultiAgentReader:
             self.train_sequence(new_sentences, enable_causal=False)
         self._known_corpus_sentences += len(new_sentences)
         self._corpus_offset = current_size
+        if getattr(self, "reasoning_agent", None) is not None:
+            self.reasoning_agent.invalidate()
         return len(new_sentences)
 
 if __name__ == "__main__":

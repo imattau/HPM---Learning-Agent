@@ -10,8 +10,9 @@ reader corpus, and triggers incremental retraining.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import requests
@@ -51,6 +52,15 @@ class DatasetTrainingAgent:
         self.contextual_agent = self.reader.agents.get("contextual")
         if self.contextual_agent is None:
             raise ValueError("MultiAgentReader must expose a 'contextual' agent.")
+
+    _TOPIC_STOPWORDS = {
+        "the", "and", "for", "with", "from", "that", "this", "into", "then", "than",
+        "were", "was", "are", "been", "being", "have", "has", "had", "not", "but",
+        "you", "your", "their", "there", "here", "when", "what", "why", "how",
+        "said", "will", "would", "could", "should", "may", "might", "can", "all",
+        "any", "each", "her", "his", "she", "him", "them", "they", "its", "our",
+        "about", "after", "before", "because", "into", "over", "under", "through",
+    }
 
     @classmethod
     def curated_gutenberg_book_ids(cls) -> List[int]:
@@ -93,6 +103,25 @@ class DatasetTrainingAgent:
     @staticmethod
     def _normalize_text(text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _normalize_topic(topic: str) -> str:
+        return re.sub(r"\s+", " ", topic).strip()
+
+    @classmethod
+    def _topic_key(cls, topic: str) -> str:
+        return cls._normalize_topic(topic).lower()
+
+    @classmethod
+    def _is_topic_token(cls, token: str) -> bool:
+        token = token.strip().strip(".,;:!?()[]{}\"'")
+        if len(token) < 3:
+            return False
+        if token.lower() in cls._TOPIC_STOPWORDS:
+            return False
+        if not re.search(r"[a-zA-Z]", token):
+            return False
+        return True
 
     def _split_paragraphs(self, text: str) -> List[str]:
         return [
@@ -149,6 +178,368 @@ class DatasetTrainingAgent:
             progress_callback(event)
         except Exception:
             return
+
+    def _collect_learned_topic_scores(self) -> Tuple[Dict[str, float], Dict[str, str]]:
+        scores: Counter[str] = Counter()
+        labels: Dict[str, str] = {}
+
+        def record(topic: str, score: float = 1.0, label: Optional[str] = None) -> None:
+            normalized = self._topic_key(topic)
+            if not normalized or not self._is_topic_token(normalized):
+                return
+            scores[normalized] += float(score)
+            if label:
+                labels[normalized] = label
+            elif normalized not in labels:
+                labels[normalized] = self._normalize_topic(topic)
+
+        focus_words = getattr(self.reader, "_focus_words", set()) or set()
+        for word in sorted(focus_words):
+            record(word, score=3.0, label=word.title())
+
+        word_agent = self.reader.agents.get("word")
+        if word_agent is not None:
+            weights = list(word_agent.get_weights()) if hasattr(word_agent, "get_weights") else []
+            for idx, pattern in enumerate(getattr(word_agent, "patterns", []) or []):
+                if pattern.source is None or pattern.target is None:
+                    continue
+                raw_score = float(weights[idx]) if idx < len(weights) else float(getattr(pattern, "weight", 0.0))
+                src_name = getattr(pattern.source, "name", "")
+                tgt_name = getattr(pattern.target, "name", "")
+                if src_name.startswith("word_"):
+                    record(src_name.removeprefix("word_"), score=max(raw_score, 1e-3), label=src_name.removeprefix("word_").title())
+                if tgt_name.startswith("word_"):
+                    record(tgt_name.removeprefix("word_"), score=max(raw_score, 1e-3), label=tgt_name.removeprefix("word_").title())
+
+        semantic_agent = self.reader.agents.get("semantic")
+        sent_text_by_name = getattr(semantic_agent, "sent_text_by_name", {}) if semantic_agent is not None else {}
+        for sentence in sent_text_by_name.values():
+            for phrase in re.findall(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", sentence):
+                record(phrase, score=2.5, label=phrase)
+            for token in self.reader._clean_words(sentence):
+                if self._is_topic_token(token):
+                    record(token, score=0.25, label=token.title())
+
+        reasoning_agent = getattr(self.reader, "reasoning_agent", None)
+        alias_index = getattr(reasoning_agent, "_alias_index", {}) if reasoning_agent is not None else {}
+        if isinstance(alias_index, dict):
+            for alias, cell_keys in alias_index.items():
+                alias_text = self._normalize_topic(str(alias))
+                if not alias_text:
+                    continue
+                if len(alias_text) > 48 or alias_text.count(" ") > 4:
+                    continue
+                if not any(ch.isalpha() for ch in alias_text):
+                    continue
+                record(alias_text, score=min(len(cell_keys) or 1, 4) * 0.4, label=alias_text.title())
+
+        return dict(scores), labels
+
+    def generate_wikipedia_topics(self, max_topics: int = 8) -> List[str]:
+        scores, labels = self._collect_learned_topic_scores()
+        ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+
+        topics: List[str] = []
+        seen = set()
+        for key, _score in ordered:
+            label = self._normalize_topic(labels.get(key, key))
+            if not label:
+                continue
+            topic_key = self._topic_key(label)
+            if topic_key in seen:
+                continue
+            seen.add(topic_key)
+            topics.append(label)
+            if len(topics) >= max_topics:
+                break
+
+        return topics
+
+    @staticmethod
+    def _wikipedia_api_get(params: Dict[str, object], timeout: int = 20) -> Dict[str, object]:
+        headers = {"User-Agent": "HPM-DatasetTrainingAgent/1.0"}
+        response = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params=params,
+            timeout=timeout,
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _search_wikipedia_titles(self, query: str, limit: int = 3) -> List[str]:
+        try:
+            payload = self._wikipedia_api_get(
+                {
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "srlimit": max(1, int(limit)),
+                    "format": "json",
+                    "utf8": 1,
+                    "origin": "*",
+                }
+            )
+        except Exception as exc:
+            print(f"Error searching Wikipedia for '{query}': {exc}")
+            return []
+
+        results = payload.get("query", {}).get("search", [])
+        titles: List[str] = []
+        for item in results:
+            title = str(item.get("title", "")).strip()
+            if title and title not in titles:
+                titles.append(title)
+        return titles
+
+    def _fetch_wikipedia_extract(self, title: str) -> str:
+        try:
+            payload = self._wikipedia_api_get(
+                {
+                    "action": "query",
+                    "prop": "extracts",
+                    "explaintext": 1,
+                    "exintro": 1,
+                    "redirects": 1,
+                    "titles": title,
+                    "format": "json",
+                    "utf8": 1,
+                    "origin": "*",
+                }
+            )
+        except Exception as exc:
+            print(f"Error fetching Wikipedia page '{title}': {exc}")
+            return ""
+
+        pages = payload.get("query", {}).get("pages", {})
+        for page in pages.values():
+            extract = str(page.get("extract", "")).strip()
+            if extract:
+                return extract
+        return ""
+
+    def add_from_wikipedia_topics(
+        self,
+        topics: Sequence[str],
+        top_k: int = 100,
+        min_score: float = 0.5,
+        retrain_epochs: int = 1,
+        search_limit: int = 3,
+    ) -> int:
+        scored: List[Tuple[float, str]] = []
+        seen_texts = set()
+
+        for topic in topics:
+            cleaned_topic = self._normalize_topic(topic)
+            if not cleaned_topic:
+                continue
+            print(f"Searching Wikipedia topic: {cleaned_topic}")
+            titles = self._search_wikipedia_titles(cleaned_topic, limit=search_limit)
+            if not titles:
+                continue
+            for title in titles[:1]:
+                text = self._fetch_wikipedia_extract(title)
+                if not text:
+                    continue
+                chunks = self._split_sentences(text)
+                print(f"  Scoring {len(chunks)} Wikipedia sentences from '{title}'...")
+                for chunk in chunks:
+                    normalized = self._normalize_text(chunk)
+                    if normalized in seen_texts:
+                        continue
+                    seen_texts.add(normalized)
+                    score = self.score_text(normalized)
+                    scored.append((score, normalized))
+
+        selected = self._select_examples(scored, top_k=top_k, min_score=min_score)
+        if not selected:
+            print("No informative Wikipedia examples found.")
+            return 0
+
+        added = self._append_examples(selected)
+        print(f"Added {added} Wikipedia examples to {self.corpus_path}")
+        self.reader.retrain_on_new_data(epochs=retrain_epochs)
+        return added
+
+    def train_wikipedia_cycle(
+        self,
+        topics: Optional[Sequence[str]] = None,
+        top_k_per_topic: int = 8,
+        min_score: float = 0.05,
+        retrain_epochs: int = 1,
+        stop_event: Optional[object] = None,
+        repeat_topics: bool = True,
+        report_progress: bool = True,
+        max_topics: Optional[int] = None,
+        progress_callback=None,
+        maintenance_callback=None,
+        search_limit: int = 3,
+    ) -> List[dict]:
+        topic_list = [self._normalize_topic(topic) for topic in (topics or self.generate_wikipedia_topics(max_topics=max_topics or 8))]
+        topic_list = [topic for topic in topic_list if topic]
+        if not topic_list:
+            return []
+
+        reports: List[dict] = []
+        topics_processed = 0
+        while True:
+            for topic in topic_list:
+                if self._stop_requested(stop_event):
+                    return reports
+                if max_topics is not None and topics_processed >= max_topics:
+                    return reports
+
+                self._emit_progress(progress_callback, {
+                    "type": "topic_start",
+                    "topic": topic,
+                    "topics_processed": topics_processed,
+                })
+                if report_progress:
+                    print(f"Searching Wikipedia topic: {topic}")
+
+                titles = self._search_wikipedia_titles(topic, limit=search_limit)
+                if not titles:
+                    self._emit_progress(progress_callback, {
+                        "type": "topic_skip",
+                        "topic": topic,
+                        "reason": "no_results",
+                    })
+                    reports.append({
+                        "topic": topic,
+                        "titles": [],
+                        "added": 0,
+                        "page_reports": [],
+                    })
+                    topics_processed += 1
+                    continue
+
+                topic_added = 0
+                page_reports: List[dict] = []
+                selected_texts: List[str] = []
+                for title in titles[:1]:
+                    if self._stop_requested(stop_event):
+                        break
+                    self._emit_progress(progress_callback, {
+                        "type": "page_start",
+                        "topic": topic,
+                        "page_title": title,
+                        "topics_processed": topics_processed,
+                    })
+                    text = self._fetch_wikipedia_extract(title)
+                    if not text:
+                        page_reports.append({
+                            "topic": topic,
+                            "page_title": title,
+                            "chunks": 0,
+                            "selected": 0,
+                            "added": 0,
+                        })
+                        continue
+
+                    chunks = self._split_sentences(text)
+                    if not chunks:
+                        page_reports.append({
+                            "topic": topic,
+                            "page_title": title,
+                            "chunks": 0,
+                            "selected": 0,
+                            "added": 0,
+                        })
+                        continue
+
+                    scored = self._score_chunks(chunks)
+                    selected = self._select_examples(scored, top_k=top_k_per_topic, min_score=min_score)
+                    if not selected:
+                        self._emit_progress(progress_callback, {
+                            "type": "page_done",
+                            "topic": topic,
+                            "page_title": title,
+                            "chunks": len(chunks),
+                            "selected": 0,
+                            "added": 0,
+                        })
+                        page_reports.append({
+                            "topic": topic,
+                            "page_title": title,
+                            "chunks": len(chunks),
+                            "selected": 0,
+                            "added": 0,
+                        })
+                        continue
+
+                    added = self._append_examples(selected)
+                    topic_added += added
+                    selected_texts.extend(selected)
+                    page_reports.append({
+                        "topic": topic,
+                        "page_title": title,
+                        "chunks": len(chunks),
+                        "selected": len(selected),
+                        "added": added,
+                    })
+                    if report_progress:
+                        print(f"  Wikipedia page '{title}': added {added} chunks")
+                    self._emit_progress(progress_callback, {
+                        "type": "page_done",
+                        "topic": topic,
+                        "page_title": title,
+                        "chunks": len(chunks),
+                        "selected": len(selected),
+                        "added": added,
+                    })
+                    if added > 0:
+                        self.reader.retrain_on_new_data(epochs=retrain_epochs)
+
+                report = {
+                    "topic": topic,
+                    "titles": titles[:1],
+                    "added": topic_added,
+                    "page_reports": page_reports,
+                }
+                if maintenance_callback is not None and selected_texts and hasattr(self.reader, "maintenance_cycle"):
+                    try:
+                        maintenance_report = self.reader.maintenance_cycle(
+                            sentences=selected_texts[-top_k_per_topic:],
+                            hydrate_limit=None,
+                            retrain_epochs=retrain_epochs,
+                            enable_causal=False,
+                            query_batch=selected_texts[-top_k_per_topic:],
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive maintenance path
+                        maintenance_report = {"error": str(exc)}
+                    report["maintenance_report"] = maintenance_report
+                    try:
+                        maintenance_callback({
+                            "type": "maintenance_done",
+                            "topic": topic,
+                            "report": maintenance_report,
+                        })
+                    except Exception:  # pragma: no cover - defensive maintenance path
+                        pass
+
+                reports.append(report)
+                topics_processed += 1
+                if report_progress:
+                    print(f"Finished topic '{topic}': added={topic_added}, retrain_epochs={retrain_epochs}")
+                self._emit_progress(progress_callback, {
+                    "type": "topic_done",
+                    "topic": topic,
+                    "titles": titles[:1],
+                    "added": topic_added,
+                    "topics_processed": topics_processed,
+                })
+
+            if not repeat_topics or self._stop_requested(stop_event):
+                break
+            if max_topics is not None and topics_processed >= max_topics:
+                break
+
+        self._emit_progress(progress_callback, {
+            "type": "cycle_done",
+            "topics_processed": topics_processed,
+            "repeat_topics": repeat_topics,
+        })
+        return reports
 
     def score_sentence(self, sentence: str) -> float:
         tokens = self.reader._clean_words(sentence)
@@ -258,19 +649,34 @@ class DatasetTrainingAgent:
         max_books: Optional[int] = None,
         progress_callback=None,
         maintenance_callback=None,
+        start_book_id: int = 1,
+        start_chapter: int = 1,
+        max_book_id: int = 75000,
+        checkpoint_callback=None,
     ) -> List[dict]:
         """
         Stream Gutenberg books chapter by chapter.
 
+        If book_ids is None, iterate sequentially from start_book_id to max_book_id
+        (repeat_books defaults to False in this mode). If book_ids is provided
+        explicitly, use it as-is.
+
         If repeat_books is True, the provided book list is cycled until stop_event
         is set or max_books is reached. Otherwise the list is processed once.
         """
-        ids = [int(book_id) for book_id in (book_ids or self.curated_gutenberg_book_ids())]
-        if not ids:
-            return []
+        sequential_mode = book_ids is None
+        if sequential_mode:
+            ids: Any = (book_id for book_id in range(start_book_id, max_book_id + 1))
+            if repeat_books is True and sequential_mode:
+                repeat_books = False
+        else:
+            ids = [int(book_id) for book_id in book_ids]
+            if not ids:
+                return []
 
         reports: List[dict] = []
         books_processed = 0
+        first_book = True
         while True:
             for book_id in ids:
                 if self._stop_requested(stop_event):
@@ -288,8 +694,31 @@ class DatasetTrainingAgent:
                 if report_progress:
                     print(f"Fetching Gutenberg book {book_id}: {url}")
 
-                text = self._fetch_text_url(url)
+                try:
+                    text = self._fetch_text_url(url)
+                except Exception as fetch_exc:
+                    self._emit_progress(progress_callback, {
+                        "type": "book_skip",
+                        "book_id": book_id,
+                        "reason": str(fetch_exc),
+                    })
+                    if report_progress:
+                        print(f"  Skipping book {book_id}: {fetch_exc}")
+                    books_processed += 1
+                    first_book = False
+                    continue
                 text = self._strip_gutenberg_boilerplate(text)
+                if len(text.strip()) < 5000:
+                    self._emit_progress(progress_callback, {
+                        "type": "book_skip",
+                        "book_id": book_id,
+                        "reason": "too_short",
+                    })
+                    if report_progress:
+                        print(f"  Skipping book {book_id}: too short ({len(text.strip())} chars)")
+                    books_processed += 1
+                    first_book = False
+                    continue
                 chapters = self._split_gutenberg_chapters(text)
                 if not chapters:
                     chapters = [text.strip()]
@@ -300,6 +729,10 @@ class DatasetTrainingAgent:
                 for chapter_idx, chapter_text in enumerate(chapters, start=1):
                     if self._stop_requested(stop_event):
                         break
+
+                    # Skip chapters before start_chapter for the first book
+                    if first_book and chapter_idx < start_chapter:
+                        continue
 
                     self._emit_progress(progress_callback, {
                         "type": "chapter_start",
@@ -371,6 +804,10 @@ class DatasetTrainingAgent:
                     if added > 0:
                         self.reader.retrain_on_new_data(epochs=retrain_epochs)
 
+                    if checkpoint_callback is not None:
+                        checkpoint_callback(book_id, chapter_idx)
+
+                first_book = False
                 report = {
                     "book_id": book_id,
                     "chapters": len(chapters),
