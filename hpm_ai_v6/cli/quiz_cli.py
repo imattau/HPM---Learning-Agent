@@ -250,13 +250,14 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
         print(yellow("No novel sentences to train on — model already knows this content."))
 
 
-def _nominate_uncertain_topics(dataset_agent, n: int = 4, pool_size: int = 20,
+def _nominate_uncertain_topics(dataset_agent, reasoning_agent, n: int = 4,
+                               pool_size: int = 20,
                                exclude: set[str] | None = None) -> list[str]:
-    """Nominate topics the model is most uncertain about (highest prediction entropy).
+    """Nominate topics where the model has the fewest learned pattern graph edges.
 
-    Gets a pool of candidate topics from the dataset agent, scores each with a
-    probe sentence, ranks by descending score (high entropy = uncertain), and
-    returns the top *n* that haven't been nominated before.
+    Gets a pool of candidate topics, counts edges in the reasoning graph whose
+    keys contain each topic word, ranks by ascending edge count (sparse = least
+    learned = highest priority), and returns the top *n* not yet nominated.
     """
     candidates = dataset_agent.generate_wikipedia_topics(max_topics=pool_size)
     if not candidates:
@@ -265,17 +266,17 @@ def _nominate_uncertain_topics(dataset_agent, n: int = 4, pool_size: int = 20,
     if exclude:
         candidates = [t for t in candidates if t not in exclude]
 
-    scored: list[tuple[float, str]] = []
-    for topic in candidates:
-        try:
-            probe = f"{topic} is a subject worth understanding."
-            score = dataset_agent.score_sentence(probe)
-        except Exception:
-            score = 0.0
-        scored.append((score, topic))
+    reasoning_agent._ensure_fresh()
+    edge_index = getattr(reasoning_agent, "_edge_index", {})
 
-    # Descending by score: high entropy → model is most uncertain
-    scored.sort(key=lambda x: x[0], reverse=True)
+    scored: list[tuple[int, str]] = []
+    for topic in candidates:
+        topic_word = topic.lower().split()[0]  # use first word for lookup
+        edge_count = sum(1 for k in edge_index if topic_word in k.lower())
+        scored.append((edge_count, topic))
+
+    # Ascending by edge count: fewest edges = least learned = learn this first
+    scored.sort(key=lambda x: x[0])
     return [topic for _, topic in scored[:n]]
 
 
@@ -327,7 +328,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         # Let the model nominate its own next learning topics — ranked by uncertainty
         print("\nAsking model what it needs to learn next...")
         model_topics = _nominate_uncertain_topics(
-            dataset_agent, n=4, pool_size=20, exclude=nominated_history
+            dataset_agent, reasoning_agent, n=4, pool_size=20, exclude=nominated_history
         )
         if model_topics:
             nominated_history.update(model_topics)
