@@ -55,6 +55,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Skip 'Press Enter' pauses; fully autonomous run",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Keep repeating quiz until all answers are correct and confident",
+    )
     return parser.parse_args(argv)
 
 
@@ -134,20 +139,40 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     quiz_agent = QuizAgent(reader, reasoning_agent)
 
-    score, weak_topics = run_quiz(
-        reader=reader,
-        quiz_agent=quiz_agent,
-        reasoning_agent=reasoning_agent,
-        n=args.n,
-        difficulty=args.difficulty,
-        source=args.source,
-        auto=args.auto,
-    )
+    mastered: set[str] = set()  # question ids answered correctly + confidently
+    round_num = 0
 
-    if weak_topics:
-        train_on_weak_topics(reader, weak_topics)
-    else:
-        print(green("All topics answered confidently — no retraining needed."))
+    while True:
+        round_num += 1
+        if args.loop and round_num > 1:
+            print(f"\n{yellow(f'=== Loop round {round_num} ===')} (mastered {len(mastered)} question(s) so far)")
+
+        score, weak_topics, newly_mastered = run_quiz(
+            reader=reader,
+            quiz_agent=quiz_agent,
+            reasoning_agent=reasoning_agent,
+            n=args.n,
+            difficulty=args.difficulty,
+            source=args.source,
+            auto=args.auto,
+            skip_ids=mastered,
+        )
+        mastered.update(newly_mastered)
+
+        if weak_topics:
+            train_on_weak_topics(reader, weak_topics)
+            reasoning_agent.invalidate()
+        else:
+            print(green("All topics answered confidently — no retraining needed."))
+
+        if not args.loop:
+            break
+
+        remaining = args.n - len(mastered)
+        if remaining <= 0:
+            print(green(f"\nAll {args.n} questions mastered! Quiz complete."))
+            break
+        print(f"\n{remaining} question(s) still to master. Rerunning...")
 
 
 OPTION_KEYS = ["A", "B", "C", "D"]
@@ -189,11 +214,15 @@ def run_quiz(
     difficulty: str,
     source: str,
     auto: bool,
-) -> tuple[int, list[str]]:
-    """Run the quiz loop. Returns (score, weak_topics)."""
+    skip_ids: set = None,
+) -> tuple[int, list[str], set]:
+    """Run the quiz loop. Returns (score, weak_topics, newly_mastered_ids)."""
     questions = quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
+    if skip_ids:
+        questions = [q for q in questions if q.id not in skip_ids]
     score = 0
     weak_topics: list[str] = []
+    newly_mastered: set = set()
 
     for idx, q in enumerate(questions, start=1):
         print(f"\n{'='*60}")
@@ -228,6 +257,7 @@ def run_quiz(
         if is_correct and confident:
             print(green("Correct!"))
             score += 1
+            newly_mastered.add(q.id)
         elif is_correct and not confident:
             # Lucky guess — still correct but treat topic as weak
             print(yellow("Correct (lucky guess)"))
@@ -251,7 +281,7 @@ def run_quiz(
     else:
         print(green("No weak topics identified."))
 
-    return score, weak_topics
+    return score, weak_topics, newly_mastered
 
 
 if __name__ == "__main__":
