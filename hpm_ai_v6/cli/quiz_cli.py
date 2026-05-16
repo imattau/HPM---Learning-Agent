@@ -84,70 +84,130 @@ import urllib.parse
 import json
 
 
-def _search_wikipedia_title(query: str) -> str:
-    """Use Wikipedia opensearch to resolve a query to the best matching article title.
-    Tries the last word (correct answer) first, then the full query as fallback."""
-    candidates = [query.split()[-1], query] if " " in query else [query]
-    for candidate in candidates:
+def _search_wikipedia_title(query: str) -> Optional[str]:
+    """Use Wikipedia query search to resolve a query to the best matching article title."""
+    # Try different variations of the query for robustness
+    search_terms = [query]
+    if " " in query:
+        # Also try just the last word (often the subject of the answer)
+        search_terms.append(query.split()[-1])
+        # And the first two words
+        search_terms.append(" ".join(query.split()[:2]))
+
+    for term in search_terms:
         params = urllib.parse.urlencode({
-            "action": "opensearch", "search": candidate, "limit": "1", "format": "json"
+            "action": "query",
+            "list": "search",
+            "srsearch": term,
+            "srlimit": "1",
+            "format": "json"
         })
         url = f"https://en.wikipedia.org/w/api.php?{params}"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
-            titles = data[1] if len(data) > 1 else []
-            if titles:
-                return titles[0]
+            search_results = data.get("query", {}).get("search", [])
+            if search_results:
+                return search_results[0]["title"]
         except Exception:
-            pass
-    return query
+            continue
+    return None
 
 
 def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]:
-    """Search for *topic*, resolve to best article title, fetch intro sentences."""
+    """Search for *topic*, resolve to best article title, fetch intro sentences via Action API."""
     title = _search_wikipedia_title(topic)
-    encoded = urllib.parse.quote(title.replace(" ", "_"))
-    url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
+    if not title:
+        return []
+
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "prop": "extracts",
+        "exintro": True,
+        "explaintext": True,
+        "titles": title,
+        "format": "json"
+    })
+    url = f"https://en.wikipedia.org/w/api.php?{params}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
-        extract = data.get("extract", "")
+        pages = data.get("query", {}).get("pages", {})
+        if not pages:
+            return []
+        
+        # Get the first page in the dictionary
+        page = next(iter(pages.values()))
+        extract = page.get("extract", "")
+        # Clean and split into sentences
         sentences = [s.strip() for s in extract.split(".") if len(s.strip()) > 20]
         return sentences[:max_sentences]
     except Exception as exc:
-        print(yellow(f"  [Wikipedia fetch failed for '{topic}': {exc}]"))
+        print(yellow(f"  [Wikipedia fetch failed for '{topic}' (title: '{title}'): {exc}]"))
         return []
 
 
-def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]]) -> None:
-    """Fetch Wikipedia text for each weak topic and retrain the reader.
+def _fetch_wordnet_sentences(word: str, max_senses: int = 4) -> list[str]:
+    """Use NLTK WordNet to get definitions and example sentences for a word."""
+    try:
+        from nltk.corpus import wordnet
+        synsets = wordnet.synsets(word.lower().replace(" ", "_"))[:max_senses]
+        sentences = []
+        for syn in synsets:
+            pos = {"n": "noun", "v": "verb", "a": "adjective", "r": "adverb", "s": "adjective"}.get(syn.pos(), "word")
+            defn = syn.definition()
+            if defn:
+                sentences.append(f"{word.title()} ({pos}): {defn}.")
+            for example in syn.examples()[:2]:
+                sentences.append(example.capitalize() + ".")
+        return sentences
+    except Exception:
+        return []
 
-    Each entry is (display_label, search_query) where search_query is the
-    correct answer text — much more specific than the coarse topic label.
+
+def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_agent=None, min_entropy: float = 0.1) -> None:
+    """Fetch Wikipedia text and dictionary definitions for each weak topic, filter by novelty, and retrain.
+
+    Each entry is (display_label, search_query). Sentences are scored by entropy
+    (how surprising they are to the model) and only novel ones are trained on.
     """
     if not weak_topics:
         return
 
     labels = ", ".join(label for label, _ in weak_topics)
-    print(f"\nTriggering Wikipedia training on: {labels}")
+    print(f"\nTriggering knowledge acquisition for: {labels}")
     all_sentences: list[str] = []
     for label, query in weak_topics:
-        print(f"  Fetching Wikipedia: '{query}' ...", end=" ", flush=True)
-        sentences = _fetch_wikipedia_sentences(query)
-        if sentences:
+        print(f"  Acquiring '{label}' ...", end=" ", flush=True)
+        
+        # 1. Fetch Encyclopedia Context
+        wiki_sentences = _fetch_wikipedia_sentences(query)
+        
+        # 2. Fetch Lexical Grounding
+        dict_sentences = _fetch_wordnet_sentences(label)
+        
+        sentences = wiki_sentences + dict_sentences
+        if not sentences:
+            print("(no data)")
+            continue
+
+        if dataset_agent is not None:
+            # Score each sentence by entropy — skip ones the model already knows
+            novel = [s for s in sentences if dataset_agent.score_sentence(s) >= min_entropy]
+            skipped = len(sentences) - len(novel)
+            print(f"{len(novel)} novel sentences ({skipped} already known, skipped)")
+            all_sentences.extend(novel)
+        else:
             print(f"{len(sentences)} sentences")
             all_sentences.extend(sentences)
-        else:
-            print("(no data)")
 
     if all_sentences:
         reader.train_sequence(all_sentences, enable_causal=False)
         print(green(f"Training complete — {len(all_sentences)} sentences processed."))
     else:
-        print(yellow("No Wikipedia data retrieved; skipping training."))
+        print(yellow("No novel sentences to train on — model already knows this content."))
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -189,7 +249,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         mastered.update(newly_mastered)
 
         if weak_topics:
-            train_on_weak_topics(reader, weak_topics)
+            train_on_weak_topics(reader, weak_topics, dataset_agent=dataset_agent)
             reasoning_agent.invalidate()
         else:
             print(green("All topics answered confidently — no retraining needed."))
