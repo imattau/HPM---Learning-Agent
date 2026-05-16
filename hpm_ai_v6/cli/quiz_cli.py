@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import List, Optional
 
@@ -83,12 +84,32 @@ import urllib.parse
 import json
 
 
+def _search_wikipedia_title(query: str) -> str:
+    """Use Wikipedia opensearch to resolve a query to the best matching article title.
+    Tries the last word (correct answer) first, then the full query as fallback."""
+    candidates = [query.split()[-1], query] if " " in query else [query]
+    for candidate in candidates:
+        params = urllib.parse.urlencode({
+            "action": "opensearch", "search": candidate, "limit": "1", "format": "json"
+        })
+        url = f"https://en.wikipedia.org/w/api.php?{params}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            titles = data[1] if len(data) > 1 else []
+            if titles:
+                return titles[0]
+        except Exception:
+            pass
+    return query
+
+
 def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]:
-    """Fetch the Wikipedia intro for *topic* and return as a list of sentences."""
-    encoded = urllib.parse.quote(topic.replace(" ", "_"))
-    url = (
-        f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
-    )
+    """Search for *topic*, resolve to best article title, fetch intro sentences."""
+    title = _search_wikipedia_title(topic)
+    encoded = urllib.parse.quote(title.replace(" ", "_"))
+    url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "HPM-QuizCLI/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -211,6 +232,20 @@ def _extract_answer(trace: dict, options: dict) -> str:
     return "A"
 
 
+_STOP_WORDS = {"what", "is", "the", "a", "an", "of", "in", "on", "at", "to", "for",
+               "are", "was", "were", "does", "do", "how", "many", "which", "who",
+               "where", "when", "why", "that", "this", "it", "its", "have", "has"}
+
+def _build_search_query(question: str, correct_answer: str) -> str:
+    """Build a specific Wikipedia search query from question keywords + correct answer."""
+    # Extract meaningful words from the question (drop stop words and punctuation)
+    words = re.sub(r"[^\w\s]", " ", question.lower()).split()
+    keywords = [w for w in words if w not in _STOP_WORDS and len(w) > 2]
+    # Combine up to 4 question keywords with the correct answer
+    query_parts = keywords[:4] + [correct_answer]
+    return " ".join(query_parts)
+
+
 def _reinforce_trace(reasoning_agent, trace: dict, boost: bool) -> None:
     """Strengthen (boost=True) or weaken (boost=False) edges from a reasoning trace."""
     chosen_path = trace.get("chosen_path")
@@ -294,17 +329,15 @@ def run_quiz(
             print(yellow("Correct (lucky guess)"))
             score += 1
             topic = getattr(q, "topic", None)
-            correct_text = options_map.get(correct, topic or "")
             if topic and topic not in weak_seen:
                 weak_seen.add(topic)
-                weak_topics.append((topic, correct_text))
+                weak_topics.append((topic, _build_search_query(q.question, options_map.get(correct, ""))))
         else:
             print(red(f"Incorrect. Correct answer: {correct}) {options_map.get(correct, '')}"))
             topic = getattr(q, "topic", None)
-            correct_text = options_map.get(correct, topic or "")
             if topic and topic not in weak_seen:
                 weak_seen.add(topic)
-                weak_topics.append((topic, correct_text))
+                weak_topics.append((topic, _build_search_query(q.question, options_map.get(correct, ""))))
             # Weaken the edges that led to this wrong confident answer
             if confident:
                 _reinforce_trace(reasoning_agent, trace, boost=False)
