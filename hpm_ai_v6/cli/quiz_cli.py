@@ -101,16 +101,21 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 20) -> list[str]
         return []
 
 
-def train_on_weak_topics(reader, weak_topics: list[str]) -> None:
-    """Fetch Wikipedia text for each weak topic and retrain the reader."""
+def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]]) -> None:
+    """Fetch Wikipedia text for each weak topic and retrain the reader.
+
+    Each entry is (display_label, search_query) where search_query is the
+    correct answer text — much more specific than the coarse topic label.
+    """
     if not weak_topics:
         return
 
-    print(f"\nTriggering Wikipedia training on: {', '.join(weak_topics)}")
+    labels = ", ".join(label for label, _ in weak_topics)
+    print(f"\nTriggering Wikipedia training on: {labels}")
     all_sentences: list[str] = []
-    for topic in weak_topics:
-        print(f"  Fetching Wikipedia: {topic} ...", end=" ", flush=True)
-        sentences = _fetch_wikipedia_sentences(topic)
+    for label, query in weak_topics:
+        print(f"  Fetching Wikipedia: '{query}' ...", end=" ", flush=True)
+        sentences = _fetch_wikipedia_sentences(query)
         if sentences:
             print(f"{len(sentences)} sentences")
             all_sentences.extend(sentences)
@@ -244,7 +249,8 @@ def run_quiz(
     if skip_ids:
         questions = [q for q in questions if q.id not in skip_ids]
     score = 0
-    weak_topics: list[str] = []
+    weak_topics: list[tuple[str, str]] = []  # (display_label, search_query)
+    weak_seen: set[str] = set()
     newly_mastered: set = set()
 
     for idx, q in enumerate(questions, start=1):
@@ -288,13 +294,17 @@ def run_quiz(
             print(yellow("Correct (lucky guess)"))
             score += 1
             topic = getattr(q, "topic", None)
-            if topic and topic not in weak_topics:
-                weak_topics.append(topic)
+            correct_text = options_map.get(correct, topic or "")
+            if topic and topic not in weak_seen:
+                weak_seen.add(topic)
+                weak_topics.append((topic, correct_text))
         else:
             print(red(f"Incorrect. Correct answer: {correct}) {options_map.get(correct, '')}"))
             topic = getattr(q, "topic", None)
-            if topic and topic not in weak_topics:
-                weak_topics.append(topic)
+            correct_text = options_map.get(correct, topic or "")
+            if topic and topic not in weak_seen:
+                weak_seen.add(topic)
+                weak_topics.append((topic, correct_text))
             # Weaken the edges that led to this wrong confident answer
             if confident:
                 _reinforce_trace(reasoning_agent, trace, boost=False)
@@ -305,7 +315,7 @@ def run_quiz(
     print(f"\n{'='*60}")
     print(f"Final score: {score}/{len(questions)}")
     if weak_topics:
-        print(yellow(f"Weak topics: {', '.join(weak_topics)}"))
+        print(yellow(f"Weak topics: {', '.join(label for label, _ in weak_topics)}"))
     else:
         print(green("No weak topics identified."))
 
