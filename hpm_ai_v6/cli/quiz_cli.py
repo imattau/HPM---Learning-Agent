@@ -206,6 +206,29 @@ def _extract_answer(trace: dict, options: dict) -> str:
     return "A"
 
 
+def _reinforce_trace(reasoning_agent, trace: dict, boost: bool) -> None:
+    """Strengthen (boost=True) or weaken (boost=False) edges from a reasoning trace."""
+    chosen_path = trace.get("chosen_path")
+    if not chosen_path:
+        return
+    steps = chosen_path if isinstance(chosen_path, list) else [chosen_path]
+    for step in steps:
+        source = getattr(step, "source", None)
+        target = getattr(step, "target", None)
+        score = getattr(step, "score", 0.0)
+        if source is None or target is None:
+            continue
+        new_score = float(score) * 1.5 if boost else float(score) * 0.3
+        try:
+            reasoning_agent.promote_reasoning_edge(source, target, max(new_score, 1e-6))
+        except Exception:
+            pass
+    try:
+        reasoning_agent.invalidate()
+    except Exception:
+        pass
+
+
 def run_quiz(
     reader,
     quiz_agent,
@@ -258,6 +281,8 @@ def run_quiz(
             print(green("Correct!"))
             score += 1
             newly_mastered.add(q.id)
+            # Reinforce the edges that led to this correct answer
+            _reinforce_trace(reasoning_agent, trace, boost=True)
         elif is_correct and not confident:
             # Lucky guess — still correct but treat topic as weak
             print(yellow("Correct (lucky guess)"))
@@ -270,6 +295,9 @@ def run_quiz(
             topic = getattr(q, "topic", None)
             if topic and topic not in weak_topics:
                 weak_topics.append(topic)
+            # Weaken the edges that led to this wrong confident answer
+            if confident:
+                _reinforce_trace(reasoning_agent, trace, boost=False)
 
         if not auto and idx < len(questions):
             input("\nPress Enter for next question...")
