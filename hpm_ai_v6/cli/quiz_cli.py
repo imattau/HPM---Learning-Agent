@@ -11,7 +11,7 @@ from typing import Callable, List, Optional
 
 import numpy as np
 from hpm_ai_v6.hpm_model.core.cell import Cell
-from hpm_ai_v6.quiz_feedback import learn_from_quiz_attempt
+from hpm_ai_v6.quiz_feedback import learn_from_quiz_attempt, learn_from_quiz_question
 
 
 # ---------------------------------------------------------------------------
@@ -1190,7 +1190,7 @@ def _boost_correct_patterns(reader, question: str, correct_text: str, boost: flo
             has_ans = any(w in name for w in ans_words)
             has_q = any(qw in name for qw in q_words)
             if has_ans and has_q:
-                pattern.weight = float(getattr(pattern, "weight", 1.0)) * boost
+                pattern.weight = float(boost)  # absolute, not multiplicative
                 total_boosted += 1
                 if pager is not None:
                     pager.enqueue_save(pattern)
@@ -1280,6 +1280,17 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
+        pre_payload = {
+            "question_id": getattr(q, "id", None),
+            "question": q.question,
+            "topic": getattr(q, "topic", None),
+            "options": options_map,
+        }
+        try:
+            learn_from_quiz_question(reader, pre_payload)
+        except Exception:
+            pass
+
         trace = {}
         if reasoning_agent is not None and hasattr(reasoning_agent, "reason_with_trace"):
             try:
@@ -1290,6 +1301,11 @@ def run_quiz(
         chosen = _extract_answer(trace, options_map) if trace else ""
         confident = bool(chosen)
         score_details = {"trace_based": True} if chosen else {}
+        if not chosen:
+            chosen = _lookup_quiz_memory(reader, q.question, options_map)
+            confident = bool(chosen)
+            if chosen:
+                score_details = {"memory_based": True}
         if not chosen:
             chosen, confident, score_details = _score_options(reader, q.question, options_map)
         if not chosen:

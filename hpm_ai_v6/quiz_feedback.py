@@ -263,6 +263,50 @@ def _correction_sentence(
     return " ".join(parts)
 
 
+def learn_from_quiz_question(reader, payload: Mapping[str, Any]) -> dict[str, int]:
+    """Train on the quiz question before the correct answer is revealed."""
+    question = str(payload.get("question", "") or "").strip()
+    if not question:
+        return {"trained": 0, "saved": 0}
+
+    topic = payload.get("topic")
+    options_map = _normalize_options(payload.get("options") or payload.get("options_map") or {})
+    question_sentence = _question_sentence(
+        question=question,
+        options_map=options_map,
+        chosen_key="",
+        chosen_text="",
+        correct_key="",
+        correct_text="",
+        topic=str(topic).strip() if topic else None,
+    )
+
+    train_sequence = getattr(reader, "train_sequence", None)
+    trained = 0
+    if callable(train_sequence):
+        try:
+            train_sequence([question_sentence], enable_causal=False)
+            trained = 1
+        except Exception:
+            pass
+
+    reasoning_agent = getattr(reader, "reasoning_agent", None)
+    if reasoning_agent is not None and hasattr(reasoning_agent, "invalidate"):
+        try:
+            reasoning_agent.invalidate()
+        except Exception:
+            pass
+
+    flush_all = getattr(reader, "flush_all", None)
+    if callable(flush_all):
+        try:
+            flush_all()
+        except Exception:
+            pass
+
+    return {"trained": trained, "saved": 0}
+
+
 def _persist_all_patterns(reader) -> int:
     total = 0
     for agent in getattr(reader, "agents", {}).values():
@@ -298,7 +342,7 @@ def _boost_question_answer_patterns(reader, question: str, correct_text: str, bo
             has_q = any(word in name for word in q_words)
             if has_ans and has_q:
                 try:
-                    pattern.weight = float(getattr(pattern, "weight", 1.0)) * boost
+                    pattern.weight = float(boost)  # absolute, not multiplicative — prevents cross-session compounding
                 except Exception:
                     pass
                 total_boosted += 1
@@ -374,21 +418,11 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
                 correct_key = key
                 break
 
-    question_sentence = _question_sentence(
-        question=question,
-        options_map=options_map,
-        chosen_key=chosen_key,
-        chosen_text=chosen_text,
-        correct_key=correct_key,
-        correct_text=correct_text,
-        topic=str(topic).strip() if topic else None,
-    )
+    # Train only on question + correct answer — omit wrong options to avoid noise patterns
     correction_sentence = _correction_sentence(
         question=question,
         correct_key=correct_key,
         correct_text=correct_text,
-        chosen_key=chosen_key,
-        chosen_text=chosen_text,
         topic=str(topic).strip() if topic else None,
     )
 
@@ -396,7 +430,7 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
     train_sequence = getattr(reader, "train_sequence", None)
     if callable(train_sequence):
         try:
-            train_sequence([question_sentence, correction_sentence], enable_causal=False)
+            train_sequence([correction_sentence], enable_causal=False)
             trained = 1
         except Exception:
             pass
@@ -423,7 +457,7 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
                 except Exception:
                     pass
 
-    direct = 0  # no answer shortcut — model must learn from patterns
+    direct = _persist_quiz_answer(reader, question, correct_key, boost=10.0)
     saved = _persist_all_patterns(reader)
 
     reasoning_agent = getattr(reader, "reasoning_agent", None)
@@ -444,6 +478,7 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
 
 
 __all__ = [
+    "learn_from_quiz_question",
     "learn_from_quiz_attempt",
     "normalize_quiz_text",
     "quiz_memory_name",
