@@ -924,13 +924,6 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
     Checks agent.patterns (in-memory, includes just-trained) and pager index (persisted).
     Options whose words appear in more/heavier patterns score higher.
     """
-    direct_key = _lookup_quiz_memory(reader, question, options_map)
-    if direct_key:
-        return direct_key, True, {
-            "direct_memory": True,
-            "scores": {k: (1.0 if k == direct_key else 0.0) for k in options_map},
-        }
-
     raw_q_words = {_tok(w) for w in question.split() if _tok(w) not in _STOP_WORDS and len(_tok(w)) > 1}
     # Exclude question words that also appear in option text — they are ambiguous signals
     all_opt_words = {_tok(w) for opt in options_map.values() for w in (opt or "").split() if _tok(w)}

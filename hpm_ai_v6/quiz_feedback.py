@@ -24,8 +24,8 @@ def normalize_quiz_text(text: str) -> str:
 
 
 def quiz_memory_name(question: str, correct_key: str) -> str:
-    """Build a direct-memory key for an exact question->answer association."""
-    return f"quiz_answer::{normalize_quiz_text(question)}=>{correct_key.lower()}"
+    """Build a low-priority exact-memory key for a question->answer association."""
+    return f"memory::exact_question_answer::{normalize_quiz_text(question)}=>{correct_key.lower()}"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -64,6 +64,160 @@ def _seed_embedding(token: str, dim: int = 16) -> np.ndarray:
         return np.zeros(dim, dtype=np.float32)
     tiled = np.resize(values / 255.0 - 0.5, dim)
     return tiled.astype(np.float32) * 0.2
+
+
+def _signature_tokens(text: str) -> list[str]:
+    tokens = []
+    for token in _tokenize(text):
+        if token and token not in _STOP_WORDS and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _signature_text(parts: Sequence[str]) -> str:
+    tokens: list[str] = []
+    for part in parts:
+        for token in _signature_tokens(part):
+            if token not in tokens:
+                tokens.append(token)
+    if not tokens:
+        return "unknown"
+    return "_".join(tokens)
+
+
+def _trace_steps(trace: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    chosen = trace.get("chosen_path") or {}
+    if isinstance(chosen, Mapping):
+        steps = chosen.get("steps") or []
+        if steps:
+            return [step for step in steps if isinstance(step, Mapping)]
+
+    evidence = trace.get("evidence") or []
+    return [step for step in evidence if isinstance(step, Mapping)]
+
+
+def _trace_path_signature(trace: Mapping[str, Any]) -> str:
+    chosen = trace.get("chosen_path") or {}
+    if isinstance(chosen, Mapping):
+        nodes = chosen.get("nodes") or []
+        labels = [
+            normalize_quiz_text(str(node.get("label", "")))
+            for node in nodes
+            if isinstance(node, Mapping) and str(node.get("label", "")).strip()
+        ]
+        labels = [label for label in labels if label]
+        if labels:
+            return "->".join(labels)
+
+    steps = _trace_steps(trace)
+    labels = []
+    for step in steps:
+        source = step.get("source_label") if isinstance(step, Mapping) else None
+        target = step.get("target_label") if isinstance(step, Mapping) else None
+        relation = step.get("relation") if isinstance(step, Mapping) else None
+        if source and target:
+            labels.append(
+                f"{normalize_quiz_text(str(source))}->{normalize_quiz_text(str(target))}"
+            )
+            if relation:
+                labels[-1] += f"::{normalize_quiz_text(str(relation))}"
+    return "|".join(labels)
+
+
+def _trace_fact_signature(trace: Mapping[str, Any], question: str, answer_text: str) -> str:
+    terms = [str(term) for term in trace.get("terms", []) or [] if str(term).strip()]
+    if terms:
+        question_sig = _signature_text(terms)
+    else:
+        question_sig = _signature_text([question])
+    answer_sig = _signature_text([answer_text])
+    return f"{question_sig}=>{answer_sig}"
+
+
+def _concept_cell(prefix: str, text: str) -> Cell:
+    signature = normalize_quiz_text(text) or "unknown"
+    return Cell(
+        name=f"{prefix}{signature}",
+        dim=0,
+        embedding=_seed_embedding(signature),
+    )
+
+
+def _edge_cell(name: str, source_text: str, target_text: str, boost: float) -> Cell:
+    source = _concept_cell("memory::concept::", source_text)
+    target = _concept_cell("memory::concept::", target_text)
+    return Cell(
+        name=name,
+        dim=1,
+        embedding=target.as_numpy() - source.as_numpy(),
+        source=source,
+        target=target,
+        weight=float(boost),
+    )
+
+
+def _trace_memory_cells(
+    trace: Mapping[str, Any],
+    question: str,
+    correct_key: str,
+    correct_text: str,
+    *,
+    boost_path: float = 40.0,
+    boost_fact: float = 20.0,
+) -> list[Cell]:
+    cells: list[Cell] = []
+    answer_text = correct_text or correct_key
+
+    fact_signature = _trace_fact_signature(trace, question, answer_text)
+    fact_source, fact_target = fact_signature.split("=>", 1)
+    cells.append(
+        _edge_cell(
+            name=f"memory::fact::{fact_signature}",
+            source_text=fact_source,
+            target_text=fact_target,
+            boost=boost_fact,
+        )
+    )
+
+    path_signature = _trace_path_signature(trace)
+    if path_signature:
+        steps = _trace_steps(trace)
+        for idx, step in enumerate(steps):
+            source_label = str(step.get("source_label", "")).strip()
+            target_label = str(step.get("target_label", "")).strip()
+            relation = str(step.get("relation", "transition")).strip()
+            if not source_label or not target_label:
+                continue
+            cells.append(
+                _edge_cell(
+                    name=(
+                        f"memory::path_step::{normalize_quiz_text(source_label)}"
+                        f"->{normalize_quiz_text(target_label)}::{normalize_quiz_text(relation) or 'transition'}::{idx}"
+                    ),
+                    source_text=source_label,
+                    target_text=target_label,
+                    boost=boost_path,
+                )
+            )
+
+        if len(path_signature) > 0:
+            nodes = (trace.get("chosen_path") or {}).get("nodes") or []
+            node_labels = [
+                str(node.get("label", "")).strip()
+                for node in nodes
+                if isinstance(node, Mapping) and str(node.get("label", "")).strip()
+            ]
+            if len(node_labels) >= 2:
+                cells.append(
+                    _edge_cell(
+                        name=f"memory::path::{path_signature}",
+                        source_text=node_labels[0],
+                        target_text=node_labels[-1],
+                        boost=boost_path,
+                    )
+                )
+
+    return cells
 
 
 def _question_sentence(
@@ -205,6 +359,9 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
     options_map = _normalize_options(payload.get("options") or payload.get("options_map") or {})
     chosen_text = str(payload.get("chosen_text", "") or "").strip()
     correct_text = str(payload.get("correct_text", "") or "").strip()
+    trace = payload.get("trace")
+    if not isinstance(trace, Mapping):
+        trace = {}
 
     if not chosen_text and chosen_key in options_map:
         chosen_text = options_map[chosen_key]
@@ -245,7 +402,28 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
             pass
 
     boosted = _boost_question_answer_patterns(reader, question, correct_text, boost=20.0)
-    direct = _persist_quiz_answer(reader, question, correct_key, boost=100.0)
+    general_cells = _trace_memory_cells(
+        trace,
+        question,
+        correct_key,
+        correct_text,
+        boost_path=40.0,
+        boost_fact=20.0,
+    )
+    general = 0
+    if general_cells:
+        for agent in getattr(reader, "agents", {}).values():
+            pager = getattr(agent, "pattern_pager", None)
+            if pager is None:
+                continue
+            for cell in general_cells:
+                try:
+                    pager.enqueue_save(cell)
+                    general += 1
+                except Exception:
+                    pass
+
+    direct = 0  # no answer shortcut — model must learn from patterns
     saved = _persist_all_patterns(reader)
 
     reasoning_agent = getattr(reader, "reasoning_agent", None)
@@ -262,13 +440,14 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
         except Exception:
             pass
 
-    return {"trained": trained, "boosted": boosted, "direct": direct, "saved": saved}
+    return {"trained": trained, "boosted": boosted, "general": general, "direct": direct, "saved": saved}
 
 
 __all__ = [
     "learn_from_quiz_attempt",
     "normalize_quiz_text",
     "quiz_memory_name",
+    "_trace_memory_cells",
     "_boost_question_answer_patterns",
     "_persist_all_patterns",
     "_persist_quiz_answer",
