@@ -9,6 +9,9 @@ import sys
 import zipfile
 from typing import Callable, List, Optional
 
+import numpy as np
+from hpm_ai_v6.hpm_model.core.cell import Cell
+
 
 # ---------------------------------------------------------------------------
 # ANSI colour helpers
@@ -1047,11 +1050,21 @@ def _boost_correct_patterns(reader, question: str, correct_text: str, boost: flo
         return 0
 
     total_boosted = 0
+
+    # Find the word agent — it has a pager and can persist associations
+    word_agent = None
+    for agent in reader.agents.values():
+        if getattr(agent, "pattern_pager", None) is not None and hasattr(agent, "patterns"):
+            if any("w_" in str(getattr(p, "name", "")) for p in getattr(agent, "patterns", [])):
+                word_agent = agent
+                break
+
+    # Boost in-memory patterns across all agents (affects within-session scoring)
     for agent in reader.agents.values():
         patterns = getattr(agent, "patterns", [])
         if not patterns:
             continue
-
+        pager = getattr(agent, "pattern_pager", None)
         for pattern in patterns:
             name = pattern.name.lower()
             has_ans = any(w in name for w in ans_words)
@@ -1059,24 +1072,23 @@ def _boost_correct_patterns(reader, question: str, correct_text: str, boost: flo
             if has_ans and has_q:
                 pattern.weight = float(getattr(pattern, "weight", 1.0)) * boost
                 total_boosted += 1
+                if pager is not None:
+                    pager.enqueue_save(pattern)
 
-        # Sync meta_rule weights tensor if present
-        meta_rule = getattr(agent, "meta_rule", None)
-        if meta_rule is not None and len(getattr(meta_rule, "patterns", [])) == len(patterns):
-            try:
-                import torch as _torch
-                new_w = _torch.tensor(
-                    [float(getattr(p, "weight", 1.0)) for p in patterns],
-                    dtype=_torch.float32,
-                )
-                total = new_w.sum()
-                if total > 0:
-                    new_w = new_w / total
-                meta_rule.set_weights_tensor(new_w)
-                for i, p in enumerate(patterns):
-                    p.weight = float(new_w[i])
-            except Exception:
-                pass
+    # Persist direct answer→question_keyword cells into word agent pager
+    # so cross-session scoring finds them even when dependency agent is gone
+    if word_agent is not None:
+        pager = word_agent.pattern_pager
+        for ans_word in ans_words:
+            for q_word in q_words:
+                cell_name = f"w_{ans_word}->{q_word}"
+                emb = np.zeros(16, dtype=float)
+                for i, ch in enumerate((ans_word + q_word)[:16]):
+                    emb[i] = ord(ch) / 128.0
+                cell = Cell(name=cell_name, dim=1,
+                            embedding=emb, weight=float(boost))
+                pager.enqueue_save(cell)
+                total_boosted += 1
 
     return total_boosted
 
