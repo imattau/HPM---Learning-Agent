@@ -404,17 +404,20 @@ def _penalize_wrong_answer_patterns(reader, question: str, wrong_text: str, pena
                     except Exception:
                         pass
 
-        # Also penalize persisted pager patterns directly
+        # Also penalize persisted pager patterns directly (hold lock to avoid writer-thread conflict)
         if pager is not None:
+            lock = getattr(pager, "_lock", None)
             try:
-                rows = pager._con.execute("SELECT rowid, name, weight FROM patterns").fetchall()
-                for rowid, name, weight in rows:
-                    name_lower = name.lower()
-                    if any(w in name_lower for w in wrong_words) and any(q in name_lower for q in q_words):
-                        new_weight = max(penalty, float(weight) * penalty)
-                        pager._con.execute("UPDATE patterns SET weight=? WHERE rowid=?", (new_weight, rowid))
-                        total_penalized += 1
-                pager._con.commit()
+                ctx = lock if lock is not None else __import__("contextlib").nullcontext()
+                with ctx:
+                    rows = pager._con.execute("SELECT rowid, name, weight FROM patterns").fetchall()
+                    for rowid, name, weight in rows:
+                        name_lower = name.lower()
+                        if any(w in name_lower for w in wrong_words) and any(q in name_lower for q in q_words):
+                            new_weight = max(penalty, float(weight) * penalty)
+                            pager._con.execute("UPDATE patterns SET weight=? WHERE rowid=?", (new_weight, rowid))
+                            total_penalized += 1
+                    pager._con.commit()
             except Exception:
                 pass
 
