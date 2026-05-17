@@ -22,6 +22,7 @@ from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
 from hpm_ai_v6.agents.dataset_training_agent import DatasetTrainingAgent
 from hpm_ai_v6.agents.web_agent import WebAgent
 from hpm_ai_v6.agents.quiz_agent import QuizAgent as _QuizAgent
+from hpm_ai_v6.quiz_feedback import learn_from_quiz_attempt
 
 
 app = Flask(__name__)
@@ -2227,6 +2228,23 @@ def api_quiz_submit():
     if question_id not in _quiz_state:
         return jsonify({"error": "Unknown question id"}), 404
     q = _quiz_state[question_id]
+    labels = ["A", "B", "C", "D"]
+    chosen_key = labels[answer_index] if 0 <= answer_index < len(labels) else ""
+    correct_key = labels[q.correct_index] if 0 <= q.correct_index < len(labels) else ""
+    payload = {
+        "question_id": question_id,
+        "question": q.question,
+        "topic": getattr(q, "topic", None),
+        "chosen": chosen_key,
+        "chosen_text": q.options[answer_index] if 0 <= answer_index < len(q.options) else "",
+        "correct": correct_key,
+        "correct_text": q.options[q.correct_index] if 0 <= q.correct_index < len(q.options) else "",
+        "options": {labels[i]: q.options[i] for i in range(min(len(q.options), len(labels)))},
+        "is_correct": answer_index == q.correct_index,
+        "confident": True,
+    }
+    if reader is not None:
+        learn_from_quiz_attempt(reader, payload)
     return jsonify({
         "correct": answer_index == q.correct_index,
         "correct_index": q.correct_index,

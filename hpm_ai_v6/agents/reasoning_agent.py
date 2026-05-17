@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 from hpm_ai_v6.hpm_model.core.cell import Cell
 from hpm_ai_v6.hpm_model.core.temporal_cell import TemporalCell
 from hpm_ai_v6.hpm_model.storage.pattern_pager import PatternPager
+from hpm_ai_v6.hpm_model.storage.reasoning_graph_store import ReasoningGraphSnapshot, ReasoningGraphStore
 
 @dataclass
 class ReasoningSignal:
@@ -108,8 +112,12 @@ class ReasoningAgent:
         self._last_pattern_counts: Dict[str, int] = {}
         self._incremental_refresh_count: int = 0
         self._reasoning_pager = PatternPager(pattern_cache_dir, "reasoning") if pattern_cache_dir else None
+        self._graph_store = ReasoningGraphStore(pattern_cache_dir, "reasoning") if pattern_cache_dir else None
         self._relation_registry = getattr(reader, "relation_registry", None)
         self._relation_cell_index: Dict[str, Cell] = {}
+        self._last_pattern_signature: str = ""
+        if self._graph_store is not None:
+            self._maybe_load_graph_snapshot()
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -220,8 +228,9 @@ class ReasoningAgent:
         return (7, -len(cell.name))
 
     def _iter_reasoning_agents(self) -> Iterable[Tuple[str, object]]:
+        agents = getattr(self.reader, "agents", None) or {}
         for name in ("word", "contextual", "semantic", "phrase", "char", "causal", "syntactic", "dependency"):
-            agent = self.reader.agents.get(name)
+            agent = agents.get(name)
             if agent is not None:
                 yield name, agent
 
@@ -616,7 +625,11 @@ class ReasoningAgent:
                 
                 if target_cell:
                     try:
-                        sim = target_cell.similarity(cell)
+                        target_emb = target_cell.as_numpy()
+                        cell_emb = cell.as_numpy()
+                        if target_emb.shape != cell_emb.shape:
+                            return None
+                        sim = float(np.dot(target_emb, cell_emb) / ((np.linalg.norm(target_emb) * np.linalg.norm(cell_emb)) + 1e-9))
                         if sim >= self.analogy_threshold:
                             analog_found = True
                             penalty *= max(sim, 0.5)
@@ -632,7 +645,11 @@ class ReasoningAgent:
                 if bound is not None:
                     if self._cell_key(bound) != self._cell_key(cell):
                         # Attempt analogical binding
-                        sim = bound.similarity(cell)
+                        bound_emb = bound.as_numpy()
+                        cell_emb = cell.as_numpy()
+                        if bound_emb.shape != cell_emb.shape:
+                            return None
+                        sim = float(np.dot(bound_emb, cell_emb) / ((np.linalg.norm(bound_emb) * np.linalg.norm(cell_emb)) + 1e-9))
                         if sim < self.analogy_threshold:
                             return None
                         # Apply penalty based on similarity (Phase 1, Step 3)
@@ -722,6 +739,121 @@ class ReasoningAgent:
         for agent_name, agent in self._iter_reasoning_agents():
             counts[agent_name] = len(list(getattr(agent, "patterns", []) or []))
         return counts
+
+    def _current_pattern_signature(self) -> str:
+        summary: List[Tuple[str, List[Tuple[str, int, str, str, float, Tuple[float, ...]]]]] = []
+        for agent_name, agent in self._iter_reasoning_agents():
+            patterns = list(getattr(agent, "patterns", []) or [])
+            try:
+                weights = list(agent.get_weights()) if hasattr(agent, "get_weights") else []
+            except Exception:
+                weights = []
+            items: List[Tuple[str, int, str, str, float, Tuple[float, ...]]] = []
+            for idx, pattern in enumerate(patterns):
+                source_name = getattr(getattr(pattern, "source", None), "name", "")
+                target_name = getattr(getattr(pattern, "target", None), "name", "")
+                try:
+                    embedding = tuple(float(value) for value in np.asarray(pattern.as_numpy(), dtype=float).ravel())
+                except Exception:
+                    embedding = ()
+                weight = float(weights[idx]) if idx < len(weights) else float(getattr(pattern, "weight", 0.0))
+                items.append((str(pattern.name), int(getattr(pattern, "dim", 0)), source_name, target_name, weight, embedding))
+            summary.append((agent_name, items))
+        if self._reasoning_pager is not None:
+            persisted: List[Tuple[str, int, str, str, float, Tuple[float, ...]]] = []
+            try:
+                payloads = self._reasoning_pager.iter_index_payloads()
+            except Exception:
+                payloads = []
+            for payload in sorted(payloads, key=lambda item: str(item.get("name", ""))):
+                emb = payload.get("embedding")
+                try:
+                    emb_tuple = tuple(float(value) for value in np.asarray(emb, dtype=float).ravel())
+                except Exception:
+                    emb_tuple = ()
+                persisted.append(
+                    (
+                        str(payload.get("name", "")),
+                        int(payload.get("dim", 0) or 0),
+                        str(payload.get("source", "")),
+                        str(payload.get("target", "")),
+                        float(payload.get("weight", 0.0) or 0.0),
+                        emb_tuple,
+                    )
+                )
+            summary.append(("reasoning_pager", persisted))
+        payload = repr(summary).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def _snapshot_graph_state(self) -> Dict[str, Any]:
+        return {
+            "edge_index": self._edge_index,
+            "node_index": self._node_index,
+            "alias_index": self._alias_index,
+            "all_patterns": self._all_patterns,
+            "sentence_labels": self._sentence_labels,
+            "analogy_cache": self._analogy_cache,
+            "explicit_analogy_index": self._explicit_analogy_index,
+            "explicit_rule_index": self._explicit_rule_index,
+            "transient_rule_edge_index": self._transient_rule_edge_index,
+            "forward_rule_patterns": self._forward_rule_patterns,
+            "relation_cell_index": self._relation_cell_index,
+            "dirty": self._dirty,
+            "refresh_state": self._refresh_state,
+            "last_refresh_started_at": self._last_refresh_started_at,
+            "last_refresh_finished_at": self._last_refresh_finished_at,
+            "last_pattern_counts": self._last_pattern_counts,
+            "incremental_refresh_count": self._incremental_refresh_count,
+        }
+
+    def _restore_graph_state(self, snapshot: Dict[str, Any]) -> None:
+        self._edge_index = snapshot.get("edge_index", {}) or {}
+        self._node_index = snapshot.get("node_index", {}) or {}
+        self._alias_index = snapshot.get("alias_index", {}) or {}
+        self._all_patterns = snapshot.get("all_patterns", []) or []
+        self._sentence_labels = snapshot.get("sentence_labels", {}) or {}
+        self._analogy_cache = snapshot.get("analogy_cache", {}) or {}
+        self._explicit_analogy_index = snapshot.get("explicit_analogy_index", {}) or {}
+        self._explicit_rule_index = snapshot.get("explicit_rule_index", {}) or {}
+        self._transient_rule_edge_index = snapshot.get("transient_rule_edge_index", {}) or {}
+        self._forward_rule_patterns = snapshot.get("forward_rule_patterns", []) or []
+        self._relation_cell_index = snapshot.get("relation_cell_index", {}) or {}
+        self._dirty = bool(snapshot.get("dirty", False))
+        self._refresh_state = str(snapshot.get("refresh_state", "ready"))
+        self._last_refresh_started_at = snapshot.get("last_refresh_started_at")
+        self._last_refresh_finished_at = snapshot.get("last_refresh_finished_at")
+        self._last_pattern_counts = snapshot.get("last_pattern_counts", {}) or {}
+        self._incremental_refresh_count = int(snapshot.get("incremental_refresh_count", 0))
+
+    def _persist_graph_snapshot(self, signature: str) -> None:
+        if self._graph_store is None:
+            return
+        try:
+            self._graph_store.save(signature, self._snapshot_graph_state())
+            self._last_pattern_signature = signature
+        except Exception:
+            pass
+
+    def _maybe_load_graph_snapshot(self) -> bool:
+        if self._graph_store is None:
+            return False
+        current_signature = self._current_pattern_signature()
+        snapshot = self._graph_store.load()
+        if snapshot is None:
+            self._last_pattern_signature = current_signature
+            return False
+        if snapshot.signature != current_signature:
+            self._last_pattern_signature = current_signature
+            return False
+        try:
+            self._restore_graph_state(self._graph_store.unpack(snapshot))
+        except Exception:
+            self._last_pattern_signature = current_signature
+            return False
+        self._dirty = False
+        self._refresh_state = "ready"
+        self._last_pattern_signature = current_signature
+        return True
 
     def invalidate(self) -> None:
         self._dirty = True
@@ -860,6 +992,7 @@ class ReasoningAgent:
             for records in self._edge_index.values():
                 records.sort(key=lambda item: item.score, reverse=True)
 
+            self._persist_graph_snapshot(self._current_pattern_signature())
             self._dirty = False
             self._refresh_state = "ready"
             self._last_refresh_finished_at = float(time.time())
@@ -870,9 +1003,13 @@ class ReasoningAgent:
 
     def refresh(self) -> None:
         current_counts = self._current_pattern_counts()
-        if not self._dirty and current_counts == self._last_pattern_counts and self._edge_index:
+        current_signature = self._current_pattern_signature()
+        if not self._dirty and current_signature == self._last_pattern_signature and self._edge_index:
             self._refresh_state = "ready"
             return
+        if not self._dirty and self._graph_store is not None and current_signature == self._last_pattern_signature:
+            if self._maybe_load_graph_snapshot():
+                return
         has_prior_index = bool(self._edge_index)
         do_full = not has_prior_index or self._dirty or self._incremental_refresh_count >= self.FULL_REFRESH_EVERY
         if do_full:
@@ -882,6 +1019,7 @@ class ReasoningAgent:
             self._incremental_refresh(current_counts)
             self._incremental_refresh_count += 1
         self._last_pattern_counts = current_counts
+        self._last_pattern_signature = current_signature
 
     def _full_refresh(self) -> None:
         self._refresh_state = "indexing"
@@ -1021,6 +1159,7 @@ class ReasoningAgent:
                 if getattr(pattern, "dim", 0) == 2
                 and getattr(pattern, "name", "").startswith("rel_")
             }
+            self._persist_graph_snapshot(self._current_pattern_signature())
             self._dirty = False
             self._refresh_state = "ready"
             self._last_refresh_finished_at = float(time.time())
@@ -1208,6 +1347,21 @@ class ReasoningAgent:
                     continue
                 seen.add(key)
                 yield edge
+
+    def iter_edges(self) -> List[EdgeRecord]:
+        """Return all known reasoning edges, including transient ones."""
+        self._ensure_fresh()
+        return list(self._iter_edges())
+
+    def iter_source_keys(self) -> List[str]:
+        """Return the distinct source keys present in the reasoning graph."""
+        self._ensure_fresh()
+        return sorted({edge.source_key for edge in self._iter_edges()})
+
+    def edges_from(self, source_key: str) -> List[EdgeRecord]:
+        """Return edges that originate from a given source key."""
+        self._ensure_fresh()
+        return [edge for edge in self._iter_edges() if edge.source_key == source_key]
 
     def _incoming_edges(
         self,

@@ -25,6 +25,7 @@ class QuizQuestion:
 
 
 _BANK_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "quiz_banks")
+_GENERATED_BANK_DIR = os.path.join(_BANK_DIR, "generated")
 
 _DIFFICULTY_PROMPT = {
     "easy": "Focus on a single well-known fact. The question should test direct recall.",
@@ -44,6 +45,8 @@ class QuizAgent:
         """Generate n questions from model (corpus) or bank (static JSON)."""
         if source == "bank":
             return self._load_bank(difficulty, n)
+        if source == "arc_mmlu":
+            return self._load_bank(difficulty, n, generated_only=True)
         questions = []
         for _ in range(n):
             q = self.generate_question(topic=None, difficulty=difficulty)
@@ -116,21 +119,39 @@ class QuizAgent:
             return None
         return data
 
-    def _load_bank(self, difficulty: str, n: int) -> List[QuizQuestion]:
+    def _bank_paths(self, difficulty: str, generated_only: bool = False) -> List[str]:
+        """Return generated bank additions first, then the base bank."""
+        paths = [os.path.join(_GENERATED_BANK_DIR, f"{difficulty}.json")]
+        if not generated_only:
+            paths.append(os.path.join(_BANK_DIR, f"{difficulty}.json"))
+        return [path for path in paths if os.path.exists(path)]
+
+    def _load_bank(self, difficulty: str, n: int, generated_only: bool = False) -> List[QuizQuestion]:
         """Load up to n questions from the static JSON bank for the given difficulty."""
-        path = os.path.join(_BANK_DIR, f"{difficulty}.json")
-        with open(path) as f:
-            raw = json.load(f)
         questions = []
-        for item in raw[:n]:
-            questions.append(QuizQuestion(
-                id=item.get("id", str(uuid.uuid4())),
-                question=item["question"],
-                options=item["options"],
-                correct_index=item["correct_index"],
-                topic=item["topic"],
-                explanation=item["explanation"],
-                difficulty=difficulty,
-                source="bank",
-            ))
+        seen = set()
+        for path in self._bank_paths(difficulty, generated_only=generated_only):
+            with open(path) as f:
+                raw = json.load(f)
+            for item in raw:
+                key = (
+                    item.get("question", "").strip().lower(),
+                    tuple(item.get("options", [])),
+                    int(item.get("correct_index", -1)),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                questions.append(QuizQuestion(
+                    id=item.get("id", str(uuid.uuid4())),
+                    question=item["question"],
+                    options=item["options"],
+                    correct_index=item["correct_index"],
+                    topic=item["topic"],
+                    explanation=item["explanation"],
+                    difficulty=difficulty,
+                    source=item.get("source", "bank"),
+                ))
+                if len(questions) >= n:
+                    return questions
         return questions

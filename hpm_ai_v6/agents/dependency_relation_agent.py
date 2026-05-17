@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List
 import numpy as np
 from hpm_ai_v6.hpm_model.core.cell import Cell
+from hpm_ai_v6.hpm_model.storage.sqlite_document_store import SQLiteDocumentStore
 
 _EMB_DIM = 16
 
@@ -115,14 +116,43 @@ class DependencyRelationAgent:
                 "name": p.name,
                 "weight": w,
             })
-        with open(path, "w") as f:
-            json.dump({"triples": triples}, f)
+        payload = {
+            "base_score": self.base_score,
+            "prep_score": self.prep_score,
+            "triples": triples,
+        }
+        if path.endswith(".db"):
+            SQLiteDocumentStore(path, table_name="dependency_relations").save(
+                "default", payload
+            )
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
 
     def load(self, path: str) -> None:
-        if not os.path.exists(path):
+        data = None
+        if path.endswith(".db"):
+            legacy_path = path[:-3] + ".json"
+            if not os.path.exists(path) and not os.path.exists(legacy_path):
+                raise FileNotFoundError(path)
+            if os.path.exists(path):
+                store = SQLiteDocumentStore(path, table_name="dependency_relations")
+                data = store.load("default")
+            if data is None and os.path.exists(legacy_path):
+                with open(legacy_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                SQLiteDocumentStore(path, table_name="dependency_relations").save(
+                    "default", data
+                )
+        else:
+            if not os.path.exists(path):
+                return
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        if data is None:
             return
-        with open(path) as f:
-            data = json.load(f)
+        self.base_score = float(data.get("base_score", self.base_score))
+        self.prep_score = float(data.get("prep_score", self.prep_score))
         self.patterns = []
         self._weights = []
         for t in data.get("triples", []):

@@ -189,6 +189,14 @@ class MultiAgentReader:
             return None
         return agent.get_best_pattern()
 
+    def _legacy_cache_exists(self, cache_path: str) -> bool:
+        if os.path.exists(cache_path):
+            return True
+        if cache_path.endswith(".db"):
+            legacy_path = cache_path[:-3] + ".json"
+            return os.path.exists(legacy_path)
+        return False
+
     def warm_start_from_cache(self, limit: Optional[int] = None) -> int:
         # Load shared cross-corpus patterns and warm-start every agent.
         self.pattern_store.load()  # populate in-memory store for ReasoningAgent use
@@ -207,8 +215,8 @@ class MultiAgentReader:
 
         syn_agent = self.agents.get("syntactic")
         if syn_agent is not None and hasattr(syn_agent, "load"):
-            cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
-            if os.path.exists(cache_path):
+            cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.db")
+            if self._legacy_cache_exists(cache_path):
                 try:
                     syn_agent.load(cache_path)
                 except Exception:
@@ -216,8 +224,8 @@ class MultiAgentReader:
 
         dep_agent = self.agents.get("dependency")
         if dep_agent is not None and hasattr(dep_agent, "load"):
-            cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.json")
-            if os.path.exists(cache_path):
+            cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.db")
+            if self._legacy_cache_exists(cache_path):
                 try:
                     dep_agent.load(cache_path)
                 except Exception:
@@ -574,7 +582,7 @@ class MultiAgentReader:
         if syn_agent is not None and hasattr(syn_agent, "learn_from_corpus"):
             syn_agent.learn_from_corpus(sentences)
             if hasattr(syn_agent, "save"):
-                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
+                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.db")
                 try:
                     syn_agent.save(cache_path)
                 except Exception:
@@ -585,7 +593,7 @@ class MultiAgentReader:
             try:
                 dep_agent.learn_from_corpus(sentences)
                 if hasattr(dep_agent, "save"):
-                    cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.json")
+                    cache_path = os.path.join(self.pattern_cache_dir, "dependency_relations.db")
                     dep_agent.save(cache_path)
             except Exception:
                 pass
@@ -642,6 +650,9 @@ class MultiAgentReader:
         if getattr(self, "temporal_agent", None) is not None:
             self.temporal_agent.update_temporal_cells(list(getattr(self.causal_agent, "patterns", []) or []))
 
+        if getattr(self, "reasoning_agent", None) is not None:
+            self.reasoning_agent.invalidate()
+
     def _learn_syntactic_rules(self, sentences: Sequence[str]) -> None:
         syn_agent = self.agents.get("syntactic")
         if syn_agent is None or not hasattr(syn_agent, "learn_from_corpus"):
@@ -649,7 +660,7 @@ class MultiAgentReader:
         try:
             syn_agent.learn_from_corpus(list(sentences))
             if hasattr(syn_agent, "save"):
-                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.json")
+                cache_path = os.path.join(self.pattern_cache_dir, "syntactic_rules.db")
                 syn_agent.save(cache_path)
         except Exception:
             pass

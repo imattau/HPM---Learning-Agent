@@ -11,6 +11,7 @@ from typing import Callable, List, Optional
 
 import numpy as np
 from hpm_ai_v6.hpm_model.core.cell import Cell
+from hpm_ai_v6.quiz_feedback import learn_from_quiz_attempt
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +41,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=["bank", "model"],
+        choices=["bank", "arc_mmlu", "model"],
         default="bank",
-        help="Question source: 'bank' (default) or 'model' (AI-generated)",
+        help="Question source: 'bank' (default), 'arc_mmlu', or 'model' (AI-generated)",
     )
     parser.add_argument(
         "--difficulty",
@@ -816,29 +817,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     round_num = 0
 
     def _learn_from_attempt(payload: dict) -> None:
-        topic = payload.get("topic")
-        query = payload.get("query")
-        question = payload.get("question")
-        correct_text = payload.get("correct_text")
-        is_correct = bool(payload.get("is_correct"))
-        confident = bool(payload.get("confident"))
-
-        if not topic or not query:
-            return
-
-        # Reinforce the correct answer in HPM patterns (builds cross-session memory)
-        if question and correct_text:
-            fact_sentence = _build_search_query(str(question), str(correct_text))
-            correction_sentence = _build_correction_sentence(str(question), str(correct_text), str(topic))
-            try:
-                reader.train_sequence([fact_sentence, correction_sentence], enable_causal=False)
-            except Exception:
-                pass
-            # Boost weights of patterns encoding question→answer so they survive noise
-            _boost_correct_patterns(reader, str(question), str(correct_text), boost=20.0)
-            # Persist ALL trained patterns (word, semantic, phrase, etc.) to SQLite
-            _persist_all_patterns(reader)
-        reasoning_agent.invalidate()
+        learn_from_quiz_attempt(reader, payload)
 
     while True:
         round_num += 1
@@ -899,9 +878,9 @@ def _retrieve_relevant_patterns(reader, question: str, options_map: dict, top_k:
     so that source/target Cell objects are correctly reconstructed via the agent's
     own cell registry (populated by the minimal warm_start).
     """
-    terms = {w.lower() for w in question.split() if w.isalpha() and len(w) > 2 and w.lower() not in _STOP_WORDS}
+    terms = {w.lower() for w in question.split() if w.isalnum() and len(w) > 1 and w.lower() not in _STOP_WORDS}
     for opt in options_map.values():
-        terms.update(w.lower() for w in (opt or "").split() if w.isalpha() and len(w) > 2)
+        terms.update(_tok(w) for w in (opt or "").split() if _tok(w) and len(_tok(w)) > 1)
 
     total_loaded = 0
     for agent in reader.agents.values():
@@ -945,15 +924,21 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
     Checks agent.patterns (in-memory, includes just-trained) and pager index (persisted).
     Options whose words appear in more/heavier patterns score higher.
     """
-    q_words = {w for w in question.lower().split()
-               if w not in _STOP_WORDS and len(w) > 2 and w.isalpha()}
+    direct_key = _lookup_quiz_memory(reader, question, options_map)
+    if direct_key:
+        return direct_key, True, {
+            "direct_memory": True,
+            "scores": {k: (1.0 if k == direct_key else 0.0) for k in options_map},
+        }
+
+    q_words = {_tok(w) for w in question.split() if _tok(w) not in _STOP_WORDS and len(_tok(w)) > 1}
 
     scores: dict[str, float] = {}
     for key, option_text in options_map.items():
         if not option_text:
             scores[key] = 0.0
             continue
-        opt_words = [w.lower() for w in option_text.split() if w.isalpha() and len(w) > 1]
+        opt_words = [_tok(w) for w in option_text.split() if _tok(w)]
         total = 0.0
         seen_names: set[str] = set()
 
@@ -988,8 +973,62 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
         scores[key] = total
 
     best_key = max(scores, key=lambda k: scores[k])
-    confident = scores[best_key] > 0.0
-    return best_key, confident, {"scores": scores}
+    best_score = scores[best_key]
+    confident = best_score > 0.0
+    if not confident:
+        return "", False, {"scores": scores}
+    return best_key, True, {"scores": scores}
+
+
+def _normalize_quiz_text(text: str) -> str:
+    """Normalize a question or answer into a stable lookup key."""
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def _quiz_memory_name(question: str, correct_key: str) -> str:
+    """Build a direct-memory key for an exact question->answer association."""
+    return f"quiz_answer::{_normalize_quiz_text(question)}=>{correct_key.lower()}"
+
+
+def _lookup_quiz_memory(reader, question: str, options_map: dict) -> str:
+    """Return a directly learned answer key for an exact quiz question, if present."""
+    question_key = _normalize_quiz_text(question)
+    if not question_key:
+        return ""
+
+    prefix = f"quiz_answer::{question_key}=>"
+    best_key = ""
+    best_weight = 0.0
+
+    for agent in reader.agents.values():
+        for pattern in getattr(agent, "patterns", []):
+            name = str(getattr(pattern, "name", "")).lower()
+            if not name.startswith(prefix):
+                continue
+            key = name[len(prefix):].upper()
+            if key not in options_map:
+                continue
+            weight = float(getattr(pattern, "weight", 0.0))
+            if weight > best_weight:
+                best_key = key
+                best_weight = weight
+
+        pager = getattr(agent, "pattern_pager", None)
+        if pager is None:
+            continue
+        for payload in pager.iter_index_payloads():
+            name = str(payload.get("name", "")).lower()
+            if not name.startswith(prefix):
+                continue
+            key = name[len(prefix):].upper()
+            if key not in options_map:
+                continue
+            weight = float(payload.get("weight", 0.0))
+            if weight > best_weight:
+                best_key = key
+                best_weight = weight
+
+    return best_key
 
 
 def _parse_letter_answer(answer_text: str, options_map: dict) -> str:
@@ -1046,6 +1085,10 @@ _STOP_WORDS = {"what", "is", "the", "a", "an", "of", "in", "on", "at", "to", "fo
                "are", "was", "were", "does", "do", "how", "many", "which", "who",
                "where", "when", "why", "that", "this", "it", "its", "have", "has"}
 
+def _tok(word: str) -> str:
+    """Strip punctuation, return lowercase alphanumeric token."""
+    return re.sub(r"[^\w]", "", word).lower()
+
 def _build_search_query(question: str, correct_answer: str) -> str:
     """Build a specific Wikipedia search query from question keywords + correct answer."""
     # Extract meaningful words from the question (drop stop words and punctuation)
@@ -1067,7 +1110,7 @@ def _boost_correct_patterns(reader, question: str, correct_text: str, boost: flo
     """
     q_words = {w for w in re.sub(r"[^\w\s]", " ", question.lower()).split()
                if w not in _STOP_WORDS and len(w) > 2}
-    ans_words = [w.lower() for w in correct_text.split() if w.isalpha() and len(w) > 1]
+    ans_words = [_tok(w) for w in correct_text.split() if _tok(w)]
     if not q_words or not ans_words:
         return 0
 
@@ -1113,6 +1156,25 @@ def _boost_correct_patterns(reader, question: str, correct_text: str, boost: flo
                 total_boosted += 1
 
     return total_boosted
+
+
+def _persist_quiz_answer(reader, question: str, correct_key: str, boost: float = 100.0) -> int:
+    """Persist a direct question->answer memory for exact repeated quiz items."""
+    if not question or not correct_key:
+        return 0
+    memory_name = _quiz_memory_name(question, correct_key)
+    cell = Cell(name=memory_name, dim=1, embedding=np.zeros(16, dtype=float), weight=float(boost))
+    saved = 0
+    for agent in reader.agents.values():
+        pager = getattr(agent, "pattern_pager", None)
+        if pager is None:
+            continue
+        try:
+            pager.enqueue_save(cell)
+            saved += 1
+        except Exception:
+            pass
+    return saved
 
 
 def _build_correction_sentence(question: str, correct_text: str, topic: str | None = None) -> str:
@@ -1212,6 +1274,8 @@ def run_quiz(
                     "chosen": chosen,
                     "correct": correct,
                     "correct_text": options_map.get(correct, ""),
+                    "chosen_text": options_map.get(chosen, ""),
+                    "options": options_map,
                     "is_correct": is_correct,
                     "confident": confident,
                     "trace": trace,

@@ -300,7 +300,7 @@ class TestWiringIntegration:
 
         # Find the edge from cat -> sat
         cat_key = ra._cell_key(alpha)
-        records = ra._edge_index.get(cat_key, [])
+        records = ra.edges_from(cat_key)
         cat_sat = next((r for r in records if r.target.name == "word_sat"), None)
         assert cat_sat is not None, "Expected edge from word_cat to word_sat"
         assert cat_sat.relation == "pos_NOUN", f"Expected pos_NOUN, got {cat_sat.relation}"
@@ -345,14 +345,14 @@ class TestPersistence:
 
     def test_save_creates_json_file(self, tmp_path):
         agent = self._make_trained_agent()
-        path = str(tmp_path / "cache" / "syntactic_rules.json")
+        path = str(tmp_path / "cache" / "syntactic_rules.db")
         agent.save(path)
         import os
         assert os.path.exists(path)
 
     def test_save_and_load_restores_word_pos(self, tmp_path):
         agent = self._make_trained_agent()
-        path = str(tmp_path / "syntactic_rules.json")
+        path = str(tmp_path / "syntactic_rules.db")
         agent.save(path)
 
         agent2 = SyntacticRuleAgent(min_prob=0.01)
@@ -363,7 +363,7 @@ class TestPersistence:
 
     def test_save_and_load_restores_patterns(self, tmp_path):
         agent = self._make_trained_agent()
-        path = str(tmp_path / "syntactic_rules.json")
+        path = str(tmp_path / "syntactic_rules.db")
         agent.save(path)
 
         agent2 = SyntacticRuleAgent(min_prob=0.01)
@@ -372,15 +372,27 @@ class TestPersistence:
 
     def test_save_and_load_restores_weights(self, tmp_path):
         agent = self._make_trained_agent()
-        path = str(tmp_path / "syntactic_rules.json")
+        path = str(tmp_path / "syntactic_rules.db")
         agent.save(path)
 
         agent2 = SyntacticRuleAgent(min_prob=0.01)
         agent2.load(path)
         assert len(agent2.get_weights()) == len(agent.get_weights())
 
+    def test_load_migrates_legacy_json_to_sqlite(self, tmp_path):
+        import os
+        agent = self._make_trained_agent()
+        legacy_path = str(tmp_path / "syntactic_rules.json")
+        db_path = str(tmp_path / "syntactic_rules.db")
+        agent.save(legacy_path)
+
+        agent2 = SyntacticRuleAgent(min_prob=0.01)
+        agent2.load(db_path)
+        assert agent2.get_pos("cat") == "NOUN"
+        assert os.path.exists(db_path)
+
     def test_load_nonexistent_raises(self, tmp_path):
         agent = SyntacticRuleAgent(min_prob=0.01)
         import pytest
         with pytest.raises((FileNotFoundError, OSError)):
-            agent.load(str(tmp_path / "nonexistent.json"))
+            agent.load(str(tmp_path / "nonexistent.db"))

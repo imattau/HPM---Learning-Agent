@@ -405,7 +405,7 @@ def verify_expected_edges(reasoning_agent: ReasoningAgent, expected_edges: Seque
         found = False
         for source_cell in source_cells:
             source_key = reasoning_agent._cell_key(source_cell)
-            edges = reasoning_agent._edge_index.get(source_key, [])
+            edges = reasoning_agent.edges_from(source_key)
             for target_cell in target_cells:
                 target_key = reasoning_agent._cell_key(target_cell)
                 if any(edge.target_key == target_key for edge in edges):

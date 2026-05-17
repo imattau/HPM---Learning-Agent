@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from hpm_ai_v6.hpm_model.core.cell import Cell
+from hpm_ai_v6.hpm_model.storage.sqlite_document_store import SQLiteDocumentStore
 
 # spaCy universal POS tag set — deterministic embedding index
 _POS_TAGS = [
@@ -183,20 +185,45 @@ class SyntacticRuleAgent:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        import json, os
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         data = {
             "min_prob": self.min_prob,
             "word_pos": self._word_pos,
             "probs": {f"{a}|{b}": v for (a, b), v in self._probs.items()},
         }
-        with open(path, "w") as f:
+        if path.endswith(".db"):
+            SQLiteDocumentStore(path, table_name="syntactic_rules").save(
+                "default", data
+            )
+            return
+
+        import json
+
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f)
 
     def load(self, path: str) -> None:
-        import json
-        with open(path) as f:
-            data = json.load(f)
+        data = None
+        if path.endswith(".db"):
+            legacy_path = path[:-3] + ".json"
+            if not os.path.exists(path) and not os.path.exists(legacy_path):
+                raise FileNotFoundError(path)
+            if os.path.exists(path):
+                store = SQLiteDocumentStore(path, table_name="syntactic_rules")
+                data = store.load("default")
+            if data is None and os.path.exists(legacy_path):
+                import json
+                with open(legacy_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                SQLiteDocumentStore(path, table_name="syntactic_rules").save(
+                    "default", data
+                )
+        if data is None and not path.endswith(".db"):
+            import json
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        if data is None:
+            return
         self.min_prob = data.get("min_prob", self.min_prob)
         self._word_pos = data.get("word_pos", {})
         self._probs = {

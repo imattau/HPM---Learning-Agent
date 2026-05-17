@@ -111,7 +111,7 @@ def test_prep_produces_prep_edge():
 def test_save_load_round_trip(tmp_path):
     agent = DependencyRelationAgent(nlp=SIMPLE_SVO_NLP)
     agent.learn_from_corpus(["Alice followed the rabbit."])
-    path = str(tmp_path / "dep.json")
+    path = str(tmp_path / "dep.db")
     agent.save(path)
     agent2 = DependencyRelationAgent(nlp=make_mock_dep_nlp([]))
     agent2.load(path)
@@ -120,6 +120,19 @@ def test_save_load_round_trip(tmp_path):
     assert agent2.patterns[0].name == agent.patterns[0].name
     assert agent2.patterns[0].source.name == agent.patterns[0].source.name
     assert agent2.patterns[0].target.name == agent.patterns[0].target.name
+
+
+def test_load_migrates_legacy_json_to_sqlite(tmp_path):
+    agent = DependencyRelationAgent(nlp=SIMPLE_SVO_NLP)
+    agent.learn_from_corpus(["Alice followed the rabbit."])
+    legacy_path = str(tmp_path / "dep.json")
+    db_path = str(tmp_path / "dep.db")
+    agent.save(legacy_path)
+
+    agent2 = DependencyRelationAgent(nlp=make_mock_dep_nlp([]))
+    agent2.load(db_path)
+    assert len(agent2.patterns) == len(agent.patterns)
+    assert os.path.exists(db_path)
 
 def test_integration_with_reasoning_agent():
     from types import SimpleNamespace

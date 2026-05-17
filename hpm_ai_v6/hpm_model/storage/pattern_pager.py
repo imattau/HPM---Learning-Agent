@@ -99,6 +99,8 @@ class PatternPager:
                     embedding BLOB NOT NULL
                 )
             """)
+            self._con.execute("CREATE INDEX IF NOT EXISTS idx_patterns_source ON patterns(source)")
+            self._con.execute("CREATE INDEX IF NOT EXISTS idx_patterns_target ON patterns(target)")
             self._con.commit()
             # Restore dim and vec table if patterns already exist
             row = self._con.execute("SELECT value FROM meta WHERE key='dim'").fetchone()

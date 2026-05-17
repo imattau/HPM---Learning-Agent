@@ -200,7 +200,7 @@ def test_reflect_then_reinforce_included_in_refresh():
         source_key = reader.reasoning_agent._cell_key(alice)
         targets = {
             edge.target_key
-            for edge in reader.reasoning_agent._edge_index.get(source_key, [])
+            for edge in reader.reasoning_agent.edges_from(source_key)
         }
         assert reader.reasoning_agent._cell_key(hole) in targets
 
@@ -313,7 +313,7 @@ def test_reasoning_edge_persists_across_agent_restart():
         source_key = restarted._cell_key(alice)
         targets = {
             edge.target_key
-            for edge in restarted._edge_index.get(source_key, [])
+            for edge in restarted.edges_from(source_key)
             if edge.relation == "reasoning_persisted"
         }
 
