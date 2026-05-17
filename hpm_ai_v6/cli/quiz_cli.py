@@ -809,39 +809,16 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     quiz_agent = QuizAgent(reader, reasoning_agent)
 
-    corrections_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "quiz_banks", "corrections.json",
-    )
-    try:
-        with open(corrections_path, encoding="utf-8") as _f:
-            corrections: dict[str, str] = json.load(_f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        corrections = {}
-
-    mastered: set[str] = set(corrections.keys())  # already-known questions start as mastered
+    mastered: set[str] = set()
     round_num = 0
-
-    def _save_corrections() -> None:
-        try:
-            with open(corrections_path, "w", encoding="utf-8") as _f:
-                json.dump(corrections, _f)
-        except Exception:
-            pass
 
     def _learn_from_attempt(payload: dict) -> None:
         topic = payload.get("topic")
         query = payload.get("query")
         question = payload.get("question")
         correct_text = payload.get("correct_text")
-        qid = payload.get("question_id")
         is_correct = bool(payload.get("is_correct"))
         confident = bool(payload.get("confident"))
-        # Cache the correct answer for this question — overrides noisy pattern scoring
-        qid = payload.get("question_id")
-        correct_key = payload.get("correct")
-        if qid and correct_key:
-            corrections[str(qid)] = str(correct_key)
 
         if not topic or not query:
             return
@@ -873,7 +850,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             auto=args.auto,
             skip_ids=mastered,
             feedback_hook=_learn_from_attempt,
-            corrections=corrections,
         )
         mastered.update(newly_mastered)
         reader.flush_all()  # persist newly trained patterns to SQLite
@@ -1131,7 +1107,6 @@ def run_quiz(
     auto: bool,
     skip_ids: set = None,
     feedback_hook: Optional[Callable[[dict], None]] = None,
-    corrections: Optional[dict] = None,
 ) -> tuple[int, list[str], set]:
     """Run the quiz loop. Returns (score, weak_topics, newly_mastered_ids)."""
     questions = quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
@@ -1153,13 +1128,7 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Check session correction cache first (model was explicitly told this answer)
-        qid = str(getattr(q, "id", ""))
-        if corrections and qid in corrections:
-            chosen = corrections[qid]
-            confident = True
-        else:
-            chosen, confident, _ = _score_options(reader, q.question, options_map)
+        chosen, confident, _ = _score_options(reader, q.question, options_map)
         trace = {}
         if not chosen:
             chosen = "?"
