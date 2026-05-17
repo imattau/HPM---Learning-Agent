@@ -808,15 +808,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
 
     quiz_agent = QuizAgent(reader, reasoning_agent)
-    dataset_agent = DatasetTrainingAgent(reader, corpus_path=corpus)
-
-    frontier_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  "data", "quiz_banks", "knowledge_frontier.json")
-    frontier = KnowledgeFrontier.load(frontier_path)
 
     mastered: set[str] = set()  # question ids answered correctly + confidently
-    nominated_history: set[str] = set()  # all topics ever nominated across rounds
-    fetched_titles: set[str] = set()  # all Wikipedia article titles fetched this session
     round_num = 0
 
     def _learn_from_attempt(payload: dict) -> None:
@@ -830,7 +823,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         if not topic or not query:
             return
 
-        # Always reinforce the correct answer in memory (fast, no network)
+        # Reinforce the correct answer directly — no Wikipedia needed
         if question and correct_text:
             fact_sentence = _build_search_query(str(question), str(correct_text))
             correction_sentence = _build_correction_sentence(str(question), str(correct_text), str(topic))
@@ -838,16 +831,6 @@ def main(argv: Optional[List[str]] = None) -> None:
                 reader.train_sequence([fact_sentence, correction_sentence], enable_causal=False)
             except Exception:
                 pass
-
-        # Only fetch Wikipedia for incorrect/unconfident answers
-        if not (is_correct and confident):
-            train_on_weak_topics(
-                reader,
-                [(str(topic), str(query))],
-                dataset_agent=dataset_agent,
-                fetched_titles=fetched_titles,
-                zim_path=getattr(args, "kiwix_zim_path", None),
-            )
         reasoning_agent.invalidate()
 
     while True:
@@ -855,7 +838,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         if args.loop and round_num > 1:
             print(f"\n{yellow(f'=== Loop round {round_num} ===')} (mastered {len(mastered)} question(s) so far)")
 
-        score, weak_topics, newly_mastered = run_quiz(
+        _score, _weak, newly_mastered = run_quiz(
             reader=reader,
             quiz_agent=quiz_agent,
             reasoning_agent=reasoning_agent,
@@ -867,33 +850,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             feedback_hook=_learn_from_attempt,
         )
         mastered.update(newly_mastered)
-
-        if weak_topics:
-            seeds = [label for label, _ in weak_topics]
-        else:
-            print(green("All topics answered confidently."))
-            seeds = _nominate_uncertain_topics(
-                dataset_agent, reasoning_agent, n=4, pool_size=50, exclude=nominated_history
-            )
-
-        frontier.add_learned_seeds(seeds, reader)
-        next_topics = frontier.next_topics(reader, n=4)
-        if next_topics:
-            nominated_history.update(next_topics)
-            print(f"\nFrontier training on: {', '.join(next_topics)}")
-            train_on_weak_topics(
-                reader,
-                [(topic, topic) for topic in next_topics],
-                dataset_agent=dataset_agent,
-                fetched_titles=fetched_titles,
-                zim_path=getattr(args, "kiwix_zim_path", None),
-            )
-            reasoning_agent.invalidate()
-        elif seeds:
-            print(yellow("Quiz gaps handled immediately; frontier produced no additional training topics."))
-        if next_topics:
-            frontier.increment_hop()
-        frontier.save(frontier_path)
+        reader.flush_all()  # persist newly trained patterns to SQLite
 
         if not args.loop:
             break
