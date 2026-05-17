@@ -925,16 +925,26 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
     Options whose words appear in more/heavier patterns score higher.
     """
     raw_q_words = {_tok(w) for w in question.split() if _tok(w) not in _STOP_WORDS and len(_tok(w)) > 1}
-    # Exclude question words that also appear in option text — they are ambiguous signals
+    # Exclude question words that appear in any option — ambiguous signals
     all_opt_words = {_tok(w) for opt in options_map.values() for w in (opt or "").split() if _tok(w)}
     q_words = raw_q_words - all_opt_words
+
+    # Words that appear in multiple options are not distinctive — exclude from opt_words scoring
+    from collections import Counter as _Counter
+    opt_word_counts = _Counter(
+        _tok(w)
+        for opt in options_map.values()
+        for w in (opt or "").split()
+        if _tok(w)
+    )
+    shared_opt_words = {w for w, c in opt_word_counts.items() if c > 1}
 
     scores: dict[str, float] = {}
     for key, option_text in options_map.items():
         if not option_text:
             scores[key] = 0.0
             continue
-        opt_words = [_tok(w) for w in option_text.split() if _tok(w)]
+        opt_words = [_tok(w) for w in option_text.split() if _tok(w) and _tok(w) not in shared_opt_words]
         total = 0.0
         seen_names: set[str] = set()
 
