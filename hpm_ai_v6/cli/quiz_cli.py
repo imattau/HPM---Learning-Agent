@@ -836,6 +836,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 pass
             # Boost weights of patterns encoding question→answer so they survive noise
             _boost_correct_patterns(reader, str(question), str(correct_text), boost=20.0)
+            # Persist ALL trained patterns (word, semantic, phrase, etc.) to SQLite
+            _persist_all_patterns(reader)
         reasoning_agent.invalidate()
 
     while True:
@@ -865,6 +867,26 @@ def main(argv: Optional[List[str]] = None) -> None:
             print(green(f"\nAll {args.n} questions mastered! Quiz complete."))
             break
         print(f"\n{remaining} question(s) still to master. Rerunning...")
+
+
+def _persist_all_patterns(reader) -> int:
+    """Enqueue all in-memory patterns from pager-enabled agents to SQLite.
+
+    Called after training so patterns don't require eviction to reach the DB.
+    Returns total count saved.
+    """
+    total = 0
+    for agent in reader.agents.values():
+        pager = getattr(agent, "pattern_pager", None)
+        if pager is None:
+            continue
+        for pattern in getattr(agent, "patterns", []):
+            try:
+                pager.enqueue_save(pattern)
+                total += 1
+            except Exception:
+                pass
+    return total
 
 
 OPTION_KEYS = ["A", "B", "C", "D"]
