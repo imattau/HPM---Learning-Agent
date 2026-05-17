@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import html as _html
 import os
 import re
 import sys
-from typing import List, Optional
+import zipfile
+from typing import Callable, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +63,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Keep repeating quiz until all answers are correct and confident",
     )
+    parser.add_argument(
+        "--kiwix-zim-path",
+        default=None,
+        help="Path to a local Kiwix .zim file or directory containing one for offline acquisition",
+    )
     return parser.parse_args(argv)
 
 
@@ -82,6 +89,9 @@ def _corpus_path() -> str:
 import urllib.request
 import urllib.parse
 import json
+
+_KIWIX_ZIM_ENV_VARS = ("HPM_KIWIX_ZIM_PATH", "KIWIX_ZIM_PATH")
+_KIWIX_ZIM_OVERRIDE: Optional[str] = None
 
 
 def _wiki_get(url: str, timeout: int = 6) -> Optional[dict]:
@@ -119,6 +129,225 @@ def _search_wikipedia_title(query: str) -> Optional[str]:
     return None
 
 
+def _kiwix_archive_path(cli_path: Optional[str] = None) -> Optional[str]:
+    """Return a local ZIM archive path from env vars, if configured."""
+    if cli_path:
+        raw_path = cli_path.strip()
+        if raw_path:
+            if os.path.isdir(raw_path):
+                zim_files = sorted(
+                    name for name in os.listdir(raw_path) if name.lower().endswith(".zim")
+                )
+                if zim_files:
+                    return os.path.join(raw_path, zim_files[0])
+            elif os.path.exists(raw_path):
+                return raw_path
+
+    if _KIWIX_ZIM_OVERRIDE:
+        raw_path = _KIWIX_ZIM_OVERRIDE.strip()
+        if raw_path:
+            if os.path.isdir(raw_path):
+                zim_files = sorted(
+                    name for name in os.listdir(raw_path) if name.lower().endswith(".zim")
+                )
+                if zim_files:
+                    return os.path.join(raw_path, zim_files[0])
+            elif os.path.exists(raw_path):
+                return raw_path
+
+    for env_name in _KIWIX_ZIM_ENV_VARS:
+        raw_path = os.environ.get(env_name, "").strip()
+        if not raw_path:
+            continue
+        if os.path.isdir(raw_path):
+            zim_files = sorted(
+                name for name in os.listdir(raw_path) if name.lower().endswith(".zim")
+            )
+            if zim_files:
+                return os.path.join(raw_path, zim_files[0])
+            continue
+        if os.path.exists(raw_path):
+            return raw_path
+    return None
+
+
+def _strip_html(text: str) -> str:
+    text = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = _html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _topic_tokens(topic: str) -> list[str]:
+    tokens = [tok.lower() for tok in re.findall(r"[a-zA-Z0-9]+", topic)]
+    if " " in topic:
+        tokens.append(topic.lower().strip())
+    seen = set()
+    ordered: list[str] = []
+    for token in tokens:
+        if token and token not in seen:
+            seen.add(token)
+            ordered.append(token)
+    return ordered
+
+
+def _expand_acquisition_terms(label: str, query: str, limit: int = 8) -> list[str]:
+    """Generate a small set of related acquisition queries from a weak topic."""
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def add(text: str) -> None:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if not cleaned:
+            return
+        key = cleaned.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append(cleaned)
+
+    add(query)
+    add(label)
+    add(f"{label} {query}")
+
+    tokens = [tok.lower() for tok in re.findall(r"[a-zA-Z0-9]+", f"{label} {query}")]
+    tokens = [tok for tok in tokens if len(tok) > 2 and tok not in _STOP_WORDS]
+    if not tokens:
+        tokens = [tok.lower() for tok in re.findall(r"[a-zA-Z0-9]+", f"{label} {query}") if tok]
+
+    for width in (2, 3):
+        for idx in range(len(tokens) - width + 1):
+            add(" ".join(tokens[idx : idx + width]))
+            if len(variants) >= limit:
+                return variants[:limit]
+
+    if tokens:
+        add(" ".join(tokens[: min(4, len(tokens))]))
+        add(" ".join(tokens[-min(4, len(tokens)) :]))
+
+    return variants[:limit]
+
+
+def _unique_sentences(sentences: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for sentence in sentences:
+        cleaned = re.sub(r"\s+", " ", sentence).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique.append(cleaned)
+    return unique
+
+
+def _fetch_zip_kiwix_sentences(topic: str, archive_path: str, max_sentences: int = 40) -> list[str]:
+    """Fallback reader for lightweight zip-based ZIM fixtures."""
+    if not zipfile.is_zipfile(archive_path):
+        return []
+
+    query_tokens = _topic_tokens(topic)
+    candidates: list[tuple[str, str]] = []
+
+    try:
+        with zipfile.ZipFile(archive_path) as zf:
+            for name in zf.namelist():
+                if name.endswith("/"):
+                    continue
+                lower_name = name.lower()
+                try:
+                    raw = zf.read(name).decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                text = _strip_html(raw)
+                lower_text = text.lower()
+                if query_tokens and not any(
+                    token in lower_name or token in lower_text for token in query_tokens
+                ):
+                    continue
+                candidates.append((name, text))
+    except Exception:
+        return []
+
+    sentences: list[str] = []
+    seen: set[str] = set()
+    for _name, text in candidates:
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            cleaned = sentence.strip()
+            if len(cleaned) <= 20:
+                continue
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+            sentences.append(cleaned)
+            if len(sentences) >= max_sentences:
+                return sentences
+    return sentences
+
+
+def _fetch_kiwix_sentences(topic: str, max_sentences: int = 40,
+                           zim_path: Optional[str] = None) -> list[str]:
+    """Fetch offline content for *topic* from a local ZIM archive when available."""
+    archive_path = _kiwix_archive_path(zim_path)
+    if not archive_path:
+        return []
+
+    try:
+        from libzim.reader import Archive
+        from libzim.search import Query, Searcher
+    except Exception:
+        return _fetch_zip_kiwix_sentences(topic, archive_path, max_sentences=max_sentences)
+
+    results = []
+    zim = None
+    try:
+        zim = Archive(archive_path)
+        searcher = Searcher(zim)
+        query = Query().set_query(topic)
+        search = searcher.search(query)
+        match_count = int(getattr(search, "getEstimatedMatches", lambda: 0)() or 0)
+        results = list(search.getResults(0, min(max(match_count, 1), 8)))
+    except Exception:
+        return _fetch_zip_kiwix_sentences(topic, archive_path, max_sentences=max_sentences)
+
+    sentences: list[str] = []
+    seen: set[str] = set()
+
+    for result in results:
+        path = getattr(result, "path", None) or getattr(result, "get_path", lambda: None)()
+        if not path:
+            path = str(result)
+        if not path:
+            continue
+        normalized_path = str(path).lstrip("/")
+        try:
+            entry = zim.get_entry_by_path(normalized_path)
+            item = entry.get_item()
+            raw_content = item.content
+            if isinstance(raw_content, (bytes, bytearray)):
+                text = raw_content.decode("utf-8", errors="ignore")
+            else:
+                text = str(raw_content)
+            text = _strip_html(text)
+        except Exception:
+            continue
+
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            cleaned = sentence.strip()
+            if len(cleaned) <= 20:
+                continue
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+            sentences.append(cleaned)
+            if len(sentences) >= max_sentences:
+                return sentences
+
+    if sentences:
+        return sentences
+    return _fetch_zip_kiwix_sentences(topic, archive_path, max_sentences=max_sentences)
+
+
 def _fetch_wikipedia_full(title: str, max_sentences: int = 40) -> list[str]:
     """Fetch full article extract for *title* and return up to max_sentences sentences."""
     params = urllib.parse.urlencode({
@@ -152,7 +381,8 @@ def _fetch_wikipedia_related_titles(title: str, limit: int = 2) -> list[str]:
 
 
 def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
-                               fetched_titles: set[str] | None = None) -> list[str]:
+                               fetched_titles: set[str] | None = None,
+                               zim_path: Optional[str] = None) -> list[str]:
     """Fetch Wikipedia content for *topic*, skipping already-fetched titles.
 
     All article fetches run in parallel threads with a 12s total budget.
@@ -165,7 +395,7 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
 
     title = _search_wikipedia_title(topic)
     if not title:
-        return []
+        return _fetch_kiwix_sentences(topic, max_sentences=max_sentences, zim_path=zim_path)
 
     # Determine which titles to fetch
     if title not in fetched_titles:
@@ -179,21 +409,28 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
 
     all_sentences: list[str] = []
 
-    # Fetch all primary titles in parallel
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_fetch_wikipedia_full, t, max_sentences): t for t in primary_titles}
-        try:
-            for fut in as_completed(futures, timeout=12):
-                t = futures[fut]
-                try:
-                    sentences = fut.result(timeout=0)
-                    if sentences:
-                        fetched_titles.add(t)
-                        all_sentences.extend(sentences)
-                except Exception:
-                    pass
-        except FuturesTimeout:
-            pass
+    # Fetch all primary titles in parallel, but do not block shutdown if one hangs.
+    pool = ThreadPoolExecutor(max_workers=4)
+    futures = {pool.submit(_fetch_wikipedia_full, t, max_sentences): t for t in primary_titles}
+    try:
+        for fut in as_completed(futures, timeout=12):
+            t = futures[fut]
+            try:
+                sentences = fut.result(timeout=0)
+                if sentences:
+                    fetched_titles.add(t)
+                    all_sentences.extend(sentences)
+            except Exception:
+                pass
+    except FuturesTimeout:
+        pass
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    if not all_sentences:
+        offline_sentences = _fetch_kiwix_sentences(title, max_sentences=max_sentences, zim_path=zim_path)
+        if offline_sentences:
+            all_sentences.extend(offline_sentences)
 
     # Fire-and-forget: queue second-level link fetches in background (no wait)
     if all_sentences:
@@ -209,13 +446,15 @@ def _fetch_wikipedia_sentences(topic: str, max_sentences: int = 40,
                 fetched_titles.add(rel_title)
                 all_sentences.extend(sents)
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            link_futures = [pool.submit(_background_fetch, t) for t in link_titles[:4]]
-            try:
-                for fut in as_completed(link_futures, timeout=8):
-                    fut.result(timeout=0)
-            except FuturesTimeout:
-                pass
+        pool = ThreadPoolExecutor(max_workers=2)
+        link_futures = [pool.submit(_background_fetch, t) for t in link_titles[:4]]
+        try:
+            for fut in as_completed(link_futures, timeout=8):
+                fut.result(timeout=0)
+        except FuturesTimeout:
+            pass
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
     return all_sentences
 
@@ -264,7 +503,8 @@ def _fetch_wordnet_sentences(word: str, max_senses: int = 4) -> list[str]:
 
 
 def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_agent=None,
-                         min_entropy: float = 0.1, fetched_titles: set[str] | None = None) -> None:
+                         min_entropy: float = 0.1, fetched_titles: set[str] | None = None,
+                         zim_path: Optional[str] = None) -> None:
     """Fetch Wikipedia text and dictionary definitions for each weak topic, filter by novelty, and retrain.
 
     Each entry is (display_label, search_query). Sentences are scored by entropy
@@ -273,35 +513,61 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
     if not weak_topics:
         return
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
-    labels = ", ".join(label for label, _ in weak_topics)
+    labels = ", ".join(
+        f"{label} [{query}]" if query and query != label else label
+        for label, query in weak_topics
+    )
     print(f"\nTriggering knowledge acquisition for: {labels}")
     all_sentences: list[str] = []
 
     def _acquire_topic(label: str, query: str) -> tuple[str, list[str]]:
-        wiki = _fetch_wikipedia_sentences(query, fetched_titles=fetched_titles)
-        # Try Live API first, then local WordNet
-        lexical = _fetch_dictionary_sentences(label)
-        if not lexical:
-            lexical = _fetch_wordnet_sentences(label)
-        return label, wiki + lexical
+        search_terms = _expand_acquisition_terms(label, query)
+        gathered: list[str] = []
 
-    with ThreadPoolExecutor(max_workers=min(len(weak_topics), 4)) as pool:
-        futures = {pool.submit(_acquire_topic, label, query): (label, query)
-                   for label, query in weak_topics}
-        topic_results: dict[str, list[str]] = {}
-        for fut in as_completed(futures, timeout=60):
+        for search_text in search_terms:
+            wiki_kwargs = {"fetched_titles": fetched_titles}
+            if zim_path:
+                wiki_kwargs["zim_path"] = zim_path
+            gathered.extend(_fetch_wikipedia_sentences(search_text, **wiki_kwargs))
+            gathered.extend(_fetch_dictionary_sentences(search_text))
+            gathered.extend(_fetch_wordnet_sentences(search_text))
+
+        return label, _unique_sentences(gathered)
+
+    pool = ThreadPoolExecutor(max_workers=min(len(weak_topics), 4))
+    futures = {pool.submit(_acquire_topic, label, query): (label, query)
+               for label, query in weak_topics}
+    topic_results: dict[str, list[str]] = {}
+    try:
+        for fut in as_completed(futures, timeout=20):
             try:
                 label, sentences = fut.result(timeout=0)
                 topic_results[label] = sentences
             except Exception:
                 label, _ = futures[fut]
                 topic_results[label] = []
+    except FuturesTimeout:
+        for fut, (label, _query) in futures.items():
+            if label not in topic_results:
+                topic_results[label] = []
+            if hasattr(fut, "cancel"):
+                try:
+                    fut.cancel()
+                except Exception:
+                    pass
+    finally:
+        if hasattr(pool, "shutdown"):
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
 
     for label, query in weak_topics:
         sentences = topic_results.get(label, [])
-        print(f"  Acquiring '{label}' ...", end=" ", flush=True)
+        search_terms = _expand_acquisition_terms(label, query)
+        print(f"  Acquiring '{label}' via {len(search_terms)} query variant(s) ...", end=" ", flush=True)
         if not sentences:
             print("(no data)")
             continue
@@ -315,7 +581,10 @@ def train_on_weak_topics(reader, weak_topics: list[tuple[str, str]], dataset_age
                 all_sentences.extend(novel)
             else:
                 # No novel sentences — try exploring links for fresh content
-                link_sentences = _fetch_wikipedia_sentences(query, fetched_titles=fetched_titles)
+                link_kwargs = {"fetched_titles": fetched_titles}
+                if zim_path:
+                    link_kwargs["zim_path"] = zim_path
+                link_sentences = _fetch_wikipedia_sentences(query, **link_kwargs)
                 link_scored = [(dataset_agent.score_sentence(s), s) for s in link_sentences] if link_sentences else []
                 link_novel = [s for sc, s in link_scored if sc >= min_entropy]
                 if link_novel:
@@ -364,12 +633,12 @@ def _nominate_uncertain_topics(dataset_agent, reasoning_agent, n: int = 4,
         candidates = [t for t in candidates if t not in exclude]
 
     reasoning_agent._ensure_fresh()
-    edge_index = getattr(reasoning_agent, "_edge_index", {})
+    source_keys = reasoning_agent.iter_source_keys()
 
     scored: list[tuple[int, str]] = []
     for topic in candidates:
         topic_word = topic.lower().split()[0]  # use first word for lookup
-        edge_count = sum(1 for k in edge_index if topic_word in k.lower())
+        edge_count = sum(1 for k in source_keys if topic_word in k.lower())
         scored.append((edge_count, topic))
 
     # Ascending by edge count: fewest edges = least learned = learn this first
@@ -523,6 +792,8 @@ class KnowledgeFrontier:
 
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
+    global _KIWIX_ZIM_OVERRIDE
+    _KIWIX_ZIM_OVERRIDE = getattr(args, "kiwix_zim_path", None)
 
     print("Building HPM reader...")
     from hpm_ai_v6.agents.multi_agent_reader import MultiAgentReader
@@ -548,6 +819,36 @@ def main(argv: Optional[List[str]] = None) -> None:
     fetched_titles: set[str] = set()  # all Wikipedia article titles fetched this session
     round_num = 0
 
+    def _learn_from_attempt(payload: dict) -> None:
+        topic = payload.get("topic")
+        query = payload.get("query")
+        question = payload.get("question")
+        correct_text = payload.get("correct_text")
+        qid = payload.get("question_id")
+        is_correct = bool(payload.get("is_correct"))
+        confident = bool(payload.get("confident"))
+        if not topic or not query:
+            return
+        if is_correct and confident:
+            return
+
+        if question and correct_text:
+            fact_sentence = _build_search_query(str(question), str(correct_text))
+            correction_sentence = _build_correction_sentence(str(question), str(correct_text), str(topic))
+            try:
+                reader.train_sequence([fact_sentence, correction_sentence], enable_causal=False)
+            except Exception:
+                pass
+
+        train_on_weak_topics(
+            reader,
+            [(str(topic), str(query))],
+            dataset_agent=dataset_agent,
+            fetched_titles=fetched_titles,
+            zim_path=getattr(args, "kiwix_zim_path", None),
+        )
+        reasoning_agent.invalidate()
+
     while True:
         round_num += 1
         if args.loop and round_num > 1:
@@ -562,6 +863,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             source=args.source,
             auto=args.auto,
             skip_ids=mastered,
+            feedback_hook=_learn_from_attempt,
         )
         mastered.update(newly_mastered)
 
@@ -570,7 +872,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         else:
             print(green("All topics answered confidently."))
             seeds = _nominate_uncertain_topics(
-                dataset_agent, reasoning_agent, n=4, pool_size=50, exclude=set()
+                dataset_agent, reasoning_agent, n=4, pool_size=50, exclude=nominated_history
             )
 
         frontier.add_learned_seeds(seeds, reader)
@@ -578,9 +880,18 @@ def main(argv: Optional[List[str]] = None) -> None:
         if next_topics:
             nominated_history.update(next_topics)
             print(f"\nFrontier training on: {', '.join(next_topics)}")
-            train_on_weak_topics(reader, [(t, t) for t in next_topics], dataset_agent=dataset_agent, fetched_titles=fetched_titles)
+            train_on_weak_topics(
+                reader,
+                [(topic, topic) for topic in next_topics],
+                dataset_agent=dataset_agent,
+                fetched_titles=fetched_titles,
+                zim_path=getattr(args, "kiwix_zim_path", None),
+            )
             reasoning_agent.invalidate()
-        frontier.increment_hop()
+        elif seeds:
+            print(yellow("Quiz gaps handled immediately; frontier produced no additional training topics."))
+        if next_topics:
+            frontier.increment_hop()
         frontier.save(frontier_path)
 
         if not args.loop:
@@ -692,14 +1003,21 @@ def _parse_letter_answer(answer_text: str, options_map: dict) -> str:
     for key, value in options_map.items():
         if value and value.lower() in answer_lower:
             return key
-    return "A"
+    return ""
 
 
 def _extract_answer(trace: dict, options: dict) -> str:
-    """Map reasoning trace output to an option key A/B/C/D."""
+    """Map reasoning trace output to an option key A/B/C/D.
+
+    Returns an empty string when no confident option can be inferred.
+    """
     # If the agent set an explicit 'answer' key, trust it.
-    if trace.get("answer") in OPTION_KEYS:
-        return trace["answer"]
+    answer_text = str(trace.get("answer", "") or "")
+    if answer_text in OPTION_KEYS:
+        return answer_text
+    parsed = _parse_letter_answer(answer_text, options)
+    if parsed in OPTION_KEYS:
+        return parsed
 
     # Otherwise match explanation / chosen_path label against option values.
     chosen = trace.get("chosen_path") or {}
@@ -719,8 +1037,7 @@ def _extract_answer(trace: dict, options: dict) -> str:
             if value.lower() in candidate_label:
                 return key
 
-    # Last resort: pick A
-    return "A"
+    return ""
 
 
 _STOP_WORDS = {"what", "is", "the", "a", "an", "of", "in", "on", "at", "to", "for",
@@ -737,6 +1054,17 @@ def _build_search_query(question: str, correct_answer: str) -> str:
     return " ".join(query_parts)
 
 
+def _build_correction_sentence(question: str, correct_text: str, topic: str | None = None) -> str:
+    """Create a direct supervised learning sentence from a quiz correction."""
+    parts = []
+    if topic:
+        parts.append(f"Topic: {topic}.")
+    parts.append(f"Question: {question}.")
+    if correct_text:
+        parts.append(f"Correct answer: {correct_text}.")
+    return " ".join(parts)
+
+
 def _reinforce_trace(reasoning_agent, trace: dict, boost: bool) -> None:
     """No-op: pager-based scoring doesn't use reasoning graph edges."""
     pass
@@ -751,6 +1079,7 @@ def run_quiz(
     source: str,
     auto: bool,
     skip_ids: set = None,
+    feedback_hook: Optional[Callable[[dict], None]] = None,
 ) -> tuple[int, list[str], set]:
     """Run the quiz loop. Returns (score, weak_topics, newly_mastered_ids)."""
     questions = quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
@@ -772,22 +1101,17 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Surgically retrieve relevant patterns for this question
-        _retrieve_relevant_patterns(reader, q.question, options_map)
-        
-        # Use reasoning agent for the final answer
-        trace = reasoning_agent.reason_with_trace(q.question)
-        chosen = _extract_answer(trace, options_map)
-        
-        # Confidence is derived from both the reasoning trace and the pattern index overlap
-        # (Using _score_options as a secondary grounding/confidence signal)
-        _, opt_confident, _ = _score_options(reader, q.question, options_map)
-        confident = opt_confident and trace.get("confidence", 0.0) > 0.3
+        # Score each option via pager index — no disk reads, no warm_start needed
+        chosen, confident, _ = _score_options(reader, q.question, options_map)
+        trace = {}
+        if not chosen:
+            chosen = "?"
         
         correct = OPTION_KEYS[q.correct_index]
 
         confidence_label = "confident" if confident else yellow("guessing")
         print(f"\nAI answers: {chosen}  [{confidence_label}]")
+        print(f"Correct answer: {correct}) {options_map.get(correct, '')}")
 
         snippet = str(trace.get("explanation", ""))[:120]
         if snippet:
@@ -817,6 +1141,23 @@ def run_quiz(
             # Weaken the edges that led to this wrong confident answer
             if confident:
                 _reinforce_trace(reasoning_agent, trace, boost=False)
+
+        if feedback_hook is not None:
+            try:
+                feedback_hook({
+                    "question_id": getattr(q, "id", None),
+                    "question": q.question,
+                    "topic": getattr(q, "topic", None),
+                    "query": _build_search_query(q.question, options_map.get(correct, "")),
+                    "chosen": chosen,
+                    "correct": correct,
+                    "correct_text": options_map.get(correct, ""),
+                    "is_correct": is_correct,
+                    "confident": confident,
+                    "trace": trace,
+                })
+            except Exception:
+                pass
 
         if not auto and idx < len(questions):
             input("\nPress Enter for next question...")
