@@ -829,9 +829,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         confident = bool(payload.get("confident"))
         if not topic or not query:
             return
-        if is_correct and confident:
-            return
 
+        # Always reinforce the correct answer in memory (fast, no network)
         if question and correct_text:
             fact_sentence = _build_search_query(str(question), str(correct_text))
             correction_sentence = _build_correction_sentence(str(question), str(correct_text), str(topic))
@@ -840,13 +839,15 @@ def main(argv: Optional[List[str]] = None) -> None:
             except Exception:
                 pass
 
-        train_on_weak_topics(
-            reader,
-            [(str(topic), str(query))],
-            dataset_agent=dataset_agent,
-            fetched_titles=fetched_titles,
-            zim_path=getattr(args, "kiwix_zim_path", None),
-        )
+        # Only fetch Wikipedia for incorrect/unconfident answers
+        if not (is_correct and confident):
+            train_on_weak_topics(
+                reader,
+                [(str(topic), str(query))],
+                dataset_agent=dataset_agent,
+                fetched_titles=fetched_titles,
+                zim_path=getattr(args, "kiwix_zim_path", None),
+            )
         reasoning_agent.invalidate()
 
     while True:
@@ -955,11 +956,10 @@ def _retrieve_relevant_patterns(reader, question: str, options_map: dict, top_k:
 
 
 def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool, dict]:
-    """Score each option by summing pattern weights from the pager index.
+    """Score each option against patterns from both active memory and the pager index.
 
-    Scans each agent's in-memory pager index (no disk reads, no cell reconstruction).
+    Checks agent.patterns (in-memory, includes just-trained) and pager index (persisted).
     Options whose words appear in more/heavier patterns score higher.
-    Newly trained patterns appear immediately — no warm_start needed.
     """
     q_words = {w for w in question.lower().split()
                if w not in _STOP_WORDS and len(w) > 2 and w.isalpha()}
@@ -971,18 +971,36 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
             continue
         opt_words = [w.lower() for w in option_text.split() if w.isalpha() and len(w) > 1]
         total = 0.0
+        seen_names: set[str] = set()
+
         for agent in reader.agents.values():
+            # Check in-memory active patterns first (includes just-trained corrections)
+            for pattern in getattr(agent, "patterns", []):
+                name = str(pattern.name).lower()
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+                weight = float(getattr(pattern, "weight", 1.0))
+                has_opt = any(w in name for w in opt_words)
+                has_q = any(qw in name for qw in q_words)
+                if has_opt and has_q:
+                    total += weight
+
+            # Also check pager index (evicted/persisted patterns)
             pager = getattr(agent, "pattern_pager", None)
             if pager is None:
                 continue
             for payload in pager.iter_index_payloads():
                 name = str(payload.get("name", "")).lower()
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
                 weight = float(payload.get("weight", 0.0))
-                # Pattern must reference option word AND at least one question word
                 has_opt = any(w in name for w in opt_words)
                 has_q = any(qw in name for qw in q_words)
                 if has_opt and has_q:
                     total += weight
+
         scores[key] = total
 
     best_key = max(scores, key=lambda k: scores[k])
