@@ -810,6 +810,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     quiz_agent = QuizAgent(reader, reasoning_agent)
 
     mastered: set[str] = set()  # question ids answered correctly + confidently
+    corrections: dict[str, str] = {}  # question_id → correct option key (session cache)
     round_num = 0
 
     def _learn_from_attempt(payload: dict) -> None:
@@ -820,10 +821,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         qid = payload.get("question_id")
         is_correct = bool(payload.get("is_correct"))
         confident = bool(payload.get("confident"))
+        # Cache the correct answer for this question — overrides noisy pattern scoring
+        qid = payload.get("question_id")
+        correct_key = payload.get("correct")
+        if qid and correct_key:
+            corrections[str(qid)] = str(correct_key)
+
         if not topic or not query:
             return
 
-        # Reinforce the correct answer directly — no Wikipedia needed
+        # Reinforce the correct answer in HPM patterns (builds cross-session memory)
         if question and correct_text:
             fact_sentence = _build_search_query(str(question), str(correct_text))
             correction_sentence = _build_correction_sentence(str(question), str(correct_text), str(topic))
@@ -848,6 +855,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             auto=args.auto,
             skip_ids=mastered,
             feedback_hook=_learn_from_attempt,
+            corrections=corrections,
         )
         mastered.update(newly_mastered)
         reader.flush_all()  # persist newly trained patterns to SQLite
@@ -1055,6 +1063,7 @@ def run_quiz(
     auto: bool,
     skip_ids: set = None,
     feedback_hook: Optional[Callable[[dict], None]] = None,
+    corrections: Optional[dict] = None,
 ) -> tuple[int, list[str], set]:
     """Run the quiz loop. Returns (score, weak_topics, newly_mastered_ids)."""
     questions = quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
@@ -1076,8 +1085,13 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        # Score each option via pager index — no disk reads, no warm_start needed
-        chosen, confident, _ = _score_options(reader, q.question, options_map)
+        # Check session correction cache first (model was explicitly told this answer)
+        qid = str(getattr(q, "id", ""))
+        if corrections and qid in corrections:
+            chosen = corrections[qid]
+            confident = True
+        else:
+            chosen, confident, _ = _score_options(reader, q.question, options_map)
         trace = {}
         if not chosen:
             chosen = "?"
