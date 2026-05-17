@@ -931,7 +931,10 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
             "scores": {k: (1.0 if k == direct_key else 0.0) for k in options_map},
         }
 
-    q_words = {_tok(w) for w in question.split() if _tok(w) not in _STOP_WORDS and len(_tok(w)) > 1}
+    raw_q_words = {_tok(w) for w in question.split() if _tok(w) not in _STOP_WORDS and len(_tok(w)) > 1}
+    # Exclude question words that also appear in option text — they are ambiguous signals
+    all_opt_words = {_tok(w) for opt in options_map.values() for w in (opt or "").split() if _tok(w)}
+    q_words = raw_q_words - all_opt_words
 
     scores: dict[str, float] = {}
     for key, option_text in options_map.items():
@@ -960,6 +963,20 @@ def _score_options(reader, question: str, options_map: dict) -> tuple[str, bool,
             if pager is None:
                 continue
             for payload in pager.iter_index_payloads():
+                name = str(payload.get("name", "")).lower()
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+                weight = float(payload.get("weight", 0.0))
+                has_opt = any(w in name for w in opt_words)
+                has_q = any(qw in name for qw in q_words)
+                if has_opt and has_q:
+                    total += weight
+
+        # Scan shared PatternStore — running-average weights from all training
+        ps = getattr(reader, "pattern_store", None)
+        if ps is not None:
+            for payload in ps.iter_payloads():
                 name = str(payload.get("name", "")).lower()
                 if name in seen_names:
                     continue

@@ -1,31 +1,14 @@
-"""Shared cross-agent cross-corpus PatternStore.
+"""Shared cross-agent cross-corpus PatternStore backed by SQLite.
 
-Patterns are identified by embedding cosine similarity (threshold 0.85 by
-default).  Weights are merged using a running average; observation counts are
-tracked per entry.
-
-Storage: <cache_dir>/shared/patterns.npz  (NumPy archive)
-
-Array layout inside the .npz file
-----------------------------------
-vectors  : (N, D)  float32  -- embedding vectors
-weights  : (N,)    float32  -- running-averaged weights
-counts   : (N,)    int32    -- merge observation count
-names    : (N,)    object   -- canonical pattern name (most recently seen)
-agents   : (N,)    object   -- comma-separated agent names that contributed
-
-Note on allow_pickle in np.load / np.savez
-------------------------------------------
-The `names` and `agents` arrays use numpy object dtype (Python strings).
-NumPy requires allow_pickle=True to save/load these.  This is safe here
-because we are the sole writer of the file -- no untrusted data is
-deserialised.  The file lives under the project's own cache directory and
-is never loaded from an external source.
+Stores patterns from all agents by name. Each pattern has its own embedding
+dimension — no single-dim constraint. Running-average weights accumulate
+across training calls. Name-based lookup enables scoring without dim matching.
 """
-
 from __future__ import annotations
 
 import os
+import sqlite3
+import struct
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -33,188 +16,154 @@ import numpy as np
 from hpm_ai_v6.hpm_model.core.cell import Cell
 
 
+def _emb_to_bytes(arr: np.ndarray) -> bytes:
+    return arr.astype(np.float32).tobytes()
+
+
+def _bytes_to_emb(b: bytes) -> np.ndarray:
+    n = len(b) // 4
+    return np.array(struct.unpack(f"{n}f", b), dtype=np.float32)
+
+
+def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
+    denom = float(np.linalg.norm(a)) * float(np.linalg.norm(b)) + 1e-9
+    return float(np.dot(a, b) / denom)
+
+
 class PatternStore:
     """Shared, cross-agent, cross-corpus pattern store."""
 
-    def __init__(
-        self,
-        cache_dir: str,
-        similarity_threshold: float = 0.85,
-    ) -> None:
-        """
-        Args:
-            cache_dir: Root cache directory (e.g. '.hpm_pattern_cache').
-                       Store writes to <cache_dir>/shared/patterns.npz.
-            similarity_threshold: Cosine similarity cutoff for merging.
-                                  Patterns with sim >= threshold are treated
-                                  as the same conceptual pattern.
-        """
+    def __init__(self, cache_dir: str, similarity_threshold: float = 0.85) -> None:
         self.cache_dir = cache_dir
         self.similarity_threshold = similarity_threshold
-        self._store_path = os.path.join(cache_dir, "shared", "patterns.npz")
 
-        # In-memory arrays; None means not yet loaded/initialised.
-        self._vectors: Optional[np.ndarray] = None   # (N, D) float32
-        self._weights: Optional[np.ndarray] = None   # (N,) float32
-        self._counts: Optional[np.ndarray] = None    # (N,) int32
-        self._names: Optional[np.ndarray] = None     # (N,) object
-        self._agents: Optional[np.ndarray] = None    # (N,) object
+        shared_dir = os.path.join(cache_dir, "shared")
+        os.makedirs(shared_dir, exist_ok=True)
+        self._db_path = os.path.join(shared_dir, "patterns.db")
+        self._npz_path = os.path.join(shared_dir, "patterns.npz")
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+        self._con = self._open_connection()
+        self._init_schema()
+        self._migrate_npz()
 
-    def _is_empty(self) -> bool:
-        return self._vectors is None or len(self._vectors) == 0
+    def _open_connection(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self._db_path, check_same_thread=False)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA synchronous=NORMAL")
+        return con
 
-    def _init_empty(self) -> None:
-        """Reset in-memory state to a valid but empty store."""
-        self._vectors = np.empty((0, 0), dtype=np.float32)
-        self._weights = np.empty((0,), dtype=np.float32)
-        self._counts = np.empty((0,), dtype=np.int32)
-        self._names = np.empty((0,), dtype=object)
-        self._agents = np.empty((0,), dtype=object)
+    def _init_schema(self) -> None:
+        self._con.execute("""
+            CREATE TABLE IF NOT EXISTS shared_patterns (
+                name      TEXT PRIMARY KEY NOT NULL,
+                agent     TEXT,
+                weight    REAL NOT NULL DEFAULT 1.0,
+                count     INTEGER NOT NULL DEFAULT 1,
+                dim       INTEGER NOT NULL,
+                embedding BLOB NOT NULL
+            )
+        """)
+        self._con.commit()
 
-    def _ensure_loaded(self) -> None:
-        """Ensure in-memory state is initialised (load from disk if needed)."""
-        if self._vectors is None:
-            self.load()
+    def _migrate_npz(self) -> None:
+        if not os.path.exists(self._npz_path):
+            return
+        count = self._con.execute("SELECT COUNT(*) FROM shared_patterns").fetchone()[0]
+        if count > 0:
+            return
+        try:
+            data = np.load(self._npz_path, allow_pickle=True)
+            vectors = data["vectors"].astype(np.float32)
+            weights_arr = data["weights"].astype(np.float32)
+            counts_arr = data["counts"].astype(np.int32)
+            names = data["names"].astype(object)
+            agents = data["agents"].astype(object)
+            for i in range(len(names)):
+                vec = vectors[i]
+                self._upsert(str(names[i]), str(agents[i]),
+                             float(weights_arr[i]), int(counts_arr[i]), vec)
+            self._con.commit()
+        except Exception:
+            pass
 
-    def _cosine_similarities(self, query: np.ndarray) -> np.ndarray:
-        """Return cosine similarity of query against all stored vectors."""
-        norms = np.linalg.norm(self._vectors, axis=1)  # (N,)
-        query_norm = float(np.linalg.norm(query))
-        return self._vectors @ query / (norms * query_norm + 1e-9)  # (N,)
+    def _upsert(self, name: str, agent: str, weight: float,
+                count: int, vec: np.ndarray) -> None:
+        emb_bytes = _emb_to_bytes(vec)
+        dim = len(vec)
+        existing = self._con.execute(
+            "SELECT weight, count FROM shared_patterns WHERE name=?", (name,)
+        ).fetchone()
+        if existing:
+            old_w, old_c = existing
+            new_c = old_c + count
+            new_w = (old_w * old_c + weight * count) / new_c
+            self._con.execute(
+                "UPDATE shared_patterns SET weight=?, count=?, agent=?, dim=?, embedding=? WHERE name=?",
+                (new_w, new_c, agent, dim, emb_bytes, name),
+            )
+        else:
+            self._con.execute(
+                "INSERT INTO shared_patterns(name, agent, weight, count, dim, embedding) VALUES (?,?,?,?,?,?)",
+                (name, agent, weight, count, dim, emb_bytes),
+            )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def merge(
-        self,
-        patterns: List[Cell],
-        weights: List[float],
-        agent_name: str,
-    ) -> None:
-        """Merge a batch of (pattern, weight) pairs into the store.
-
-        For each pair:
-        - If the store is non-empty and the maximum cosine similarity against
-          stored vectors is >= similarity_threshold, update the matching entry
-          using a running average and increment its count.
-        - Otherwise append a new entry.
-
-        Does NOT call save() -- the caller must call save() after the batch.
-        """
-        self._ensure_loaded()
-
+    def merge(self, patterns: List[Cell], weights: List[float], agent_name: str) -> None:
+        """Merge patterns with running-average weight update."""
         for cell, w in zip(patterns, weights):
-            vec = cell.as_numpy().astype(np.float32)
-            D = vec.shape[0]
-
-            if self._is_empty():
-                self._vectors = vec.reshape(1, D)
-                self._weights = np.array([w], dtype=np.float32)
-                self._counts = np.array([1], dtype=np.int32)
-                self._names = np.array([cell.name], dtype=object)
-                self._agents = np.array([agent_name], dtype=object)
+            try:
+                vec = cell.as_numpy().astype(np.float32)
+                if vec.size == 0:
+                    continue
+                self._upsert(cell.name, agent_name, float(w), 1, vec)
+            except Exception:
                 continue
-
-            stored_D = self._vectors.shape[1]
-            if D != stored_D:
-                raise ValueError(
-                    f"Embedding dimension mismatch: incoming vector has dim {D}, "
-                    f"store expects dim {stored_D}."
-                )
-
-            sims = self._cosine_similarities(vec)
-            best_idx = int(np.argmax(sims))
-            best_sim = float(sims[best_idx])
-
-            if best_sim >= self.similarity_threshold:
-                n = int(self._counts[best_idx])
-                self._weights[best_idx] = (
-                    float(self._weights[best_idx]) * n + w
-                ) / (n + 1)
-                self._counts[best_idx] = n + 1
-                self._names[best_idx] = cell.name
-                existing_agents = self._agents[best_idx].split(",")
-                if agent_name not in existing_agents:
-                    self._agents[best_idx] = ",".join(existing_agents + [agent_name])
-            else:
-                self._vectors = np.vstack([self._vectors, vec.reshape(1, D)])
-                self._weights = np.append(self._weights, np.float32(w))
-                self._counts = np.append(self._counts, np.int32(1))
-                self._names = np.append(self._names, cell.name)
-                self._agents = np.append(self._agents, agent_name)
+        self._con.commit()
 
     def load(self) -> Tuple[List[Cell], List[float]]:
-        """Load all stored patterns and their averaged weights from disk.
-
-        Returns ([], []) if no store file exists yet.
-        Also populates the in-memory state so subsequent merge() calls work.
-        """
-        if not os.path.exists(self._store_path):
-            self._init_empty()
-            return [], []
-
-        # allow_pickle=True is required for object-dtype string arrays.
-        # Safe -- we are the sole writer; see module docstring.
-        data = np.load(self._store_path, allow_pickle=True)
-        self._vectors = data["vectors"].astype(np.float32)
-        self._weights = data["weights"].astype(np.float32)
-        self._counts = data["counts"].astype(np.int32)
-        self._names = data["names"].astype(object)
-        self._agents = data["agents"].astype(object)
-
-        cells = [
-            Cell(name=str(name), embedding=vec)
-            for name, vec in zip(self._names, self._vectors)
-        ]
-        weights = [float(w) for w in self._weights]
+        rows = self._con.execute(
+            "SELECT name, weight, embedding FROM shared_patterns"
+        ).fetchall()
+        cells, weights = [], []
+        for name, weight, emb_b in rows:
+            emb = _bytes_to_emb(emb_b).astype(float)
+            cells.append(Cell(name=str(name), embedding=emb))
+            weights.append(float(weight))
         return cells, weights
 
-    def find_similar(
-        self,
-        vector: np.ndarray,
-        top_k: int = 5,
-    ) -> List[Tuple[float, Cell]]:
-        """Return the top-k most similar stored patterns (descending similarity).
+    def find_similar(self, vector: np.ndarray, top_k: int = 5) -> List[Tuple[float, Cell]]:
+        """Return top-k most similar same-dim patterns by cosine similarity."""
+        vec = np.asarray(vector, dtype=np.float32)
+        dim = len(vec)
+        rows = self._con.execute(
+            "SELECT name, embedding FROM shared_patterns WHERE dim=?", (dim,)
+        ).fetchall()
+        results = []
+        for name, emb_b in rows:
+            emb = _bytes_to_emb(emb_b)
+            sim = _cosine_sim(vec, emb)
+            results.append((sim, Cell(name=str(name), embedding=emb.astype(float))))
+        results.sort(key=lambda x: x[0], reverse=True)
+        return results[:top_k]
 
-        Returns [] if the store is empty.
-        """
-        self._ensure_loaded()
-        if self._is_empty():
-            return []
-
-        query = np.asarray(vector, dtype=np.float32)
-        sims = self._cosine_similarities(query)
-        k = min(top_k, len(sims))
-        top_indices = np.argsort(sims)[::-1][:k]
-
+    def iter_payloads(self) -> List[dict]:
+        rows = self._con.execute(
+            "SELECT name, agent, weight, count, embedding FROM shared_patterns"
+        ).fetchall()
         return [
-            (float(sims[i]), Cell(name=str(self._names[i]), embedding=self._vectors[i]))
-            for i in top_indices
+            {"name": r[0], "agent": r[1], "weight": r[2],
+             "count": r[3], "embedding": _bytes_to_emb(r[4]).tolist()}
+            for r in rows
         ]
 
     def save(self) -> None:
-        """Persist in-memory state to <cache_dir>/shared/patterns.npz.
-
-        Creates the directory if it does not exist. Overwrites any existing file.
-        """
-        self._ensure_loaded()
-        os.makedirs(os.path.dirname(self._store_path), exist_ok=True)
-        # allow_pickle=True required for object-dtype string arrays.
-        # Safe -- we are the sole writer; see module docstring.
-        np.savez(
-            self._store_path,
-            vectors=self._vectors,
-            weights=self._weights,
-            counts=self._counts,
-            names=self._names,
-            agents=self._agents,
-        )
+        pass  # SQLite commits immediately; kept for API compatibility
 
     def clear(self) -> None:
-        """Reset in-memory store to empty (does not delete the file on disk)."""
-        self._init_empty()
+        self._con.execute("DELETE FROM shared_patterns")
+        self._con.commit()
+
+    def close(self) -> None:
+        try:
+            self._con.close()
+        except Exception:
+            pass
