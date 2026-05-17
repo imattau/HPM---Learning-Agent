@@ -183,7 +183,7 @@ def test_run_quiz_does_not_default_to_a_when_uncertain(capsys):
     captured = capsys.readouterr()
     assert "AI answers: ?" in captured.out
 
-def test_run_quiz_prefers_learned_score_over_stale_trace(capsys):
+def test_run_quiz_prefers_trace_over_learned_overlap_score(capsys):
     from hpm_ai_v6.cli.quiz_cli import run_quiz
 
     mock_reader = MagicMock()
@@ -203,7 +203,7 @@ def test_run_quiz_prefers_learned_score_over_stale_trace(capsys):
 
     mock_reasoning_agent.reason_with_trace.return_value = {
         "candidate_paths": [],
-        "chosen_path": None,
+        "chosen_path": {"nodes": [{"label": "London"}], "steps": []},
         "explanation": "I think the answer is London.",
         "answer": "C",
         "confidence": 0.9,
@@ -219,10 +219,11 @@ def test_run_quiz_prefers_learned_score_over_stale_trace(capsys):
         auto=True,
     )
 
-    assert score == 1
-    assert weak == []
+    assert score == 0
+    assert weak[0][0] == "geography"
     captured = capsys.readouterr()
-    assert "AI answers: A" in captured.out
+    assert "AI answers: C" in captured.out
+    assert mock_reasoning_agent.reason_with_trace.called
 
 
 def test_run_quiz_learns_exact_answer_memory_after_feedback(capsys):
@@ -249,6 +250,12 @@ def test_run_quiz_learns_exact_answer_memory_after_feedback(capsys):
     mock_pager.iter_index_payloads.return_value = []
     mock_agent.pattern_pager = mock_pager
     mock_reader.agents = {"test": mock_agent}
+    mock_reasoning_agent.reason_with_trace.return_value = {
+        "candidate_paths": [],
+        "chosen_path": None,
+        "explanation": "",
+        "answer": "",
+    }
 
     def _feedback(payload):
         if payload.get("correct") == "B":

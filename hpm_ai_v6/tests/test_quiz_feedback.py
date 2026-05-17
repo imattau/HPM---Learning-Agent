@@ -41,6 +41,20 @@ def test_learn_from_quiz_attempt_reinforces_semantic_word_and_exact_memory():
             "D": "Rome",
         },
         "is_correct": False,
+        "trace": {
+            "chosen_path": {
+                "nodes": [{"label": "capital"}, {"label": "paris"}],
+                "steps": [
+                    {
+                        "source_label": "capital",
+                        "target_label": "paris",
+                        "relation": "lexical_transition",
+                    }
+                ],
+            },
+            "terms": ["capital", "france"],
+            "answer": "B",
+        },
     }
 
     result = learn_from_quiz_attempt(reader, payload)
@@ -59,11 +73,15 @@ def test_learn_from_quiz_attempt_reinforces_semantic_word_and_exact_memory():
         for call in word_pager.enqueue_save.call_args_list
     ]
     assert quiz_memory_name(payload["question"], "B") in saved_names
+    assert any(name.startswith("memory::fact::capital_france=>paris") for name in saved_names)
+    assert any(name.startswith("memory::path::capital->paris") for name in saved_names)
+    assert any(name.startswith("memory::path_step::capital->paris::lexical_transition") for name in saved_names)
     assert "w_capital->paris" in saved_names
     assert "w_france->paris" in saved_names
     assert reader.reasoning_agent.invalidate.called
     assert reader.flush_all.called
     assert result["trained"] == 1
+    assert result["general"] >= 3
 
 
 def test_cli_main_uses_shared_quiz_feedback_helper():
@@ -108,6 +126,57 @@ def test_cli_main_uses_shared_quiz_feedback_helper():
     mock_feedback.assert_called_once()
     assert mock_feedback.call_args.args[0] is mock_reader
     assert mock_reader.flush_all.called
+
+
+def test_run_quiz_reads_question_before_reasoning():
+    from hpm_ai_v6.cli.quiz_cli import run_quiz
+
+    mock_reader = MagicMock()
+    mock_reader.train_sequence = MagicMock()
+    mock_reader.flush_all = MagicMock()
+    mock_reader.agents = {}
+    mock_quiz_agent = MagicMock()
+    mock_reasoning_agent = MagicMock()
+
+    question = MagicMock()
+    question.id = "q1"
+    question.question = "What is the capital of France?"
+    question.options = ["Paris", "London", "Berlin", "Madrid"]
+    question.correct_index = 0
+    question.topic = "geography"
+    mock_quiz_agent.generate_quiz.return_value = [question]
+
+    call_order = []
+
+    def _read_side_effect(reader, payload):
+        call_order.append("read")
+        return {"trained": 1, "saved": 0}
+
+    def _reason_side_effect(question_text, method="auto"):
+        call_order.append("reason")
+        return {
+            "answer": "A",
+            "candidate_paths": [],
+            "chosen_path": None,
+            "evidence": [],
+            "intent": "path",
+            "mode": "connection",
+            "method": method,
+        }
+
+    with patch("hpm_ai_v6.cli.quiz_cli.learn_from_quiz_question", side_effect=_read_side_effect):
+        mock_reasoning_agent.reason_with_trace.side_effect = _reason_side_effect
+        run_quiz(
+            reader=mock_reader,
+            quiz_agent=mock_quiz_agent,
+            reasoning_agent=mock_reasoning_agent,
+            n=1,
+            difficulty="easy",
+            source="bank",
+            auto=True,
+        )
+
+    assert call_order == ["read", "reason"]
 
 
 def test_web_submit_uses_shared_quiz_feedback_helper():
