@@ -986,8 +986,8 @@ def _normalize_quiz_text(text: str) -> str:
 
 
 def _quiz_memory_name(question: str, correct_key: str) -> str:
-    """Build a direct-memory key for an exact question->answer association."""
-    return f"quiz_answer::{_normalize_quiz_text(question)}=>{correct_key.lower()}"
+    """Build a low-priority exact-memory key for an exact question->answer association."""
+    return f"memory::exact_question_answer::{_normalize_quiz_text(question)}=>{correct_key.lower()}"
 
 
 def _lookup_quiz_memory(reader, question: str, options_map: dict) -> str:
@@ -996,37 +996,42 @@ def _lookup_quiz_memory(reader, question: str, options_map: dict) -> str:
     if not question_key:
         return ""
 
-    prefix = f"quiz_answer::{question_key}=>"
     best_key = ""
     best_weight = 0.0
+    prefixes = (
+        f"memory::exact_question_answer::{question_key}=>",
+        f"quiz_answer::{question_key}=>",  # legacy compatibility
+    )
 
     for agent in reader.agents.values():
         for pattern in getattr(agent, "patterns", []):
             name = str(getattr(pattern, "name", "")).lower()
-            if not name.startswith(prefix):
-                continue
-            key = name[len(prefix):].upper()
-            if key not in options_map:
-                continue
-            weight = float(getattr(pattern, "weight", 0.0))
-            if weight > best_weight:
-                best_key = key
-                best_weight = weight
+            for prefix in prefixes:
+                if not name.startswith(prefix):
+                    continue
+                key = name[len(prefix):].upper()
+                if key not in options_map:
+                    continue
+                weight = float(getattr(pattern, "weight", 0.0))
+                if weight > best_weight:
+                    best_key = key
+                    best_weight = weight
 
         pager = getattr(agent, "pattern_pager", None)
         if pager is None:
             continue
         for payload in pager.iter_index_payloads():
             name = str(payload.get("name", "")).lower()
-            if not name.startswith(prefix):
-                continue
-            key = name[len(prefix):].upper()
-            if key not in options_map:
-                continue
-            weight = float(payload.get("weight", 0.0))
-            if weight > best_weight:
-                best_key = key
-                best_weight = weight
+            for prefix in prefixes:
+                if not name.startswith(prefix):
+                    continue
+                key = name[len(prefix):].upper()
+                if key not in options_map:
+                    continue
+                weight = float(payload.get("weight", 0.0))
+                if weight > best_weight:
+                    best_key = key
+                    best_weight = weight
 
     return best_key
 
@@ -1052,6 +1057,9 @@ def _extract_answer(trace: dict, options: dict) -> str:
 
     Returns an empty string when no confident option can be inferred.
     """
+    if not isinstance(trace, dict):
+        return ""
+
     # If the agent set an explicit 'answer' key, trust it.
     answer_text = str(trace.get("answer", "") or "")
     if answer_text in OPTION_KEYS:
@@ -1060,25 +1068,62 @@ def _extract_answer(trace: dict, options: dict) -> str:
     if parsed in OPTION_KEYS:
         return parsed
 
-    # Otherwise match explanation / chosen_path label against option values.
+    trace_bits: list[str] = [answer_text, str(trace.get("explanation", ""))]
+
+    def _extend_from_path(path: dict) -> None:
+        if not isinstance(path, dict):
+            return
+        for node in path.get("nodes", []) or []:
+            if isinstance(node, dict):
+                trace_bits.append(str(node.get("label", "")))
+        for step in path.get("steps", []) or []:
+            if not isinstance(step, dict):
+                continue
+            trace_bits.append(str(step.get("relation", "")))
+            trace_bits.append(str(step.get("pattern", "")))
+            trace_bits.append(str(step.get("source_label", "")))
+            trace_bits.append(str(step.get("target_label", "")))
+
     chosen = trace.get("chosen_path") or {}
-    label = str(chosen.get("label", "")).lower()
-    explanation = str(trace.get("explanation", "")).lower()
+    _extend_from_path(chosen if isinstance(chosen, dict) else {})
+    for candidate in trace.get("candidate_paths") or []:
+        _extend_from_path(candidate)
 
+    anchors = trace.get("anchors") or {}
+    for anchor in anchors.values():
+        if isinstance(anchor, dict):
+            trace_bits.append(str(anchor.get("label", "")))
+
+    subgraph = trace.get("explanatory_subgraph") or {}
+    if isinstance(subgraph, dict):
+        effect = subgraph.get("effect")
+        if isinstance(effect, dict):
+            trace_bits.append(str(effect.get("label", "")))
+        for root in subgraph.get("root_causes", []) or []:
+            if isinstance(root, dict):
+                trace_bits.append(str(root.get("label", "")))
+
+    trace_text = " ".join(bit.lower() for bit in trace_bits if bit)
+    best_key = ""
+    best_score = 0
     for key, value in options.items():
-        v = value.lower()
-        if v and (v in label or v in explanation):
-            return key
+        option_text = str(value or "").strip().lower()
+        if not option_text:
+            continue
+        option_tokens = [_tok(tok) for tok in option_text.split() if _tok(tok)]
+        score = 0
+        if option_text and option_text in trace_text:
+            score += 3
+        for token in option_tokens:
+            if token and token in trace_text:
+                score += 1
+        if key.lower() in trace_text:
+            score += 1
+        if score > best_score:
+            best_key = key
+            best_score = score
 
-    # Fallback: first candidate path label
-    candidates = trace.get("candidate_paths") or []
-    if candidates:
-        candidate_label = str(candidates[0].get("label", "")).lower()
-        for key, value in options.items():
-            if value.lower() in candidate_label:
-                return key
-
-    return ""
+    return best_key if best_score > 0 else ""
 
 
 _STOP_WORDS = {"what", "is", "the", "a", "an", "of", "in", "on", "at", "to", "for",
@@ -1203,6 +1248,7 @@ def run_quiz(
     auto: bool,
     skip_ids: set = None,
     feedback_hook: Optional[Callable[[dict], None]] = None,
+    reasoning_method: str = "auto",
 ) -> tuple[int, list[str], set]:
     """Run the quiz loop. Returns (score, weak_topics, newly_mastered_ids)."""
     questions = quiz_agent.generate_quiz(n=n, difficulty=difficulty, source=source)
@@ -1224,8 +1270,18 @@ def run_quiz(
             if option_text:
                 print(f"  {key}) {option_text}")
 
-        chosen, confident, _ = _score_options(reader, q.question, options_map)
         trace = {}
+        if reasoning_agent is not None and hasattr(reasoning_agent, "reason_with_trace"):
+            try:
+                trace = reasoning_agent.reason_with_trace(q.question, method=reasoning_method) or {}
+            except Exception:
+                trace = {}
+
+        chosen = _extract_answer(trace, options_map) if trace else ""
+        confident = bool(chosen)
+        score_details = {"trace_based": True} if chosen else {}
+        if not chosen:
+            chosen, confident, score_details = _score_options(reader, q.question, options_map)
         if not chosen:
             chosen = "?"
         
@@ -1235,7 +1291,7 @@ def run_quiz(
         print(f"\nAI answers: {chosen}  [{confidence_label}]")
         print(f"Correct answer: {correct}) {options_map.get(correct, '')}")
 
-        snippet = str(trace.get("explanation", ""))[:120]
+        snippet = str(trace.get("answer") or trace.get("explanation", ""))[:120]
         if snippet:
             print(f"Reasoning: {snippet}")
 
@@ -1279,6 +1335,7 @@ def run_quiz(
                     "is_correct": is_correct,
                     "confident": confident,
                     "trace": trace,
+                    "trace_based": bool(score_details.get("trace_based")),
                 })
             except Exception:
                 pass
