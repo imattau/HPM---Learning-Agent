@@ -809,9 +809,25 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     quiz_agent = QuizAgent(reader, reasoning_agent)
 
-    mastered: set[str] = set()  # question ids answered correctly + confidently
-    corrections: dict[str, str] = {}  # question_id → correct option key (session cache)
+    corrections_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "quiz_banks", "corrections.json",
+    )
+    try:
+        with open(corrections_path, encoding="utf-8") as _f:
+            corrections: dict[str, str] = json.load(_f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        corrections = {}
+
+    mastered: set[str] = set(corrections.keys())  # already-known questions start as mastered
     round_num = 0
+
+    def _save_corrections() -> None:
+        try:
+            with open(corrections_path, "w", encoding="utf-8") as _f:
+                json.dump(corrections, _f)
+        except Exception:
+            pass
 
     def _learn_from_attempt(payload: dict) -> None:
         topic = payload.get("topic")
@@ -838,6 +854,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 reader.train_sequence([fact_sentence, correction_sentence], enable_causal=False)
             except Exception:
                 pass
+            # Boost weights of patterns encoding question→answer so they survive noise
+            _boost_correct_patterns(reader, str(question), str(correct_text), boost=20.0)
         reasoning_agent.invalidate()
 
     while True:
@@ -1035,6 +1053,56 @@ def _build_search_query(question: str, correct_answer: str) -> str:
     # Combine up to 4 question keywords with the correct answer
     query_parts = keywords[:4] + [correct_answer]
     return " ".join(query_parts)
+
+
+def _boost_correct_patterns(reader, question: str, correct_text: str, boost: float = 20.0) -> int:
+    """Boost Cell.weight for patterns encoding question→correct_answer associations.
+
+    Works on all agents regardless of whether they have a meta_rule.
+    Boosted weights are serialized to SQLite on next flush_all(), persisting
+    the stronger association across sessions.
+
+    Returns the number of patterns boosted.
+    """
+    q_words = {w for w in re.sub(r"[^\w\s]", " ", question.lower()).split()
+               if w not in _STOP_WORDS and len(w) > 2}
+    ans_words = [w.lower() for w in correct_text.split() if w.isalpha() and len(w) > 1]
+    if not q_words or not ans_words:
+        return 0
+
+    total_boosted = 0
+    for agent in reader.agents.values():
+        patterns = getattr(agent, "patterns", [])
+        if not patterns:
+            continue
+
+        for pattern in patterns:
+            name = pattern.name.lower()
+            has_ans = any(w in name for w in ans_words)
+            has_q = any(qw in name for qw in q_words)
+            if has_ans and has_q:
+                pattern.weight = float(getattr(pattern, "weight", 1.0)) * boost
+                total_boosted += 1
+
+        # Sync meta_rule weights tensor if present
+        meta_rule = getattr(agent, "meta_rule", None)
+        if meta_rule is not None and len(getattr(meta_rule, "patterns", [])) == len(patterns):
+            try:
+                import torch as _torch
+                new_w = _torch.tensor(
+                    [float(getattr(p, "weight", 1.0)) for p in patterns],
+                    dtype=_torch.float32,
+                )
+                total = new_w.sum()
+                if total > 0:
+                    new_w = new_w / total
+                meta_rule.set_weights_tensor(new_w)
+                for i, p in enumerate(patterns):
+                    p.weight = float(new_w[i])
+            except Exception:
+                pass
+
+    return total_boosted
 
 
 def _build_correction_sentence(question: str, correct_text: str, topic: str | None = None) -> str:
