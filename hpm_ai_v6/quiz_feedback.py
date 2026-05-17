@@ -372,6 +372,55 @@ def _boost_question_answer_patterns(reader, question: str, correct_text: str, bo
     return total_boosted
 
 
+def _penalize_wrong_answer_patterns(reader, question: str, wrong_text: str, penalty: float = 0.1) -> int:
+    """Reduce weights of patterns linking question keywords to wrong-answer words.
+
+    Penalizes both in-memory patterns and existing pager entries.
+    """
+    q_words = {word for word in _tokenize(question) if len(word) > 1}
+    wrong_words = [word for word in _tokenize(wrong_text) if len(word) > 1]
+    if not q_words or not wrong_words:
+        return 0
+
+    total_penalized = 0
+    for agent in getattr(reader, "agents", {}).values():
+        patterns = getattr(agent, "patterns", [])
+        pager = getattr(agent, "pattern_pager", None)
+
+        # Penalize in-memory patterns
+        for pattern in patterns:
+            name = str(getattr(pattern, "name", "")).lower()
+            has_wrong = any(word in name for word in wrong_words)
+            has_q = any(word in name for word in q_words)
+            if has_wrong and has_q:
+                try:
+                    pattern.weight = max(float(penalty), float(getattr(pattern, "weight", 1.0)) * penalty)
+                except Exception:
+                    pass
+                total_penalized += 1
+                if pager is not None:
+                    try:
+                        pager.enqueue_save(pattern)
+                    except Exception:
+                        pass
+
+        # Also penalize persisted pager patterns directly
+        if pager is not None:
+            try:
+                rows = pager._con.execute("SELECT rowid, name, weight FROM patterns").fetchall()
+                for rowid, name, weight in rows:
+                    name_lower = name.lower()
+                    if any(w in name_lower for w in wrong_words) and any(q in name_lower for q in q_words):
+                        new_weight = max(penalty, float(weight) * penalty)
+                        pager._con.execute("UPDATE patterns SET weight=? WHERE rowid=?", (new_weight, rowid))
+                        total_penalized += 1
+                pager._con.commit()
+            except Exception:
+                pass
+
+    return total_penalized
+
+
 def _persist_quiz_answer(reader, question: str, correct_key: str, boost: float = 100.0) -> int:
     """Persist a direct question->answer memory for exact repeated quiz items."""
     if not question or not correct_key:
@@ -457,7 +506,14 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
                 except Exception:
                     pass
 
-    direct = _persist_quiz_answer(reader, question, correct_key, boost=10.0)
+    direct = 0  # no answer shortcut — model must learn from patterns
+
+    # Penalize wrong-answer patterns when model was incorrect
+    is_correct = bool(payload.get("is_correct", False)) if isinstance(payload, dict) else False
+    penalized = 0
+    if not is_correct and chosen_text and chosen_text != correct_text:
+        penalized = _penalize_wrong_answer_patterns(reader, question, chosen_text, penalty=0.1)
+
     saved = _persist_all_patterns(reader)
 
     reasoning_agent = getattr(reader, "reasoning_agent", None)
@@ -474,7 +530,7 @@ def learn_from_quiz_attempt(reader, payload: Mapping[str, Any]) -> dict[str, int
         except Exception:
             pass
 
-    return {"trained": trained, "boosted": boosted, "general": general, "direct": direct, "saved": saved}
+    return {"trained": trained, "boosted": boosted, "general": general, "direct": direct, "penalized": penalized, "saved": saved}
 
 
 __all__ = [
