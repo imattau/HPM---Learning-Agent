@@ -16,7 +16,9 @@ def test_fetch_passages_splits_paragraphs():
 
 def test_fetch_passages_filters_short():
     text = "This is a long enough passage. Too short. Another long enough passage."
-    ps = fetch_passages(text=text, min_length=15)
+    # Sentence mode: this text has no paragraph breaks, so exercise the
+    # sentence-splitting path explicitly.
+    ps = fetch_passages(text=text, min_length=15, mode="sentence")
     # "Too short." (10 chars) should be filtered out
     assert len(ps) == 2
 

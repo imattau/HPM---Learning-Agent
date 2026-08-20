@@ -230,6 +230,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         mu = self.config.encode_passage(text)
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.1, id=f"passage_{idx}", use_diag=True)
         node.metadata = {"passage_idx": idx, "text": text, "type": "passage"}
+        node.relation_type = "passage"
         
         # Link paragraph node to passage node
         if para_node: node.add_child(para_node)
@@ -382,10 +383,17 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             # Filter out non-content nodes like priors or character primitives
             candidates = [n for n in candidates if getattr(n, "relation_type", None) in ["sentence", "paragraph", "passage", "document", "spelling"]]
 
-        if not candidates: 
+        if not candidates:
             print("      [DEBUG] No suitable candidates after filtering.")
             return None
-        
+
+        # Prefer verbatim "passage" nodes over sentence/paragraph duplicates of the
+        # same content: sentence/paragraph nodes reconstruct text by rejoining word
+        # macros (lowercased, punctuation-mangled), while passage nodes return the
+        # original stored string. Stable sort keeps the retriever's similarity order
+        # within each group.
+        candidates.sort(key=lambda n: 0 if getattr(n, "relation_type", None) == "passage" else 1)
+
         res = self.renderer.render(candidates[0])
         print(f"      [DEBUG] Best match: {res[:50]}...")
         return res
@@ -436,6 +444,11 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         agent.role_knowledge = meta.get("role_knowledge", [])
         agent.word_spellings = meta.get("word_spellings", {})
         agent.load_state(str(path / "agent_state.pkl"))
+        # Restored patterns live in agent.patterns but were never re-inserted
+        # into the forest/observer index, so the retriever can't see them.
+        for node in agent.patterns.values():
+            if node.id not in agent.forest:
+                agent.observer.register(node, protected=False)
         # FIX: Explicitly reindex all nodes (hot and cold) after load
         agent.reindex_knowledge_base()
         return agent

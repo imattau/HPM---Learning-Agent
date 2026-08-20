@@ -24,11 +24,12 @@ def test_structural_wiring_depth():
     topics = concept.children()
     assert len(topics) >= 1
     
-    # Check L3 -> L2
+    # Check L3 -> L2 (topics cluster over structural sentence/paragraph nodes,
+    # not the passage nodes directly, per the fractal-uniformity hierarchy)
     topic = topics[0]
     passages_nodes = topic.children()
     assert len(passages_nodes) >= 1
-    assert "passage_" in passages_nodes[0].id
+    assert getattr(passages_nodes[0], "relation_type", None) in ("sentence", "paragraph")
 
 def test_predictive_curiosity():
     """Verify that predictive curiosity measures surprise against narrative transitions."""
@@ -70,7 +71,9 @@ def test_summarization():
     for p in passages: agent.observe_passage(p)
     
     agent.build_topic_clusters(n_clusters=1)
-    summary = agent.summarize_node("topic_0", top_n=3)
+    # Topic node ids are uuid-suffixed (topic_<hex>), not sequential
+    topic_id = next(k for k in agent.patterns if k.startswith("topic_"))
+    summary = agent.summarize_node(topic_id, top_n=3)
     
     assert "Topic" in summary
     # Check if at least one keyword is present

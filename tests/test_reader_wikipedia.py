@@ -39,15 +39,14 @@ def test_dynamic_vocab():
     # Reindex should have been triggered
     assert agent.config.m_dim == agent.forest._D
 
-def test_wikipedia_ingestion_mocked(mocker):
-    # Mock wikipedia.page
-    mock_page = mocker.Mock()
-    mock_page.content = "Python is a programming language. It is very popular. HPM is a theory of learning."
-    mocker.patch("wikipedia.page", return_value=mock_page)
-    
+def test_wikipedia_ingestion_mocked():
+    # `ingest_wikipedia_page` (wikipedia-package-backed) was replaced by the
+    # live web-acquisition pipeline (WebAgent + ingest_text); this exercises
+    # the current text-ingestion path with page-like content, no network.
+    content = "Python is a programming language. It is very popular. HPM is a theory of learning."
     config = TextDomainConfig.from_passages(["initial"], max_vocab=10, include_char_primitives=True)
     agent = ReaderAgent(config, dynamic_vocab=True)
-    
-    indices = agent.ingest_wikipedia_page("Python (programming language)")
-    assert len(indices) > 0
+
+    doc_node = agent.ingest_text(content, title="Python (programming language)")
+    assert doc_node is not None
     assert any("Python" in p for p in agent.config._passages)

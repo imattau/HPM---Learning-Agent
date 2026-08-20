@@ -22,7 +22,7 @@ dependencies = [
 packages = ["hpm", "hfn"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov"]
+dev = ["pytest>=8.0", "pytest-cov", "pytest-mock"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
