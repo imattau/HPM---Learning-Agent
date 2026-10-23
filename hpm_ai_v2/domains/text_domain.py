@@ -114,8 +114,14 @@ class TextDomainConfig(DomainConfig):
         doc_freq: Counter = Counter()
         for p in new_passages:
             doc_freq.update(set(tokenise(p)))
-        candidates = [w for w, _ in doc_freq.most_common(max_new * 2) if w not in existing]
-        added = candidates[:max_new]
+        # Filter known terms before applying the frequency limit. If known
+        # terms dominate many source/query passages, limiting first can hide
+        # rare new curriculum terms and silently leave them out of the encoder.
+        candidates = [
+            w for w, _ in doc_freq.most_common()
+            if w not in existing
+        ][:max_new]
+        added = candidates
         if not added: return 0
         
         n_docs = max(len(self._passages) + len(new_passages), 1)
