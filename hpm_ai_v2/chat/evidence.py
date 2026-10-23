@@ -24,13 +24,11 @@ from typing import Optional
 
 from hpm_ai_v2.agents.text_structure import StructureIndex, content_stems, stem
 from hpm_ai_v2.chat.feedback import find_answer_node
+from hpm_ai_v2.chat.language import QUESTION_WORDS
 from hpm_ai_v2.chat.planner import GroundedPlanner
 from hpm_ai_v2.chat.schema import Citation, Claim, ResponsePlan
 
-_QUESTION_WORDS = {stem(w) for w in (
-    "how", "what", "why", "when", "where", "which", "who", "whom", "whose",
-    "explain", "describe", "tell", "show",
-)}
+_QUESTION_WORDS = QUESTION_WORDS
 _PROCESS = re.compile(
     r"\b(?:how (?:does|do|did|is|are|can|might)|why|explain|describe|what happens|stages?|steps?)\b", re.I
 )
@@ -263,12 +261,14 @@ class ExpandingPlanner(GroundedPlanner):
 
     def plan(self, turn_id: str, question: str, *, user_id: str = "default",
              scope_source_id: str | None = None) -> ResponsePlan:
-        plan = super().plan(turn_id, question, user_id=user_id, scope_source_id=scope_source_id)
+        # The support check runs on the final evidence, not the seed: the selector may replace a seed that
+        # mentions none of the question with a sentence that does.
+        plan = self._plan(turn_id, question, user_id=user_id, scope_source_id=scope_source_id)
         if plan.act != "answer" or not plan.claims or plan.fmt == "compare":
-            return plan
+            return self._abstain_if_unsupported(plan)
         selection = self.selector.select(question, plan, user_id=user_id, scope=scope_source_id)
         if selection is None:
-            return plan
+            return self._abstain_if_unsupported(plan)
         claims = []
         for n, sid in enumerate(selection.sentence_ids, start=1):
             data = self.trainer.answer_node_data[sid]
@@ -276,4 +276,6 @@ class ExpandingPlanner(GroundedPlanner):
             citation = Citation(data["source_id"], data["start"], data["end"], data["text"], source.title)
             claims.append(Claim(f"claim-{turn_id}-{n}", data["text"], (citation,)))
         roles = ",".join(f"{selection.roles[s]}" for s in selection.sentence_ids)
-        return replace(plan, claims=tuple(claims), reason=f"{plan.reason};evidence={roles}")
+        return self._abstain_if_unsupported(
+            replace(plan, claims=tuple(claims), reason=f"{plan.reason};evidence={roles}")
+        )

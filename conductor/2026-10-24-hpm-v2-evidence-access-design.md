@@ -189,6 +189,7 @@ Summaries: source stem coverage 0.51 at width 5.8, against 0.19 at width 3.0 for
 - **Cross-source questions are complete for no system** (0 of 4 everywhere); expanded only improves recall slightly and precision a lot.
 - **The structural link term is still the weak part** (section 10): it favours sentences with few concept links.
 - **Dev versus held-out:** v2 dev (0.67 recall, 13 complete) against held-out (0.69, 10 complete) is a much smaller gap than round 1 (0.77 to 0.64), which is some evidence the fixes reduced overfitting to the tuning questions. It is one split of 21.
+- **A later trainer commit moved the frozen selector slightly.** With the trainer committed afterwards, the same selector and parameters score precision 0.687 on v2 held-out, against 0.698 at the scoring commit (recall unchanged at 0.687). The naive baselines and the gate were not re-scored on that trainer.
 - **Same limits as before:** one author for sources, questions and labels, and the author knew round 1's failure modes. This is a direction check, not an accuracy measurement.
 
 ### Changes after the scoring (none affects the scored numbers)

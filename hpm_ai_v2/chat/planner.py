@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
+from typing import Union
 
+from hpm_ai_v2.agents.text_structure import content_stems
+from hpm_ai_v2.chat.language import content_terms
 from hpm_ai_v2.chat.schema import Citation, Claim, ResponsePlan
 
 
@@ -23,11 +27,54 @@ def classify_task(question: str) -> str:
 
 
 class GroundedPlanner:
-    def __init__(self, trainer, ambiguity_margin: float = 0.02):
+    def __init__(
+        self,
+        trainer,
+        ambiguity_margin: float = 0.02,
+        *,
+        min_confidence: float = 0.0,
+        require_content_support: Union[bool, str] = "auto",
+    ):
         self.trainer = trainer
         # Ask for clarification when the runner-up source scores within this
         # relative margin of the best one.
         self.ambiguity_margin = ambiguity_margin
+        # Optional hard floor on retrieval confidence for answers and clarifications. Off by default:
+        # on uncalibrated checkpoints confidence does not separate good matches from junk (see the design doc).
+        self.min_confidence = min_confidence
+        # "auto": on only for a lexical encoder with no calibrated abstention threshold.
+        self.require_content_support = require_content_support
+
+    # -- abstaining without calibration --------------------------------------------------
+    def _content_support_required(self) -> bool:
+        if self.require_content_support != "auto":
+            return bool(self.require_content_support)
+        semantic = hasattr(self.trainer.agent.config, "embedding_model")   # a semantic match needs no shared word
+        return not semantic and self.trainer.abstain_threshold <= 0.0
+
+    def _supported_by_question_words(self, plan: ResponsePlan) -> bool:
+        """Does the evidence share a content word with the question?
+
+        A lexical match with none rests only on question words (what, how, ...), which carry no subject
+        matter. An answer is judged on its cited sentences, a clarification on the sources it offers.
+        """
+        wanted = content_terms(plan.effective_question)
+        if not wanted:
+            return False
+        if plan.act == "clarify":
+            texts = [self.trainer.sources[sid].text for sid, _label in plan.options]
+        else:
+            texts = [citation.text for claim in plan.claims for citation in claim.citations]
+        return any(wanted & set(content_stems(text)) for text in texts)
+
+    def _abstain_if_unsupported(self, plan: ResponsePlan) -> ResponsePlan:
+        if plan.act not in {"answer", "clarify"}:
+            return plan
+        if self.min_confidence and plan.confidence < self.min_confidence:
+            return replace(plan, act="abstain", claims=(), options=(), reason="below_confidence_floor")
+        if self._content_support_required() and not self._supported_by_question_words(plan):
+            return replace(plan, act="abstain", claims=(), options=(), reason="no_content_support")
+        return plan
 
     def _ambiguous_sources(self, prediction) -> tuple[tuple[str, str], ...]:
         ranked = prediction.ranked_evidence
@@ -41,6 +88,18 @@ class GroundedPlanner:
         return tuple((sid, sources[sid].title or sid) for sid in close)
 
     def plan(
+        self,
+        turn_id: str,
+        question: str,
+        *,
+        user_id: str = "default",
+        scope_source_id: str | None = None,
+    ) -> ResponsePlan:
+        return self._abstain_if_unsupported(
+            self._plan(turn_id, question, user_id=user_id, scope_source_id=scope_source_id)
+        )
+
+    def _plan(
         self,
         turn_id: str,
         question: str,
