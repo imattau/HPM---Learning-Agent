@@ -18,9 +18,19 @@ def render_schema(plan: ResponsePlan) -> str:
     if plan.fmt == "define":
         claim = claims[0]
         return f"Definition: {claim.text}\n\n{_source(claim)}"
+    if plan.fmt == "compare":
+        rows = []
+        for claim in claims:
+            citation = claim.citations[0]
+            label = citation.title or citation.source_id
+            rows.append(f"{label}\n{claim.text}\n{_source(claim)}")
+        return "Comparison from the provided material\n\n" + "\n\n".join(rows)
     if plan.fmt in {"summarize", "outline"}:
         heading = "Summary" if plan.fmt == "summarize" else "Outline"
-        points = [f"{i}. {claim.text}\n   {_source(claim)}" for i, claim in enumerate(claims, start=1)]
+        if plan.format_style == "bullets":
+            points = [f"• {claim.text}\n  {_source(claim)}" for claim in claims]
+        else:
+            points = [f"{i}. {claim.text}\n   {_source(claim)}" for i, claim in enumerate(claims, start=1)]
         return f"{heading}\n" + "\n".join(points)
     if plan.fmt == "flashcards":
         title = claims[0].citations[0].title or claims[0].citations[0].source_id

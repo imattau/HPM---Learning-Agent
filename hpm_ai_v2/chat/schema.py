@@ -35,6 +35,7 @@ class ResponsePlan:
     procedure_id: Optional[str] = None
     effective_question: str = ""
     reason: str = ""
+    format_style: Optional[str] = None
     # (source_id, label) candidates offered when act == "clarify".
     options: tuple[tuple[str, str], ...] = ()
 
