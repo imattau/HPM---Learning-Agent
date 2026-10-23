@@ -7,10 +7,12 @@ Uses the hierarchical structure of HFNs to prune search space.
 from __future__ import annotations
 import numpy as np
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import quote, unquote
 
-from hfn.hfn import HFN
+from hfn.hfn import HFN, Edge
 from hfn.forest import Forest
 
 try:
@@ -43,10 +45,14 @@ class TieredForest(Forest):
         self._hot_cap = hot_cap
         self._hot: OrderedDict[str, HFN] = OrderedDict()
         self._mu_index: dict[str, np.ndarray] = {}
+        self._parent_ids: dict[str, set[str]] = {}
         self._cold_dir.mkdir(parents=True, exist_ok=True)
         self._sweep_every = sweep_every
         self._min_free_ram_mb = min_free_ram_mb
         self._obs_count: int = 0
+        self._bulk_registration_depth = 0
+        # ids being rebuilt from cold storage: never evicted half-built, and cycles resolve to the same node
+        self._loading: set[str] = set()
 
         # PERSISTENT CACHES
         self._summary_ids: set[str] = set()
@@ -60,30 +66,50 @@ class TieredForest(Forest):
         self._hot[node_id] = node
         self._hot.move_to_end(node_id)
         
-        if not skip_cache:
+        if not skip_cache and self._bulk_registration_depth == 0:
             # Update Hierarchy Cache
-            if not self.get_parents(node_id):
+            if not self._parent_ids.get(node_id):
                 self._root_ids.add(node_id)
+            else:
+                self._root_ids.discard(node_id)
             
             if node.children():
                 self._summary_ids.add(node_id)
                 for child in node.children():
+                    self._parent_ids.setdefault(child.id, set()).add(node_id)
                     self._root_ids.discard(child.id)
             
         if len(self._hot) > self._hot_cap:
             self._evict_lru()
+
+    @property
+    def bulk_registration_active(self) -> bool:
+        return self._bulk_registration_depth > 0
+
+    @contextmanager
+    def bulk_registration(self):
+        """Defer hierarchy-cache rebuilding while a group of nodes is registered."""
+        self._bulk_registration_depth += 1
+        try:
+            yield self
+        finally:
+            self._bulk_registration_depth -= 1
+            if self._bulk_registration_depth == 0:
+                self.rebuild_hierarchy_cache()
 
     def rebuild_hierarchy_cache(self) -> None:
         """Efficiently rebuild _root_ids and _summary_ids without O(N^2)."""
         all_ids = list(self._mu_index.keys())
         self._root_ids = set(all_ids)
         self._summary_ids.clear()
+        self._parent_ids.clear()
         
         for nid in all_ids:
             node = self.get(nid)
             if node and node.children():
                 self._summary_ids.add(nid)
                 for child in node.children():
+                    self._parent_ids.setdefault(child.id, set()).add(nid)
                     self._root_ids.discard(child.id)
         
         pass # print(f"      [DEBUG] Forest.rebuild_hierarchy_cache: nodes={len(all_ids)}, roots={len(self._root_ids)}")
@@ -101,9 +127,18 @@ class TieredForest(Forest):
             return  # protected nodes cannot be deregistered
         if node_id in self._mu_index:
             self._mu_index.pop(node_id)
-            self._hot.pop(node_id, None)
+            node = self._hot.pop(node_id, None)
             self._summary_ids.discard(node_id)
             self._root_ids.discard(node_id)
+            self._parent_ids.pop(node_id, None)
+            if node is not None:
+                for child in node.children():
+                    child_parents = self._parent_ids.get(child.id)
+                    if child_parents is not None:
+                        child_parents.discard(node_id)
+                        if not child_parents and child.id in self._mu_index:
+                            self._parent_ids.pop(child.id, None)
+                            self._root_ids.add(child.id)
             cold_path = self._cold_path(node_id)
             if cold_path.exists():
                 cold_path.unlink()
@@ -201,7 +236,7 @@ class TieredForest(Forest):
         for p in self._cold_dir.glob("*.npz"):
             try:
                 data = np.load(p)
-                node_id = p.stem
+                node_id = unquote(p.stem)
                 self._mu_index[node_id] = data["mu"]
             except Exception:
                 continue
@@ -209,23 +244,25 @@ class TieredForest(Forest):
             self.rebuild_hierarchy_cache()
 
     def _cold_path(self, node_id: str) -> Path:
-        return self._cold_dir / f"{node_id}.npz"
+        # Character-primitives and imported IDs can contain path separators.
+        # Quote IDs for filenames while keeping old simple-ID files compatible.
+        return self._cold_dir / f"{quote(node_id, safe='')}.npz"
 
     def _load_from_cold(self, node_id: str) -> HFN | None:
         path = self._cold_path(node_id)
         if not path.exists(): return None
+        import pickle
         try:
             data = np.load(path)
-            
+
             # Reconstruct probabilistic model
             prob_model = None
             if "model_state" in data:
-                import pickle
                 from hfn.probabilistic_models import get_model_class
                 m_state = pickle.loads(data["model_state"].item())
                 model_cls = get_model_class(m_state["model_type"])
                 prob_model = model_cls.from_state(m_state["params"])
-            
+
             node = HFN(
                 mu=data["mu"],
                 sigma=data["sigma"],
@@ -233,32 +270,53 @@ class TieredForest(Forest):
                 use_diag=bool(data["use_diag"]),
                 prob_model=prob_model
             )
-            
-            # Restore HFN metadata
-            if "metadata" in data:
-                metadata = pickle.loads(data["metadata"].item())
-                node.relation_type = metadata.get("relation_type")
-                node.relation_params = metadata.get("relation_params", {})
-                # Resolve input/output nodes by ID
-                for iid in metadata.get("inputs_ids", []):
-                    inode = self.get(iid)
-                    if inode: node.inputs.append(inode)
-                for oid in metadata.get("outputs_ids", []):
-                    onode = self.get(oid)
-                    if onode: node.outputs.append(onode)
-
-            # Restore child links if saved (legacy PART_OF edges)
-            child_ids_str = str(data["child_ids_str"]) if "child_ids_str" in data else ""
-            for cid in (child_ids_str.split(",") if child_ids_str else []):
-                child = self.get(cid)
-                if child is not None:
-                    node.add_edge(node, child, "PART_OF")
-            # Re-register locally
-            self._hot[node_id] = node
-            if len(self._hot) > self._hot_cap: self._evict_lru()
-            return node
         except Exception:
             return None
+
+        # Register the node before resolving its structure: ids that refer back to it (a cycle) get this
+        # same object, and eviction cannot save it half-built over its own file.
+        self._loading.add(node_id)
+        self._hot[node_id] = node
+        try:
+            metadata = pickle.loads(data["metadata"].item()) if "metadata" in data else {}
+            node.relation_type = metadata.get("relation_type")
+            node.relation_params = metadata.get("relation_params", {})
+            node.metadata = metadata.get("node_metadata", {})
+            # Resolve input/output nodes by ID
+            for iid in metadata.get("inputs_ids", []):
+                inode = self.get(iid)
+                if inode: node.inputs.append(inode)
+            for oid in metadata.get("outputs_ids", []):
+                onode = self.get(oid)
+                if onode: node.outputs.append(onode)
+
+            if "child_ids" in metadata:
+                # Faithful polygraph: children in their stored order, and every typed edge between
+                # them (or to other stored nodes) as it was saved. An id that is no longer stored is dropped.
+                for cid in metadata["child_ids"]:
+                    child = self.get(cid)
+                    if child is not None:
+                        node._children.append(child)
+                for source_id, target_id, relation in metadata.get("edges", ()):
+                    source = node if source_id == node_id else self.get(source_id)
+                    target = node if target_id == node_id else self.get(target_id)
+                    if source is not None and target is not None:
+                        node._edges.append(Edge(source=source, target=target, relation=relation))
+            else:
+                # Files written before structure was stored: children only as PART_OF edges.
+                child_ids_str = str(data["child_ids_str"]) if "child_ids_str" in data else ""
+                for cid in (child_ids_str.split(",") if child_ids_str else []):
+                    child = self.get(cid)
+                    if child is not None:
+                        node.add_edge(node, child, "PART_OF")
+        except Exception:
+            self._hot.pop(node_id, None)
+            return None
+        finally:
+            self._loading.discard(node_id)
+        self._hot.move_to_end(node_id)
+        if len(self._hot) > self._hot_cap: self._evict_lru()
+        return node
 
     def save_to_cold(self) -> None:
         """Persist all hot nodes to cold storage."""
@@ -286,7 +344,11 @@ class TieredForest(Forest):
             "relation_type": node.relation_type,
             "relation_params": node.relation_params,
             "inputs_ids": [n.id for n in node.inputs],
-            "outputs_ids": [n.id for n in node.outputs]
+            "outputs_ids": [n.id for n in node.outputs],
+            "node_metadata": getattr(node, "metadata", {}),
+            # The polygraph itself: ordered children and typed edges, so a reloaded node is the node that was saved.
+            "child_ids": [c.id for c in node.children()],
+            "edges": [(e.source.id, e.target.id, e.relation) for e in node.edges()],
         }
         
         # Store child IDs as a comma-joined string to avoid pickle for basic structure
@@ -305,7 +367,7 @@ class TieredForest(Forest):
         # Find the LRU node that isn't protected
         evict_id = None
         for candidate in list(self._hot.keys()):
-            if candidate not in self._protected_ids:
+            if candidate not in self._protected_ids and candidate not in self._loading:
                 evict_id = candidate
                 break
         if evict_id is None:

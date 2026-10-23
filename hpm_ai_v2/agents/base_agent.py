@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import pickle
 import random
+import shutil
 import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -772,10 +773,40 @@ class BaseHFNAgent:
         """Serialise agent state (patterns + meta stats) to disk."""
         save_path = Path(path) if path else self.cold_dir / "agent_state.pkl"
         save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # A checkpoint must include TieredForest's cold nodes beside the agent
+        # state. ReaderAgent.load_agent reopens the forest from this directory.
+        cold_dir = getattr(self.forest, "_cold_dir", None)
+        forest_saved_for_relocation = False
+        if path is not None and cold_dir is not None:
+            cold_path = Path(cold_dir)
+            if cold_path.resolve() != save_path.parent.resolve():
+                # Flush hot nodes before moving the cold store. Moving files
+                # keeps the checkpoint self-contained without doubling its size.
+                if hasattr(self.forest, "save_to_cold"):
+                    self.forest.save_to_cold()
+                    forest_saved_for_relocation = True
+                for node_file in cold_path.glob("*.npz"):
+                    shutil.move(str(node_file), str(save_path.parent / node_file.name))
+                try:
+                    cold_path.rmdir()
+                except OSError:
+                    pass
+                self.forest._cold_dir = save_path.parent
+                self.cold_dir = save_path.parent
         
-        # 1. Patterns
+        # 1. Patterns usually alias nodes already stored by the forest. Keep
+        # their IDs here instead of pickling the dense HFN objects a second time.
+        pattern_refs: dict[str, str] = {}
+        inline_patterns: dict[str, Any] = {}
+        for name, pattern in self.patterns.items():
+            if isinstance(pattern, HFN) and pattern.id in self.forest:
+                pattern_refs[name] = pattern.id
+            else:
+                inline_patterns[name] = pattern
         state = {
-            "patterns": self.patterns,
+            "pattern_refs": pattern_refs,
+            "patterns": inline_patterns,
         }
         
         # 2. Meta Stats (L5)
@@ -789,7 +820,7 @@ class BaseHFNAgent:
             self.forward_model.save_state()
             
         # 4. Global Forest
-        if hasattr(self.forest, "save_to_cold"):
+        if hasattr(self.forest, "save_to_cold") and not forest_saved_for_relocation:
             self.forest.save_to_cold()
 
         with open(save_path, "wb") as f:
@@ -804,6 +835,10 @@ class BaseHFNAgent:
         with open(load_path, "rb") as f:
             state = pickle.load(f)
         self.patterns = state.get("patterns", {})
+        for name, node_id in state.get("pattern_refs", {}).items():
+            node = self.forest.get(node_id)
+            if node is not None:
+                self.patterns[name] = node
         
         # Meta stats recovery for dict-based controller
         if "meta_stats" in state and hasattr(self.meta, "_stats"):

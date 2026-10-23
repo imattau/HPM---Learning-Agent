@@ -564,7 +564,12 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # into the forest/observer index, so the retriever can't see them.
         for node in agent.patterns.values():
             if node.id not in agent.forest:
-                agent.observer.register(node, protected=False)
+                agent.observer.register(
+                    node, protected=False, skip_forest_cache=True
+                )
+        meta_forest = agent.observer.meta_forest
+        if hasattr(meta_forest, "rebuild_hierarchy_cache"):
+            meta_forest.rebuild_hierarchy_cache()
         # FIX: Explicitly reindex all nodes (hot and cold) after load
         agent.reindex_knowledge_base()
         return agent

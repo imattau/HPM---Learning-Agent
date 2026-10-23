@@ -249,7 +249,14 @@ class Observer:
 
     # --- Node lifecycle ---
 
-    def register(self, node: HFN, *, protected: bool = False, initial_weight: float | None = None) -> None:
+    def register(
+        self,
+        node: HFN,
+        *,
+        protected: bool = False,
+        initial_weight: float | None = None,
+        skip_forest_cache: bool = False,
+    ) -> None:
         """Register a node in the Forest and initialise its Observer state.
 
         Parameters
@@ -262,9 +269,23 @@ class Observer:
         initial_weight : float or None
             Override the default w_init for this node's starting weight.
             If None, uses the Observer's w_init.
+        skip_forest_cache : bool
+            Defer TieredForest hierarchy-cache maintenance during bulk restore.
         """
-        self.forest.register(node)
-        self._init_node(node, initial_weight=initial_weight)
+        skip_forest_cache = skip_forest_cache or bool(
+            getattr(self.forest, "bulk_registration_active", False)
+        )
+        if skip_forest_cache and hasattr(self.forest, "rebuild_hierarchy_cache"):
+            # Bulk checkpoint restore rebuilds hierarchy caches once after all
+            # nodes are loaded. Avoid a full parent scan for every restored node.
+            self.forest.register(node, skip_cache=True)
+        else:
+            self.forest.register(node)
+        self._init_node(
+            node,
+            initial_weight=initial_weight,
+            skip_forest_cache=skip_forest_cache,
+        )
         if protected:
             self.protected_ids.add(node.id)
 
@@ -272,7 +293,13 @@ class Observer:
         if self.density_tracker:
             self.density_tracker.update_structural_connectivity(node)
 
-    def _init_node(self, node: HFN, initial_weight: float | None = None) -> None:
+    def _init_node(
+        self,
+        node: HFN,
+        initial_weight: float | None = None,
+        *,
+        skip_forest_cache: bool = False,
+    ) -> None:
         state_id = f"state:{node.id}"
         w = initial_weight if initial_weight is not None else self.w_init
         if state_id not in self.meta_forest:
@@ -282,7 +309,10 @@ class Observer:
                 id=state_id,
                 use_diag=True,
             )
-            self.meta_forest.register(state_node)
+            if skip_forest_cache and hasattr(self.meta_forest, "rebuild_hierarchy_cache"):
+                self.meta_forest.register(state_node, skip_cache=True)
+            else:
+                self.meta_forest.register(state_node)
 
     # --- NodeState HFN helpers ---
     # mu layout: [0]=weight, [1]=score, [2]=miss_count, [3]=hit_count
