@@ -103,3 +103,26 @@ What the held-out failures say (looked at after the verdict, not used to change 
 ## 8. What would change the verdict
 
 None of these were tried, because the held-out split has now been seen and any fix needs a fresh one: a steeper decay or a structural cap tied to the question's own stems; restricting process growth to questions whose topic sits in one source; letting the seed swap fire only on a large margin; and a seed-confidence check before expanding at all. The next evaluation needs a new held-out set, longer sources, and annotation by someone other than the author of the selector.
+
+## 9. Round 2: protocol fixed before the selector changes
+
+The v1 held-out split has been seen and the gate failed, so it can no longer test anything. Round 2 uses a new set and a stated procedure, committed here before the selector is touched.
+
+**New set:** `hpm_ai_v2/training/eval_sets/coverage_v2.jsonl`. Six new topics (circulatory system, DNA to protein, life cycle of stars, supply and demand, how data crosses the internet, the French Revolution), each 18–20 sentences in four paragraphs, about twice the length of v1's. 24 dev and 24 held-out questions, same type mix (6 specific, 6 process, 5 compound, 4 cross-source, 3 unanswerable per split), each labelled with a minimal support set.
+
+**What this set does not fix.** The same person (me) wrote the sources, the questions and the labels, and wrote them knowing which failure modes v1 exposed, so question types lean towards them. Labels are one annotator's judgement. n is still 21 answerable per split. An independent annotator would be better and was not available.
+
+**Harness change (made before any selector run).** `build_trainer` capped the TF-IDF vocabulary at 300 words, but v2's sources use 617 distinct words, so every system was blind to many questions. The cap is now the number of distinct words in the set (never below 300). v1 has 298, so its numbers are unchanged; this was checked.
+
+**v2 dev baselines** (all answerable; recall / precision / complete of 21 / width): current chat 0.33 / 0.48 / 4 / 1.0; naive top-2 0.52 / 0.48 / 9 / 1.8; top-3 0.56 / 0.44 / 10 / 2.5; top-4 0.56 / 0.39 / 10 / 3.1. On long sources process and cross-source questions are much harder for fixed top-k than on v1 (top-3 process recall 0.28, cross 0.12). Held-out baselines are recorded in the single scoring below, not before.
+
+**Changes planned for the selector** (one per failure mode, each a named parameter):
+
+1. *Cap-bound growth:* structural growth gets its own budget (`max_structural`) in addition to the gain threshold, and an addition must share at least one concept with the evidence so far, so adjacency alone cannot chain.
+2. *Wrong-seed amplification:* no structural growth when the seed covers too little of the question (`seed_min_share`), or when at least `unseen_ratio` of the question's content words appear in no source at all (the question is probably out of scope; return the seed alone).
+3. *Over-triggering:* a question with a second clause ("… and how …") is a compound question and gets coverage growth only (`compound_blocks_process`).
+4. *Seed swap:* the seed is replaced only when it mentions none of the question's words (`swap_seed_share_max = 0`), not when another sentence merely mentions more.
+
+**Tuning:** only on data already seen: v1 dev, v1 held-out, v2 dev. A small grid declared in advance over `max_structural`, `decay`, `theta_struct`, `seed_min_share`, `link_weight`, `theta_cov`. Selection rule: keep cells where, on each of those three splits, specific-question recall is at least the current chat's, specific precision is within 0.10 of it, and the same questions abstain; among those, choose the highest mean F1 over the three splits, narrower width on ties. Then freeze and commit the parameters.
+
+**Scoring:** the v2 held-out split is scored **once**, on a pinned export of the committed code with frozen parameters, against the same six criteria as section 4 (recall at least +0.20 over current and more complete answers; F1 above naive top-2, top-3 and top-4; no single-fact regression; abstention unchanged; summary stem coverage at least +0.10 at width at most 7; no regressions in existing tests). If the gate is met the selector becomes the chat default; otherwise it stays opt-in. Nothing is changed after that scoring.

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hpm_ai_v2.agents.reader_agent import ReaderAgent
 from hpm_ai_v2.chat import ChatSession
-from hpm_ai_v2.domains.text_domain import TextDomainConfig
+from hpm_ai_v2.domains.text_domain import TextDomainConfig, tokenise
 from hpm_ai_v2.training import SupervisedStudyTrainer
 from hpm_ai_v2.training.coverage import (
     aggregate, load_coverage_set, run_system, sentence_keys, source_stem_coverage,
@@ -24,7 +24,9 @@ DEFAULT_SET = Path(__file__).parents[1] / "training/eval_sets/coverage_v1.jsonl"
 
 
 def build_trainer(sources, workdir: str):
-    config = TextDomainConfig.from_passages([s.text for s in sources], max_vocab=300)
+    # No truncation: a vocabulary smaller than the sources' own would blind every system alike.
+    distinct = len({w for s in sources for w in tokenise(s.text)})
+    config = TextDomainConfig.from_passages([s.text for s in sources], max_vocab=max(300, distinct))
     agent = ReaderAgent(config, dynamic_vocab=False, cold_dir=workdir)
     trainer = SupervisedStudyTrainer(agent)
     trainer.ingest(sources)
