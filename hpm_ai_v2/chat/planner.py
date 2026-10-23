@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 
-from hpm_ai_v2.training.study import StudyEpisode
 from hpm_ai_v2.chat.schema import Citation, Claim, ResponsePlan
 
 

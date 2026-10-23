@@ -206,7 +206,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Create character-level macro
         return self.learn_word_spelling(word, case_sensitive=False)
 
-    def observe_passage(self, text: str) -> int:
+    def observe_passage(self, text: str, initial_weight: float = 1.0) -> int:
         if self.dynamic_vocab:
             from hpm_ai_v2.domains.text_domain import tokenise
             tokens = tokenise(text)
@@ -235,7 +235,7 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Link paragraph node to passage node
         if para_node: node.add_child(para_node)
         
-        self.observer.register(node, protected=False, initial_weight=1.0)
+        self.observer.register(node, protected=False, initial_weight=initial_weight)
         self.patterns[f"passage_{idx}"] = node
         
         # Update last topic mu for predictive curiosity
@@ -411,6 +411,26 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             res.append((self.config.get_passage(i), score))
         return sorted(res, key=lambda x: x[1], reverse=True)[:k]
 
+    def query_scored_nodes(self, question: str, k: int = 10) -> List[tuple[str, str, float]]:
+        """Return ranked ``(passage_node_id, text, cosine_score)`` evidence.
+
+        Unlike :meth:`query_scored`, this retains stable passage identity, which
+        supervised training and citation systems need when source texts repeat.
+        """
+        if not self.config._passage_vecs:
+            return []
+        q_mu = self.config.encode_passage(question)
+        s_dim, dim = self.config.S_DIM, self.config.DIM
+        q_v = q_mu[s_dim : s_dim + dim]
+        results: List[tuple[str, str, float]] = []
+        for i, pvec in enumerate(self.config._passage_vecs):
+            pv = pvec[s_dim : s_dim + dim]
+            denom = float(np.linalg.norm(q_v) * np.linalg.norm(pv) + 1e-9)
+            score = float(np.dot(q_v, pv) / denom)
+            results.append((f"passage_{i}", self.config.get_passage(i), score))
+        results.sort(key=lambda item: (-item[2], item[0]))
+        return results[:k]
+
     def save_agent(self, directory: str) -> None:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
@@ -425,20 +445,44 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             "word_spellings": getattr(self, "word_spellings", {}),
             "include_char_primitives": getattr(self.config, "include_char_primitives", False)
         }
+        meta["dynamic_vocab"] = self.dynamic_vocab
+        meta["inject_blank_priors"] = self.inject_blank_priors
+        if hasattr(self.config, "encoder_metadata"):
+            meta["encoder"] = self.config.encoder_metadata(include_cache=True)
+            meta["passage_vectors"] = [vector.tolist() for vector in self.config._passage_vecs]
         with open(path / "reader_meta.json", "w") as f: json.dump(meta, f)
 
     @classmethod
     def load_agent(cls, directory: str) -> "ReaderAgent":
         path = Path(directory)
         with open(path / "reader_meta.json") as f: meta = json.load(f)
-        config = TextDomainConfig(
-            meta["concepts"], 
-            meta["idf"], 
-            include_char_primitives=meta.get("include_char_primitives", False)
-        )
+        encoder = meta.get("encoder")
+        if encoder and encoder.get("type") == "ollama_embedding":
+            from hpm_ai_v2.domains.ollama_embedding import OllamaEmbeddingTextDomainConfig
+            config = OllamaEmbeddingTextDomainConfig.from_metadata(encoder)
+        else:
+            config = TextDomainConfig(
+                meta["concepts"],
+                meta["idf"],
+                include_char_primitives=meta.get("include_char_primitives", False)
+            )
         config._passages = meta["passages"]
-        config._passage_vecs = [config.encode_passage(p) for p in meta["passages"]]
-        agent = cls(config, cold_dir=str(path))
+        passage_vectors = meta.get("passage_vectors")
+        if passage_vectors is not None and len(passage_vectors) == len(meta["passages"]):
+            config._passage_vecs = [np.asarray(vector, dtype=np.float32) for vector in passage_vectors]
+            if encoder and encoder.get("type") == "ollama_embedding":
+                for text, vector in zip(config._passages, config._passage_vecs):
+                    config._embedding_cache[text] = vector[
+                        config.S_DIM : config.S_DIM + config.DIM
+                    ].copy()
+        else:
+            config._passage_vecs = [config.encode_passage(p) for p in meta["passages"]]
+        agent = cls(
+            config,
+            dynamic_vocab=meta.get("dynamic_vocab", True),
+            inject_blank_priors=meta.get("inject_blank_priors", True),
+            cold_dir=str(path),
+        )
         agent._documents = meta.get("docs", [])
         agent.pos_rules = meta.get("pos_rules", {})
         agent.role_knowledge = meta.get("role_knowledge", [])

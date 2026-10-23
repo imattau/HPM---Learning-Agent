@@ -7,7 +7,11 @@ from hpm_ai_v2.training.study import (
     SupervisedStudyTrainer,
     load_curriculum_jsonl,
 )
-from hpm_ai_v2.training.ollama import ModelAnswer, OllamaChatBaseline
+from hpm_ai_v2.training.ollama import (
+    ModelAnswer,
+    OllamaChatBaseline,
+    OllamaRetrievalBaseline,
+)
 
 __all__ = [
     "SourceDocument",
@@ -17,4 +21,5 @@ __all__ = [
     "load_curriculum_jsonl",
     "ModelAnswer",
     "OllamaChatBaseline",
+    "OllamaRetrievalBaseline",
 ]

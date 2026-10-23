@@ -64,6 +64,7 @@ class BaseHFNAgent:
         auto_observe_frequency: int = 0,
         replay_buffer_size: int = 100,
         auto_save_frequency: int = 0,
+        inject_blank_priors: bool = True,
         **kwargs: Any,
     ) -> None:
         self.config = config
@@ -160,6 +161,7 @@ class BaseHFNAgent:
         self._replay_buffer: List[np.ndarray] = []
         self._replay_buffer_size = replay_buffer_size
         self.auto_save_frequency = auto_save_frequency
+        self.inject_blank_priors = inject_blank_priors
         self._step_counter = 0
 
         super().__init__(**kwargs)
@@ -171,7 +173,7 @@ class BaseHFNAgent:
         self._recency_boost: float = kwargs.get("recency_boost", 1.5)  # multiplicative boost
 
         # Inject priors if forest is empty
-        if len(self.forest) == 0:
+        if inject_blank_priors and len(self.forest) == 0:
             self._inject_blank_priors()
 
     # ------------------------------------------------------------------

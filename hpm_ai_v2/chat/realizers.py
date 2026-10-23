@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from hpm_ai_v2.chat.schema import ResponsePlan
+from hpm_ai_v2.chat.procedures import render_schema
 
 
 class ExtractiveRealizer:
@@ -17,3 +18,12 @@ class ExtractiveRealizer:
             f"Source: {citation.title or citation.source_id} "
             f"({citation.source_id}, characters {citation.start}–{citation.end})."
         )
+
+
+class SchemaRealizer:
+    """Format cited extractive claims as definitions, summaries, outlines or cards."""
+
+    name = "schema-extractive"
+
+    def realize(self, plan: ResponsePlan) -> str:
+        return render_schema(plan)

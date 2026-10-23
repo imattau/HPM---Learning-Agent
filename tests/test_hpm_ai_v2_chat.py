@@ -53,3 +53,31 @@ def test_chat_resolves_simple_reference_after_session_restart(tmp_path):
     assert "Context: What carries brain messages?" in reply.plan.effective_question
     assert reply.plan.claims[0].citations[0].source_id == "brain"
 
+
+def test_chat_formats_summaries_as_multiple_cited_sentences(tmp_path):
+    text = (
+        "Solar panels convert sunlight into electricity. "
+        "Solar energy can reduce household emissions. "
+        "Photovoltaic cells generate direct current."
+    )
+    source = SourceDocument("solar", text, "Solar energy")
+    config = TextDomainConfig.from_passages([text], max_vocab=100)
+    agent = ReaderAgent(config, dynamic_vocab=False, cold_dir=str(tmp_path / "forest"))
+    trainer = SupervisedStudyTrainer(agent)
+    trainer.fit(
+        [source],
+        [StudyEpisode("teach-solar", "train", "grounded_qa", "What do solar panels do?", "solar", "Solar panels convert sunlight into electricity.")],
+        [StudyEpisode("validate-solar", "validation", "grounded_qa", "How do solar panels work?", "solar", "Solar panels convert sunlight into electricity.")],
+    )
+
+    reply = ChatSession(trainer).send("Summarize solar energy")
+
+    assert reply.verified and not reply.abstained
+    assert reply.plan.fmt == "summarize"
+    assert len(reply.plan.claims) == 3
+    for claim in reply.plan.claims:
+        citation = claim.citations[0]
+        assert text[citation.start:citation.end] == claim.text == citation.text
+    assert reply.text.startswith("Summary\n")
+
+

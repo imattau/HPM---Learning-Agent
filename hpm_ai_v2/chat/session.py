@@ -9,7 +9,7 @@ from pathlib import Path
 
 from hpm_ai_v2.chat.controller import GroundedActController
 from hpm_ai_v2.chat.planner import GroundedPlanner
-from hpm_ai_v2.chat.realizers import ExtractiveRealizer
+from hpm_ai_v2.chat.realizers import SchemaRealizer
 from hpm_ai_v2.chat.schema import Reply, TurnEvent
 from hpm_ai_v2.chat.state import ConversationState
 from hpm_ai_v2.chat.verifier import GroundingVerifier
@@ -36,7 +36,7 @@ class ChatSession:
         self.event_log = Path(event_log) if event_log else None
         self.controller = GroundedActController()
         self.planner = GroundedPlanner(trainer)
-        self.realizer = ExtractiveRealizer()
+        self.realizer = SchemaRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
     def send(self, user_text: str) -> Reply:

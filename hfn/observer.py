@@ -304,6 +304,14 @@ class Observer:
     def get_weight(self, node_id: str) -> float:
         return self._get_state_field(node_id, 0)
 
+    def set_weight(self, node_id: str, weight: float) -> None:
+        """Set a node's bounded utility weight, for checkpoint restoration."""
+        if not np.isfinite(weight):
+            raise ValueError("weight must be finite")
+        if self._get_state(node_id) is None:
+            raise KeyError(f"unknown observer node: {node_id}")
+        self._set_state_field(node_id, 0, float(np.clip(weight, 0.0, 1.0)))
+
     def get_score(self, node_id: str) -> float:
         return self._get_state_field(node_id, 1)
 

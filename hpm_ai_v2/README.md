@@ -38,8 +38,9 @@ hpm_ai_v2/
 
 ```python
 from hpm_ai_v2.agents.agents import InducedSchemaAgent
+from hpm_ai_v2.domains.list_domain import ListDomainConfig
 
-agent = InducedSchemaAgent()
+agent = InducedSchemaAgent(config=ListDomainConfig())
 
 # Register a strategy (BFS is built-in)
 success, code, strategy = agent.solve(
@@ -48,8 +49,10 @@ success, code, strategy = agent.solve(
     goal_type="map",
     task_id="MAP_plus1",
 )
-print(success, code)
+print(success, code, strategy)
 ```
+
+`solve()` returns `(success, code, strategy, path)`.
 
 ---
 
@@ -371,3 +374,38 @@ The `hfn/` package is the shared core used by both.
 cd /path/to/HPM---Learning-Agent
 PYTHONPATH=. .venv/bin/python hpm_ai_v2/experiments/experiment_sp80_comparative_benchmark.py
 ```
+
+## Supervised grounded-study training
+
+The first implemented training slice is a supervised evidence-retrieval and extractive-answer loop for `ReaderAgent`. It ingests source passages and sentence patterns, reinforces labeled evidence and answer sentences and penalizes distractors through Observer weights, calibrates abstention on a validation split, then evaluates held-out episodes without updating weights. Predictions include the exact source sentence and its character offsets.
+
+Curricula are JSONL files with `source` and `episode` rows. Episode splits are `train`, `validation`, and `test`; answerable episodes name an `evidence_id`, while `abstain` episodes use `null`. The checked-in seed curriculum is deliberately small and is a smoke fixture, not a 9B usability benchmark.
+
+```bash
+PYTHONPATH=. .venv/bin/python -m hpm_ai_v2.experiments.run_supervised_study \
+  hpm_ai_v2/training/curricula/grounded_study_seed.jsonl \
+  --output-dir /tmp/hpm-study-run
+```
+
+The run writes `training_events.jsonl`, `study_training_state.json`, `study_report.json`, and the ReaderAgent checkpoint. Reports include Wilson 95% intervals for task and evidence accuracy, abstention quality, per-task and per-episode answer scores, and median latency. It compares supervised HFN-weighted retrieval with the same encoder at neutral weights. Pass `--ollama-model MODEL` to add both a plain Ollama chat baseline and BM25 retrieval plus the same model. Use `--encoder ollama_embedding --embedding-model qwen3-embedding:0.6b` to compare a fixed semantic embedding substrate; its parameters are not trained, while HPM learns evidence and fact weights. For semantic retrieval, HPM also applies a small BM25 corroboration bonus and allows a near-threshold answer only when strong lexical support agrees with the top semantic source. These thresholds are included in the report/checkpoint. The report records encoder/model digests, runtime placement, host details, prompts, and retrieval settings. Use `--retention-curriculum FILE.jsonl` for held-out before/after retention scoring.
+
+The `paraphrase_transfer_seed.jsonl` fixture probes transfer to changed wording. TF-IDF HPM scored 2/5 overall (0.25 answerable evidence accuracy). With frozen Qwen embeddings and BM25 corroboration, the default (rescue disabled) scored 4/5 on test (0.75 evidence accuracy, 0.75 answer-token F1). Plain Qwen and BM25 plus Qwen scored 5/5, with answer-token F1 0.483 and 0.441. Training now includes a user-scoped unsupported example about food warmth. Its learned negative pattern transfers to a held-out near-negative question about temperature, resulting in 3/3 calibration resubstitution accuracy. With the opt-in near-threshold rescue, HPM scores 5/5 test accuracy (0.833 answer-token F1), while still rejecting that hard negative; default rescue stays disabled until larger independent hard-negative sets validate the behavior. These five test items are a diagnostic only; answers remain extractive and broad task-family exams are still required.
+
+Supervised `abstain` episodes create persistent, user-scoped HFN negative patterns. A sufficiently similar question from that user can trigger abstention without lowering a source passage's global utility. Reports include the learned pattern count, similarity threshold, validation behavior, and abstention reason; checkpoints restore negative patterns. The transfer test covers a paraphrased unsupported question, a supported neighboring question, another user's scope, and restart behavior.
+
+The `correction_transfer_seed.jsonl` fixture checks a user correction across restart. Before correction, the paraphrased held-out request retrieves an earlier incorrect source; after training the correction, HPM selects the corrected source, keeps an unrelated bat answer correct, and abstains on the unsupported request. Corrections create `corrects` links in the fact graph and use stronger reinforcement/penalty settings than ordinary feedback. The runner reloads each saved checkpoint and reports whether held-out predictions remain identical. For cumulative training, `SupervisedStudyTrainer.fit_curriculum(phases, retention_episodes=...)` accepts ordered phase mappings (`name`, `sources`, `train_episodes`, and optional `validation_episodes`), reuses the same HFN state, and scores the same untouched test suite before and after every phase. Its report includes per-phase knowledge growth and retention gate results. A three-phase test verifies that fact nodes accumulate while retained-task accuracy holds. These remain small synthetic checks, not longitudinal usability evidence.
+
+## Grounded chat API
+
+`ChatSession` adds a small conversational wrapper around a fitted `SupervisedStudyTrainer`. It produces an extractive answer plan, verifies each citation against the stored source offsets, abstains when no supported sentence is retrieved, and appends replayable turn events. A saved session retains recent questions so simple pronoun references can be resolved after restart.
+
+```python
+from hpm_ai_v2.chat import ChatSession
+
+chat = ChatSession(trainer, user_id="student-1", event_log="study-turns.jsonl")
+reply = chat.send("What is the main idea?")
+print(reply.text, reply.plan.claims, reply.verified)
+chat.save("study-session.json")
+```
+
+This is the first chat slice: one-turn grounded QA, abstention, exact citation verification, event logging, and rule-based reference carry-over. It does not yet support clarification, summaries, comparisons, study aids, preference learning, or correction feedback.

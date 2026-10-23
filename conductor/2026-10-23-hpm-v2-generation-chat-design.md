@@ -1,6 +1,6 @@
 # HPM v2 Generation and Chat: Design
 
-**Status:** active implementation; C0–C1 first slice implemented  
+**Status:** active implementation; C0–C2 partial slice implemented
 **Parent:** [HPM Training Regime: First Target at 9B-Model Usability](2026-10-23-hpm-9b-usability-training-regime.md)  
 **Scope:** the user-facing conversational layer of `hpm_ai_v2` for the study-assistant task boundary (grounded QA, explain/compare/define/summarize, study aids, preferences, corrections).
 
@@ -105,7 +105,7 @@ hpm_ai_v2/experiments/run_chat_eval.py   # multi-turn held-out episodes vs Ollam
 | C4 | Optional VerbalizerRealizer + verifier | Ungrounded-claim rate not above extractive baseline; config recorded |
 | C5 | Multi-turn eval runner vs pinned 9B and retrieval baselines | Per-family results, abstention quality, latency; no aggregate-only score |
 
-C0–C1 are the first tranche.
+C0–C2 are in the first implementation tranche; C2 currently uses fixed response schemas and extractive source sentences, not learned procedures.
 
 ## 8. Risks
 
@@ -122,6 +122,6 @@ C0–C1 are the first tranche.
 
 ## 10. Implementation evidence (2026-10-23)
 
-`hpm_ai_v2/chat/` now contains the C0–C1 path: typed response plans and turn events, `ConversationState`, a rule-based answer/abstain controller, a planner over `SupervisedStudyTrainer`, exact-span citation verification, an extractive realizer, and `ChatSession.send/save/load`. Follow-up questions with simple reference words carry forward the prior resolved question. The chat layer does not train or modify HFN weights itself; supervised learning remains in the trainer.
+`hpm_ai_v2/chat/` now contains the C0–C2 partial path: typed response plans and turn events, `ConversationState`, a rule-based answer/abstain controller, a planner over `SupervisedStudyTrainer`, exact-span citation verification, extractive response schemas for define/summarize/outline/flashcards, and `ChatSession.send/save/load`. Follow-up questions with simple reference words carry forward the prior resolved question. The chat layer does not train or modify HFN weights itself; supervised learning remains in the trainer. The trainer now creates source-linked fact patterns from labeled answer references and validates/promotes them only through held-out answer and provenance checks; C2's response schemas themselves remain hand-authored.
 
-Tests cover grounded answer and abstention behavior, citation validity, event logging, and follow-up resolution after session restart. Nineteen focused chat, study-training, and Reader regression tests pass. Clarification, procedure schemas, correction/preferences, optional verbalization, and multi-turn comparison against the pinned baseline remain unimplemented.
+Tests cover grounded answer and abstention behavior, citation validity, event logging, follow-up resolution after session restart, and fact-pattern support/promotion/checkpoint restoration. The supervised trainer now supports correction episodes and the runner verifies checkpoint reload predictions; `ChatSession.feedback` and conversational correction capture remain unimplemented. Three of three source-linked facts were created in the latest small procedure smoke run; none promoted because its validation episodes lack answer references. Clarification, learned procedure promotion, preferences, optional verbalization, and multi-turn comparison against the pinned baseline remain unimplemented.
