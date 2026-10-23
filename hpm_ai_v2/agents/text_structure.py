@@ -108,6 +108,30 @@ def build_structured_passage(
     return paragraphs, sentences
 
 
+def _create_term(agent, term: str, members: list[HFN]) -> HFN:
+    node = HFN(
+        mu=np.mean([child.mu for child in members], axis=0),
+        sigma=np.ones(agent.m_dim) * 0.2,
+        id=f"term_{term}",
+        use_diag=True,
+    )
+    node.relation_type = "term"
+    node.metadata = {"type": "term", "stem": term}
+    for child in members:
+        node.add_child(child)
+    agent.observer.register(node, protected=False, initial_weight=0.5)
+    agent.patterns[node.id] = node
+    return node
+
+
+def ensure_term(agent, term: str) -> HFN:
+    """The concept node for a stem, created on demand so a relation has endpoints."""
+    node = agent.patterns.get(f"term_{term}")
+    if node is None:
+        node = _create_term(agent, term, [agent.patterns[i] for i in agent.term_sentences[term]])
+    return node
+
+
 def link_terms(agent, sentence_nodes: Iterable[HFN]) -> list[str]:
     """Attach sentences to shared stem concepts; returns ids of terms created.
 
@@ -128,20 +152,60 @@ def link_terms(agent, sentence_nodes: Iterable[HFN]) -> list[str]:
             if node is not None:
                 node.add_child(sentence)
             elif len(members) >= 2:
-                children = [agent.patterns[member] for member in members]
-                node = HFN(
-                    mu=np.mean([child.mu for child in children], axis=0),
-                    sigma=np.ones(agent.m_dim) * 0.2,
-                    id=f"term_{term}",
-                    use_diag=True,
-                )
-                node.relation_type = "term"
-                node.metadata = {"type": "term", "stem": term}
-                for child in children:
-                    node.add_child(child)
-                agent.observer.register(node, protected=False, initial_weight=0.5)
-                agent.patterns[node.id] = node
-                created.append(node.id)
+                created.append(_create_term(agent, term, [agent.patterns[member] for member in members]).id)
+    return created
+
+
+def default_role_extractor():
+    from hpm_ai_v2.agents.propositions import HeuristicRoleExtractor
+
+    return HeuristicRoleExtractor()
+
+
+def link_propositions(agent, text: str, sentence_nodes: Iterable[HFN]) -> list[str]:
+    """Store each sentence's extracted relations as ``proposition`` nodes.
+
+    A proposition is an HFN relation node: ``inputs`` are the concept (term)
+    nodes filling its roles, ``relation_params`` name the predicate and the
+    role order, and it is ``supported_by`` the sentence it came from. Only
+    relations whose predicate and arguments all occur in the sentence are kept.
+    """
+    from hpm_ai_v2.agents.propositions import COPULA, ROLE_ORDER
+
+    extractor = getattr(agent, "role_extractor", None)
+    if extractor is None:
+        extractor = agent.role_extractor = default_role_extractor()
+    created = []
+    for sentence in sentence_nodes:
+        meta = sentence.metadata
+        stems = set(meta["stems"])
+        for k, prop in enumerate(extractor.extract(text[meta["start"]:meta["end"]])):
+            roles = {r: v for r, v in prop.roles.items() if r in ROLE_ORDER and v[0] in stems}
+            if prop.predicate != COPULA and prop.predicate not in stems:
+                continue
+            if prop.voice != "passive" and len(roles) < 2 or not roles:
+                continue
+            ordered = [r for r in ROLE_ORDER if r in roles]
+            node = HFN(
+                mu=sentence.mu.copy(),
+                sigma=np.ones(agent.m_dim) * 0.2,
+                id=structure_id("proposition", meta["source_id"], sentence.id, k),
+                use_diag=True,
+            )
+            node.relation_type = "proposition"
+            node.metadata = {
+                "type": "proposition", "source_id": meta["source_id"], "sentence_id": sentence.id,
+                "predicate": prop.predicate, "lemma": prop.lemma, "voice": prop.voice,
+                "roles": {r: roles[r][0] for r in ordered},
+                "role_text": {r: roles[r][1] for r in ordered},
+            }
+            node.add_relation(inputs=[ensure_term(agent, roles[r][0]) for r in ordered])
+            node.relation_params = {"predicate": prop.predicate, "roles": ordered}
+            node.add_child(sentence)
+            node.add_edge(node, sentence, "supported_by")
+            agent.observer.register(node, protected=False, initial_weight=0.5)
+            agent.patterns[node.id] = node
+            created.append(node.id)
     return created
 
 
@@ -178,6 +242,10 @@ class StructureIndex:
             for position, sentence_id in enumerate(ordered):
                 self._position[sentence_id] = (source_id, position)
 
+    def position(self, sentence_id: str) -> Optional[tuple[str, int]]:
+        """``(source_id, reading-order position)`` of a stored sentence."""
+        return self._position.get(sentence_id)
+
     def sentence_ids(self, source_id: str) -> list[str]:
         """Sentence node ids of a source in reading order, across paragraphs."""
         return list(self._order.get(source_id, ()))
@@ -199,8 +267,23 @@ class StructureIndex:
         low, high = max(0, position - before), min(len(order), position + after + 1)
         return [sid for sid in order[low:high] if sid != sentence_id]
 
+    def is_shared(self, term: str) -> bool:
+        """True when a stem occurs in two or more sentences (a term node alone does not say so:
+        a relation argument mentioned once also has one)."""
+        return len(self.agent.term_sentences.get(term, ())) >= 2
+
     def terms_of(self, sentence_id: str) -> list[str]:
-        """Stems of a sentence that are shared concepts (have a term node)."""
+        """Stems of a sentence that are shared across two or more sentences, with a term node."""
+        node = self.agent.patterns.get(sentence_id)
+        if node is None:
+            return []
+        return [
+            t for t in node.metadata.get("stems", ())
+            if f"term_{t}" in self.agent.patterns and self.is_shared(t)
+        ]
+
+    def concepts_of(self, sentence_id: str) -> list[str]:
+        """Every stem of a sentence that has a concept node: shared ones and relation arguments."""
         node = self.agent.patterns.get(sentence_id)
         if node is None:
             return []
@@ -224,6 +307,38 @@ class StructureIndex:
             for sentence_id in self.sentences_with_stem(term):
                 counts[sentence_id] = counts.get(sentence_id, 0) + 1
         return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+    def propositions(self, source_id: Optional[str] = None) -> list[HFN]:
+        """Stored relation nodes, optionally of one source, in a stable order."""
+        found = [
+            n for n in self.agent.patterns.values()
+            if n.relation_type == "proposition" and (source_id is None or n.metadata["source_id"] == source_id)
+        ]
+        return sorted(found, key=lambda n: n.id)
+
+    def find(self, agent: Optional[str] = None, predicate: Optional[str] = None,
+             patient: Optional[str] = None) -> list[HFN]:
+        """Propositions matching the given words (stemmed); omitted roles match anything.
+
+        ``find(predicate="release", patient="oxygen")`` answers "what releases oxygen".
+        """
+        want = {k: stem(v) for k, v in (("AGENT", agent), ("PATIENT", patient)) if v}
+        pred = stem(predicate) if predicate else None
+        return [
+            n for n in self.propositions()
+            if (pred is None or n.metadata["predicate"] == pred)
+            and all(n.metadata["roles"].get(role) == key for role, key in want.items())
+        ]
+
+    def relations_of(self, term: str) -> list[tuple[str, str, Optional[str], str]]:
+        """``(role, predicate, other argument stem or None, proposition id)`` for a concept."""
+        out = []
+        for n in self.propositions():
+            for role, key in n.metadata["roles"].items():
+                if key == term:
+                    other = next((k for r, k in n.metadata["roles"].items() if r != role), None)
+                    out.append((role, n.metadata["predicate"], other, n.id))
+        return out
 
     def related(self, sentence_id: str) -> dict[str, int]:
         """Other sentences sharing concepts with this one, with shared-term counts."""

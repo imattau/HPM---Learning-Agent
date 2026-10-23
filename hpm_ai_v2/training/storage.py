@@ -52,22 +52,58 @@ def storage_problems(trainer) -> list[str]:
     for node_id in trainer.answer_node_data:
         if node_id not in sentence_owner:
             problems.append(f"{node_id}: sentence is outside the document hierarchy")
+    argument_terms: set[str] = set()
+    for node_id, node in agent.patterns.items():
+        if node.relation_type == "proposition":
+            _check_proposition(problems, agent, node, sentence_owner, argument_terms)
     for node_id, node in agent.patterns.items():
         if node.relation_type != "term":
             continue
         children = node.children()
-        if len(children) < 2:
-            problems.append(f"{node_id}: term has fewer than two sentences")
+        stem_ = node.metadata.get("stem")
+        if not children or (len(children) < 2 and stem_ not in argument_terms):
+            problems.append(f"{node_id}: term has fewer than two sentences and is not a relation argument")
         for child in children:
-            if node.metadata.get("stem") not in child.metadata.get("stems", ()):
+            if stem_ not in child.metadata.get("stems", ()):
                 problems.append(f"{node_id}: child {child.id} does not mention the stem")
             if child.id not in sentence_owner:
                 problems.append(f"{node_id}: child {child.id} is not a stored sentence")
     shared = {t for t, ids in agent.term_sentences.items() if len(ids) >= 2}
     stored = {n.metadata["stem"] for n in agent.patterns.values() if n.relation_type == "term"}
-    if shared != stored:
-        problems.append(f"terms with two or more sentences {sorted(shared ^ stored)[:5]} have no node, or have no sentences")
+    if not shared <= stored:
+        problems.append(f"terms in two or more sentences have no node: {sorted(shared - stored)[:5]}")
+    if not argument_terms <= stored:
+        problems.append(f"relation arguments have no term node: {sorted(argument_terms - stored)[:5]}")
     return problems
+
+
+def _check_proposition(problems, agent, node, sentence_owner, argument_terms) -> None:
+    from hpm_ai_v2.agents.propositions import COPULA, ROLE_ORDER
+
+    meta, label = node.metadata, node.id
+    children = node.children()
+    if len(children) != 1 or children[0].id != meta.get("sentence_id") or children[0].id not in sentence_owner:
+        problems.append(f"{label}: proposition is not supported by exactly one stored sentence")
+        return
+    if not any(e.relation == "supported_by" and e.target is children[0] for e in node.edges()):
+        problems.append(f"{label}: missing supported_by edge")
+    sentence = children[0]
+    stems = set(sentence.metadata.get("stems", ()))
+    roles = meta.get("roles", {})
+    ordered = [r for r in ROLE_ORDER if r in roles]
+    if not roles or set(roles) - set(ROLE_ORDER) or node.relation_params.get("roles") != ordered:
+        problems.append(f"{label}: roles are malformed")
+        return
+    if [i.metadata.get("stem") for i in node.inputs] != [roles[r] for r in ordered]:
+        problems.append(f"{label}: inputs do not match the role fillers")
+    if meta.get("source_id") != sentence.metadata.get("source_id"):
+        problems.append(f"{label}: source differs from its sentence")
+    if meta.get("predicate") != COPULA and meta.get("predicate") not in stems:
+        problems.append(f"{label}: predicate {meta.get('predicate')!r} is not in its sentence")
+    for role, key in roles.items():
+        argument_terms.add(key)
+        if key not in stems:
+            problems.append(f"{label}: {role} {key!r} is not in its sentence")
 
 
 def _check_chain(problems: list[str], node, label: str) -> None:

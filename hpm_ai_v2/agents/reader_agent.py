@@ -38,6 +38,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self.sentence_splitter = SentenceSplitter()
         # stem -> sentence ids; derived from sentence nodes (see text_structure)
         self.term_sentences: Dict[str, List[str]] = {}
+        # relation extractor for structured passages; None means the default heuristic one
+        self.role_extractor = None
         self.corpus_node: Optional[HFN] = None
         self.web_agent = web_agent
         
@@ -299,8 +301,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         for para_node in paragraph_nodes:
             node.add_child(para_node, relation="next" if structured else None)
         if structured:
-            from hpm_ai_v2.agents.text_structure import link_terms
+            from hpm_ai_v2.agents.text_structure import link_propositions, link_terms
             link_terms(self, sentence_nodes)
+            link_propositions(self, text, sentence_nodes)
         
         self.observer.register(node, protected=False, initial_weight=initial_weight)
         self.patterns[f"passage_{idx}"] = node

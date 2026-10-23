@@ -178,8 +178,132 @@ def test_stem_lookup_bridges_word_forms_even_for_single_mention_words(tmp_path):
     index = StructureIndex(trainer.agent)
     oxygen = next(i for i, d in trainer.answer_node_data.items() if d["text"].startswith("Oxygen is released"))
     assert index.terms_of(oxygen) == [stem("oxygen"), stem("release")]   # shared with respiration
+    # "molecules" is mentioned once but is the argument of a stored relation: a concept, not shared
+    assert index.concepts_of(oxygen) == [stem("oxygen"), stem("release"), stem("molecules")]
+    assert not index.is_shared(stem("molecules")) and index.is_shared(stem("oxygen"))
     water = index.sentences_with_stem(stem("water"))
     assert water == [oxygen] and "term_" + stem("water") not in trainer.agent.patterns
     hits = index.sentences_for_query("Why do plants release oxygen?")
     assert oxygen in hits and hits[oxygen] == 2                           # "release" ~ "released" and "oxygen"
     assert index.sentences_for_query("quantum chromodynamics") == {}
+
+
+# -- relations: proposition nodes ------------------------------------------------------
+
+def _props(trainer, **query):
+    return StructureIndex(trainer.agent).find(**query)
+
+
+def test_sentences_yield_proposition_nodes_with_concept_arguments(tmp_path):
+    trainer = _trainer(tmp_path)
+    assert storage_problems(trainer) == []
+    [released] = _props(trainer, predicate="release", patient="oxygen")           # passive
+    assert released.relation_type == "proposition" and released.metadata["voice"] == "passive"
+    assert released.metadata["roles"] == {"PATIENT": stem("oxygen")}
+    assert [n.metadata["stem"] for n in released.inputs] == [stem("oxygen")]      # inputs are concept nodes
+    assert released.relation_params == {"predicate": stem("release"), "roles": ["PATIENT"]}
+    sentence = trainer.agent.patterns[released.metadata["sentence_id"]]
+    assert released.children() == [sentence]
+    assert [(e.source.id, e.target.id, e.relation) for e in released.edges()] == [(released.id, sentence.id, "supported_by")]
+    assert trainer.answer_node_data[sentence.id]["text"].startswith("Oxygen is released")
+
+
+def test_relations_unify_word_forms_across_sources(tmp_path):
+    trainer = _trainer(tmp_path)
+    releases = _props(trainer, predicate="released")                               # "release" in both stems
+    assert {n.metadata["source_id"] for n in releases} == {"photo", "resp"}
+    [respiration] = _props(trainer, agent="respiration", predicate="release", patient="energy")
+    assert respiration.metadata["voice"] == "active"
+    assert [x.metadata["roles"] for x in _props(trainer, agent="cycle", predicate="use")] == \
+        [{"AGENT": stem("cycle"), "PATIENT": stem("atp")}, {"AGENT": stem("cycle"), "PATIENT": stem("nadph")}] or \
+        sorted(x.metadata["roles"]["PATIENT"] for x in _props(trainer, agent="cycle", predicate="use")) == \
+        sorted([stem("atp"), stem("nadph")])
+    [chloro] = _props(trainer, agent="chloroplasts", predicate="contain")
+    assert chloro.metadata["roles"]["PATIENT"] == stem("chlorophyll")             # relative clause antecedent
+    [definition] = _props(trainer, agent="photosynthesis", predicate="be")
+    assert definition.metadata["voice"] == "copula" and definition.metadata["roles"]["PATIENT"] == stem("process")
+
+
+def test_a_relation_argument_gets_a_concept_node_even_if_mentioned_once(tmp_path):
+    trainer = _trainer(tmp_path)
+    nadph = trainer.agent.patterns["term_" + stem("nadph")]
+    assert len(nadph.children()) == 1                                              # single mention, but a relation endpoint
+    index = StructureIndex(trainer.agent)
+    sentence = nadph.children()[0].id
+    assert stem("nadph") not in index.terms_of(sentence) and stem("nadph") in index.concepts_of(sentence)
+    for other in index.related(sentence):                                           # related() uses shared terms only
+        assert set(index.terms_of(other)) & set(index.terms_of(sentence))
+    assert StructureIndex(trainer.agent).relations_of(stem("nadph"))[0][:3] == ("PATIENT", stem("use"), stem("cycle"))
+    assert storage_problems(trainer) == []
+
+
+def test_questions_and_pronoun_only_sentences_state_no_relation(tmp_path):
+    source = SourceDocument("q", "What does the cat chase? It chases mice. Water is wet.", "Q")
+    trainer = _trainer(tmp_path, [source, SourceDocument("pad", RESP)], name="q")
+    assert _props(trainer) and all(n.metadata["source_id"] == "pad" for n in _props(trainer))  # nothing from "q"
+
+
+def test_proposition_nodes_have_deterministic_ids_and_survive_a_checkpoint(tmp_path):
+    a, b = _trainer(tmp_path, name="a"), _trainer(tmp_path, name="b")
+    ids = lambda t: [n.id for n in StructureIndex(t.agent).propositions()]
+    assert ids(a) == ids(b) and ids(a)
+    a.save_checkpoint(tmp_path / "ck")
+    restored = SupervisedStudyTrainer(ReaderAgent.load_agent(str(tmp_path / "ck")))
+    restored.load_checkpoint_state(tmp_path / "ck")
+    assert storage_problems(restored) == []
+    shape = lambda t: [(n.id, n.metadata["roles"], [i.id for i in n.inputs], n.relation_params)
+                       for n in StructureIndex(t.agent).propositions()]
+    assert shape(restored) == shape(a)
+    assert [n.id for n in _props(restored, predicate="release", patient="oxygen")] == \
+        [n.id for n in _props(a, predicate="release", patient="oxygen")]
+    restored.ingest([SourceDocument("more", "Chlorophyll absorbs light.", "More")])        # keeps growing
+    assert storage_problems(restored) == [] and _props(restored, agent="chlorophyll", predicate="absorb")
+
+
+def test_the_extractor_is_pluggable_and_unsupported_relations_are_dropped(tmp_path):
+    from hpm_ai_v2.agents.propositions import Proposition
+
+    class Fixed:
+        def extract(self, sentence):
+            if not sentence.startswith("Glucose is a simple sugar"):
+                return []
+            return [
+                Proposition(stem("sugar"), "sugar", "active", {"AGENT": (stem("glucose"), "glucose"), "PATIENT": (stem("sugar"), "sugar")}),
+                Proposition(stem("flies"), "fly", "active", {"AGENT": (stem("glucose"), "glucose"), "PATIENT": (stem("sugar"), "sugar")}),  # predicate not in sentence
+                Proposition(stem("sugar"), "sugar", "active", {"AGENT": (stem("kangaroo"), "kangaroo"), "PATIENT": (stem("sugar"), "sugar")}),  # agent not in sentence
+            ]
+
+    sources = [SourceDocument("s", "Glucose is a simple sugar. Plants make glucose.", "S")]
+    config = TextDomainConfig.from_passages([s.text for s in sources], max_vocab=100)
+    agent = ReaderAgent(config, dynamic_vocab=False, cold_dir=str(tmp_path / "f"))
+    agent.role_extractor = Fixed()
+    trainer = SupervisedStudyTrainer(agent)
+    trainer.ingest(sources)
+    kept = StructureIndex(agent).propositions()
+    assert [n.metadata["predicate"] for n in kept] == [stem("sugar")] and storage_problems(trainer) == []
+
+
+def test_the_checker_catches_relation_damage(tmp_path):
+    def broken(mutate):
+        trainer = _trainer(tmp_path, name=f"r{mutate.__name__}")
+        mutate(trainer)
+        return " | ".join(storage_problems(trainer))
+
+    def wrong_input(t):
+        prop = StructureIndex(t.agent).find(predicate="release", patient="energy")[0]
+        prop.inputs.reverse() if len(prop.inputs) > 1 else prop.inputs.append(t.agent.patterns["term_" + stem("glucose")])
+
+    def no_support_edge(t):
+        StructureIndex(t.agent).propositions()[0]._edges.clear()
+
+    def foreign_predicate(t):
+        StructureIndex(t.agent).propositions()[0].metadata["predicate"] = "zzzz"
+
+    def lost_argument(t):
+        prop = StructureIndex(t.agent).find(predicate="release", patient="oxygen")[0]
+        t.agent.patterns.pop("term_" + prop.metadata["roles"]["PATIENT"])
+
+    assert "inputs do not match" in broken(wrong_input)
+    assert "supported_by" in broken(no_support_edge)
+    assert "not in its sentence" in broken(foreign_predicate)
+    assert "relation arguments have no term node" in broken(lost_argument)
