@@ -1,6 +1,6 @@
 # HPM v2 Chat Frontend: Design
 
-**Status:** W0 implemented (scoped send, `presentation.to_blocks`, `ChatService`); server and frontend (W1+) not yet built
+**Status:** W0 and W1 implemented and checked in the built-in browser; W2 (SSE stage progress, edit button, search) and W3 (feedback, after C3) not built
 **Parent:** [HPM v2 Generation and Chat: Design](2026-10-23-hpm-v2-generation-chat-design.md). This supersedes section 9, decision 2 ("terminal REPL first, web UI deferred"): the frontend is a modern LLM-style chat app. A terminal client is no longer the first deliverable.
 
 ## 1. Goal
@@ -161,3 +161,14 @@ Frontend: a smoke script drives the built-in browser against the running server:
 ## 14. Implementation evidence
 
 W0: `ChatSession.send(text, scope_source_id=...)` restricts ranking to one source and is logged on the turn event; `hpm_ai_v2/chat/presentation.py` builds blocks for define, summarize, outline, flashcards, compare, abstain and clarify, and refuses a claim with no citation; `hpm_ai_v2/chat/service.py` stores conversations as atomic JSON files, serialises sends behind a lock, reloads follow-up state, supports rename, delete and edit-and-resend (dropped turns are logged), and rejects non-hex conversation ids. `tests/test_hpm_ai_v2_chat_service.py` has 7 tests.
+
+W1: `hpm_ai_v2/chat/server.py` (stdlib `ThreadingHTTPServer`, localhost only, Host and Origin checks, JSON content-type required on writes, CSP, 64 KB body cap, no tracebacks to the client) and the static app in `hpm_ai_v2/chat/web/` (vanilla JS, `textContent` only). `tests/test_hpm_ai_v2_chat_server.py` has 6 tests over real HTTP. Checked by hand in the built-in browser: ask, citation chip opens the source with the exact span highlighted, clarify chips resolve through a scoped resend, abstain card, flashcards, rename and delete, dark and light themes, 375px width (bottom-sheet source panel, no horizontal scroll), no console errors. Not yet built: SSE stage progress (the typing line is static), an edit button on the last user message (the API exists), conversation search.
+
+To try it:
+
+```
+python -m hpm_ai_v2.chat.demo_checkpoint /tmp/hpm-demo
+python -m hpm_ai_v2.chat.server /tmp/hpm-demo/checkpoint --data-dir /tmp/hpm-demo/data --port 8765
+```
+
+For real use, pass a checkpoint written by `run_supervised_study.py --output-dir`.

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HPM Study Assistant</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar" aria-label="Conversations">
+    <div class="side-head">
+      <span class="brand">HPM study assistant</span>
+      <button class="btn icon" id="close-sidebar" aria-label="Close sidebar">✕</button>
+    </div>
+    <button class="btn primary new-chat" id="new-chat">+ New chat</button>
+    <nav class="conv-list" id="conv-list"></nav>
+    <div class="side-foot">
+      <label class="toggle"><input type="checkbox" id="animate"> Animate replies</label>
+      <p class="hint">Replies are computed whole; animation is cosmetic.</p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="btn icon" id="open-sidebar" aria-label="Open sidebar">☰</button>
+      <h1 id="title">New chat</h1>
+    </header>
+    <div class="config" id="config" role="note"></div>
+    <section class="thread" id="thread" aria-live="polite" aria-label="Conversation"></section>
+    <form class="composer" id="composer">
+      <textarea id="input" rows="1" placeholder="Ask about your sources…" aria-label="Message" maxlength="4000"></textarea>
+      <button class="btn primary" id="send" type="submit" aria-label="Send">Send</button>
+    </form>
+  </main>
+
+  <aside class="panel" id="panel" aria-label="Source" hidden>
+    <div class="panel-head">
+      <div><div class="panel-kicker">Source</div><div class="panel-title" id="panel-title"></div></div>
+      <button class="btn icon" id="close-panel" aria-label="Close source">✕</button>
+    </div>
+    <div class="panel-body" id="panel-body"></div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
