@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blinded answer review</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #172033; background: #f4f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 900px; margin: 0 auto; padding: 28px 20px 52px; }
+    h1, h2, p { margin-top: 0; }
+    h1 { font-size: 1.7rem; }
+    .panel { background: white; border: 1px solid #d8deea; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    .muted, .hint { color: #596579; }
+    .hint { font-size: .92rem; }
+    label { display: block; font-weight: 650; margin: 0 0 6px; }
+    input[type="text"], input[type="file"], textarea { width: 100%; font: inherit; }
+    input[type="text"], textarea { border: 1px solid #9aa6ba; border-radius: 7px; padding: 9px 10px; }
+    textarea { min-height: 74px; resize: vertical; }
+    button { font: inherit; border: 1px solid #7a879b; border-radius: 7px; background: #fff; color: inherit; padding: 8px 14px; cursor: pointer; }
+    button.primary { color: white; background: #214ca0; border-color: #214ca0; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .topline, .nav, .actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .answer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .answer { border: 1px solid #cbd3e0; border-radius: 9px; padding: 14px; overflow-wrap: anywhere; }
+    .answer h2 { font-size: 1.1rem; margin-bottom: 8px; }
+    .answer-text { white-space: pre-wrap; }
+    .source { border-top: 1px solid #e0e5ed; margin-top: 12px; padding-top: 10px; font-size: .93rem; }
+    .source-title { font-weight: 650; }
+    .scale { display: flex; flex-wrap: wrap; gap: 8px; }
+    .scale label { border: 1px solid #b6c0cf; border-radius: 7px; padding: 7px 9px; font-weight: 450; }
+    .scale input { margin-right: 5px; }
+    .choice { display: flex; flex-wrap: wrap; gap: 16px; }
+    .choice label { font-weight: 450; }
+    #status { min-height: 1.5em; }
+    @media (max-width: 650px) { .answer-grid { grid-template-columns: 1fr; } .topline { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Blinded answer review</h1>
+  <p class="muted">Rate each pair based on usefulness for the question. The systems are labeled A and B in randomized order. The app never loads the deblinding key.</p>
+
+  <section class="panel" id="setup">
+    <label for="packetFile">Rating packet (.jsonl)</label>
+    <input id="packetFile" type="file" accept=".jsonl,.txt,application/json">
+    <p class="hint">Choose <code>rating_packet.jsonl</code> from the packet folder. Keep the private key out of this app.</p>
+    <label for="raterId">Rater ID</label>
+    <input id="raterId" type="text" maxlength="80" autocomplete="off" placeholder="For example: rater-01">
+    <p class="hint">Draft ratings are saved in this browser on this device. They are not uploaded.</p>
+    <div class="actions"><button id="resumeButton" class="primary" disabled>Open packet</button><span id="setupStatus" class="hint" role="status"></span></div>
+  </section>
+
+  <section class="panel" id="review" hidden>
+    <div class="topline">
+      <div><strong id="caseCounter"></strong> <span id="taskType" class="muted"></span></div>
+      <span id="progress" class="muted"></span>
+    </div>
+    <h2 id="question"></h2>
+    <div class="answer-grid">
+      <article class="answer"><h2>Response A</h2><div id="answerA" class="answer-text"></div></article>
+      <article class="answer"><h2>Response B</h2><div id="answerB" class="answer-text"></div></article>
+    </div>
+
+    <div class="answer-grid" style="margin-top:18px">
+      <fieldset class="panel" style="margin:0;padding:14px"><legend>How useful is A?</legend><div id="scaleA" class="scale"></div></fieldset>
+      <fieldset class="panel" style="margin:0;padding:14px"><legend>How useful is B?</legend><div id="scaleB" class="scale"></div></fieldset>
+    </div>
+    <fieldset class="panel" style="margin-top:14px"><legend>Which response do you prefer?</legend>
+      <div class="choice">
+        <label><input type="radio" name="preferred" value="A"> A</label>
+        <label><input type="radio" name="preferred" value="B"> B</label>
+        <label><input type="radio" name="preferred" value="tie"> Tie</label>
+      </div>
+    </fieldset>
+    <label for="comment">Optional comment</label>
+    <textarea id="comment" maxlength="2000"></textarea>
+    <div class="nav" style="margin-top:16px">
+      <button id="previousButton">Previous</button>
+      <span id="status" class="hint" role="status" aria-live="polite"></span>
+      <button id="nextButton" class="primary">Next</button>
+    </div>
+    <section class="panel" style="margin-top:18px">
+      <div class="actions"><div><strong id="completion"></strong><div class="hint">Export includes completed cases only. Finish all cases for the full packet.</div></div><button id="exportButton" class="primary">Download ratings CSV</button></div>
+    </section>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const packetInput = $('packetFile');
+  const raterInput = $('raterId');
+  const openButton = $('resumeButton');
+  const review = $('review');
+  let rows = [];
+  let ratings = new Map();
+  let index = 0;
+  let storageKey = '';
+
+  function safeKey(value) { return btoa(unescape(encodeURIComponent(value))).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100); }
+  function setStatus(message) { $('status').textContent = message; }
+  function encodeCsv(value) { return '"' + String(value ?? '').replaceAll('"', '""') + '"'; }
+  function currentRating() {
+    const selected = name => document.querySelector(`input[name="${name}"]:checked`);
+    return {
+      case_id: rows[index].case_id,
+      rater_id: raterInput.value.trim(),
+      usefulness_a: document.querySelector('input[name="usefulness_a"]:checked')?.value || '',
+      usefulness_b: document.querySelector('input[name="usefulness_b"]:checked')?.value || '',
+      preferred: selected('preferred')?.value || '',
+      comment: $('comment').value,
+    };
+  }
+  function complete(row) { return row && row.rater_id && row.usefulness_a && row.usefulness_b && row.preferred; }
+  function saveCurrent() {
+    if (!rows.length || !review.hidden) {
+      const row = currentRating();
+      if (row.rater_id || row.usefulness_a || row.usefulness_b || row.preferred || row.comment) ratings.set(row.case_id, row);
+    }
+    if (storageKey) localStorage.setItem(storageKey, JSON.stringify([...ratings.entries()]));
+    renderProgress();
+  }
+  function buildScale(container, name, value) {
+    container.replaceChildren();
+    const labels = ['Not useful', 'Slightly useful', 'Moderately useful', 'Very useful', 'Extremely useful'];
+    labels.forEach((label, i) => {
+      const wrapper = document.createElement('label');
+      const radio = document.createElement('input');
+      radio.type = 'radio'; radio.name = name; radio.value = String(i + 1);
+      radio.checked = String(value || '') === radio.value;
+      radio.addEventListener('change', saveCurrent);
+      wrapper.append(radio, document.createTextNode(`${i + 1} · ${label}`));
+      container.append(wrapper);
+    });
+  }
+  function appendSources(parent, sources) {
+    for (const source of (sources || [])) {
+      const box = document.createElement('div'); box.className = 'source';
+      const title = document.createElement('div'); title.className = 'source-title'; title.textContent = `${source.label || 'Source'}: ${source.title || ''}`;
+      const body = document.createElement('div'); body.textContent = source.text || '';
+      box.append(title, body); parent.append(box);
+    }
+  }
+  function renderProgress() {
+    if (!rows.length) return;
+    const done = rows.filter(row => complete(ratings.get(row.case_id))).length;
+    $('progress').textContent = `${done} of ${rows.length} rated`;
+    $('completion').textContent = done === rows.length ? 'Packet complete' : `${rows.length - done} cases remaining`;
+    $('exportButton').disabled = done === 0;
+  }
+  function render() {
+    if (!rows.length) return;
+    const row = rows[index];
+    const rating = ratings.get(row.case_id) || {case_id: row.case_id, rater_id: raterInput.value.trim()};
+    $('caseCounter').textContent = `Case ${index + 1} / ${rows.length}`;
+    $('taskType').textContent = row.task_type ? `· ${row.task_type.replaceAll('_', ' ')}` : '';
+    $('question').textContent = row.question || '';
+    $('answerA').replaceChildren(document.createTextNode(row.response_a?.text || '[No answer returned]'));
+    $('answerB').replaceChildren(document.createTextNode(row.response_b?.text || '[No answer returned]'));
+    appendSources($('answerA'), row.response_a?.sources);
+    appendSources($('answerB'), row.response_b?.sources);
+    buildScale($('scaleA'), 'usefulness_a', rating.usefulness_a);
+    buildScale($('scaleB'), 'usefulness_b', rating.usefulness_b);
+    document.querySelectorAll('input[name="preferred"]').forEach(input => {
+      input.checked = input.value === (rating.preferred || '');
+      input.onchange = saveCurrent;
+    });
+    $('comment').value = rating.comment || '';
+    $('comment').oninput = saveCurrent;
+    $('previousButton').disabled = index === 0;
+    $('nextButton').textContent = index === rows.length - 1 ? 'Finish' : 'Next';
+    setStatus('');
+    renderProgress();
+  }
+  packetInput.addEventListener('change', () => {
+    openButton.disabled = !packetInput.files.length || !raterInput.value.trim();
+  });
+  raterInput.addEventListener('input', () => {
+    openButton.disabled = !packetInput.files.length || !raterInput.value.trim();
+  });
+  openButton.addEventListener('click', async () => {
+    try {
+      const text = await packetInput.files[0].text();
+      rows = text.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
+      if (!rows.length || rows.some(row => !row.case_id || !row.question || !row.response_a || !row.response_b)) throw new Error('Packet is empty or has an invalid row.');
+      if (new Set(rows.map(row => row.case_id)).size !== rows.length) throw new Error('Packet contains duplicate case IDs.');
+      storageKey = `hpm-blind-ratings-${safeKey(rows.map(row => row.case_id).join('|'))}-${safeKey(raterInput.value.trim())}`;
+      ratings = new Map(JSON.parse(localStorage.getItem(storageKey) || '[]'));
+      // Preserve completed work for the same packet if the rater label changes.
+      for (const [caseId, value] of ratings) if (value.rater_id) value.rater_id = raterInput.value.trim();
+      $('setupStatus').textContent = `${rows.length} cases loaded.`;
+      review.hidden = false; $('setup').hidden = true; render();
+    } catch (error) { $('setupStatus').textContent = error.message || String(error); }
+  });
+  $('previousButton').addEventListener('click', () => { saveCurrent(); if (index > 0) { index--; render(); } });
+  $('nextButton').addEventListener('click', () => {
+    saveCurrent();
+    const row = ratings.get(rows[index].case_id);
+    if (!complete(row)) { setStatus('Rate A, rate B, select a preference, and enter a rater ID before continuing.'); return; }
+    if (index < rows.length - 1) { index++; render(); }
+    else { renderProgress(); setStatus('All cases are complete. Download the CSV to submit the ratings.'); }
+  });
+  $('exportButton').addEventListener('click', () => {
+    saveCurrent();
+    const done = rows.map(row => ratings.get(row.case_id)).filter(complete);
+    if (!done.length) return;
+    const fields = ['case_id', 'rater_id', 'usefulness_a', 'usefulness_b', 'preferred', 'comment'];
+    const csv = [fields.map(encodeCsv).join(','), ...done.map(row => fields.map(field => encodeCsv(row[field])).join(','))].join('\r\n');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+    link.download = 'ratings.csv'; link.click(); URL.revokeObjectURL(link.href);
+    setStatus(`Downloaded ${done.length} completed ratings.`);
+  });
+})();
+</script>
+</body>
+</html>
