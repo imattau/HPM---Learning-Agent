@@ -31,6 +31,7 @@ class ChatSession:
         event_log: str | Path | None = None,
         state: ConversationState | None = None,
         ledger: Ledger | None = None,
+        planner=None,
     ):
         self.trainer = trainer
         self.ledger = ledger
@@ -41,7 +42,7 @@ class ChatSession:
         )
         self.event_log = Path(event_log) if event_log else None
         self.controller = GroundedActController()
-        self.planner = GroundedPlanner(trainer)
+        self.planner = planner if planner is not None else GroundedPlanner(trainer)
         self.realizer = SchemaRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
