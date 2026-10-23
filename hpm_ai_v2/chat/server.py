@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from hpm_ai_v2.chat.feedback import LedgerMismatch, file_digest
 from hpm_ai_v2.chat.service import ChatService, NotFound
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -35,6 +36,10 @@ _ROUTES = [
     ("DELETE", re.compile(rf"^/api/conversations/{_ID}$"), "delete"),
     ("POST", re.compile(rf"^/api/conversations/{_ID}/messages$"), "send"),
     ("POST", re.compile(rf"^/api/conversations/{_ID}/messages/{_ID}/edit$"), "edit"),
+    ("POST", re.compile(rf"^/api/conversations/{_ID}/messages/{_ID}/feedback$"), "feedback"),
+    ("GET", re.compile(rf"^/api/conversations/{_ID}/messages/{_ID}/candidates$"), "candidates"),
+    ("GET", re.compile(r"^/api/preferences$"), "preferences"),
+    ("POST", re.compile(r"^/api/preferences$"), "set_preference"),
 ]
 
 
@@ -153,6 +158,25 @@ def make_handler(service: ChatService):
                 elif action == "delete":
                     service.delete(args[0])
                     status, payload = 200, {"deleted": args[0]}
+                elif action == "feedback":
+                    body = self._json_body()
+                    signal = body.get("signal")
+                    correction = body.get("correction")
+                    if not isinstance(signal, str):
+                        raise _BadRequest("signal must be a string")
+                    if correction is not None and not isinstance(correction, dict):
+                        raise _BadRequest("correction must be an object")
+                    payload = service.feedback(args[0], args[1], signal, correction)
+                elif action == "candidates":
+                    payload = service.correction_candidates(args[0], args[1])
+                elif action == "preferences":
+                    payload = service.preferences()
+                elif action == "set_preference":
+                    body = self._json_body()
+                    key, value = body.get("key"), body.get("value")
+                    if not isinstance(key, str) or not isinstance(value, str):
+                        raise _BadRequest("key and value must be strings")
+                    payload = service.set_preference(key, value)
                 elif action in {"send", "edit"}:
                     body = self._json_body()
                     text = body.get("text")
@@ -216,6 +240,7 @@ def load_service(checkpoint: Path, data_dir: Path, user_id: str = "default") -> 
     encoder = getattr(agent.config, "embedding_model", None)
     info = {
         "checkpoint": str(checkpoint),
+        "checkpoint_digest": file_digest(Path(checkpoint) / "study_training_state.json"),
         "representation": f"semantic encoder: {encoder}" if encoder else "lexical TF-IDF vocabulary",
     }
     return ChatService(trainer, data_dir, user_id=user_id, info=info)
@@ -228,7 +253,11 @@ def main(argv=None) -> int:
     parser.add_argument("--user", default="default")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
-    service = load_service(args.checkpoint, args.data_dir, args.user)
+    try:
+        service = load_service(args.checkpoint, args.data_dir, args.user)
+    except LedgerMismatch as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     server = create_server(service, port=args.port)
     print(f"HPM chat on http://127.0.0.1:{server.server_address[1]}  (data: {args.data_dir})")
     try:

@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from hpm_ai_v2.chat.feedback import SUPPORTED_PREFERENCES, Ledger
 from hpm_ai_v2.chat.presentation import UngroundedClaim, to_blocks
 from hpm_ai_v2.chat.schema import Reply
 from hpm_ai_v2.chat.session import ChatSession
@@ -45,6 +46,13 @@ class ChatService:
         self.event_log = self.data_dir / "events.jsonl"
         self._lock = threading.Lock()
         self._sessions: dict[str, ChatSession] = {}
+        # Learned feedback is replayed onto the unchanged base checkpoint. A trainer
+        # object that already carries this ledger's learning must not replay it twice.
+        self.ledger = Ledger(self.data_dir / "learning.jsonl", self.info.get("checkpoint_digest"))
+        replayed = trainer.__dict__.setdefault("_chat_ledgers_replayed", set())
+        if str(self.ledger.path) not in replayed:
+            self.ledger.replay(trainer)
+            replayed.add(str(self.ledger.path))
 
     # -- read-only configuration and sources ---------------------------------
     def config(self) -> dict:
@@ -163,6 +171,39 @@ class ChatService:
                                 "user_id": self.user_id, "dropped_turn_ids": dropped})
             return self._send_locked(record, text, None, on_stage)
 
+    # -- learning from feedback ------------------------------------------------------
+    def feedback(self, conv_id: str, turn_id: str, signal: str, correction: dict | None = None) -> dict:
+        with self._lock:
+            record = self._read(conv_id)
+            session = self._session_for(record)
+            result = session.feedback(turn_id, signal, correction=correction)
+            turn = session._turn(turn_id)
+            record["session"]["turns"] = session.state.turns
+            for message in record["messages"]:
+                if message["role"] == "assistant" and message["turn_id"] == turn_id:
+                    message["feedback"] = list(turn["feedback"])
+            self._write(record)
+            return {**result, "feedback": list(turn["feedback"])}
+
+    def correction_candidates(self, conv_id: str, turn_id: str) -> list[dict]:
+        with self._lock:
+            return self._session_for(self._read(conv_id)).correction_candidates(turn_id)
+
+    def preferences(self) -> dict:
+        with self._lock:
+            return {
+                key: {"value": self.trainer.get_preference(self.user_id, key), "options": list(options)}
+                for key, options in SUPPORTED_PREFERENCES.items()
+            }
+
+    def set_preference(self, key: str, value: str) -> dict:
+        with self._lock:
+            session = ChatSession(
+                self.trainer, user_id=self.user_id, event_log=self.event_log, ledger=self.ledger
+            )
+            session.set_preference(key, value)
+        return self.preferences()
+
     # -- internals ----------------------------------------------------------------
     def _send_locked(
         self, record: dict, text: str, scope_source_id: str | None, on_stage=None
@@ -194,7 +235,7 @@ class ChatService:
         return {
             "role": "assistant", "turn_id": reply.turn_id, "act": plan.act,
             "task_family": plan.task_family, "confidence": plan.confidence,
-            "verified": reply.verified, "blocks": blocks, "citations": citations,
+            "verified": reply.verified, "blocks": blocks, "citations": citations, "feedback": [],
             "why": {
                 "reason": plan.reason, "procedure_id": plan.procedure_id,
                 "effective_question": plan.effective_question,
@@ -211,7 +252,7 @@ class ChatService:
                 user_id=data["user_id"], session_id=data["session_id"],
                 source_ids=tuple(data["source_ids"]), turns=list(data["turns"]),
             )
-            session = ChatSession(self.trainer, event_log=self.event_log, state=state)
+            session = ChatSession(self.trainer, event_log=self.event_log, state=state, ledger=self.ledger)
             self._sessions[conv_id] = session
         return session
 

@@ -13,7 +13,7 @@ class ConversationState:
     user_id: str = "default"
     session_id: str = ""
     source_ids: tuple[str, ...] = ()
-    turns: list[dict[str, str | None]] = field(default_factory=list)
+    turns: list[dict] = field(default_factory=list)
 
     def resolve_reference(self, question: str) -> tuple[str, bool]:
         """Append the last resolved topic when the new turn uses a reference word."""
@@ -32,6 +32,7 @@ class ConversationState:
         effective_question: str,
         source_id: str | None,
         answer: str | None,
+        citations: list[dict] | None = None,
     ) -> None:
         self.turns.append({
             "turn_id": turn_id,
@@ -39,4 +40,6 @@ class ConversationState:
             "effective_question": effective_question,
             "source_id": source_id,
             "answer": answer,
+            "citations": citations or [],
+            "feedback": [],
         })

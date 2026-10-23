@@ -45,6 +45,21 @@ button, textarea { font: inherit; color: inherit; }
 .conv .btn.icon { padding: 2px 6px; font-size: 13px; }
 .empty-list { color: var(--muted); padding: 8px 10px; }
 .side-foot { border-top: 1px solid var(--border); padding-top: 10px; font-size: 13px; }
+.pref { display: block; margin-bottom: 4px; }
+.select { width: 100%; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 8px; padding: 5px 8px; }
+.toggle { display: block; margin-top: 10px; }
+.thumb { font-size: 14px; text-decoration: none; opacity: .75; }
+.thumb:hover:not(:disabled), .thumb.chosen { opacity: 1; }
+.thumb:disabled:not(.chosen) { opacity: .3; cursor: default; }
+.link:disabled { cursor: default; text-decoration: none; opacity: .7; }
+.fb-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.picker-help { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+.picker-source { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+.pick { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; white-space: normal; }
+.pick:hover:not(:disabled) { background: var(--surface-2); }
+.pick.current { border-style: dashed; }
+.pick small { color: var(--muted); }
+.picker-error { color: var(--bad); }
 .hint { color: var(--muted); margin: 4px 0 0; font-size: 12px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }

@@ -141,3 +141,79 @@ def test_conversation_search_over_http(server):
     httpx.post(f"{server}/api/conversations/{a}/messages", json={"text": "What do solar panels convert?"})
     assert [c["id"] for c in httpx.get(server + "/api/conversations", params={"q": "solar"}).json()] == [a]
     assert httpx.get(server + "/api/conversations", params={"q": "nothing-here"}).json() == []
+
+
+SEED = __import__("pathlib").Path(__file__).parents[1] / "hpm_ai_v2/training/curricula/correction_transfer_seed.jsonl"
+ASKED = "How do bees show others where food can be found?"
+PARAPHRASE = "How do bees communicate food location to hive mates?"
+
+
+def _seed_checkpoint(tmp_path):
+    from hpm_ai_v2.training import load_curriculum_jsonl
+
+    sources, _ = load_curriculum_jsonl(SEED)
+    config = TextDomainConfig.from_passages([s.text for s in sources], max_vocab=200)
+    agent = ReaderAgent(config, dynamic_vocab=False, inject_blank_priors=False, cold_dir=str(tmp_path / "forest"))
+    trainer = SupervisedStudyTrainer(agent)
+    trainer.ingest(sources)
+    trainer.save_checkpoint(tmp_path / "ckpt")
+    return tmp_path / "ckpt"
+
+
+def _serve(service):
+    httpd = create_server(service, port=0)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def test_feedback_over_http_and_learning_survives_a_server_restart(tmp_path):
+    checkpoint = _seed_checkpoint(tmp_path)
+    httpd, base = _serve(load_service(checkpoint, tmp_path / "data"))
+    try:
+        conv = httpx.post(base + "/api/conversations", json={}).json()["id"]
+        url = f"{base}/api/conversations/{conv}/messages"
+        reply = httpx.post(url, json={"text": ASKED}).json()
+        assert {c["source_id"] for c in reply["citations"]} == {"visual"} and reply["feedback"] == []
+
+        rows = httpx.get(f"{url}/{reply['turn_id']}/candidates").json()
+        assert any(r["current"] for r in rows)
+        waggle = next(r for r in rows if r["source_id"] == "waggle" and r["start"] == 0)
+        done = httpx.post(f"{url}/{reply['turn_id']}/feedback",
+                          json={"signal": "correct", "correction": {k: waggle[k] for k in ("source_id", "start", "end")}})
+        assert done.status_code == 200 and done.json()["learned"] and done.json()["feedback"] == ["correct"]
+        assert httpx.get(f"{base}/api/conversations/{conv}").json()["messages"][1]["feedback"] == ["correct"]
+        assert httpx.post(f"{url}/{reply['turn_id']}/feedback", json={"signal": "up"}).status_code == 200
+        assert httpx.post(f"{url}/{reply['turn_id']}/feedback", json={"signal": "down"}).status_code == 400
+        assert httpx.post(f"{url}/{reply['turn_id']}/feedback", json={"signal": 3}).status_code == 400
+        assert httpx.post(f"{url}/{'9' * 32}/feedback", json={"signal": "up"}).status_code == 400
+        after = httpx.post(url, json={"text": PARAPHRASE}).json()
+        assert {c["source_id"] for c in after["citations"]} == {"waggle"}
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+    httpd, base = _serve(load_service(checkpoint, tmp_path / "data"))    # restart: replay the ledger
+    try:
+        conv = httpx.post(base + "/api/conversations", json={}).json()["id"]
+        again = httpx.post(f"{base}/api/conversations/{conv}/messages", json={"text": PARAPHRASE}).json()
+        assert {c["source_id"] for c in again["citations"]} == {"waggle"}
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+    from hpm_ai_v2.chat.feedback import LedgerMismatch
+    (tmp_path / "other").mkdir()
+    other = _seed_checkpoint(tmp_path / "other")
+    (other / "study_training_state.json").write_text((other / "study_training_state.json").read_text() + " ")
+    with pytest.raises(LedgerMismatch):
+        load_service(other, tmp_path / "data")
+
+
+def test_preferences_over_http(server):
+    prefs = httpx.get(server + "/api/preferences").json()
+    assert prefs["summary_format"] == {"value": None, "options": ["bullets", "numbered"]}
+    assert httpx.post(server + "/api/preferences", json={"key": "summary_format", "value": "bullets"}).json()["summary_format"]["value"] == "bullets"
+    assert httpx.post(server + "/api/preferences", json={"key": "summary_format", "value": "poem"}).status_code == 400
+    assert httpx.post(server + "/api/preferences", json={"key": "tone", "value": "x"}).status_code == 400
+    assert httpx.post(server + "/api/preferences", json={"key": 1, "value": "x"}).status_code == 400
+    conv = httpx.post(server + "/api/conversations", json={}).json()["id"]
+    reply = httpx.post(f"{server}/api/conversations/{conv}/messages", json={"text": "Summarize solar energy"}).json()
+    assert reply["blocks"][0]["type"] == "bullet_list"

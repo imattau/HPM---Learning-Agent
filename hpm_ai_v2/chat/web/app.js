@@ -159,7 +159,74 @@ function metaLine(msg) {
   );
   meta.append(el("button", { class: "link", type: "button", text: "why?", onclick: () => { why.hidden = !why.hidden; } }));
   meta.append(el("button", { class: "link", type: "button", text: "copy", onclick: (e) => copyText(msg.text, e.target) }));
-  return [meta, why];
+  const [controls, note] = feedbackControls(msg);
+  controls.forEach((c) => meta.append(c));
+  return [meta, why, note];
+}
+
+// ---- feedback: thumbs and "correct this" ------------------------------------
+function feedbackControls(msg) {
+  if (msg.act === "clarify" || !state.current) return [[], null];
+  const done = msg.feedback || [];
+  const note = el("div", { class: "fb-note" });
+  note.hidden = true;
+  const show = (text) => { note.textContent = text; note.hidden = false; };
+  const mark = (signal) => { msg.feedback = (msg.feedback || []).concat(signal); };
+  const thumbs = ["up", "down"].map((signal) => {
+    const chosen = done.includes(signal);
+    const button = el("button", {
+      class: "link thumb" + (chosen ? " chosen" : ""), type: "button",
+      "aria-label": signal === "up" ? "Good answer" : "Bad answer", "aria-pressed": String(chosen),
+      text: signal === "up" ? "👍" : "👎",
+    });
+    button.disabled = done.includes("up") || done.includes("down");
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const r = await api("POST", `/api/conversations/${state.current.id}/messages/${msg.turn_id}/feedback`, { signal });
+        mark(signal);
+        thumbs.forEach((b) => { b.disabled = true; });
+        button.classList.add("chosen"); button.setAttribute("aria-pressed", "true");
+        show(r.message);
+      } catch (e) { button.disabled = false; show(e.message); }
+    });
+    return button;
+  });
+  const correct = el("button", { class: "link", type: "button", text: done.includes("correct") ? "corrected" : "correct this" });
+  correct.disabled = done.includes("correct");
+  correct.addEventListener("click", () => openPicker(msg, (r) => { mark("correct"); correct.textContent = "corrected"; correct.disabled = true; show(r.message); }));
+  return [[...thumbs, correct], note];
+}
+
+// The picker reuses the source panel: the user chooses the exact source sentence that answers the question.
+async function openPicker(msg, onDone) {
+  let rows;
+  try { rows = await api("GET", `/api/conversations/${state.current.id}/messages/${msg.turn_id}/candidates`); }
+  catch (err) { return showError(err.message); }
+  $("panel-title").textContent = "Which sentence answers this?";
+  const body = $("panel-body");
+  body.textContent = "";
+  body.append(el("p", { class: "picker-help", text: "Pick the source sentence that should have been used. Your correction is saved for you only and applies to close rewordings of the question." }));
+  let lastSource = null;
+  for (const row of rows) {
+    if (row.source_id !== lastSource) { body.append(el("h3", { class: "picker-source", text: row.title })); lastSource = row.source_id; }
+    const option = el("button", { class: "pick" + (row.current ? " current" : ""), type: "button" },
+      el("span", { text: row.text }), row.current ? el("small", { text: " (what I cited)" }) : null);
+    option.addEventListener("click", async () => {
+      body.querySelectorAll(".pick").forEach((b) => { b.disabled = true; });
+      try {
+        const r = await api("POST", `/api/conversations/${state.current.id}/messages/${msg.turn_id}/feedback`,
+          { signal: "correct", correction: { source_id: row.source_id, start: row.start, end: row.end } });
+        body.textContent = "";
+        body.append(el("p", { text: r.message }));
+        onDone(r);
+      } catch (e) { body.append(el("p", { class: "picker-error", text: e.message })); body.querySelectorAll(".pick").forEach((b) => { b.disabled = false; }); }
+    });
+    body.append(option);
+  }
+  $("panel").hidden = false;
+  $("app").classList.add("panel-open");
+  $("scrim").hidden = false;
 }
 
 function copyText(text, button) {
@@ -172,8 +239,9 @@ function assistantNode(msg) {
   const body = el("div", { class: "body" });
   msg.blocks.forEach((b) => body.append(renderBlock(b, msg)));
   node.append(body);
-  const [meta, why] = metaLine(msg);
+  const [meta, why, note] = metaLine(msg);
   node.append(meta, why);
+  if (note) node.append(note);
   return node;
 }
 
@@ -412,6 +480,23 @@ function autosize() {
 function openSidebar() { $("app").classList.add("sidebar-open"); $("scrim").hidden = false; }
 function closeSidebar() { $("app").classList.remove("sidebar-open"); if ($("panel").hidden) $("scrim").hidden = true; }
 
+async function initPreferences() {
+  const select = $("pref-summary");
+  let prefs;
+  try { prefs = (await api("GET", "/api/preferences")).summary_format; } catch { return; }
+  select.textContent = "";
+  if (!prefs.value) select.append(el("option", { value: "", text: "Not set (numbered)", disabled: "", selected: "" }));
+  prefs.options.forEach((o) => select.append(el("option", { value: o, text: o })));
+  if (prefs.value) select.value = prefs.value;
+  select.addEventListener("change", async () => {
+    $("pref-note").textContent = "";
+    try {
+      await api("POST", "/api/preferences", { key: "summary_format", value: select.value });
+      $("pref-note").textContent = "Saved for you.";
+    } catch (e) { $("pref-note").textContent = e.message; }
+  });
+}
+
 function renderConfig() {
   const c = state.config;
   const parts = [`${c.source_count} source${c.source_count === 1 ? "" : "s"}`, c.representation, c.realizer, `user ${c.user_id}`];
@@ -438,6 +523,7 @@ async function init() {
   try {
     [state.config, state.sources] = await Promise.all([api("GET", "/api/config"), api("GET", "/api/sources")]);
     renderConfig();
+    initPreferences();
     await refreshList();
     if (state.convs.length) await selectConv(state.convs[0].id); else renderWelcome();
   } catch (err) { showError(err.message); }

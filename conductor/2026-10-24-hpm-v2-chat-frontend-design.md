@@ -1,6 +1,6 @@
 # HPM v2 Chat Frontend: Design
 
-**Status:** W0, W1 and W2 implemented and checked in the built-in browser; W3 (feedback, after C3) not built
+**Status:** W0 to W3 implemented (W3 with C3 feedback) and checked in the built-in browser
 **Parent:** [HPM v2 Generation and Chat: Design](2026-10-23-hpm-v2-generation-chat-design.md). This supersedes section 9, decision 2 ("terminal REPL first, web UI deferred"): the frontend is a modern LLM-style chat app. A terminal client is no longer the first deliverable.
 
 ## 1. Goal
@@ -142,7 +142,7 @@ Frontend: a smoke script drives the built-in browser against the running server:
 | W0 | `scope_source_id` in `send`/planner (own commit), `presentation.to_blocks`, `ChatService` with conversation store | Tests 1–3, 6; existing 20 tests still pass |
 | W1 | `server.py` with the JSON API, static frontend: thread, composer, sidebar, citation chips and source panel, abstain and clarify rendering, config line | Test 5; manual browser checklist passes |
 | W2 | SSE stage progress, suggested prompts, edit-last-message, search, dark mode and mobile polish | Checklist at 375px and in both themes |
-| W3 (after C3) | Thumbs, "correct this", preferences panel wired to `ChatSession.feedback` | C3 gate |
+| W3 (with C3) | Thumbs, "correct this" span picker, summary-format preference, wired to `ChatSession.feedback` | C3 gate (met, see section 14) |
 
 ## 12. Risks and open points
 
@@ -174,3 +174,12 @@ python -m hpm_ai_v2.chat.server /tmp/hpm-demo/checkpoint --data-dir /tmp/hpm-dem
 For real use, pass a checkpoint written by `run_supervised_study.py --output-dir`.
 
 W2: `ChatSession.send(..., on_stage=)` reports the four real steps (interpret, plan, verify, realize); `ChatService` maps them to labels and the server relays them as server-sent events on the same POST endpoints when the client sends `Accept: text/event-stream` (a client that disconnects does not abort the turn, which still persists). The page shows the current stage label while waiting. There is no artificial delay, so with the lexical representation the stages pass too quickly to read; they matter with a slow encoder. Edit appears on the last user message only, and not on a turn that answered a clarification (the scope would be lost); it truncates later turns and logs them as `chat_turns_edited`. `GET /api/conversations?q=` searches titles and message text server-side, and the sidebar has a debounced search box. 6 new service and server tests; checked in the browser with a MutationObserver on the stage label, an edit that replaced the last turn, and search hit and miss.
+
+W3 and C3: `hpm_ai_v2/chat/feedback.py` holds the learning ledger. Every learning step (thumb, correction, preference) is a ledger entry applied by `apply_entry` and appended to `learning.jsonl` in the data directory; a restarted server replays the ledger onto the unchanged base checkpoint, and refuses to start (`LedgerMismatch`) if the ledger was written against a different checkpoint (SHA-256 of `study_training_state.json`). `ChatSession.feedback(turn_id, signal, correction=)`, `set_preference` and `correction_candidates` are the API; `ChatService` and the server expose them as `POST .../feedback`, `GET .../candidates`, `GET/POST /api/preferences`. Semantics:
+
+- **Thumbs** move the Observer weight of the cited answer sentences only, never a whole source, once per turn; a reply that cited nothing learns nothing.
+- **Correct this** opens a picker of exact source sentences (best-ranked sources, the cited one marked). Free text is not accepted, so a correction always points at the user's own material. It becomes a user-scoped correction episode in the study trainer and is reported back with a re-ask check (`effective`).
+- **Preference**: only `summary_format` (bullets or numbered), the one key the planner honours; saved per user.
+- **Honest limit:** the trainer applies a correction to close paraphrases that resemble both the corrected question and the chosen span's wording. The exact original wording can still give the earlier answer; the UI says so rather than claiming the fix worked.
+- **C3 gate** is tested in `tests/test_hpm_ai_v2_chat_feedback.py` and over HTTP: a correction is applied to a held-out paraphrase after a restart, unrelated source scores are unchanged, another user's answer is unchanged. 15 new tests; checked in the browser, including a server restart.
+- Editing a message does not undo learning from its dropped turns (the ledger is append-only).
