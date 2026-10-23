@@ -1,0 +1,48 @@
+{"id": "tes-in-01", "question": "What happens to surprise on later epochs after new nodes are created?", "answer_contains": "resulting in lower surprise"}
+{"id": "tes-in-02", "question": "What does Experiment 20 test?", "answer_contains": "stable, reusable, expanding knowledge structure over a prolonged curriculum"}
+{"id": "tes-in-03", "question": "When does the structured curriculum loop stop?", "answer_contains": "until 6/10 solved or max iterations reached"}
+{"id": "tes-in-04", "question": "Is the shared protocol a private language?", "answer_contains": "not an unconstrained private language"}
+{"id": "tes-in-05", "question": "When may existing agent behavior change in the relational patch?", "answer_contains": "unless structural messaging is explicitly enabled"}
+{"id": "tes-in-06", "question": "How many processes does the sovereign cluster experiment simulate?", "answer_contains": "simplified 5-process cluster"}
+{"id": "tes-in-07", "question": "Where should small typed structures be added?", "answer_contains": "near existing seams instead of building a new subsystem"}
+{"id": "tes-in-08", "question": "What grid size does the upgraded ARC solver support?", "answer_contains": "support 30x30 grids"}
+{"id": "tes-in-09", "question": "What does a completely new forest for Domain B show about learning?", "answer_contains": "only learning surface-level geometry"}
+{"id": "tes-in-10", "question": "What does the explorer do when a node is missing?", "answer_contains": "creates the missing node, and Decoder retries"}
+{"id": "tes-in-11", "question": "Where are future observations routed once a specialist is promoted?", "answer_contains": "routed to the new Specialist instead of the Generalist"}
+{"id": "tes-in-12", "question": "What does the scoring function measure for a concrete node?", "answer_contains": "how well a concrete node satisfies the constraints of an abstract node"}
+{"id": "tes-in-13", "question": "What does the current documentation understate about the observer?", "answer_contains": "understates the complexity and self-organizing capabilities"}
+{"id": "tes-in-14", "question": "How should structural messages be handled in the queue?", "answer_contains": "keep structural messages on a separate queue and behind a flag"}
+{"id": "tes-in-15", "question": "What must a learning system do besides accumulate knowledge?", "answer_contains": "revise its beliefs when faced with shifting evidence"}
+{"id": "tes-in-16", "question": "What does the dynamic specialist promotion spawn?", "answer_contains": "spawns a new process and seeds it with that node and its sub-tree"}
+{"id": "tes-in-17", "question": "When is a completion feature not causal enough to justify its complexity?", "answer_contains": "does not change a benchmark decision"}
+{"id": "tes-in-18", "question": "What benefit must self-representation show?", "answer_contains": "faster adaptation to concept drift"}
+{"id": "tes-in-19", "question": "Are learning rule changes introduced in the patch?", "answer_contains": "No learning rule changes are introduced"}
+{"id": "tes-in-20", "question": "What does true reasoning require?", "answer_contains": "holding and manipulating intermediate states over time"}
+{"id": "tes-in-21", "question": "What does it mean if the system sticks to Rule A and ignores Rule B?", "answer_contains": "it is too rigid"}
+{"id": "tes-in-22", "question": "What does the decoder resolve the goal into in the thinking solver?", "answer_contains": "resolves the Goal into the final Test Output grid"}
+{"id": "tes-in-23", "question": "How does the governor extract the summary at the end of the stream?", "answer_contains": "extracts the summary by querying the L2 Synthesizer"}
+{"id": "tes-in-24", "question": "What search complexity does the fractal design ensure?", "answer_contains": "search complexity and infinite recursive depth"}
+{"id": "tes-out-01", "question": "What is the capital of Australia?", "answer_contains": null}
+{"id": "tes-out-02", "question": "How do I make fresh pasta?", "answer_contains": null}
+{"id": "tes-out-03", "question": "Who invented the telephone?", "answer_contains": null}
+{"id": "tes-out-04", "question": "How many players are in a rugby team?", "answer_contains": null}
+{"id": "tes-out-05", "question": "What is the melting point of iron?", "answer_contains": null}
+{"id": "tes-out-06", "question": "Which country hosts the next Olympics?", "answer_contains": null}
+{"id": "tes-out-07", "question": "How do I plan a budget for a wedding?", "answer_contains": null}
+{"id": "tes-out-08", "question": "What is a good test for fitness?", "answer_contains": null}
+{"id": "tes-out-09", "question": "How does the nervous system send signals?", "answer_contains": null}
+{"id": "tes-out-10", "question": "What is a graph in mathematics?", "answer_contains": null}
+{"id": "tes-out-11", "question": "How do children learn to read?", "answer_contains": null}
+{"id": "tes-out-12", "question": "Who wrote the play Hamlet?", "answer_contains": null}
+{"id": "tes-out-13", "question": "What is the longest river in Africa?", "answer_contains": null}
+{"id": "tes-out-14", "question": "How does a refrigerator work?", "answer_contains": null}
+{"id": "tes-out-15", "question": "What is the structure of a DNA molecule?", "answer_contains": null}
+{"id": "tes-out-16", "question": "Which planet has the most moons?", "answer_contains": null}
+{"id": "tes-out-17", "question": "How do I lower my cholesterol?", "answer_contains": null}
+{"id": "tes-out-18", "question": "What causes the northern lights?", "answer_contains": null}
+{"id": "tes-out-19", "question": "How do I train for a marathon?", "answer_contains": null}
+{"id": "tes-out-20", "question": "What is the rule for offside in football?", "answer_contains": null}
+{"id": "tes-out-21", "question": "What does a real estate agent do?", "answer_contains": null}
+{"id": "tes-out-22", "question": "What year did the Roman empire fall?", "answer_contains": null}
+{"id": "tes-out-23", "question": "How tall is Mount Everest?", "answer_contains": null}
+{"id": "tes-out-24", "question": "How does a thermostat control the temperature?", "answer_contains": null}

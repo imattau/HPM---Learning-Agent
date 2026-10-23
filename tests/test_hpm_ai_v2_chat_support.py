@@ -67,9 +67,10 @@ def test_a_question_with_no_subject_matter_cannot_be_supported(trainer):
     assert GroundedPlanner(trainer).plan("t", "What is this?").act == "abstain"
 
 
-def test_a_calibrated_checkpoint_is_left_to_its_own_threshold(trainer):
-    trainer.abstain_threshold = 1e-6                                        # calibrated: the trainer owns abstention
-    assert GroundedPlanner(trainer).plan("t", JUNK).act == "answer"
+def test_a_calibrated_lexical_checkpoint_keeps_the_check_too(trainer):
+    trainer.abstain_threshold = 1e-6                                        # calibrated, yet the match still rests on "what"
+    plan = GroundedPlanner(trainer).plan("t", JUNK)
+    assert plan.act == "abstain" and plan.reason == "no_content_support"
 
 
 def test_a_semantic_encoder_may_match_without_a_shared_word(trainer, monkeypatch):

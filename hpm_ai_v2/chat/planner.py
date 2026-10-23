@@ -42,15 +42,16 @@ class GroundedPlanner:
         # Optional hard floor on retrieval confidence for answers and clarifications. Off by default:
         # on uncalibrated checkpoints confidence does not separate good matches from junk (see the design doc).
         self.min_confidence = min_confidence
-        # "auto": on only for a lexical encoder with no calibrated abstention threshold.
+        # "auto": on for a lexical encoder, whether or not a threshold was calibrated. Measured on a pretrained
+        # corpus the check adds to a calibrated threshold without costing in-scope answers.
         self.require_content_support = require_content_support
 
     # -- abstaining without calibration --------------------------------------------------
     def _content_support_required(self) -> bool:
         if self.require_content_support != "auto":
             return bool(self.require_content_support)
-        semantic = hasattr(self.trainer.agent.config, "embedding_model")   # a semantic match needs no shared word
-        return not semantic and self.trainer.abstain_threshold <= 0.0
+        # a semantic match needs no shared word, so the check is for lexical encoders only
+        return not hasattr(self.trainer.agent.config, "embedding_model")
 
     def _supported_by_question_words(self, plan: ResponsePlan) -> bool:
         """Does the evidence share a content word with the question?

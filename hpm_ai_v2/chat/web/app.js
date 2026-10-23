@@ -499,7 +499,7 @@ async function initPreferences() {
 
 function renderConfig() {
   const c = state.config;
-  const parts = [`${c.source_count} source${c.source_count === 1 ? "" : "s"}`, c.representation, c.realizer, `user ${c.user_id}`];
+  const parts = [`${c.source_count} source${c.source_count === 1 ? "" : "s"}`, c.representation, c.realizer, c.abstention, `user ${c.user_id}`];
   $("config").textContent = parts.filter(Boolean).join(" · ");
 }
 

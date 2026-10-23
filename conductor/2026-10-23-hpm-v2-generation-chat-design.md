@@ -134,9 +134,40 @@ A pretrained checkpoint has no validation episodes, so its abstention threshold 
 
 **A confidence floor does not fix this.** On uncalibrated TF-IDF checkpoints retrieval confidence overlaps between good and junk matches. Correct answers ranged 0.04 to 0.18 (eval sets and pretrained corpus, median about 0.13); junk answers ranged 0.035 to 0.141. A label-free null (queries of unrelated words drawn from the corpus) had a 95th percentile of about 0.21, above the median correct answer, so a floor at that level would have abstained on about 80% of correct answers. Cosine scales also differ across encoders and vocabulary sizes, so a constant would not carry over. `GroundedPlanner(min_confidence=...)` exists as an explicit knob and is off by default.
 
-**What is implemented instead:** `GroundedPlanner` abstains (`reason: no_content_support`) when an answer's cited sentences, or a clarification's offered sources, share no content word with the question. Question words (what, how, why, ...) are removed first, since a match resting only on them says nothing about subject matter. It applies only when the encoder is lexical and the abstention threshold is uncalibrated (`require_content_support="auto"`); a semantic encoder can match without a shared word, and a calibrated checkpoint owns its own abstention. It judges the final evidence, after the selector has had a chance to replace a seed that mentions none of the question's words.
+**What is implemented instead:** `GroundedPlanner` abstains (`reason: no_content_support`) when an answer's cited sentences, or a clarification's offered sources, share no content word with the question. Question words (what, how, why, ...) are removed first, since a match resting only on them says nothing about subject matter. It applies to any lexical encoder (`require_content_support="auto"`), calibrated or not; a semantic encoder can match without a shared word, so it is left out. It was first limited to uncalibrated checkpoints; the calibration measurements below showed it still adds to a calibrated threshold without costing in-scope answers, so it now stays on. It judges the final evidence, after the selector has had a chance to replace a seed that mentions none of the question's words.
 
 **Measured.** Eval sets (96 questions): exactly one question changed per set, both unanswerable ones now abstaining; every answerable metric is identical to three decimals. Pretrained corpus (10 in-scope, 12 out-of-scope questions): in-scope answered 9 of 10 before and after; out-of-scope answered or clarified 9 of 12 before and 5 of 12 after.
 
 **What it cannot do.** Junk that shares one word with the corpus still gets an answer ("when did the Roman empire fall", "how many moons does Jupiter have", "what is the boiling point of mercury"), and a weakly related sentence that shares a word with an in-scope question passes ("how does the chat plan a response", where "chat" is nowhere in the corpus). Closing that gap needs real calibration from validation episodes, not a heuristic. The question lists are small and written by the same author as the check, so these counts show direction, not a rate.
+
+### Calibrating a pretrained checkpoint (2026-10-24)
+
+Closing the one-shared-word gap needs real calibration. The study trainer already has it: `SupervisedStudyTrainer.fit` with validation episodes sets `abstain_threshold` by choosing the confidence that gives the most correct evidence choices. What a pretrained checkpoint lacked was validation episodes. `hpm_ai_v2/chat/calibrate.py` supplies the step:
+
+```
+PYTHONPATH=. .venv/bin/python -m hpm_ai_v2.chat.calibrate CHECKPOINT \
+    --validation questions.jsonl --test held_out.jsonl --output calibration.json
+PYTHONPATH=. .venv/bin/python -m hpm_ai_v2.chat.server CHECKPOINT --data-dir DATA --calibration calibration.json
+```
+
+A question row is `{"id", "question", "answer_contains": "quoted text" | null}`. The quote is a snippet of the answering sentence; every source containing it is a right source, which keeps labels valid when a corpus is re-chunked. `null` marks a question the corpus cannot answer. The threshold is the trainer's own, stored in a small JSON file bound to the checkpoint's fingerprint (a calibration for another checkpoint is refused), and the server applies it when loading. The checkpoint itself is never written: saving a loaded checkpoint to a new directory would move the base's node files, and a pretrained checkpoint may be large.
+
+**Question sets.** `hpm_ai_v2/training/eval_sets/pretrained_calibration_{validation,test}.jsonl`: 24 in-scope and 24 out-of-scope questions each, disjoint. In-scope questions are paraphrases of single sentences in the corpus. Half of the out-of-scope questions share ordinary words with the project vocabulary ("plan", "test", "system", "node", "agent", "structure"). The corpus is the first 60 documents of `conductor/` by name (`pretrained_corpus_files.txt`), prepared with `prepare_pretraining_corpus --source-type text` and pretrained with `pretrain_hfn_corpus --max-vocab 3000`: 76 sources, 4,046 sentences. One author wrote the sources' questions and the labels.
+
+**What I compared on the held-out test set** (24 in-scope, 24 out-of-scope; validation fitted only):
+
+| Configuration | in-scope: right source / wrong source / abstained | out-of-scope abstained | balanced |
+|---|---|---|---|
+| word-support check only (no calibration) | 16 / 8 / 0 | 7 of 24 | 0.479 |
+| trainer calibration (confidence only), no check | 15 / 7 / 2 | 18 of 24 | 0.688 |
+| **trainer calibration + word-support check (shipped)** | 15 / 7 / 2 | **19 of 24** | **0.708** |
+| my own two-signal fit (confidence and an idf-weighted word-support floor) | 13 / 7 / 4 | 19 of 24 | 0.667 |
+
+The threshold fitted was 0.0875 (validation balanced accuracy 0.583 to 0.854). The two-signal fit caught the same number of junk questions on the test set while losing two more in-scope answers, so it was dropped; the trainer's own calibration is the mechanism, with the word-support check kept alongside it. Earlier I argued that confidence alone cannot separate junk from good answers; on a larger set it separates most of them (75 to 79% of junk), with the remainder overlapping.
+
+**What it does not do.**
+- Five out-of-scope test questions are still answered or clarified (Hamlet's author, the offside rule, what a real estate agent does, when the Roman empire fell, how a thermostat works), at confidences 0.09 to 0.15, inside the range of correct answers (0.08 to 0.19).
+- Nine of 24 in-scope questions get no right answer: seven are answered from a wrong source and two abstain. This is retrieval quality with a 3,000-word TF-IDF vocabulary, which calibration cannot fix.
+- **Summary requests lose out.** After calibration "summarize the usability regime" abstains (confidence 0.049, threshold 0.0875): requests with few content words score low whatever the answer. The validation set contained no summaries, outlines or flashcard requests, so the threshold knows nothing about them. A calibration set must include the request types the assistant should serve.
+- 24 plus 24 questions per split, one author: these counts show direction, not a rate.
 

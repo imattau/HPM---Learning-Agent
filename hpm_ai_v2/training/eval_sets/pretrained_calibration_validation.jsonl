@@ -1,0 +1,48 @@
+{"id": "val-in-01", "question": "What do orchestrators do when structural messaging is turned on?", "answer_contains": "orchestrators relay inspectable messages"}
+{"id": "val-in-02", "question": "How are relations treated in the structured patterns design?", "answer_contains": "Relations are treated as an additional substrate for structured patterns"}
+{"id": "val-in-03", "question": "How does the HPM framework view the whole AI?", "answer_contains": "treats the Entire AI as a single, massive Root HPM Node"}
+{"id": "val-in-04", "question": "What does the agent receive instead of single states in the goal-conditioned design?", "answer_contains": "the agent receives an operational objective"}
+{"id": "val-in-05", "question": "What is Experiment 22 meant to validate?", "answer_contains": "autonomously prune its structural search space through sandboxed"}
+{"id": "val-in-06", "question": "Why must anchors be more than common words?", "answer_contains": "are not just common words"}
+{"id": "val-in-07", "question": "What does the agent do during downtime dreams?", "answer_contains": "explore the combinatorial space of its structural primitives"}
+{"id": "val-in-08", "question": "When do the internal nodes of a polygraph hibernate?", "answer_contains": "the internal nodes hibernate"}
+{"id": "val-in-09", "question": "How does the thinking solver check its induced rules?", "answer_contains": "tests its induced rules against the training examples"}
+{"id": "val-in-10", "question": "When is a child node promoted in the v1 design?", "answer_contains": "If the Child is more elegant (MDL), it is promoted"}
+{"id": "val-in-11", "question": "How are failed hypotheses stored?", "answer_contains": "stored as HFN nodes with negative valence"}
+{"id": "val-in-12", "question": "How do workers run the curriculum in the study and test plan?", "answer_contains": "run the entire curriculum without forest resets"}
+{"id": "val-in-13", "question": "How is LLM knowledge described as a prior?", "answer_contains": "very powerful but undifferentiated prior"}
+{"id": "val-in-14", "question": "What happens when the system sees high residual surprise?", "answer_contains": "it naturally creates new nodes to capture the anomaly"}
+{"id": "val-in-15", "question": "How do the Observer and Decoder differ in direction?", "answer_contains": "the Decoder (Top-Down) collapses abstract goals into concrete actions"}
+{"id": "val-in-16", "question": "Why is the curriculum generator's knowledge base called grounded?", "answer_contains": "a massive, grounded knowledge base without human labels"}
+{"id": "val-in-17", "question": "How is a sentence generated in the toddler design?", "answer_contains": "finding an alignment (a multi-forest path) across these independent knowledge bases"}
+{"id": "val-in-18", "question": "What happens if the goal is not met?", "answer_contains": "the system receives a penalty"}
+{"id": "val-in-19", "question": "What must messages stay like in the relational design?", "answer_contains": "Messages must remain human-readable and serializable"}
+{"id": "val-in-20", "question": "When does the signal cluster create parent HFNs?", "answer_contains": "when it detects recurring co-occurrences"}
+{"id": "val-in-21", "question": "What do compositional graphs let the system chunk?", "answer_contains": "successful sequences into reusable subgraphs"}
+{"id": "val-in-22", "question": "What do you get if you query a node?", "answer_contains": "it reveals a polygraph of sub-nodes"}
+{"id": "val-in-23", "question": "What happens to the explorer's redundant copy of a concept?", "answer_contains": "redundant copy of the concept naturally decays"}
+{"id": "val-in-24", "question": "Is the composite promotion layer a universal parser?", "answer_contains": "not a universal symbolic parser"}
+{"id": "val-out-01", "question": "What is the capital of Canada?", "answer_contains": null}
+{"id": "val-out-02", "question": "How do I bake sourdough bread?", "answer_contains": null}
+{"id": "val-out-03", "question": "Who won the 2018 football world cup?", "answer_contains": null}
+{"id": "val-out-04", "question": "How many bones are in the human body?", "answer_contains": null}
+{"id": "val-out-05", "question": "What is the boiling point of water?", "answer_contains": null}
+{"id": "val-out-06", "question": "Which language is spoken in Brazil?", "answer_contains": null}
+{"id": "val-out-07", "question": "How do I plan a vacation in Italy?", "answer_contains": null}
+{"id": "val-out-08", "question": "What is the best test for diabetes?", "answer_contains": null}
+{"id": "val-out-09", "question": "How does the immune system fight infection?", "answer_contains": null}
+{"id": "val-out-10", "question": "What is a node in a computer network?", "answer_contains": null}
+{"id": "val-out-11", "question": "How do neural networks learn from data?", "answer_contains": null}
+{"id": "val-out-12", "question": "Who painted the Mona Lisa?", "answer_contains": null}
+{"id": "val-out-13", "question": "What is the tallest mountain in the world?", "answer_contains": null}
+{"id": "val-out-14", "question": "How does a car engine work?", "answer_contains": null}
+{"id": "val-out-15", "question": "What is the structure of a cell membrane?", "answer_contains": null}
+{"id": "val-out-16", "question": "Which planet is closest to the sun?", "answer_contains": null}
+{"id": "val-out-17", "question": "How do I improve my running speed?", "answer_contains": null}
+{"id": "val-out-18", "question": "What causes earthquakes?", "answer_contains": null}
+{"id": "val-out-19", "question": "How do I train a puppy to sit?", "answer_contains": null}
+{"id": "val-out-20", "question": "What is the plan for the next Olympic games?", "answer_contains": null}
+{"id": "val-out-21", "question": "Who is the author of Pride and Prejudice?", "answer_contains": null}
+{"id": "val-out-22", "question": "How does a rule of law protect citizens?", "answer_contains": null}
+{"id": "val-out-23", "question": "What is the agent fee for selling a house?", "answer_contains": null}
+{"id": "val-out-24", "question": "What is the speed of light?", "answer_contains": null}

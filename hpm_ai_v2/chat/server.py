@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from hpm_ai_v2.chat.calibration import CalibrationMismatch
 from hpm_ai_v2.chat.feedback import LedgerMismatch, file_digest
 from hpm_ai_v2.chat.service import ChatService, NotFound
 
@@ -230,7 +231,9 @@ def create_server(service: ChatService, host: str = "127.0.0.1", port: int = 876
     return server
 
 
-def load_service(checkpoint: Path, data_dir: Path, user_id: str = "default") -> ChatService:
+def load_service(
+    checkpoint: Path, data_dir: Path, user_id: str = "default", calibration_path: Path | None = None
+) -> ChatService:
     from hpm_ai_v2.agents.reader_agent import ReaderAgent
     from hpm_ai_v2.training import SupervisedStudyTrainer
 
@@ -243,6 +246,10 @@ def load_service(checkpoint: Path, data_dir: Path, user_id: str = "default") -> 
         "checkpoint_digest": file_digest(Path(checkpoint) / "study_training_state.json"),
         "representation": f"semantic encoder: {encoder}" if encoder else "lexical TF-IDF vocabulary",
     }
+    if calibration_path is not None:
+        from hpm_ai_v2.chat.calibration import Calibration
+
+        Calibration.load(calibration_path, checkpoint_digest=info["checkpoint_digest"]).apply(trainer)
     return ChatService(trainer, data_dir, user_id=user_id, info=info)
 
 
@@ -252,10 +259,11 @@ def main(argv=None) -> int:
     parser.add_argument("--data-dir", type=Path, required=True, help="conversations and event log")
     parser.add_argument("--user", default="default")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--calibration", type=Path, help="abstention calibration fitted for this checkpoint")
     args = parser.parse_args(argv)
     try:
-        service = load_service(args.checkpoint, args.data_dir, args.user)
-    except LedgerMismatch as exc:
+        service = load_service(args.checkpoint, args.data_dir, args.user, args.calibration)
+    except (LedgerMismatch, CalibrationMismatch) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     server = create_server(service, port=args.port)

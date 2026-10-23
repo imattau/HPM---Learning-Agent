@@ -473,3 +473,16 @@ The current-code acquisition rerun trained on 60 facts, validated all 60 against
 Re-evaluating the older 387/405 checkpoint under the current code gives 370/405, so that older score is not directly comparable to current results. The current three-phase continuation adds ten source-linked facts and validates all ten on held-out answers; 17 fact nodes are validated/promoted in the resulting checkpoint, and all 405 predictions match after restart. The cumulative exam is 357/405 (88.1%), versus 288/405 (71.1%) for matched Qwen3.5 9.7B Q4_K_M with BM25 top-three retrieval. HPM's answer-token F1 is 0.808 versus Qwen's 0.867. HPM leads task accuracy on this shared hand-authored benchmark, but correction transfer remains 32/60 and human usefulness is unmeasured. The audit therefore passes task completion, knowledge growth, and retention, while overall acceptance remains false. Detailed report: `experiments/results/2026-10-24-balanced-six-family-corrected/growth-validated-final-scoped/cumulative_study_report.json`; comparison: `experiments/results/2026-10-24-balanced-six-family-corrected/full405_9b_comparison_current.json`; gates: `experiments/results/2026-10-24-balanced-six-family-corrected/training_acceptance_audit_current.json`.
 
 Correction-transfer follow-up tightened transfer matching so an accepted correction cannot alter answers to nearby but distinct collateral questions. On the latest v4 correction run, 13/16 correction queries transfer correctly (answer F1 0.945), all 8 collateral controls remain unchanged, and restart predictions match. Only 7/8 corrected facts pass held-out source validation, so the correction-learning gate remains failed. The acceptance audit now requires that validation gate to pass and reports the validated/total fact counts; the overall 9B usability decision remains not accepted because grounded answer-token F1 is below the comparator and blinded usefulness/user effort are unmeasured. See `experiments/results/2026-10-24-balanced-six-family-corrected/correction-transfer-v4-r6/cumulative_study_report.json` and `training_acceptance_audit.json`.
+
+### Calibrating abstention for a pretrained checkpoint
+
+A checkpoint that was only pretrained has no validation episodes, so its abstention threshold is 0.0 and the chat answers any question that shares a word with the corpus. Calibrate it from labelled questions (an answer is a quoted snippet, `null` for a question the corpus cannot answer):
+
+```bash
+PYTHONPATH=. .venv/bin/python -m hpm_ai_v2.chat.calibrate /tmp/hpm-pretrained-checkpoint \
+  --validation validation.jsonl --test held_out.jsonl --output calibration.json
+PYTHONPATH=. .venv/bin/python -m hpm_ai_v2.chat.server /tmp/hpm-pretrained-checkpoint \
+  --data-dir /tmp/hpm-chat --calibration calibration.json
+```
+
+This runs the trainer's own `fit` calibration and stores the threshold in a small file bound to the checkpoint; the checkpoint is not modified. On the 76-source test corpus, the committed question sets (`training/eval_sets/pretrained_calibration_*.jsonl`) moved held-out out-of-scope abstentions from 7 of 24 to 19 of 24 while right-source in-scope answers went from 16 of 24 to 15 of 24. Include summary, outline and flashcard requests in your validation questions, or those requests will abstain. Details and limits are in `conductor/2026-10-23-hpm-v2-generation-chat-design.md`.

@@ -60,8 +60,13 @@ class ChatService:
             "user_id": self.user_id,
             "source_count": len(self.trainer.sources),
             "realizer": "schema-extractive",
+            "abstention": self._abstention_note(),
             **self.info,
         }
+
+    def _abstention_note(self) -> str:
+        threshold = self.trainer.abstain_threshold
+        return f"abstention calibrated (threshold {threshold:.3f})" if threshold > 0.0 else "abstention uncalibrated"
 
     def sources(self) -> list[dict]:
         return [
