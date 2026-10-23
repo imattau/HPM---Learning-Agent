@@ -35,6 +35,8 @@ class ResponsePlan:
     procedure_id: Optional[str] = None
     effective_question: str = ""
     reason: str = ""
+    # (source_id, label) candidates offered when act == "clarify".
+    options: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

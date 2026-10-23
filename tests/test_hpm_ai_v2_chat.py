@@ -81,3 +81,28 @@ def test_chat_formats_summaries_as_multiple_cited_sentences(tmp_path):
     assert reply.text.startswith("Summary\n")
 
 
+
+def test_chat_asks_which_source_when_two_sources_tie(tmp_path):
+    text = "Synaptic plasticity strengthens connections between neurons."
+    config = TextDomainConfig.from_passages([text, text], max_vocab=100)
+    agent = ReaderAgent(config, dynamic_vocab=False, cold_dir=str(tmp_path / "forest"))
+    trainer = SupervisedStudyTrainer(agent)
+    trainer.ingest([
+        SourceDocument("notes-a", text, "Lecture notes"),
+        SourceDocument("notes-b", text, "Textbook"),
+    ])
+    log = tmp_path / "turns.jsonl"
+
+    reply = ChatSession(trainer, event_log=log).send("What does synaptic plasticity do?")
+
+    assert reply.plan.act == "clarify" and reply.verified
+    assert not reply.abstained and reply.citations == ()
+    assert {sid for sid, _ in reply.plan.options} == {"notes-a", "notes-b"}
+    assert "Lecture notes" in reply.text and "Textbook" in reply.text
+    assert json.loads(log.read_text().splitlines()[0])["act"] == "clarify"
+
+
+def test_chat_does_not_clarify_when_one_source_clearly_wins(tmp_path):
+    trainer, _source = _trainer(tmp_path)
+    reply = ChatSession(trainer).send("What carries brain messages?")
+    assert reply.plan.act == "answer" and reply.plan.options == ()

@@ -6,4 +6,6 @@ class GroundedActController:
     """Answer when evidence is selected; otherwise make uncertainty explicit."""
 
     def choose(self, plan) -> str:
-        return "abstain" if plan.act == "abstain" or not plan.claims else "answer"
+        if plan.act == "clarify" and len(plan.options) >= 2:
+            return "clarify"
+        return "abstain" if plan.act != "answer" or not plan.claims else "answer"

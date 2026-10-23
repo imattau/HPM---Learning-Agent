@@ -22,8 +22,22 @@ def classify_task(question: str) -> str:
 
 
 class GroundedPlanner:
-    def __init__(self, trainer):
+    def __init__(self, trainer, ambiguity_margin: float = 0.02):
         self.trainer = trainer
+        # Ask for clarification when the runner-up source scores within this
+        # relative margin of the best one.
+        self.ambiguity_margin = ambiguity_margin
+
+    def _ambiguous_sources(self, prediction) -> tuple[tuple[str, str], ...]:
+        ranked = prediction.ranked_evidence
+        if len(ranked) < 2 or ranked[0][1] <= 0:
+            return ()
+        best = ranked[0][1]
+        close = [sid for sid, score in ranked if best - score <= best * self.ambiguity_margin]
+        if len(close) < 2:
+            return ()
+        sources = self.trainer.sources
+        return tuple((sid, sources[sid].title or sid) for sid in close)
 
     def plan(self, turn_id: str, question: str) -> ResponsePlan:
         # The synthetic episode is only a query carrier; predict() reads no labels.
@@ -32,6 +46,18 @@ class GroundedPlanner:
             question, episode_id=f"chat-{turn_id}", task_type=task_type
         )
         act = "answer" if prediction.selected_evidence_id and prediction.answer else "abstain"
+        options = self._ambiguous_sources(prediction) if act == "answer" else ()
+        if options:
+            return ResponsePlan(
+                act="clarify",
+                task_family=task_type,
+                claims=(),
+                confidence=prediction.confidence,
+                fmt=task_type,
+                effective_question=question,
+                reason="ambiguous_between_sources",
+                options=options,
+            )
         citation_rows = prediction.citations or ((prediction.citation,) if prediction.citation else ())
         claims = tuple(
             Claim(

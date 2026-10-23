@@ -10,6 +10,9 @@ from hpm_ai_v2.chat.schema import ResponsePlan
 
 def render_schema(plan: ResponsePlan) -> str:
     claims = plan.claims
+    if plan.act == "clarify":
+        from hpm_ai_v2.chat.realizers import clarify_text
+        return clarify_text(plan)
     if not claims:
         return "I couldn't find an answer in the provided material."
     if plan.fmt == "define":
