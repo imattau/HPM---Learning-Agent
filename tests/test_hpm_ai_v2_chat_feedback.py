@@ -49,6 +49,8 @@ def test_correction_transfers_to_paraphrase_after_restart_without_side_effects(t
     trainer, checkpoint = _base(tmp_path)
     session, ledger = _session(trainer, tmp_path, checkpoint=checkpoint)
     unrelated_before = dict(trainer._rank(UNRELATED, user_id="alice"))
+    sources_of = lambda user: [(c.source_id, c.start) for c in ChatSession(trainer, user_id=user).send(PARAPHRASE).citations]
+    bob_before = sources_of("bob")                    # evidence expansion changes everyone's baseline, so compare to it
 
     first = session.send(QUESTION)
     assert {c.source_id for c in first.citations} == {"visual"}            # wrong answer
@@ -57,14 +59,14 @@ def test_correction_transfers_to_paraphrase_after_restart_without_side_effects(t
 
     assert {c.source_id for c in session.send(PARAPHRASE).citations} == {"waggle"}
     assert dict(trainer._rank(UNRELATED, user_id="alice")) == unrelated_before
-    assert {c.source_id for c in ChatSession(trainer, user_id="bob").send(PARAPHRASE).citations} == {"visual"}
+    assert sources_of("bob") == bob_before
 
     restarted = _restore(checkpoint)                                         # fresh process
-    assert {c.source_id for c in ChatSession(restarted, user_id="alice").send(PARAPHRASE).citations} == {"visual"}
+    assert {c.source_id for c in ChatSession(restarted, user_id="alice").send(PARAPHRASE).citations} != {"waggle"}
     Ledger(tmp_path / "learning.jsonl", file_digest(checkpoint / "study_training_state.json")).replay(restarted)
     assert {c.source_id for c in ChatSession(restarted, user_id="alice").send(PARAPHRASE).citations} == {"waggle"}
     assert dict(restarted._rank(UNRELATED, user_id="alice")) == unrelated_before
-    assert {c.source_id for c in ChatSession(restarted, user_id="bob").send(PARAPHRASE).citations} == {"visual"}
+    assert [(c.source_id, c.start) for c in ChatSession(restarted, user_id="bob").send(PARAPHRASE).citations] == bob_before
     assert [e["type"] for e in ledger.entries] == ["correction"]
 
 

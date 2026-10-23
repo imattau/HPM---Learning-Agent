@@ -36,7 +36,9 @@ def build_trainer(sources, workdir: str):
 def chat_system(planner_factory=None):
     """The chat as a system: cited sentences of the reply."""
     def system(trainer, question):
-        session = ChatSession(trainer) if planner_factory is None else ChatSession(trainer, planner=planner_factory(trainer))
+        # None means the trainer's own evidence, i.e. before evidence expansion became the default
+        session = (ChatSession(trainer, expand_evidence=False) if planner_factory is None
+                   else ChatSession(trainer, planner=planner_factory(trainer)))
         reply = session.send(question)
         spans = [(c.source_id, c.start, c.end) for c in reply.citations]
         return sentence_keys(trainer, spans), reply.plan.act != "answer"

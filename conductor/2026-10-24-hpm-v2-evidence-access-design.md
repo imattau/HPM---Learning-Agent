@@ -1,6 +1,6 @@
 # HPM v2 Evidence Access over the Structured Store
 
-**Status:** selector built (`hpm_ai_v2/chat/evidence.py`, opt-in via `ExpandingPlanner`). **It did not pass the gate on held-out, so it is not the chat default.** Sections 1–4 were committed before the selector existed; sections 5–7 are results.
+**Status:** round 1 failed the gate; after round 2 (fresh longer-source held-out, four failure-mode fixes, protocol fixed in advance) **the gate is met and evidence expansion is the chat default** (`ChatSession(expand_evidence=False)` turns it off). The margin on one criterion is small and process questions are still not solved; see sections 11 and 12.
 **Parent:** [text storage](2026-10-24-hpm-v2-text-storage-design.md), [chat design](2026-10-23-hpm-v2-generation-chat-design.md).
 
 ## 1. Problem
@@ -142,3 +142,66 @@ Frozen parameters: `max_structural 3, decay 0.6, theta_struct 0.1, seed_min_shar
 On the tuning splits (F1 / complete of 21): v1 dev 0.65 / 9, v1 held-out 0.68 / 10, v2 dev 0.67 / 13, against current chat 0.41, 0.62, 0.39. These are tuning-set numbers and say nothing about generalisation; the v1 held-out figure in particular is no longer held out.
 
 Known weakness left as is, to keep the protocol clean: the structural `link` term divides by the candidate's own shared-concept weight, so it favours sentences with few concept links over richly linked ones. For "how does photosynthesis work" it picks the glucose-storage and algae sentences over the light-reaction and Calvin-cycle ones. It was not changed because it is not one of the four declared fixes.
+
+## 11. Round 2 result: v2 held-out, scored once
+
+Scored once on a pinned clean export of commit `0038417` (selector and parameters frozen in section 10), all systems on the same trainer. Nothing about the selector was changed after seeing these numbers.
+
+All answerable (21), recall / precision / F1 / complete / mean width:
+
+| System | recall | precision | F1 | complete | width |
+|---|---|---|---|---|---|
+| current chat (top-1) | 0.480 | 0.762 | 0.589 | 5 | 1.0 |
+| naive top-2 | 0.663 | 0.619 | 0.640 | 10 | 1.9 |
+| naive top-3 | 0.714 | 0.532 | 0.610 | 12 | 2.6 |
+| naive top-4 | 0.714 | 0.468 | 0.566 | 12 | 3.3 |
+| **expanded** | 0.687 | 0.698 | **0.692** | 10 | 1.9 |
+
+Per type (recall / precision / complete):
+
+| Type (n) | current | naive top-2 | naive top-3 | expanded |
+|---|---|---|---|---|
+| specific (6) | 0.83 / 0.83 / 5 | 1.00 / 0.67 / 6 | 1.00 / 0.58 / 6 | 1.00 / 1.00 / 6 |
+| process (6) | 0.26 / 0.67 / 0 | 0.40 / 0.58 / 0 | 0.58 / 0.61 / 2 | 0.40 / 0.42 / 0 |
+| compound (5) | 0.50 / 1.00 / 0 | 0.90 / 0.90 / 4 | 0.90 / 0.67 / 4 | 0.90 / 0.83 / 4 |
+| cross-source (4) | 0.25 / 0.50 / 0 | 0.25 / 0.25 / 0 | 0.25 / 0.17 / 0 | 0.38 / 0.50 / 0 |
+
+Summaries: source stem coverage 0.51 at width 5.8, against 0.19 at width 3.0 for the current chat and 0.12 to 0.19 for naive top-k.
+
+### Gate (section 4 criteria, unchanged)
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | recall at least +0.20 over current; more complete answers | +0.206 (pass, by 0.006); complete 10 vs 5 → **pass** |
+| 2 | F1 above naive top-2, top-3, top-4 | 0.692 vs 0.640 / 0.610 / 0.566 → **pass** |
+| 3 | single-fact questions do not regress | recall 1.00 vs 0.83, precision 1.00 vs 0.83 → **pass** |
+| 4 | abstention unchanged | the same two questions abstain (F22, F23) → **pass** |
+| 5 | summaries: coverage at least +0.10 at width at most 7 | +0.32 at width 5.8 → **pass** (partly circular, see round 1) |
+| 6 | existing tests unaffected | chat, study and structure tests pass on the pinned commit → **pass** |
+
+**Result: the gate is met, so by the rule fixed in advance expansion became the chat default.**
+
+## 12. How to read that result
+
+- **The margin on criterion 1 is 0.006.** At 21 questions, one question moving by a tenth of a point changes it. Criterion 2 has more room (0.05 over naive top-2).
+- **Per question:** recall was higher than the current chat on 8 of 21 questions and lower on none. Against naive top-2, expanded did better on recall plus precision on 7 and worse on 3.
+- **Process questions are not solved.** 0 of 6 complete. Recall 0.40 equals naive top-2, and naive top-3 does better (0.58, 2 complete). The aggregate gate passes because the gains come from single-fact precision, compound questions and cross-source precision. On process questions expanded is no better than returning the top two or three sentences.
+- **Cross-source questions are complete for no system** (0 of 4 everywhere); expanded only improves recall slightly and precision a lot.
+- **The structural link term is still the weak part** (section 10): it favours sentences with few concept links.
+- **Dev versus held-out:** v2 dev (0.67 recall, 13 complete) against held-out (0.69, 10 complete) is a much smaller gap than round 1 (0.77 to 0.64), which is some evidence the fixes reduced overfitting to the tuning questions. It is one split of 21.
+- **Same limits as before:** one author for sources, questions and labels, and the author knew round 1's failure modes. This is a direction check, not an accuracy measurement.
+
+### Changes after the scoring (none affects the scored numbers)
+
+- **Default flipped** to `ExpandingPlanner`, the declared consequence of meeting the gate. `ChatSession(..., expand_evidence=False)` restores the trainer's own evidence.
+- **A user's correction is returned as chosen, with no widening.** Found when the default flip made the correction test fail: coverage expansion re-added the sentence the user had just corrected against. The eval sets contain no corrections, and the dev numbers were re-run and are unchanged.
+- **The eval harness names the old behaviour explicitly** (`current_chat` uses `expand_evidence=False`), so the baseline cannot silently become the new default.
+- **The C3 isolation test now compares another user's answer before and after a correction**, instead of pinning an absolute answer, because expansion legitimately changed every user's baseline.
+
+### What the repo's own tests showed
+
+Two structure tests (`test_structure_survives_a_checkpoint_round_trip_and_keeps_growing` and `test_proposition_nodes_have_deterministic_ids_and_survive_a_checkpoint`) fail in the shared working tree with "passage has no paragraphs" after a reload. They pass on a clean export of the committed code, and `hfn/tiered_forest.py` (uncommitted, not part of this work) was modified during the session, so the cause is in that uncommitted change, not here.
+
+## 13. Next
+
+Process questions: the structural term needs a different relevance signal (it cannot tell the sentences that elaborate a process from sentences that merely share its vocabulary). That, a larger and independently annotated set, and a per-type gate (so an aggregate cannot hide a type that did not improve) are the next measured steps.

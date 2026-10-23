@@ -145,12 +145,16 @@ def test_a_users_correction_is_never_replaced_by_the_selector(trainer):
         assert selector._is_correction_seed(node, "alice")
         assert not selector._is_correction_seed(node, "bob")
         assert not selector._is_correction_seed(trainer.source_to_answer_nodes["photo"][0], "alice")
+        question = "How does photosynthesis work?"
+        index = selector.index()
+        assert selector._answer(question, node, "alice", None).sentence_ids == (node,)   # no widening of a correction
+        assert len(selector._answer(question, node, "bob", None).sentence_ids) >= 1
     finally:
         del trainer.fact_node_data["study_fact_test"]
 
 
 def test_abstain_clarify_and_compare_are_left_alone(trainer):
-    plain = ChatSession(trainer)
+    plain = ChatSession(trainer, expand_evidence=False)
     wide = ChatSession(trainer, planner=ExpandingPlanner(trainer))
     for question in ["Who painted the Mona Lisa?", "Compare photosynthesis and respiration"]:
         a, b = plain.send(question), wide.send(question)
@@ -167,3 +171,10 @@ def test_legacy_storage_falls_back_to_the_trainers_own_evidence(trainer, monkeyp
 def test_expansion_is_deterministic(trainer):
     first = _ask(trainer, "How does the water cycle work?")[1]
     assert all(_ask(trainer, "How does the water cycle work?")[1] == first for _ in range(3))
+
+
+def test_expansion_is_the_chat_default_and_can_be_turned_off(trainer):
+    assert isinstance(ChatSession(trainer).planner, ExpandingPlanner)
+    assert type(ChatSession(trainer, expand_evidence=False).planner) is GroundedPlanner
+    custom = GroundedPlanner(trainer)
+    assert ChatSession(trainer, planner=custom).planner is custom

@@ -129,6 +129,9 @@ class EvidenceSelector:
 
     def _answer(self, question: str, seed: str, user_id: str, scope: Optional[str]) -> Selection:
         p, index = self.params, self.index()
+        if self._is_correction_seed(seed, user_id):
+            # the user chose this span explicitly; widening it could re-add the sentence they corrected
+            return Selection((seed,), {seed: "seed"})
         process = bool(_PROCESS.search(question)) and not (p.compound_blocks_process and _COMPOUND.search(question))
         content = [t for t in content_stems(question) if t not in _QUESTION_WORDS]
         unseen = [t for t in content if not self.trainer.agent.term_sentences.get(t)]

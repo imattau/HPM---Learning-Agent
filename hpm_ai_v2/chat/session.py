@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from hpm_ai_v2.chat.controller import GroundedActController
+from hpm_ai_v2.chat.evidence import ExpandingPlanner
 from hpm_ai_v2.chat.feedback import (
     THUMBS, Ledger, apply_entry, correction_entry, find_answer_node, preference_entry,
 )
@@ -32,6 +33,7 @@ class ChatSession:
         state: ConversationState | None = None,
         ledger: Ledger | None = None,
         planner=None,
+        expand_evidence: bool = True,
     ):
         self.trainer = trainer
         self.ledger = ledger
@@ -42,7 +44,11 @@ class ChatSession:
         )
         self.event_log = Path(event_log) if event_log else None
         self.controller = GroundedActController()
-        self.planner = planner if planner is not None else GroundedPlanner(trainer)
+        if planner is None:
+            # Evidence expansion passed its pre-registered gate (see the evidence-access design doc);
+            # expand_evidence=False gives the trainer's own single-sentence or top-three evidence.
+            planner = ExpandingPlanner(trainer) if expand_evidence else GroundedPlanner(trainer)
+        self.planner = planner
         self.realizer = SchemaRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
