@@ -36,6 +36,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         self.dynamic_vocab = dynamic_vocab
         self.max_vocab = max_vocab
         self.sentence_splitter = SentenceSplitter()
+        # stem -> sentence ids; derived from sentence nodes (see text_structure)
+        self.term_sentences: Dict[str, List[str]] = {}
         self.corpus_node: Optional[HFN] = None
         self.web_agent = web_agent
         
@@ -100,13 +102,26 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         if isinstance(curr, GoalConditionedRetriever):
             curr.target_slice = slice(s_dim, s_dim + self.config.DIM)
 
-    def build_sentence_node(self, tokens: List[str]) -> HFN:
-        """Create a sentence node with inputs = list of word nodes."""
+    def build_sentence_node(
+        self,
+        tokens: List[str],
+        *,
+        node_id: Optional[str] = None,
+        mu_text: Optional[str] = None,
+        initial_weight: Optional[float] = None,
+        metadata: Optional[Dict] = None,
+    ) -> HFN:
+        """Create a sentence node with inputs = list of word nodes.
+
+        ``node_id`` and ``metadata`` let a caller give the node a deterministic
+        identity and its source offsets; ``mu_text`` is the text to encode when
+        it differs from the token join.
+        """
         word_nodes = [self._ensure_word_macro(t) for t in tokens]
         # Use existing encoding for mu
-        sentence_mu = self.config.encode_passage(" ".join(tokens))
+        sentence_mu = self.config.encode_passage(mu_text if mu_text is not None else " ".join(tokens))
         
-        sentence_id = f"sentence_{uuid.uuid4().hex[:8]}"
+        sentence_id = node_id or f"sentence_{uuid.uuid4().hex[:8]}"
         sentence_node = HFN(
             mu=sentence_mu,
             sigma=np.ones(self.m_dim)*0.05,
@@ -116,18 +131,32 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         for wn in word_nodes:
             sentence_node.add_child(wn)
             
-        sentence_node.metadata = {"tokens": tokens, "type": "sentence"}
+        sentence_node.metadata = {"tokens": tokens, "type": "sentence", **(metadata or {})}
         sentence_node.relation_type = "sentence"
-        self.observer.register(sentence_node, protected=False)
+        if initial_weight is None:
+            self.observer.register(sentence_node, protected=False)
+        else:
+            self.observer.register(sentence_node, protected=False, initial_weight=initial_weight)
         self.patterns[sentence_id] = sentence_node
         return sentence_node
 
-    def build_paragraph_node(self, sentence_nodes: List[HFN]) -> HFN:
-        """Create a paragraph node with inputs = sentence nodes."""
+    def build_paragraph_node(
+        self,
+        sentence_nodes: List[HFN],
+        *,
+        node_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        chain_relation: Optional[str] = None,
+    ) -> HFN:
+        """Create a paragraph node with inputs = sentence nodes.
+
+        ``chain_relation`` records a typed edge between each pair of
+        consecutive sentences (for example ``"next"``).
+        """
         if not sentence_nodes: return None
         para_mu = np.mean([n.mu for n in sentence_nodes], axis=0)
         
-        para_id = f"paragraph_{uuid.uuid4().hex[:8]}"
+        para_id = node_id or f"paragraph_{uuid.uuid4().hex[:8]}"
         para_node = HFN(
             mu=para_mu,
             sigma=np.ones(self.m_dim)*0.08,
@@ -135,9 +164,9 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
             use_diag=True,
         )
         for sn in sentence_nodes:
-            para_node.add_child(sn)
+            para_node.add_child(sn, relation=chain_relation)
             
-        para_node.metadata = {"type": "paragraph"}
+        para_node.metadata = {"type": "paragraph", **(metadata or {})}
         para_node.relation_type = "paragraph"
         self.observer.register(para_node, protected=False)
         self.patterns[para_id] = para_node
@@ -206,34 +235,72 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         # Create character-level macro
         return self.learn_word_spelling(word, case_sensitive=False)
 
-    def observe_passage(self, text: str, initial_weight: float = 1.0) -> int:
+    def observe_passage(
+        self,
+        text: str,
+        initial_weight: float = 1.0,
+        *,
+        sentence_spans: Optional[List[tuple]] = None,
+        sentence_ids: Optional[List[str]] = None,
+        sentence_weight: Optional[float] = None,
+        source_id: Optional[str] = None,
+    ) -> int:
+        """Store a passage as an HFN hierarchy.
+
+        By default the passage is split into sentences and held as one
+        paragraph. With ``sentence_spans`` (``(sentence, start, end)`` triples
+        into ``text``), ``sentence_ids`` and ``source_id``, the structured form
+        is built instead: real paragraphs, ``next`` edges, deterministic node
+        ids, exact source offsets on every sentence, and links from each
+        sentence to the shared stem concepts it mentions.
+        """
         if self.dynamic_vocab:
             from hpm_ai_v2.domains.text_domain import tokenise
             tokens = tokenise(text)
             for t in tokens:
                 self._ensure_word_macro(t)
-        
-        # Build structural hierarchy (Fractal Uniformity)
-        sentences = self.sentence_splitter.split(text)
-        sentence_nodes = []
-        from hpm_ai_v2.domains.text_domain import tokenise_raw
-        for s in sentences:
-            tokens = tokenise_raw(s)
-            if tokens:
-                s_node = self.build_sentence_node(tokens)
-                sentence_nodes.append(s_node)
-        
-        # Build paragraph node (treat passage as one paragraph for now)
-        para_node = self.build_paragraph_node(sentence_nodes)
-        
+
+        structured = sentence_spans is not None
+        if structured:
+            from hpm_ai_v2.agents.text_structure import build_structured_passage
+            if sentence_ids is None or len(sentence_ids) != len(sentence_spans) or not source_id:
+                raise ValueError("structured passages need sentence_ids matching sentence_spans and a source_id")
+            for sentence, start, end in sentence_spans:
+                if text[start:end] != sentence:
+                    raise ValueError("sentence span does not match the passage text")
+            paragraph_nodes, sentence_nodes = build_structured_passage(
+                self, text, list(sentence_spans), list(sentence_ids), source_id,
+                1.0 if sentence_weight is None else sentence_weight,
+            )
+        else:
+            # Build structural hierarchy (Fractal Uniformity)
+            sentences = self.sentence_splitter.split(text)
+            sentence_nodes = []
+            from hpm_ai_v2.domains.text_domain import tokenise_raw
+            for s in sentences:
+                tokens = tokenise_raw(s)
+                if tokens:
+                    s_node = self.build_sentence_node(tokens)
+                    sentence_nodes.append(s_node)
+
+            # Build paragraph node (treat passage as one paragraph for now)
+            para_node = self.build_paragraph_node(sentence_nodes)
+            paragraph_nodes = [para_node] if para_node else []
+
         idx = self.config.register_passage(text)
         mu = self.config.encode_passage(text)
         node = HFN(mu=mu, sigma=np.ones(self.m_dim)*0.1, id=f"passage_{idx}", use_diag=True)
         node.metadata = {"passage_idx": idx, "text": text, "type": "passage"}
+        if source_id:
+            node.metadata["source_id"] = source_id
         node.relation_type = "passage"
-        
-        # Link paragraph node to passage node
-        if para_node: node.add_child(para_node)
+
+        # Link paragraph nodes to the passage node, in reading order
+        for para_node in paragraph_nodes:
+            node.add_child(para_node, relation="next" if structured else None)
+        if structured:
+            from hpm_ai_v2.agents.text_structure import link_terms
+            link_terms(self, sentence_nodes)
         
         self.observer.register(node, protected=False, initial_weight=initial_weight)
         self.patterns[f"passage_{idx}"] = node
@@ -488,6 +555,8 @@ class ReaderAgent(BaseHFNAgent, SyntaxMixin, SemanticRoleMixin, SpellingMixin):
         agent.role_knowledge = meta.get("role_knowledge", [])
         agent.word_spellings = meta.get("word_spellings", {})
         agent.load_state(str(path / "agent_state.pkl"))
+        from hpm_ai_v2.agents.text_structure import rebuild_term_sentences
+        rebuild_term_sentences(agent)
         # Restored patterns live in agent.patterns but were never re-inserted
         # into the forest/observer index, so the retriever can't see them.
         for node in agent.patterns.values():

@@ -156,6 +156,9 @@ class SupervisedStudyTrainer:
         self.semantic_lexical_rescue_margin = float(semantic_lexical_rescue_margin)
         self.abstention_similarity_threshold = float(abstention_similarity_threshold)
         self.abstain_threshold = 0.0
+        # 2: sentences are hierarchy nodes with offsets, linked by next edges and
+        # shared term nodes. 1 (older checkpoints): a flat answer_sentence copy.
+        self.storage_version = 2
         self.sources: dict[str, SourceDocument] = {}
         self.source_to_node: dict[str, str] = {}
         self.node_to_source: dict[str, str] = {}
@@ -177,7 +180,15 @@ class SupervisedStudyTrainer:
                 continue
             # Start evidence patterns below saturation so correct feedback can
             # strengthen them as well as incorrect feedback weakening distractors.
-            index = self.agent.observe_passage(source.text, initial_weight=0.5)
+            spans = _sentences_with_offsets(source.text)
+            index = self.agent.observe_passage(
+                source.text,
+                initial_weight=0.5,
+                sentence_spans=spans,
+                sentence_ids=[self._sentence_node_id(source.source_id, s, start) for s, start, _ in spans],
+                sentence_weight=0.5,
+                source_id=source.source_id,
+            )
             node_id = f"passage_{index}"
             self.sources[source.source_id] = source
             self.source_to_node[source.source_id] = node_id
@@ -185,24 +196,26 @@ class SupervisedStudyTrainer:
             self._index_answer_sentences(source)
             self._log({"event": "source_ingested", "source_id": source.source_id, "node_id": node_id})
 
+    @staticmethod
+    def _sentence_node_id(source_id: str, sentence: str, start: int) -> str:
+        # The "answer_sentence_" prefix is legacy: learned facts and checkpoints
+        # already refer to sentences by these ids, so the scheme is kept.
+        digest = hashlib.sha1(f"{source_id}:{start}:{sentence}".encode()).hexdigest()[:12]
+        return f"answer_sentence_{digest}"
+
     def _index_answer_sentences(self, source: SourceDocument) -> None:
-        """Create persistent sentence patterns with offsets for grounded answers."""
+        """Record the source's sentence nodes, built by the document hierarchy.
+
+        The sentence nodes are the ReaderAgent hierarchy's own (passage ->
+        paragraph -> sentence), so there is one node per sentence, not a flat
+        parallel copy. This only maps them to their text and offsets.
+        """
         self.source_to_answer_nodes[source.source_id] = []
-        for index, (sentence, start, end) in enumerate(_sentences_with_offsets(source.text)):
-            digest = hashlib.sha1(f"{source.source_id}:{start}:{sentence}".encode()).hexdigest()[:12]
-            node_id = f"answer_sentence_{digest}"
+        for sentence, start, end in _sentences_with_offsets(source.text):
+            node_id = self._sentence_node_id(source.source_id, sentence, start)
+            if node_id not in self.agent.patterns:
+                raise RuntimeError(f"sentence node was not created for {source.source_id}:{start}")
             if node_id not in self.answer_node_data:
-                mu = self.agent.config.encode_passage(sentence)
-                node = HFN(
-                    mu=mu,
-                    sigma=np.ones(self.agent.m_dim) * 0.2,
-                    id=node_id,
-                    use_diag=True,
-                )
-                node.relation_type = "answer_sentence"
-                node.metadata = {"type": "answer_sentence", "source_id": source.source_id, "start": start, "end": end}
-                self.agent.observer.register(node, protected=False, initial_weight=0.5)
-                self.agent.patterns[node_id] = node
                 self.answer_node_data[node_id] = {
                     "source_id": source.source_id,
                     "text": sentence,
@@ -1045,6 +1058,7 @@ class SupervisedStudyTrainer:
         path.mkdir(parents=True, exist_ok=True)
         self.agent.save_agent(str(path))
         state = {
+            "storage_version": self.storage_version,
             "abstain_threshold": self.abstain_threshold,
             "abstention_similarity_threshold": self.abstention_similarity_threshold,
             "sources": [asdict(source) for source in self.sources.values()],
@@ -1120,6 +1134,7 @@ class SupervisedStudyTrainer:
             state.get("abstention_similarity_threshold", self.abstention_similarity_threshold)
         )
         self.abstain_threshold = float(state.get("abstain_threshold", 0.0))
+        self.storage_version = int(state.get("storage_version", 1))
         self._fit_episode_ids = set(state.get("fit_episode_ids", []))
 
     def _validate_evidence(self, episode: StudyEpisode) -> None:
