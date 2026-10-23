@@ -1,0 +1,48 @@
+{"id": "tes-summ-in-1", "question": "Summarize the toddler sentence generator design.", "title_contains": "toddler-sentence-generator"}
+{"id": "tes-summ-in-2", "question": "Give me a summary of the demand driven learning design.", "title_contains": "demand-driven-learning"}
+{"id": "tes-summ-in-3", "question": "Summarize the dynamic specialist promotion plan.", "title_contains": "dynamic-specialist-promotion"}
+{"id": "tes-summ-in-4", "question": "Summarize the iterative thinking solver design.", "title_contains": "iterative-thinking-solver"}
+{"id": "tes-summ-in-5", "question": "Summarize the adversarial belief revision design.", "title_contains": "adversarial-belief-revision"}
+{"id": "tes-summ-in-6", "question": "Summarize the autonomous pruning design.", "title_contains": "autonomous-pruning"}
+{"id": "tes-summ-out-1", "question": "Summarize the plot of Romeo and Juliet.", "title_contains": null}
+{"id": "tes-summ-out-2", "question": "Summarize the causes of the Great Depression.", "title_contains": null}
+{"id": "tes-summ-out-3", "question": "Summarize the annual budget proposal.", "title_contains": null}
+{"id": "tes-summ-out-4", "question": "Summarize the rules of tennis.", "title_contains": null}
+{"id": "tes-summ-out-5", "question": "Summarize the history of the internet.", "title_contains": null}
+{"id": "tes-summ-out-6", "question": "Summarize today's weather forecast.", "title_contains": null}
+{"id": "tes-outl-in-1", "question": "Outline the goal conditioned reasoning design.", "title_contains": "goal-conditioned-reasoning"}
+{"id": "tes-outl-in-2", "question": "Outline the study and test plan.", "title_contains": "study-and-test"}
+{"id": "tes-outl-in-3", "question": "Outline the structured curriculum design.", "title_contains": "structured-curriculum"}
+{"id": "tes-outl-in-4", "question": "Outline the competing hypotheses belief revision design.", "title_contains": "competing-hypotheses"}
+{"id": "tes-outl-in-5", "question": "Outline the true cross domain design.", "title_contains": "true-cross-domain"}
+{"id": "tes-outl-in-6", "question": "Outline the autonomous curriculum generation design.", "title_contains": "autonomous-curriculum-generation"}
+{"id": "tes-outl-out-1", "question": "Outline the history of jazz.", "title_contains": null}
+{"id": "tes-outl-out-2", "question": "Outline a plan for a wedding.", "title_contains": null}
+{"id": "tes-outl-out-3", "question": "Outline the structure of a business letter.", "title_contains": null}
+{"id": "tes-outl-out-4", "question": "Outline the stages of grief.", "title_contains": null}
+{"id": "tes-outl-out-5", "question": "Outline the system of the human digestive tract.", "title_contains": null}
+{"id": "tes-outl-out-6", "question": "Outline a speech about teamwork.", "title_contains": null}
+{"id": "tes-flas-in-1", "question": "Make flashcards for the demand driven learning plan.", "title_contains": "demand-driven-learning"}
+{"id": "tes-flas-in-2", "question": "Make flashcards for the multi step internal reasoning design.", "title_contains": "multi-step-internal-reasoning"}
+{"id": "tes-flas-in-3", "question": "Make flashcards for the closed loop learning plan.", "title_contains": "closed-loop-learning"}
+{"id": "tes-flas-in-4", "question": "Make flashcards for the sovereign arc solver design.", "title_contains": "sovereign-arc-solver"}
+{"id": "tes-flas-in-5", "question": "Make flashcards for the meta hfn utilisation plan.", "title_contains": "meta-hfn-utilisation"}
+{"id": "tes-flas-in-6", "question": "Make flashcards for the developmental cognitive system design.", "title_contains": "developmental-cognitive-system"}
+{"id": "tes-flas-out-1", "question": "Make flashcards for the capital cities of Europe.", "title_contains": null}
+{"id": "tes-flas-out-2", "question": "Make flashcards for organic chemistry reactions.", "title_contains": null}
+{"id": "tes-flas-out-3", "question": "Make flashcards for the muscles of the leg.", "title_contains": null}
+{"id": "tes-flas-out-4", "question": "Make flashcards for the plan of a Roman house.", "title_contains": null}
+{"id": "tes-flas-out-5", "question": "Make flashcards for the structure of a poem.", "title_contains": null}
+{"id": "tes-flas-out-6", "question": "Make flashcards for Japanese greetings.", "title_contains": null}
+{"id": "tes-comp-in-1", "question": "Compare the iterative thinking solver design and the sovereign arc solver design.", "title_contains": ["iterative-thinking-solver", "sovereign-arc-solver"]}
+{"id": "tes-comp-in-2", "question": "Compare the demand driven learning design and the closed loop learning plan.", "title_contains": ["demand-driven-learning", "closed-loop-learning"]}
+{"id": "tes-comp-in-3", "question": "Compare the adversarial belief revision design and the competing hypotheses belief revision design.", "title_contains": ["adversarial-belief-revision", "competing-hypotheses"]}
+{"id": "tes-comp-in-4", "question": "Compare the autonomous pruning design and the compositional program graphs plan.", "title_contains": ["autonomous-pruning", "compositional-program-graphs"]}
+{"id": "tes-comp-in-5", "question": "Compare the toddler sentence generator design and the dynamic specialist promotion design.", "title_contains": ["toddler-sentence-generator", "dynamic-specialist-promotion"]}
+{"id": "tes-comp-in-6", "question": "Compare the goal conditioned reasoning design and the multi step internal reasoning design.", "title_contains": ["goal-conditioned-reasoning", "multi-step-internal-reasoning"]}
+{"id": "tes-comp-out-1", "question": "Compare tea and coffee.", "title_contains": null}
+{"id": "tes-comp-out-2", "question": "Compare electric and petrol cars.", "title_contains": null}
+{"id": "tes-comp-out-3", "question": "Compare Rome and Athens in antiquity.", "title_contains": null}
+{"id": "tes-comp-out-4", "question": "Compare React and Vue for web apps.", "title_contains": null}
+{"id": "tes-comp-out-5", "question": "Compare the autonomous pruning design and the Italian Renaissance.", "title_contains": null}
+{"id": "tes-comp-out-6", "question": "Compare the closed loop learning plan and the Premier League.", "title_contains": null}

@@ -99,10 +99,10 @@ def test_a_quote_that_matches_nothing_or_a_repeated_id_is_an_error(tmp_path):
 
 def test_evaluate_counts_right_wrong_and_abstained_separately(tmp_path):
     trainer = _trainer(tmp_path)
-    items = [Item("a", "How do honeybees tell each other where food is?", frozenset({"bees"})),
-             Item("b", "How do honeybees tell each other where food is?", frozenset({"tides"})),     # deliberately wrong label
-             Item("c", "Who invented the telephone?", frozenset()),
-             Item("d", "How does the immune system fight infection?", frozenset())]
+    items = [Item("a", "How do honeybees tell each other where food is?", (frozenset({"bees"}),)),
+             Item("b", "How do honeybees tell each other where food is?", (frozenset({"tides"}),)),   # deliberately wrong label
+             Item("c", "Who invented the telephone?", ()),
+             Item("d", "How does the immune system fight infection?", ())]
     result = evaluate(items, ExpandingPlanner(trainer))
     assert result["counts"] == {"answerable: right source": 1, "answerable: wrong source": 1,
                                 "unanswerable: abstained": 1, "unanswerable: answered or clarified": 1}
@@ -186,3 +186,66 @@ def test_the_word_support_check_still_applies_to_a_calibrated_lexical_checkpoint
     trainer.abstain_threshold = 1e-6
     reply = ChatSession(trainer).send("What is the capital of France?")
     assert reply.abstained and reply.plan.reason in {"no_content_support", "no_retrievable_supported_answer"}
+
+
+def test_topic_labels_resolve_by_title_and_a_list_needs_every_topic(tmp_path):
+    trainer = _trainer(tmp_path)                       # source titles are their ids
+    one = resolve(trainer, [{"id": "a", "question": "q", "title_contains": "bees"}])[0]
+    assert one.groups == (frozenset({"bees"}),) and one.answerable
+    both = resolve(trainer, [{"id": "b", "question": "q", "title_contains": ["bees", "tid"]}])[0]
+    assert both.groups == (frozenset({"bees"}), frozenset({"tides"}))
+    assert both.satisfied_by(frozenset({"bees", "tides"})) and not both.satisfied_by(frozenset({"bees"}))
+    assert not both.satisfied_by(frozenset({"bees", "wind"}))               # one topic is not enough
+    nothing = resolve(trainer, [{"id": "c", "question": "q"}])[0]
+    assert not nothing.answerable and not nothing.satisfied_by(frozenset({"bees"}))
+    with pytest.raises(ValueError, match="no source title contains"):
+        resolve(trainer, [{"id": "d", "question": "q", "title_contains": "no such topic"}])
+
+
+def test_evaluate_reports_each_request_type_separately(tmp_path):
+    trainer = _trainer(tmp_path)
+    items = [Item("q", "How do honeybees tell each other where food is?", (frozenset({"bees"}),)),
+             Item("s", "Summarize the honeybees", (frozenset({"bees"}),)),
+             Item("f", "Make flashcards for the tides", (frozenset({"tides"}),)),
+             Item("j", "Summarize the French Revolution", ())]
+    result = evaluate(items, ExpandingPlanner(trainer))
+    assert set(result["by_family"]) >= {"grounded_qa", "summarize", "flashcards"}
+    assert result["by_family"]["flashcards"]["counts"] == {"answerable: right source": 1}
+    summarize = result["by_family"]["summarize"]
+    assert summarize["answerable"] == 1 and summarize["unanswerable"] == 1
+    assert sum(f["answerable"] + f["unanswerable"] for f in result["by_family"].values()) == 4
+
+
+def test_several_question_files_are_read_together_and_ids_must_stay_unique(tmp_path):
+    first = _write(tmp_path / "a.jsonl", VALIDATION[:3])
+    second = _write(tmp_path / "b.jsonl", VALIDATION[3:6])
+    assert [r["id"] for r in read_questions(first, second)] == [i for i, _, _ in VALIDATION[:6]]
+    with pytest.raises(ValueError, match="duplicate"):
+        read_questions(first, first)
+
+
+def test_the_cli_takes_several_validation_and_test_files(checkpoint, tmp_path, capsys):
+    v1, v2 = _write(tmp_path / "v1.jsonl", VALIDATION[:6]), _write(tmp_path / "v2.jsonl", VALIDATION[6:])
+    t1, t2 = _write(tmp_path / "t1.jsonl", TEST[:2]), _write(tmp_path / "t2.jsonl", TEST[2:])
+    out = tmp_path / "cal.json"
+    assert calibrate_main([str(checkpoint), "--validation", str(v1), "--validation", str(v2),
+                           "--test", str(t1), "--test", str(t2), "--output", str(out)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["test_after"]["answerable"] == 2 and report["test_after"]["unanswerable"] == 5
+    assert "by_family" in report["test_after"] and json.loads(out.read_text())["abstain_threshold"] > 0
+
+
+def test_the_committed_request_sets_are_balanced_and_use_disjoint_topics():
+    from pathlib import Path
+    folder = Path(__file__).parents[1] / "hpm_ai_v2/training/eval_sets"
+    sets = {name: read_questions(folder / f"pretrained_calibration_requests_{name}.jsonl") for name in ("validation", "test")}
+    topics = {}
+    for name, rows in sets.items():
+        inside = [r for r in rows if r.get("title_contains")]
+        outside = [r for r in rows if not r.get("title_contains")]
+        assert len(inside) == len(outside) == 24
+        words = {w for r in rows for w in ("summar", "outline", "flashcards", "compare") if w in r["question"].lower()}
+        assert words == {"summar", "outline", "flashcards", "compare"}              # every request type is present
+        topics[name] = {t for r in inside for t in ([r["title_contains"]] if isinstance(r["title_contains"], str) else r["title_contains"])}
+    assert topics["validation"] and topics["test"] and not (topics["validation"] & topics["test"])
+

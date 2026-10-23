@@ -1,0 +1,48 @@
+{"id": "val-summ-in-1", "question": "Summarize the relational structured design.", "title_contains": "relational-structured"}
+{"id": "val-summ-in-2", "question": "Give me a summary of the thematic anchor extraction design.", "title_contains": "thematic-anchor-extraction"}
+{"id": "val-summ-in-3", "question": "Summarize the sovereign meta hierarchy design.", "title_contains": "sovereign-meta-hierarchy"}
+{"id": "val-summ-in-4", "question": "Summarize the agnostic decoder design.", "title_contains": "agnostic-decoder"}
+{"id": "val-summ-in-5", "question": "Summarize the toddler language acquisition design.", "title_contains": "toddler-language-acquisition"}
+{"id": "val-summ-in-6", "question": "Summarize the hpm fractal node plan.", "title_contains": "hpm-fractal-node"}
+{"id": "val-summ-out-1", "question": "Summarize the French Revolution.", "title_contains": null}
+{"id": "val-summ-out-2", "question": "Give me a summary of the plot of Hamlet.", "title_contains": null}
+{"id": "val-summ-out-3", "question": "Summarize the quarterly sales report.", "title_contains": null}
+{"id": "val-summ-out-4", "question": "Summarize the rules of chess.", "title_contains": null}
+{"id": "val-summ-out-5", "question": "Summarize the history of the Roman empire.", "title_contains": null}
+{"id": "val-summ-out-6", "question": "Summarize the latest news about the economy.", "title_contains": null}
+{"id": "val-outl-in-1", "question": "Outline the structured agents task decomposition.", "title_contains": "task-decomposition"}
+{"id": "val-outl-in-2", "question": "Outline the sovereign arc design.", "title_contains": "sovereign-arc-design"}
+{"id": "val-outl-in-3", "question": "Outline the sovereign decoder design.", "title_contains": "sovereign-decoder"}
+{"id": "val-outl-in-4", "question": "Outline the hpm ai v1 design.", "title_contains": "hpm-ai-v1"}
+{"id": "val-outl-in-5", "question": "Outline the hfn future directions.", "title_contains": "hfn-future-directions"}
+{"id": "val-outl-in-6", "question": "Outline the structured agents composite promotion.", "title_contains": "composite-promotion"}
+{"id": "val-outl-out-1", "question": "Outline the causes of World War One.", "title_contains": null}
+{"id": "val-outl-out-2", "question": "Outline a plan for a vegetable garden.", "title_contains": null}
+{"id": "val-outl-out-3", "question": "Outline the structure of a cell.", "title_contains": null}
+{"id": "val-outl-out-4", "question": "Outline an essay about climate change.", "title_contains": null}
+{"id": "val-outl-out-5", "question": "Outline the steps to file a tax return.", "title_contains": null}
+{"id": "val-outl-out-6", "question": "Outline the system of government in Canada.", "title_contains": null}
+{"id": "val-flas-in-1", "question": "Make flashcards for the agnostic decoder plan.", "title_contains": "agnostic-decoder"}
+{"id": "val-flas-in-2", "question": "Make flashcards for the hpm ai v2 design.", "title_contains": "hpm-ai-v2"}
+{"id": "val-flas-in-3", "question": "Make flashcards for the sovereign cluster experiment.", "title_contains": "sovereign-cluster-experiment"}
+{"id": "val-flas-in-4", "question": "Make flashcards for the structured agents hpm completion design.", "title_contains": "hpm-completion"}
+{"id": "val-flas-in-5", "question": "Make flashcards for the taboo saliency plan.", "title_contains": "taboo-saliency"}
+{"id": "val-flas-in-6", "question": "Make flashcards for the project sovereignty plan.", "title_contains": "project-sovereignty"}
+{"id": "val-flas-out-1", "question": "Make flashcards for the periodic table.", "title_contains": null}
+{"id": "val-flas-out-2", "question": "Make flashcards for Spanish verbs.", "title_contains": null}
+{"id": "val-flas-out-3", "question": "Make flashcards for the bones of the hand.", "title_contains": null}
+{"id": "val-flas-out-4", "question": "Make flashcards for the planets of the solar system.", "title_contains": null}
+{"id": "val-flas-out-5", "question": "Make flashcards for the plan of the Paris metro.", "title_contains": null}
+{"id": "val-flas-out-6", "question": "Make flashcards for the test of a good argument.", "title_contains": null}
+{"id": "val-comp-in-1", "question": "Compare the sovereign decoder design and the agnostic decoder design.", "title_contains": ["sovereign-decoder", "agnostic-decoder"]}
+{"id": "val-comp-in-2", "question": "Compare the relational structured design and the hpm ai v2 design.", "title_contains": ["relational-structured", "hpm-ai-v2"]}
+{"id": "val-comp-in-3", "question": "Compare the toddler language acquisition design and the thematic anchor extraction design.", "title_contains": ["toddler-language-acquisition", "thematic-anchor-extraction"]}
+{"id": "val-comp-in-4", "question": "Compare the hpm ai v1 design and the hpm ai v2 design.", "title_contains": ["hpm-ai-v1", "hpm-ai-v2"]}
+{"id": "val-comp-in-5", "question": "Compare the sovereign arc design and the sovereign meta hierarchy design.", "title_contains": ["sovereign-arc-design", "sovereign-meta-hierarchy"]}
+{"id": "val-comp-in-6", "question": "Compare the hfn future directions and the hpm fractal node plan.", "title_contains": ["hfn-future-directions", "hpm-fractal-node"]}
+{"id": "val-comp-out-1", "question": "Compare cats and dogs as pets.", "title_contains": null}
+{"id": "val-comp-out-2", "question": "Compare solar power and wind power.", "title_contains": null}
+{"id": "val-comp-out-3", "question": "Compare the French Revolution and the Russian Revolution.", "title_contains": null}
+{"id": "val-comp-out-4", "question": "Compare Python and Java for beginners.", "title_contains": null}
+{"id": "val-comp-out-5", "question": "Compare the sovereign decoder design and the Roman republic.", "title_contains": null}
+{"id": "val-comp-out-6", "question": "Compare the agnostic decoder design and the Premier League table.", "title_contains": null}

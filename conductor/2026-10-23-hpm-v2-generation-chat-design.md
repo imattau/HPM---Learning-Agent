@@ -136,7 +136,7 @@ A pretrained checkpoint has no validation episodes, so its abstention threshold 
 
 **What is implemented instead:** `GroundedPlanner` abstains (`reason: no_content_support`) when an answer's cited sentences, or a clarification's offered sources, share no content word with the question. Question words (what, how, why, ...) are removed first, since a match resting only on them says nothing about subject matter. It applies to any lexical encoder (`require_content_support="auto"`), calibrated or not; a semantic encoder can match without a shared word, so it is left out. It was first limited to uncalibrated checkpoints; the calibration measurements below showed it still adds to a calibrated threshold without costing in-scope answers, so it now stays on. It judges the final evidence, after the selector has had a chance to replace a seed that mentions none of the question's words.
 
-**Measured.** Eval sets (96 questions): exactly one question changed per set, both unanswerable ones now abstaining; every answerable metric is identical to three decimals. Pretrained corpus (10 in-scope, 12 out-of-scope questions): in-scope answered 9 of 10 before and after; out-of-scope answered or clarified 9 of 12 before and 5 of 12 after.
+**Measured.** Eval sets (96 questions): exactly one question changed per set, both unanswerable ones now abstaining; every answerable metric is identical to three decimals. Pretrained corpus (10 in-scope, 12 out-of-scope questions): in-scope answered 9 of 10 before and after; out-of-scope answered or clarified 9 of 12 before and 5 of 12 after. **Correction:** those 22 were informal probes, not labelled questions, and two of the "in-scope" ones ("summarize the usability regime", "how does the chat plan a response") are about material that is not in the pretraining corpus (that document is dated after the 60 files it was built from, and the word "chat" occurs in none of them). Do not rely on the 9 of 10; the labelled held-out sets in the next section are the evidence.
 
 **What it cannot do.** Junk that shares one word with the corpus still gets an answer ("when did the Roman empire fall", "how many moons does Jupiter have", "what is the boiling point of mercury"), and a weakly related sentence that shares a word with an in-scope question passes ("how does the chat plan a response", where "chat" is nowhere in the corpus). Closing that gap needs real calibration from validation episodes, not a heuristic. The question lists are small and written by the same author as the check, so these counts show direction, not a rate.
 
@@ -168,6 +168,31 @@ The threshold fitted was 0.0875 (validation balanced accuracy 0.583 to 0.854). T
 **What it does not do.**
 - Five out-of-scope test questions are still answered or clarified (Hamlet's author, the offside rule, what a real estate agent does, when the Roman empire fell, how a thermostat works), at confidences 0.09 to 0.15, inside the range of correct answers (0.08 to 0.19).
 - Nine of 24 in-scope questions get no right answer: seven are answered from a wrong source and two abstain. This is retrieval quality with a 3,000-word TF-IDF vocabulary, which calibration cannot fix.
-- **Summary requests lose out.** After calibration "summarize the usability regime" abstains (confidence 0.049, threshold 0.0875): requests with few content words score low whatever the answer. The validation set contained no summaries, outlines or flashcard requests, so the threshold knows nothing about them. A calibration set must include the request types the assistant should serve.
+- **Summary requests do not lose out; an earlier version of this note said they did.** It rested on "summarize the usability regime" abstaining, but that request is about a document that is not in the corpus, so abstaining was correct. A labelled test of every request type follows.
 - 24 plus 24 questions per split, one author: these counts show direction, not a rate.
+
+### Request types and per-type thresholds (2026-10-24)
+
+**Does one threshold serve every request type?** Cosine confidence differs between request types ("summarize X" has few content words), so a threshold per type was the natural worry. I tested it on held-out requests. `pretrained_calibration_requests_{validation,test}.jsonl` hold 24 in-scope and 24 out-of-scope requests each: summarize, outline, flashcards and compare, six in-scope and six out-of-scope of each. In-scope requests are labelled by topic (`title_contains`; a list means the request needs every topic, as a comparison does) and name documents of the pretraining corpus; validation and test topics are disjoint (a test checks this). Out-of-scope requests share ordinary words with the project vocabulary ("plan", "structure", "system"), and a comparison pairs an in-scope topic with an out-of-scope one, which must still abstain.
+
+**Result.** The shipped single threshold (0.0875, fitted on validation *questions only*) on held-out questions plus requests (48 in-scope, 48 out-of-scope), by request type as the planner classified it, in-scope right source before to after, and out-of-scope abstained before to after:
+
+| Request type | in-scope right source | out-of-scope abstained |
+|---|---|---|
+| question (question and define) | 15 to 14 of 23 | 7 to 19 of 24 |
+| summarize | 5 to 5 of 7 | 4 to 6 of 6 |
+| outline | 6 to 6 of 6 | 2 to 6 of 6 |
+| flashcards | 4 to 4 of 6 | 0 to 6 of 6 |
+| compare | 5 to 5 of 6 | 0 to 5 of 6 |
+| **all** | **35 to 34 of 48** (wrong source 13 to 12, abstained 0 to 2) | **13 to 42 of 48** |
+
+**Per-type thresholds were not better, so they are not shipped.** I built them (a floor fitted for each type on its six in-scope and six out-of-scope validation requests, the trainer left at the lowest floor and the planner enforcing each type's own) and compared three calibrations on the same held-out set, all fitted on validation only:
+
+| Calibration | in-scope right | out-of-scope abstained |
+|---|---|---|
+| single threshold, validation questions only (shipped) | 34 of 48 | 42 of 48 |
+| one pooled threshold, questions and requests together (0.0986) | 31 of 48 | 44 of 48 |
+| per-type thresholds (summarize 0.080, outline 0.159, flashcards 0.093, compare 0.075; default 0.0875) | 32 of 48 | 41 of 48 |
+
+The per-type fit overfitted its small samples: the outline floor (0.159) cost two in-scope outlines, and the compare floor missed one more out-of-scope comparison. The differences are one to three requests, so this does not show that per-type thresholds can never help, only that at this size they did not, and the extra mechanism was not worth keeping. Sets of about 24 per kind, one author.
 
