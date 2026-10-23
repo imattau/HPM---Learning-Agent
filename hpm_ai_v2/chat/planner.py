@@ -39,14 +39,24 @@ class GroundedPlanner:
         sources = self.trainer.sources
         return tuple((sid, sources[sid].title or sid) for sid in close)
 
-    def plan(self, turn_id: str, question: str) -> ResponsePlan:
+    def plan(
+        self,
+        turn_id: str,
+        question: str,
+        *,
+        user_id: str = "default",
+        scope_source_id: str | None = None,
+    ) -> ResponsePlan:
         # The synthetic episode is only a query carrier; predict() reads no labels.
         task_type = classify_task(question)
         prediction = self.trainer.predict_question(
-            question, episode_id=f"chat-{turn_id}", task_type=task_type
+            question, episode_id=f"chat-{turn_id}", task_type=task_type, scope_source_id=scope_source_id
         )
         act = "answer" if prediction.selected_evidence_id and prediction.answer else "abstain"
-        options = self._ambiguous_sources(prediction) if act == "answer" else ()
+        options = (
+            self._ambiguous_sources(prediction)
+            if act == "answer" and scope_source_id is None else ()
+        )
         if options:
             return ResponsePlan(
                 act="clarify",

@@ -70,6 +70,7 @@ class TurnEvent:
     citations: tuple[Citation, ...]
     verified: bool
     abstained: bool
+    scope_source_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

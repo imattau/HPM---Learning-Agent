@@ -39,12 +39,21 @@ class ChatSession:
         self.realizer = SchemaRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
-    def send(self, user_text: str) -> Reply:
+    def send(self, user_text: str, *, scope_source_id: str | None = None) -> Reply:
         if not user_text.strip():
             raise ValueError("user_text must not be empty")
+        if scope_source_id is not None and scope_source_id not in self.trainer.sources:
+            raise ValueError(f"unknown scope_source_id: {scope_source_id}")
         turn_id = uuid.uuid4().hex
-        effective_question, _resolved = self.state.resolve_reference(user_text.strip())
-        plan = self.planner.plan(turn_id, effective_question)
+        # A scoped send answers an earlier clarification, so its text is already resolved.
+        if scope_source_id is None:
+            effective_question, _resolved = self.state.resolve_reference(user_text.strip())
+        else:
+            effective_question = user_text.strip()
+        plan = self.planner.plan(
+            turn_id, effective_question,
+            user_id=self.state.user_id, scope_source_id=scope_source_id,
+        )
         plan = replace(plan, act=self.controller.choose(plan))
         verified = self.verifier.verify(plan)
         if not verified:
@@ -78,6 +87,7 @@ class ChatSession:
             citations=citations,
             verified=reply.verified,
             abstained=reply.abstained,
+            scope_source_id=scope_source_id,
         ))
         return reply
 

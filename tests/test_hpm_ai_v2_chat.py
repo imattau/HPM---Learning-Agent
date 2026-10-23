@@ -106,3 +106,41 @@ def test_chat_does_not_clarify_when_one_source_clearly_wins(tmp_path):
     trainer, _source = _trainer(tmp_path)
     reply = ChatSession(trainer).send("What carries brain messages?")
     assert reply.plan.act == "answer" and reply.plan.options == ()
+
+
+def _tied_trainer(tmp_path):
+    text = "Synaptic plasticity strengthens connections between neurons."
+    config = TextDomainConfig.from_passages([text, text], max_vocab=100)
+    agent = ReaderAgent(config, dynamic_vocab=False, cold_dir=str(tmp_path / "forest"))
+    trainer = SupervisedStudyTrainer(agent)
+    trainer.ingest([
+        SourceDocument("notes-a", text, "Lecture notes"),
+        SourceDocument("notes-b", text, "Textbook"),
+    ])
+    return trainer
+
+
+def test_scoped_send_answers_from_the_chosen_source_and_logs_it(tmp_path):
+    trainer = _tied_trainer(tmp_path)
+    log = tmp_path / "turns.jsonl"
+    session = ChatSession(trainer, event_log=log)
+    question = "What does synaptic plasticity do?"
+    assert session.send(question).plan.act == "clarify"
+
+    reply = session.send(question, scope_source_id="notes-b")
+
+    assert reply.plan.act == "answer" and reply.verified and reply.plan.options == ()
+    assert {c.source_id for c in reply.citations} == {"notes-b"}
+    rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert [row.get("scope_source_id") for row in rows] == [None, "notes-b"]
+
+
+def test_scoped_send_rejects_unknown_source(tmp_path):
+    session = ChatSession(_tied_trainer(tmp_path))
+    try:
+        session.send("What does synaptic plasticity do?", scope_source_id="missing")
+    except ValueError as exc:
+        assert "missing" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+    assert session.state.turns == []

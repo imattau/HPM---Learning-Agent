@@ -369,11 +369,16 @@ class SupervisedStudyTrainer:
         task_type: str = "grounded_qa",
         *,
         user_id: str = "default",
+        scope_source_id: Optional[str] = None,
     ) -> StudyPrediction:
         """Read-only evidence selection for a free-form question (no labels needed)."""
         if task_type not in TASK_TYPES:
             raise ValueError(f"unsupported task_type: {task_type}")
         ranked = self._rank(question)
+        if scope_source_id is not None:
+            if scope_source_id not in self.sources:
+                raise ValueError(f"unknown scope_source_id: {scope_source_id}")
+            ranked = [item for item in ranked if item[0] == scope_source_id]
         confidence = ranked[0][1] if ranked else 0.0
         selected = ranked[0][0] if ranked and confidence >= self.abstain_threshold else None
         abstention_reason = "calibrated_threshold" if ranked and selected is None else None
