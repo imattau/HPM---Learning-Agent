@@ -126,3 +126,19 @@ The v1 held-out split has been seen and the gate failed, so it can no longer tes
 **Tuning:** only on data already seen: v1 dev, v1 held-out, v2 dev. A small grid declared in advance over `max_structural`, `decay`, `theta_struct`, `seed_min_share`, `link_weight`, `theta_cov`. Selection rule: keep cells where, on each of those three splits, specific-question recall is at least the current chat's, specific precision is within 0.10 of it, and the same questions abstain; among those, choose the highest mean F1 over the three splits, narrower width on ties. Then freeze and commit the parameters.
 
 **Scoring:** the v2 held-out split is scored **once**, on a pinned export of the committed code with frozen parameters, against the same six criteria as section 4 (recall at least +0.20 over current and more complete answers; F1 above naive top-2, top-3 and top-4; no single-fact regression; abstention unchanged; summary stem coverage at least +0.10 at width at most 7; no regressions in existing tests). If the gate is met the selector becomes the chat default; otherwise it stays opt-in. Nothing is changed after that scoring.
+
+## 10. Round 2: selector changes and tuning record (committed before the v2 held-out is scored)
+
+The four planned fixes are in `evidence.py` as parameters (`max_structural`, `require_link`, `seed_min_share`, `unseen_ratio`, `compound_blocks_process`, `swap_seed_share_max`). Summary selection is unchanged and untuned.
+
+Tuning used only seen data: v1 dev, v1 held-out and v2 dev (63 questions, 21 answerable each). The declared grid had 96 cells (`max_structural` 1/2/3, `decay` 0.6/0.8, `theta_struct` 0.1/0.2, `seed_min_share` 0/0.34, `link_weight` 0.5/0.7, `theta_cov` 0.25/0.35). Results:
+
+- All 96 cells met the single-fact constraints (specific recall at least the current chat's, precision within 0.10) on all three splits, so the constraints did not bind.
+- Mean F1 over the three splits ranged only from 0.62 to 0.67 (median 0.645). The grid is not a sensitive instrument: the result does not hinge on the chosen cell.
+- The top cells tied exactly (mean F1 0.665, width 1.83 to 1.84). The declared rule leaves a tie on `seed_min_share` (0 versus 0.34); I added one tie-break at this point, **keep the safeguard on (0.34)**, because the guard is part of the planned fix and the data cannot separate the two. That tie-break was chosen before any v2 held-out result existed.
+
+Frozen parameters: `max_structural 3, decay 0.6, theta_struct 0.1, seed_min_share 0.34, link_weight 0.5 (adjacency_weight 0.5), theta_cov 0.25, unseen_ratio 0.5, swap_seed_share_max 0, compound_blocks_process on, require_link on`, others as in section 5.
+
+On the tuning splits (F1 / complete of 21): v1 dev 0.65 / 9, v1 held-out 0.68 / 10, v2 dev 0.67 / 13, against current chat 0.41, 0.62, 0.39. These are tuning-set numbers and say nothing about generalisation; the v1 held-out figure in particular is no longer held out.
+
+Known weakness left as is, to keep the protocol clean: the structural `link` term divides by the candidate's own shared-concept weight, so it favours sentences with few concept links over richly linked ones. For "how does photosynthesis work" it picks the glucose-storage and algae sentences over the light-reaction and Calvin-cycle ones. It was not changed because it is not one of the four declared fixes.

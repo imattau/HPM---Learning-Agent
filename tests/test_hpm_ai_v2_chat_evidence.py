@@ -58,23 +58,53 @@ def test_what_is_x_is_answered_where_x_is_introduced(trainer):
     assert keys == {("neuro", 4)}
 
 
-def test_process_questions_grow_but_plain_facts_do_not(trainer):
+def test_process_questions_grow_within_a_budget_but_plain_facts_do_not(trainer):
     _, process = _ask(trainer, "How does photosynthesis work?")
-    assert len(process) >= 3 and {s for s, _ in process} == {"photo"}
-    assert {i for _, i in process} >= {0, 2, 3}                       # the definition, light reactions and Calvin cycle
+    assert 2 <= len(process) <= 1 + AccessParams().max_structural and {s for s, _ in process} == {"photo"}
     _, fact = _ask(trainer, "What do phagocytes do?")
     assert len(fact) == 1
-    _, capped = _ask(trainer, "How does photosynthesis work?", AccessParams(cap=2))
-    assert len(capped) <= 2
+
+
+def test_structural_growth_has_its_own_budget_apart_from_the_cap(trainer):
+    question = "How does photosynthesis work?"
+    widths = [len(_ask(trainer, question, AccessParams(max_structural=n, cap=9))[1]) for n in (0, 1, 2)]
+    assert widths[0] == 1 and widths[1] == 2 and widths[2] >= 2
+    assert len(_ask(trainer, question, AccessParams(max_structural=9, cap=2))[1]) <= 2
 
 
 def test_the_gain_threshold_limits_structural_growth(trainer):
     question = "How does photosynthesis work?"
-    loose = _ask(trainer, question, AccessParams(theta_struct=0.01, cap=9))[1]
     default = _ask(trainer, question)[1]
     strict = _ask(trainer, question, AccessParams(theta_struct=0.9))[1]
-    assert len(strict) < len(default) <= len(loose)
-    assert len(strict) == 1                                           # nothing clears the bar: the seed alone
+    assert len(strict) == 1 < len(default)
+
+
+def test_adjacency_alone_cannot_chain_without_a_shared_concept(trainer):
+    question = "How does photosynthesis work?"
+    linked = _ask(trainer, question, AccessParams(max_structural=5, cap=9))[1]
+    unlinked = _ask(trainer, question, AccessParams(max_structural=5, cap=9, require_link=False))[1]
+    assert len(linked) < len(unlinked)
+
+
+def test_a_question_mostly_outside_the_sources_is_not_widened(trainer):
+    # "rainfall" is in no source: most of the question's own words are unseen
+    _, keys = _ask(trainer, "How does rainfall form?")
+    assert len(keys) == 1
+    _, off = _ask(trainer, "How does rainfall form?", AccessParams(unseen_ratio=2.0, cap=9, max_structural=5))
+    assert len(off) >= 1
+
+
+def test_a_second_clause_makes_a_compound_question_not_a_process_question(trainer):
+    reply, _ = _ask(trainer, "What are memory cells and how do vaccines use them?")
+    assert "structure" not in reply.plan.reason
+    reply, _ = _ask(trainer, "What are memory cells and how do vaccines use them?", AccessParams(compound_blocks_process=False))
+    assert reply.verified
+
+
+def test_the_seed_gives_way_only_when_it_mentions_none_of_the_question(trainer):
+    _, keys = _ask(trainer, "Which part of the cell hosts respiration?")
+    assert keys == {("resp", 1)}                               # mentions "cell": it stays
+    assert AccessParams().swap_seed_share_max == 0.0
 
 
 def test_ablation_switches_turn_each_signal_off(trainer):

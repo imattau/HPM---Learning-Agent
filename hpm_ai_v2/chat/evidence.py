@@ -34,6 +34,7 @@ _QUESTION_WORDS = {stem(w) for w in (
 _PROCESS = re.compile(
     r"\b(?:how (?:does|do|did|is|are|can|might)|why|explain|describe|what happens|stages?|steps?)\b", re.I
 )
+_COMPOUND = re.compile(r"\b(?:and|or)\b[^?.]*\b(?:what|how|why|where|which|who|when)\b", re.I)
 _DEFINITIONAL = re.compile(r"^\s*(?:what|who)\s+(?:is|are|was|were)\b", re.I)
 _SUMMARY_FORMATS = {"summarize", "outline", "flashcards"}
 
@@ -41,15 +42,21 @@ _SUMMARY_FORMATS = {"summarize", "outline", "flashcards"}
 @dataclass(frozen=True)
 class AccessParams:
     cap: int = 6                    # most sentences in one answer
-    theta_cov: float = 0.35         # least share of query weight a coverage addition must newly cover
+    theta_cov: float = 0.25         # least share of query weight a coverage addition must newly cover
     theta_struct: float = 0.10      # least gain for a structural (neighbour or concept) addition
-    decay: float = 0.8              # structural gain is multiplied by decay**k after k structural additions
-    adjacency_weight: float = 0.3   # weight of reading-order adjacency in structural score
-    link_weight: float = 0.7        # weight of shared-concept overlap in structural score
+    decay: float = 0.6              # structural gain is multiplied by decay**k after k structural additions
+    adjacency_weight: float = 0.5   # weight of reading-order adjacency in structural score
+    link_weight: float = 0.5        # weight of shared-concept overlap in structural score
     source_ratio: float = 0.5       # other sources must score at least this fraction of the best source
     forward_weight: float = 1.0     # adjacency to a following sentence (elaboration usually follows)
     backward_weight: float = 0.5    # adjacency to a preceding sentence
     structure_after_coverage: bool = False   # also grow structurally when coverage already added sentences
+    max_structural: int = 3         # most sentences structural growth may add (its own budget, apart from cap)
+    require_link: bool = True       # a structural addition must share a concept with the evidence so far
+    seed_min_share: float = 0.34    # no structural growth unless the seed covers this share of the question's weight
+    unseen_ratio: float = 0.5       # if this share of the question's content words is in no source, return the seed alone
+    compound_blocks_process: bool = True     # a question with a second clause gets coverage growth only
+    swap_seed_share_max: float = 0.0         # the seed gives way only if it covers at most this share of the question
     definitional_first_mention: bool = True  # "what is X" and "how does X work" start where X is introduced
     summary_theta: float = 0.06     # least share of source stem weight a summary addition must cover
     summary_min: int = 3            # summaries are at least this wide when the source allows
@@ -122,7 +129,12 @@ class EvidenceSelector:
 
     def _answer(self, question: str, seed: str, user_id: str, scope: Optional[str]) -> Selection:
         p, index = self.params, self.index()
-        process = bool(_PROCESS.search(question))
+        process = bool(_PROCESS.search(question)) and not (p.compound_blocks_process and _COMPOUND.search(question))
+        content = [t for t in content_stems(question) if t not in _QUESTION_WORDS]
+        unseen = [t for t in content if not self.trainer.agent.term_sentences.get(t)]
+        if content and len(unseen) / len(content) >= p.unseen_ratio:
+            # most of the question's own words are in no source: it is probably out of scope, so do not widen the seed
+            return Selection((seed,), {seed: "seed"})
         allowed = self._allowed_sources(question, index.source_of(seed), user_id, scope)
         # a query word counts only if some relevant source says it (a stray "work" in an unrelated source does not)
         query = [
@@ -153,7 +165,7 @@ class EvidenceSelector:
             )
             if best is not None and best != seed and not self._is_correction_seed(seed, user_id):
                 share = lambda sid: sum(self._weight(t) for t in self._stems(sid) if t in query) / total
-                if share(best) >= 0.5 and share(best) >= 2 * share(seed):
+                if share(seed) <= p.swap_seed_share_max and share(best) >= 0.5:
                     chosen = {best: "coverage"}
             while len(chosen) < p.cap:
                 missing = [t for t in query if t not in covered()]
@@ -169,9 +181,13 @@ class EvidenceSelector:
                     break
                 chosen[top] = "coverage"
         grew_by_coverage = len(chosen) > 1
-        if p.expand_structure and process and (p.structure_after_coverage or not grew_by_coverage):
+        seed_share = (
+            sum(self._weight(t) for t in self._stems(seed) if t in query) / total if total > 0 else 1.0
+        )
+        if (p.expand_structure and process and (p.structure_after_coverage or not grew_by_coverage)
+                and seed_share >= p.seed_min_share):
             additions = 0
-            while len(chosen) < p.cap:
+            while len(chosen) < p.cap and additions < p.max_structural:
                 options = {n for sid in chosen for n in index.neighbours(sid, 1, 1)} - set(chosen)
                 options |= {o for sid in chosen for o in index.related(sid)} - set(chosen)
                 options = {o for o in options if pool_ok(o)}
@@ -199,6 +215,8 @@ class EvidenceSelector:
         theirs = {t for c in chosen for t in self._stems(c)}
         den = sum(self._weight(t) for t in mine)
         link = sum(self._weight(t) for t in mine & theirs) / den if den else 0.0
+        if p.require_link and link <= 0:
+            return 0.0
         return p.adjacency_weight * adjacent + p.link_weight * link
 
     def _distance(self, index: StructureIndex, sid: str, chosen: dict) -> int:
