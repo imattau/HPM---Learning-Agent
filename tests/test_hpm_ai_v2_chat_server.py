@@ -1,3 +1,4 @@
+import json
 import threading
 
 import httpx
@@ -97,3 +98,46 @@ def test_load_service_from_checkpoint_answers_like_the_original(tmp_path):
     conv = service.create_conversation()
     reply = service.send(conv["id"], "What do solar panels convert into electricity?")
     assert reply["act"] == "answer" and reply["citations"][0]["source_id"] == "solar"
+
+
+def _sse(response):
+    events, name = [], None
+    for line in response.iter_lines():
+        if line.startswith("event: "):
+            name = line[7:]
+        elif line.startswith("data: "):
+            events.append((name, json.loads(line[6:])))
+    return events
+
+
+def test_send_streams_stages_then_reply_and_persists(server):
+    conv = httpx.post(server + "/api/conversations", json={}).json()
+    url = f"{server}/api/conversations/{conv['id']}/messages"
+    with httpx.stream("POST", url, json={"text": "What do solar panels convert into electricity?"},
+                      headers={"Accept": "text/event-stream"}) as response:
+        assert response.headers["content-type"].startswith("text/event-stream")
+        events = _sse(response)
+    assert [n for n, _ in events] == ["stage"] * 4 + ["reply"]
+    assert [d["stage"] for n, d in events[:4]] == ["interpret", "plan", "verify", "realize"]
+    assert events[-1][1]["act"] == "answer"
+    assert len(httpx.get(f"{server}/api/conversations/{conv['id']}").json()["messages"]) == 2
+
+
+def test_stream_errors_arrive_as_events_or_status(server):
+    conv = httpx.post(server + "/api/conversations", json={}).json()
+    url = f"{server}/api/conversations/{conv['id']}/messages"
+    accept = {"Accept": "text/event-stream"}
+    assert httpx.post(url, json={"text": " "}, headers=accept).status_code == 400
+    missing = httpx.post(f"{server}/api/conversations/{'0' * 32}/messages", json={"text": "hi"}, headers=accept)
+    assert missing.status_code == 404
+    edit_url = f"{url}/{'1' * 32}/edit"
+    with httpx.stream("POST", edit_url, json={"text": "hi"}, headers=accept) as response:
+        events = _sse(response)
+    assert events and events[-1][0] == "error"
+
+
+def test_conversation_search_over_http(server):
+    a = httpx.post(server + "/api/conversations", json={}).json()["id"]
+    httpx.post(f"{server}/api/conversations/{a}/messages", json={"text": "What do solar panels convert?"})
+    assert [c["id"] for c in httpx.get(server + "/api/conversations", params={"q": "solar"}).json()] == [a]
+    assert httpx.get(server + "/api/conversations", params={"q": "nothing-here"}).json() == []

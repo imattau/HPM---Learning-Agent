@@ -6,6 +6,7 @@ import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 from hpm_ai_v2.chat.controller import GroundedActController
 from hpm_ai_v2.chat.planner import GroundedPlanner
@@ -39,25 +40,40 @@ class ChatSession:
         self.realizer = SchemaRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
-    def send(self, user_text: str, *, scope_source_id: str | None = None) -> Reply:
+    def send(
+        self,
+        user_text: str,
+        *,
+        scope_source_id: str | None = None,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> Reply:
+        """Run one turn. ``on_stage`` is told when each real step starts.
+
+        Stages: interpret, plan, verify, realize. They report progress only.
+        """
+        stage = on_stage or (lambda _name: None)
         if not user_text.strip():
             raise ValueError("user_text must not be empty")
         if scope_source_id is not None and scope_source_id not in self.trainer.sources:
             raise ValueError(f"unknown scope_source_id: {scope_source_id}")
         turn_id = uuid.uuid4().hex
+        stage("interpret")
         # A scoped send answers an earlier clarification, so its text is already resolved.
         if scope_source_id is None:
             effective_question, _resolved = self.state.resolve_reference(user_text.strip())
         else:
             effective_question = user_text.strip()
+        stage("plan")
         plan = self.planner.plan(
             turn_id, effective_question,
             user_id=self.state.user_id, scope_source_id=scope_source_id,
         )
         plan = replace(plan, act=self.controller.choose(plan))
+        stage("verify")
         verified = self.verifier.verify(plan)
         if not verified:
             plan = replace(plan, act="abstain", claims=(), reason="grounding_verification_failed")
+        stage("realize")
         reply = Reply(
             turn_id=turn_id,
             text=self.realizer.realize(plan),

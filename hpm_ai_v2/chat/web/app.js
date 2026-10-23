@@ -21,6 +21,44 @@ async function api(method, path, body) {
   return data;
 }
 
+// POST that streams real stage progress (server-sent events) and resolves to the reply.
+async function postStream(path, body, onStage) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `Request failed (${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", reply = null;
+  const handle = (chunk) => {
+    let name = "message", data = "";
+    for (const line of chunk.split("\n")) {
+      if (line.startsWith("event: ")) name = line.slice(7);
+      else if (line.startsWith("data: ")) data += line.slice(6);
+    }
+    if (!data) return;
+    const payload = JSON.parse(data);
+    if (name === "stage") onStage(payload);
+    else if (name === "reply") reply = payload;
+    else if (name === "error") throw new Error(payload.message || "The turn failed.");
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) { handle(buffer.slice(0, idx)); buffer = buffer.slice(idx + 2); }
+    if (done) break;
+  }
+  if (buffer.trim()) handle(buffer);
+  if (!reply) throw new Error("The connection closed before a reply arrived.");
+  return reply;
+}
+
 function el(tag, attrs = {}, ...kids) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -219,12 +257,54 @@ function renderThread(conv) {
   if (!conv || !conv.messages.length) return renderWelcome();
   conv.messages.forEach((m) => thread.append(m.role === "user" ? userNode(m) : assistantNode(m)));
   scrollDown();
+  updateEditLink();
+}
+
+// Only the last user message can be edited, and not one that answered a clarification.
+function updateEditLink() {
+  document.querySelectorAll(".edit-link").forEach((n) => n.remove());
+  const msgs = state.current ? state.current.messages : [];
+  const last = [...msgs].reverse().find((m) => m.role === "user");
+  if (state.busy || !last || last.scope_source_id || !last.turn_id) return;
+  const nodes = $("thread").querySelectorAll(".msg.user");
+  const node = nodes[nodes.length - 1];
+  if (node) node.append(el("button", { class: "link edit-link", type: "button", text: "edit", onclick: () => startEdit(node, last) }));
+}
+
+function startEdit(node, msg) {
+  if (state.busy) return;
+  node.textContent = "";
+  const box = el("textarea", { class: "edit-box", rows: "2", "aria-label": "Edit your message", maxlength: "4000" });
+  box.value = msg.text;
+  const save = el("button", { class: "btn primary", type: "button", text: "Save and resend", onclick: () => submitEdit(msg, box.value) });
+  const cancel = el("button", { class: "btn", type: "button", text: "Cancel", onclick: () => { node.textContent = ""; node.append(el("div", { class: "bubble", text: msg.text })); updateEditLink(); } });
+  box.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitEdit(msg, box.value); } if (e.key === "Escape") cancel.click(); });
+  node.append(box, el("div", { class: "edit-actions" }, cancel, save));
+  box.focus();
+}
+
+async function submitEdit(msg, text) {
+  text = text.trim();
+  if (!text || state.busy) return;
+  state.busy = true;
+  $("send").disabled = true;
+  const messages = state.current.messages;
+  const at = messages.findIndex((m) => m.turn_id === msg.turn_id && m.role === "user");
+  const thread = $("thread");
+  const nodes = [...thread.children];
+  const userIdx = nodes.map((n) => n.classList.contains("user")).lastIndexOf(true);
+  nodes.slice(userIdx).forEach((n) => n.remove());
+  const userMsg = { role: "user", text, scope_source_id: null };
+  thread.append(userNode(userMsg));
+  await runTurn(`/api/conversations/${state.current.id}/messages/${msg.turn_id}/edit`, { text }, userMsg, (reply) => {
+    state.current.messages = messages.slice(0, at).concat([userMsg, reply]);
+  });
 }
 
 function renderList() {
   const list = $("conv-list");
   list.textContent = "";
-  if (!state.convs.length) list.append(el("div", { class: "empty-list", text: "No conversations yet." }));
+  if (!state.convs.length) list.append(el("div", { class: "empty-list", text: searchTerm ? "No matches." : "No conversations yet." }));
   for (const c of state.convs) {
     const row = el("div", { class: "conv" + (state.current && state.current.id === c.id ? " active" : "") },
       el("a", { href: "#", text: c.title, onclick: (e) => { e.preventDefault(); selectConv(c.id); } }),
@@ -235,7 +315,12 @@ function renderList() {
   }
 }
 
-async function refreshList() { state.convs = await api("GET", "/api/conversations"); renderList(); }
+let searchTerm = "";
+async function refreshList() {
+  const q = searchTerm ? `?q=${encodeURIComponent(searchTerm)}` : "";
+  state.convs = await api("GET", `/api/conversations${q}`);
+  renderList();
+}
 
 async function selectConv(id) {
   closeSidebar();
@@ -282,19 +367,29 @@ async function send(text, scope = null, scopeLabel = null) {
       thread.textContent = "";
     } catch (e) { state.busy = false; $("send").disabled = false; return showError(e.message); }
   } else if (!state.current.messages.length) thread.textContent = "";
+  document.querySelectorAll(".edit-link").forEach((n) => n.remove());
   const userMsg = { role: "user", text, scope_source_id: scope };
   thread.append(userNode(userMsg));
-  const typing = el("div", { class: "msg assistant" }, el("div", { class: "typing", text: "Searching sources" }));
+  $("input").value = ""; autosize();
+  await runTurn(`/api/conversations/${state.current.id}/messages`, { text, scope_source_id: scope }, userMsg,
+    (reply) => { state.current.messages.push(userMsg, reply); });
+}
+
+// Shared by send and edit: show real stage progress, then the reply.
+async function runTurn(path, body, userMsg, commit) {
+  const thread = $("thread");
+  const label = el("div", { class: "typing", text: "Working" });
+  const typing = el("div", { class: "msg assistant" }, label);
   thread.append(typing);
   scrollDown();
-  $("input").value = ""; autosize();
+  const finish = () => { state.busy = false; $("send").disabled = false; updateEditLink(); $("input").focus(); };
   try {
-    const reply = await api("POST", `/api/conversations/${state.current.id}/messages`, { text, scope_source_id: scope });
+    const reply = await postStream(path, body, (s) => { label.textContent = s.label; });
     typing.remove();
+    userMsg.turn_id = reply.turn_id;
     const node = assistantNode(reply);
     thread.append(node);
-    state.current.messages.push(userMsg, reply);
-    const finish = () => { state.busy = false; $("send").disabled = false; $("input").focus(); };
+    commit(reply);
     if ($("animate").checked && !matchMedia("(prefers-reduced-motion: reduce)").matches) animate(node, finish);
     else { finish(); scrollDown(); }
     await refreshList();
@@ -303,7 +398,7 @@ async function send(text, scope = null, scopeLabel = null) {
   } catch (err) {
     typing.remove();
     showError(err.message);
-    state.busy = false; $("send").disabled = false;
+    finish();
   }
 }
 
@@ -330,6 +425,11 @@ async function init() {
   $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send($("input").value); } });
   $("input").addEventListener("input", autosize);
   $("new-chat").addEventListener("click", newChat);
+  let searchTimer;
+  $("search").addEventListener("input", (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchTerm = e.target.value.trim(); refreshList().catch((err) => showError(err.message)); }, 200);
+  });
   $("open-sidebar").addEventListener("click", openSidebar);
   $("close-sidebar").addEventListener("click", closeSidebar);
   $("close-panel").addEventListener("click", closePanel);

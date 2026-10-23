@@ -11,7 +11,7 @@ import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from hpm_ai_v2.chat.service import ChatService, NotFound
 
@@ -65,6 +65,27 @@ def make_handler(service: ChatService):
 
         def _error(self, status: int, error: str, message: str):
             self._reply(status, {"error": error, "message": message})
+
+        def _stream_start(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+
+        def _event(self, name: str, payload) -> None:
+            """Write one SSE event; a vanished client must not abort the turn."""
+            if getattr(self, "_client_gone", False):
+                return
+            data = json.dumps(payload, ensure_ascii=False)
+            try:
+                self.wfile.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except OSError:
+                self._client_gone = True
 
         def _host_ok(self) -> bool:
             raw = self.headers.get("Host") or ""
@@ -120,7 +141,8 @@ def make_handler(service: ChatService):
                 elif action == "source":
                     payload = service.source(args[0])
                 elif action == "list_conversations":
-                    payload = service.list_conversations()
+                    query = parse_qs(urlsplit(self.path).query).get("q", [""])[0]
+                    payload = service.list_conversations(query[:200])
                 elif action == "create_conversation":
                     self._json_body()
                     status, payload = 201, service.create_conversation()
@@ -138,10 +160,27 @@ def make_handler(service: ChatService):
                         raise _BadRequest("text must be a non-empty string")
                     if len(text) > 4000:
                         raise _BadRequest("text is too long (4000 characters max)")
+                    scope = body.get("scope_source_id") if action == "send" else None
+                    if scope is not None and not isinstance(scope, str):
+                        raise _BadRequest("scope_source_id must be a string")
+                    streaming = "text/event-stream" in (self.headers.get("Accept") or "")
+                    if streaming:
+                        service.get_conversation(args[0])  # 404 before the stream starts
+                        self._stream_start()
+                        on_stage = lambda name, label: self._event("stage", {"stage": name, "label": label})
+                        try:
+                            if action == "send":
+                                message = service.send(args[0], text, scope_source_id=scope, on_stage=on_stage)
+                            else:
+                                message = service.edit(args[0], args[1], text, on_stage=on_stage)
+                            self._event("reply", message)
+                        except (NotFound, ValueError) as exc:
+                            self._event("error", {"error": "bad_request", "message": str(exc)})
+                        except Exception as exc:
+                            print(f"internal error: {exc!r}", file=sys.stderr)
+                            self._event("error", {"error": "internal_error", "message": "The server hit an unexpected error."})
+                        return
                     if action == "send":
-                        scope = body.get("scope_source_id")
-                        if scope is not None and not isinstance(scope, str):
-                            raise _BadRequest("scope_source_id must be a string")
                         payload = service.send(args[0], text, scope_source_id=scope)
                     else:
                         payload = service.edit(args[0], args[1], text)

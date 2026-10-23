@@ -140,3 +140,30 @@ def test_concurrent_sends_to_different_conversations_stay_consistent(tmp_path):
     for conv_id in ids:
         assert len(service.get_conversation(conv_id)["messages"]) == 6
     assert len((tmp_path / "data" / "events.jsonl").read_text().splitlines()) == 12
+
+
+def test_send_reports_real_stages_in_order(tmp_path):
+    service = _service(tmp_path)
+    conv = service.create_conversation()
+    seen = []
+    service.send(conv["id"], "What do solar panels convert?", on_stage=lambda n, label: seen.append((n, label)))
+    assert [n for n, _ in seen] == ["interpret", "plan", "verify", "realize"]
+    assert all(label for _, label in seen)
+    seen.clear()
+    turn = service.get_conversation(conv["id"])["messages"][0]["turn_id"]
+    service.edit(conv["id"], turn, "What do photovoltaic cells generate?", on_stage=lambda n, label: seen.append(n))
+    assert seen == ["interpret", "plan", "verify", "realize"]
+
+
+def test_search_matches_titles_and_message_text(tmp_path):
+    service = _service(tmp_path)
+    a = service.create_conversation()["id"]
+    b = service.create_conversation()["id"]
+    service.send(a, "What do solar panels convert?")
+    service.send(b, "What do photovoltaic cells generate?")
+    service.rename(b, "Direct current notes")
+    assert {c["id"] for c in service.list_conversations()} == {a, b}
+    assert [c["id"] for c in service.list_conversations("DIRECT")] == [b]       # title, case-insensitive
+    assert [c["id"] for c in service.list_conversations("electricity")] == [a]  # assistant reply text
+    assert service.list_conversations("zzz-no-match") == []
+    assert len(service.list_conversations("   ")) == 2

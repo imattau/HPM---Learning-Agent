@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from hpm_ai_v2.chat.presentation import UngroundedClaim, to_blocks
 from hpm_ai_v2.chat.schema import Reply
@@ -21,6 +22,12 @@ from hpm_ai_v2.chat.state import ConversationState
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _TITLE_CHARS = 60
+STAGE_LABELS = {
+    "interpret": "Reading your question",
+    "plan": "Searching sources and planning",
+    "verify": "Checking citations",
+    "realize": "Writing the reply",
+}
 
 
 class NotFound(KeyError):
@@ -76,13 +83,21 @@ class ChatService:
             self._write(record)
         return self._summary(record)
 
-    def list_conversations(self) -> list[dict]:
+    def list_conversations(self, query: str | None = None) -> list[dict]:
+        """Newest first. ``query`` keeps conversations whose title or message text contains it."""
+        needle = (query or "").strip().lower()
         rows = []
         for path in self._dir.glob("*.json"):
             try:
-                rows.append(self._summary(json.loads(path.read_text(encoding="utf-8"))))
+                record = json.loads(path.read_text(encoding="utf-8"))
+                row = self._summary(record)
             except (OSError, ValueError, KeyError):
                 continue
+            if needle and needle not in row["title"].lower() and not any(
+                needle in str(m.get("text", "")).lower() for m in record.get("messages", [])
+            ):
+                continue
+            rows.append(row)
         return sorted(rows, key=lambda row: row["updated_at"], reverse=True)
 
     def get_conversation(self, conv_id: str) -> dict:
@@ -108,12 +123,27 @@ class ChatService:
             self._sessions.pop(conv_id, None)
 
     # -- turns --------------------------------------------------------------------
-    def send(self, conv_id: str, text: str, *, scope_source_id: str | None = None) -> dict:
+    def send(
+        self,
+        conv_id: str,
+        text: str,
+        *,
+        scope_source_id: str | None = None,
+        on_stage: Callable[[str, str], None] | None = None,
+    ) -> dict:
+        """``on_stage(name, label)`` is called as each real step of the turn starts."""
         with self._lock:
             record = self._read(conv_id)
-            return self._send_locked(record, text, scope_source_id)
+            return self._send_locked(record, text, scope_source_id, on_stage)
 
-    def edit(self, conv_id: str, turn_id: str, text: str) -> dict:
+    def edit(
+        self,
+        conv_id: str,
+        turn_id: str,
+        text: str,
+        *,
+        on_stage: Callable[[str, str], None] | None = None,
+    ) -> dict:
         """Replace a user turn: drop it and everything after it, then re-send."""
         with self._lock:
             record = self._read(conv_id)
@@ -131,12 +161,15 @@ class ChatService:
             self._sessions.pop(conv_id, None)
             self._append_event({"event": "chat_turns_edited", "session_id": record["session"]["session_id"],
                                 "user_id": self.user_id, "dropped_turn_ids": dropped})
-            return self._send_locked(record, text, None)
+            return self._send_locked(record, text, None, on_stage)
 
     # -- internals ----------------------------------------------------------------
-    def _send_locked(self, record: dict, text: str, scope_source_id: str | None) -> dict:
+    def _send_locked(
+        self, record: dict, text: str, scope_source_id: str | None, on_stage=None
+    ) -> dict:
         session = self._session_for(record)
-        reply = session.send(text, scope_source_id=scope_source_id)
+        relay = (lambda name: on_stage(name, STAGE_LABELS[name])) if on_stage else None
+        reply = session.send(text, scope_source_id=scope_source_id, on_stage=relay)
         now = time.time()
         user_message = {
             "role": "user", "turn_id": reply.turn_id, "text": text.strip(),
