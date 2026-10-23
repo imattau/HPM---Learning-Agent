@@ -1,0 +1,15 @@
+{"kind":"source","source_id":"ml","title":"Machine learning","text":"Machine learning trains statistical models on labeled data. Neural networks with many layers are used for deep learning."}
+{"kind":"source","source_id":"brain","title":"Neuroscience","text":"Biological neural networks in the brain communicate through electrochemical signals across neurons and synapses."}
+{"kind":"source","source_id":"solar","title":"Solar power","text":"Photovoltaic panels convert sunlight into electricity. Batteries can store solar power for use after sunset."}
+{"kind":"source","source_id":"astronomy","title":"Astronomy","text":"The solar system contains the Sun, planets, moons, and asteroids. Planets orbit stars through gravitational attraction."}
+{"kind":"source","source_id":"python","title":"Python programming","text":"Python is a programming language used in data science. Its readable syntax and package ecosystem support many applications."}
+{"kind":"source","source_id":"snake","title":"Pythons","text":"Pythons are non-venomous snakes that subdue prey by constriction. They can sense warm animals in darkness."}
+{"kind":"episode","episode_id":"train-brain-1","split":"train","task_type":"grounded_qa","question":"brain neurons synapses biological signals","evidence_id":"brain","expected_answer":"Biological neural networks communicate through signals."}
+{"kind":"episode","episode_id":"train-solar-1","split":"train","task_type":"grounded_qa","question":"photovoltaic sunlight electricity panels","evidence_id":"solar","expected_answer":"Photovoltaic panels convert sunlight into electricity."}
+{"kind":"episode","episode_id":"train-python-correction","split":"train","task_type":"correction","question":"Python language syntax packages software","evidence_id":"python","expected_answer":"Python is a programming language.","correction_of":"previous-ambiguous-python-answer"}
+{"kind":"episode","episode_id":"validation-brain","split":"validation","task_type":"grounded_qa","question":"electrochemical communication synapses neurons","evidence_id":"brain"}
+{"kind":"episode","episode_id":"validation-unknown","split":"validation","task_type":"abstain","question":"quasars emit gamma rays","evidence_id":null}
+{"kind":"episode","episode_id":"test-transfer-brain","split":"test","task_type":"grounded_qa","question":"neurons connect through synaptic plasticity","evidence_id":"brain","expected_answer":"Biological neural networks in the brain communicate through electrochemical signals across neurons and synapses."}
+{"kind":"episode","episode_id":"test-transfer-solar","split":"test","task_type":"grounded_qa","question":"renewable panels generate power from sunlight","evidence_id":"solar","expected_answer":"Photovoltaic panels convert sunlight into electricity."}
+{"kind":"episode","episode_id":"test-transfer-python","split":"test","task_type":"grounded_qa","question":"Python readable code data applications","evidence_id":"python","expected_answer":"Python is a programming language used in data science."}
+{"kind":"episode","episode_id":"test-unknown","split":"test","task_type":"abstain","question":"quasars emit gamma rays","evidence_id":null}
