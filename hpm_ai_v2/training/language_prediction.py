@@ -533,7 +533,7 @@ class HierarchicalNextUnitModel:
         self._build_hfn_nodes()
         progress("recompute_observer_reliability", hfn_nodes=len(self.nodes))
         self._fit_pattern_observer()
-        if self.class_nodes_enabled:
+        if self.class_nodes_enabled and self.class_lambda > 0.0:
             for node in self.word_level_nodes.values():
                 self.observer.set_weight(node.id, 1.0)
         progress("train_observer_weights", objective="training_leave_one_event_out_next_unit_cross_entropy")
@@ -2445,6 +2445,11 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
                                       class_nodes=class_nodes).fit(
         (row["text"] for row in split["train"]), workers=workers,
     )
+    # Class-enabled fitting temporarily uses flat word weights while class
+    # selection is unresolved. If validation rejects every class, restore the
+    # ordinary HFN Observer initialization before the shared training pass.
+    if class_nodes and model.class_lambda <= 0.0:
+        model._fit_pattern_observer()
     training_groups = sorted({row.get("group_id", row["id"]) for row in split["train"]})
     model.training_manifest = {
         "corpora": [str(path) for path in corpus_paths], "seed": seed,

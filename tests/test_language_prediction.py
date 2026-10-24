@@ -168,6 +168,21 @@ def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
         assert hpm_probs == pytest.approx(flat_probs)
 
 
+def test_no_class_fallback_restores_ordinary_observer_training_state():
+    texts = [f"the {noun} {verb}" for noun in ("cat", "dog", "bird")
+             for verb in ("runs", "sleeps", "jumps")]
+    plain = HierarchicalNextUnitModel(max_order=2).fit(texts)
+    candidate = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
+    assert candidate.class_lambda == 0.0
+
+    # run_pilot performs this reset before its shared Observer training pass
+    # when validation chooses the no-class candidate.
+    candidate._fit_pattern_observer()
+    plain_training = plain.train_observer_weights(texts)
+    candidate_training = candidate.train_observer_weights(texts)
+    assert candidate_training["selected_weights"] == plain_training["selected_weights"]
+
+
 def test_sentence_boundaries_reset_context_and_create_linked_nodes():
     text = "cats chase mice. dogs flee birds!"
     model = HierarchicalNextUnitModel(max_order=3).fit([text])
@@ -652,6 +667,24 @@ def test_pilot_persists_checkpoint_and_terminal_status(tmp_path):
     assert checkpoint.character_word_mix == result["character_to_word_composition"]["selected_mix"]
     assert "normalized character spelling likelihood" in checkpoint.training_manifest["objective"]
     assert "training-only leave-one-event-out loss" in checkpoint.training_manifest["objective"]
+
+
+def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path):
+    corpus = tmp_path / "fallback-corpus.jsonl"
+    corpus.write_text("\n".join(
+        json.dumps({"source_id": f"d{i}",
+                    "text": f"the {('cat', 'dog', 'bird')[i % 3]} "
+                            f"{('runs', 'sleeps', 'jumps')[i % 3]} in garden"})
+        for i in range(48)
+    ), encoding="utf-8")
+    plain = run_pilot(corpus, tmp_path / "plain", seed=17, max_order=2)
+    candidate = run_pilot(corpus, tmp_path / "candidate", seed=17,
+                          max_order=2, class_nodes=True)
+
+    assert candidate["class_node_training"]["selected_lambda"] == 0.0
+    assert candidate["observer_weights"]["word_context_orders"] == \
+        plain["observer_weights"]["word_context_orders"]
+    assert candidate["hpm"]["test"] == plain["hpm"]["test"]
 
 
 def test_language_pilot_cli_exits_with_compact_summary(tmp_path):
