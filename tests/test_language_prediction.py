@@ -1,4 +1,5 @@
 import json
+import math
 import subprocess
 import sys
 from collections import Counter
@@ -607,13 +608,18 @@ def test_language_pilot_cli_exits_with_compact_summary(tmp_path):
     out = tmp_path / "cli-run"
     completed = subprocess.run(
         [sys.executable, "-m", "hpm_ai_v2.experiments.train_language_pilot", "--corpus", str(corpus),
-         "--output", str(out), "--order", "1", "--workers", "2", "--min-word-count", "2"],
+         "--output", str(out), "--order", "1", "--workers", "2", "--min-word-count", "2",
+         "--class-nodes"],
         check=True, capture_output=True, text=True, timeout=30,
     )
     summary = json.loads(completed.stdout)
     assert summary["state"] == "complete"
     assert summary["min_word_count"] == 2
     assert summary["checkpoint_roundtrip"]["word_test_metrics_match"]
+    assert summary["class_node_training"]["enabled"] is True
+    assert summary["class_node_training"]["class_count"] == 0
+    assert summary["class_node_training"]["selected_tau"] is None
+    assert math.isfinite(summary["hpm_test_surface_cross_entropy_nats"])
     assert (out / "metrics.json").is_file()
     assert (out / "hpm_language_checkpoint.json").is_file()
 

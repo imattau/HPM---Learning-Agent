@@ -16,11 +16,13 @@ def main() -> None:
                         help="bounded worker count for document counting and independent validation/evaluation")
     parser.add_argument("--min-word-count", type=int, default=1,
                         help="map training words below this frequency to <unk> in HPM and matched controls")
+    parser.add_argument("--class-nodes", action="store_true",
+                        help="enable opt-in HFN word-class nodes; reports validation selection and surface metrics")
     args = parser.parse_args()
     corpora = args.corpus if len(args.corpus) > 1 else args.corpus[0]
     result = run_pilot(corpora, args.output, args.seed, args.order, args.workers,
-                       args.min_word_count)
-    print(json.dumps({
+                       args.min_word_count, class_nodes=args.class_nodes)
+    summary = {
         "state": "complete",
         "metrics": f"{args.output}/metrics.json",
         "checkpoint": f"{args.output}/hpm_language_checkpoint.json",
@@ -31,7 +33,11 @@ def main() -> None:
         "selected_character_alpha": result["selected_character_alpha"],
         "hpm_test_cross_entropy_nats": result["hpm"]["test"]["cross_entropy_nats"],
         "checkpoint_roundtrip": result["checkpoint_roundtrip"],
-    }, indent=2))
+    }
+    if args.class_nodes:
+        summary["class_node_training"] = result["class_node_training"]
+        summary["hpm_test_surface_cross_entropy_nats"] = result["hpm"]["test"]["surface_cross_entropy_nats"]
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":

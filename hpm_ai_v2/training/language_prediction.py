@@ -2305,8 +2305,14 @@ class HierarchicalNextUnitModel:
 
 
 def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, seed: int = 17,
-              max_order: int = 3, workers: int = 1, min_word_count: int = 1) -> dict:
-    """Train and evaluate against unigram/bigram/trigram count baselines."""
+              max_order: int = 3, workers: int = 1, min_word_count: int = 1,
+              *, class_nodes: bool = False) -> dict:
+    """Train and evaluate against n-gram baselines, optionally enabling HFN classes.
+
+    The held-out HPM report always includes both vocabulary-mapped and exact
+    surface-word cross-entropy. Class-node runs retain the same evaluation and
+    additionally record the training-only class selection decision.
+    """
     from hpm_ai_v2.training.ngram_baseline import NGramBaseline
     if workers < 1 or min_word_count < 1:
         raise ValueError("workers and min_word_count must be at least 1")
@@ -2335,7 +2341,8 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
     status("read_corpora", "complete", source_rows=len(rows),
            split_documents={name: len(items) for name, items in split.items()})
     status("fit", "running", source_rows=len(rows), split_documents={name: len(items) for name, items in split.items()})
-    model = HierarchicalNextUnitModel(max_order=max_order, min_word_count=min_word_count).fit(
+    model = HierarchicalNextUnitModel(max_order=max_order, min_word_count=min_word_count,
+                                      class_nodes=class_nodes).fit(
         (row["text"] for row in split["train"]), workers=workers,
     )
     training_groups = sorted({row.get("group_id", row["id"]) for row in split["train"]})
@@ -2350,6 +2357,8 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
         "tokenizer": "unicode-regex-word-punctuation-lowercase-v1",
         "min_word_count": min_word_count,
     }
+    if class_nodes:
+        model.training_manifest["class_nodes_enabled"] = True
     train_texts = [row["text"] for row in split["train"]]
     status("observer_training", "running", training_documents=len(train_texts), workers=1)
     word_observer_training = model.train_observer_weights(
@@ -2439,6 +2448,16 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
               "hpm": {"validation": hpm_validation},
               "character_model": {"validation": character_validation},
               "baselines": {}}
+    if class_nodes:
+        result["class_node_training"] = {
+            "enabled": True,
+            "selected_tau": model.class_tau,
+            "selected_lambda": model.class_lambda,
+            "class_count": len(model.class_node_registry),
+            "member_word_count": len(model.class_labels),
+            "selection": model.class_selection,
+            "test_metrics_use": "hpm.test includes vocabulary_mapped and exact_surface_word_and_eos target spaces",
+        }
     baseline_models = {}
     for order in range(1, max_order + 1):
         baseline = NGramBaseline(order=order, min_word_count=min_word_count).fit(
