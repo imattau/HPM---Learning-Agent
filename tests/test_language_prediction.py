@@ -69,6 +69,11 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
     assert model.class_nodes_enabled
     assert model.class_node_registry
     assert all(len(node.metadata["members"]) >= 2 for node in model.class_node_registry.values())
+    assert all(node.relation_type == "distributional_substitution_class"
+               for node in model.class_node_registry.values())
+    assert all({node.id for node in group.inputs}
+               == {model.word_nodes[word].id for word in group.metadata["members"]}
+               for group in model.class_node_registry.values())
     assert all(child.metadata["type"] == "word"
                for node in model.class_node_registry.values() for child in node.children())
     assert all(child.metadata.get("follower_profile")
@@ -87,11 +92,25 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
         assert node.sigma == pytest.approx(
             np.var([child.mu for child in children], axis=0) + .05 ** 2
         )
-    # A class expert must contribute its direct probability to unseen targets;
-    # seen-mass conservation silently erased that signal as word counts grew.
     context = ("cat",)
     class_context = tuple(model.class_labels.get(word, word) for word in context)
+    class_context_node = model.class_context_nodes[class_context]
+    assert class_context_node.metadata["type"] == "class_conditioned_next_unit_distribution"
+    assert class_context_node in model.nodes.values()
+    assert class_context_node.relation_type == "next_unit_given_class_context"
+    assert class_context_node.inputs == [model.class_node_registry[class_id]]
+    assert any(child.id == class_id for child in class_context_node.children())
+    assert class_context_node.outputs
+    assert any(node.id == class_context_node.id for node in model.pattern_forest.active_nodes())
+    observer_training = model.train_observer_weights(texts, passes=1, max_events=256)
+    assert observer_training["training_events"] > 0
+    assert model.class_context_nodes[class_context].relation_type == "next_unit_given_class_context"
+    # A class expert must contribute its direct probability to unseen targets;
+    # seen-mass conservation silently erased that signal as word counts grew.
     model.class_context_counts[class_context]["runs"] += 10
+    class_context_node.metadata["target_counts"]["runs"] = (
+        class_context_node.metadata["target_counts"].get("runs", 0) + 10
+    )
     plain = np.asarray([model._weighted_probability(context, word, apply_class_mix=False)
                         for word in model.vocab])
     class_distribution = model._class_distribution_for_context(class_context)
@@ -111,6 +130,13 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
     assert restored.class_lambda == model.class_lambda
     assert restored.class_profile_features == model.class_profile_features
     assert restored.class_selection == model.class_selection
+    restored_class = restored.class_node_registry[class_id]
+    assert restored_class.relation_type == "distributional_substitution_class"
+    assert len(restored_class.inputs) == len(restored_class.metadata["members"])
+    restored_class_context = restored.class_context_nodes[class_context]
+    assert restored_class_context.relation_type == "next_unit_given_class_context"
+    assert restored_class_context.inputs[0].id == class_id
+    assert restored_class_context.outputs
     assert restored.predict_proba(["cat"]) == pytest.approx(model.predict_proba(["cat"]))
 
 

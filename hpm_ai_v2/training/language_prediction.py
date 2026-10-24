@@ -311,6 +311,7 @@ class HierarchicalNextUnitModel:
         self.char_nodes: dict[str, HFN] = {}
         self.word_nodes: dict[str, HFN] = {}
         self.context_nodes: dict[tuple[str, ...], HFN] = {}
+        self.class_context_nodes: dict[tuple[str, ...], HFN] = {}
         self.phrase_nodes: dict[tuple[str, ...], HFN] = {}
         self.sentence_nodes: dict[str, HFN] = {}
         self.sentence_counts: Counter[str] = Counter()
@@ -962,6 +963,7 @@ class HierarchicalNextUnitModel:
         self.char_nodes.clear()
         self.word_nodes.clear()
         self.context_nodes.clear()
+        self.class_context_nodes.clear()
         self.phrase_nodes.clear()
         self.char_context_nodes.clear()
         self.sentence_nodes.clear()
@@ -1012,9 +1014,15 @@ class HierarchicalNextUnitModel:
                              "follower_profile_features": list(self.class_profile_features),
                              "projected_profile_mean": mu.tolist(),
                              "projected_profile_variance": profile_variance.tolist()}
+            member_nodes = [self.word_nodes[word] for word in members if word in self.word_nodes]
             for word in members:
                 if word in self.word_nodes:
                     node.add_child(self.word_nodes[word], relation="member")
+            node.relation_type = "distributional_substitution_class"
+            node.relation_params = {"profile": "idf_weighted_positive_pmi_of_followers",
+                                   "cluster_threshold": self.class_tau,
+                                   "member_count": len(member_nodes)}
+            node.add_relation(inputs=member_nodes)
             self.class_node_registry[class_id] = self.nodes[class_id] = node
         for context, targets in self.char_counts.items():
             total = sum(targets.values())
@@ -1048,6 +1056,40 @@ class HierarchicalNextUnitModel:
             self.context_nodes[context] = self.nodes[node.id] = node
             if context:
                 self.phrase_nodes[context] = node
+        # A pooled class context is itself a predictive HFN pattern. It links
+        # the abstract class nodes and any exact word nodes in its slot, and
+        # stores pooled follower sufficient statistics on the node. The
+        # dictionary is only a fast index for these graph patterns.
+        for context, targets in self.class_context_counts.items():
+            if not context:
+                continue
+            total = sum(targets.values())
+            entropy = (-sum((count / total) * math.log(count / total)
+                            for count in targets.values()) if total else 0.0)
+            categorical_variance = (1.0 - sum((count / total) ** 2
+                                               for count in targets.values()) if total else 1.0)
+            node = HFN(np.array([entropy, math.log1p(total), 0.0, 0.0]),
+                       np.array([max(categorical_variance, 1e-9),
+                                 1.0 / (total + 1.0), 1e-6, 1e-6]),
+                       id=self._safe_id("class_context_", "\x1f".join(context)), use_diag=True)
+            node.metadata = {"type": "class_conditioned_next_unit_distribution",
+                             "context": list(context), "observations": total,
+                             "target_counts": dict(targets),
+                             "sigma_dimensions": ["categorical_gini_variance", "inverse_n_plus_one"]}
+            context_nodes = []
+            for token in context:
+                child = self.class_node_registry.get(token) or self.word_nodes.get(token)
+                if child is not None:
+                    node.add_child(child)
+                    context_nodes.append(child)
+            node.relation_type = "next_unit_given_class_context"
+            node.relation_params = {"context_order": len(context),
+                                   "context_slots": list(range(len(context)))}
+            node.add_relation(
+                inputs=context_nodes,
+                outputs=[self.word_nodes[target] for target in targets if target in self.word_nodes],
+            )
+            self.class_context_nodes[context] = self.nodes[node.id] = node
         for sentence, count in self.sentence_counts.items():
             words = tokenize(sentence)
             node = HFN(np.array([float(len(words)), math.log1p(count), 0.0, 0.0]),
@@ -1105,6 +1147,9 @@ class HierarchicalNextUnitModel:
         for context, node in self.context_nodes.items():
             self.word_level_nodes[min(len(context), self.max_order - 1)].add_child(
                 node, relation="weights_phrase_pattern")
+        for context, node in self.class_context_nodes.items():
+            self.word_level_nodes[min(len(context), self.max_order - 1)].add_child(
+                node, relation="weights_class_phrase_pattern")
         for char, node in self.char_nodes.items():
             self.char_level_nodes[0].add_child(node, relation="weights_character_pattern")
         for context, node in self.char_context_nodes.items():
@@ -1578,7 +1623,7 @@ class HierarchicalNextUnitModel:
                            + (1.0 - local_mass) * probability)
         if not character and apply_class_mix and self.class_lambda > 0:
             class_context = tuple(self.class_labels.get(word, word) for word in context)
-            if class_context != context and self.class_context_counts.get(class_context):
+            if class_context != context and class_context in self.class_context_nodes:
                 weight_key = tuple(self.observer.get_weight(node.id)
                                    for _, node in sorted(level_nodes.items()))
                 cache_key = (context, weight_key, self.class_lambda, self.alpha)
@@ -2096,8 +2141,8 @@ class HierarchicalNextUnitModel:
             plain = {word: local_mass * counts.get(word, 0) / total + (1.0 - local_mass) * base[word]
                      for word in self.vocab}
         class_context = tuple(self.class_labels.get(word, word) for word in context)
-        class_counts = self.class_context_counts.get(class_context)
-        if not class_counts or class_context == context or self.class_lambda <= 0:
+        if (class_context == context or self.class_lambda <= 0
+                or class_context not in self.class_context_nodes):
             return plain
         class_dist = self._class_distribution_for_context(class_context)
         lam = self.class_lambda
@@ -2111,7 +2156,9 @@ class HierarchicalNextUnitModel:
             denom = sum(counts.values()) + self.alpha * len(self.vocab)
             return {word: (counts.get(word, 0) + self.alpha) / denom for word in self.vocab}
         base = self._class_distribution_for_context(context[1:])
-        counts = self.class_context_counts.get(context, Counter())
+        node = self.class_context_nodes.get(context)
+        counts = (node.metadata.get("target_counts", {})
+                  if node is not None else self.class_context_counts.get(context, Counter()))
         total = sum(counts.values())
         if not total:
             return base
