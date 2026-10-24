@@ -103,9 +103,9 @@ class L5MetaMonitor:
             high = low + 1e-8
         self.theta_low, self.theta_high = low, high
         self.calibrated = True
-        # Calibration residuals establish thresholds; they are not task events.
-        self._surprises = []
-        self._surprise_ewma = None
+        # Calibration inputs set thresholds but are not injected into task
+        # history. Preserve any task events already observed prequentially;
+        # reset() remains the task-boundary operation that clears those.
         return {"observations": len(new_surprises), "cumulative_observations": len(surprises),
                 "lower_quantile": self.lower_quantile,
                 "upper_quantile": self.upper_quantile, "theta_low": self.theta_low,
