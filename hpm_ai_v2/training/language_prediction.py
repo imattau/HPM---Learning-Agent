@@ -432,9 +432,6 @@ class HierarchicalNextUnitModel:
         self._fit_pattern_observer(progress_callback=progress_callback)
         report("observer_initialization", state="complete", hfn_nodes=len(self.nodes),
                forest_nodes=len(self.pattern_forest) if self.pattern_forest else 0)
-        if self.class_nodes_enabled:
-            for node in self.word_level_nodes.values():
-                self.observer.set_weight(node.id, 1.0)
         return self
 
     def _rebuild_mapped_word_counts(self) -> None:
@@ -572,9 +569,6 @@ class HierarchicalNextUnitModel:
         self._build_hfn_nodes()
         progress("recompute_observer_reliability", hfn_nodes=len(self.nodes))
         self._fit_pattern_observer()
-        if self.class_nodes_enabled and self.class_lambda > 0.0:
-            for node in self.word_level_nodes.values():
-                self.observer.set_weight(node.id, 1.0)
         progress("train_observer_weights", objective="training_leave_one_event_out_next_unit_cross_entropy")
         word_training = self.train_observer_weights(
             [*texts, *replay_texts], character=False,

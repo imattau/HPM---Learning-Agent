@@ -215,15 +215,65 @@ def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
     assert candidate.class_selection is not None
     assert candidate.class_lambda == 0.0
     assert candidate.class_selection["selection_reason"].startswith("no-class fallback")
-    flat = NGramBaseline(order=3, alpha=.1, smoothing="interpolated").fit(texts)
+    plain = HierarchicalNextUnitModel(max_order=3).fit(texts)
     contexts = {()}
     for text in texts[:32]:
         sequence = [BOUNDARY, BOUNDARY] + tokenize(text) + [BOUNDARY]
         contexts.update(tuple(sequence[max(0, i - 2):i]) for i in range(2, len(sequence)))
     for context in contexts:
         hpm_probs = dict(zip(candidate.vocab, candidate.predict_proba(context)))
-        flat_probs = dict(zip(flat.vocab, flat.predict_proba(context)))
-        assert hpm_probs == pytest.approx(flat_probs)
+        plain_probs = dict(zip(plain.vocab, plain.predict_proba(context)))
+        assert hpm_probs == pytest.approx(plain_probs)
+
+
+def test_class_enabled_no_class_fallback_keeps_reliability_initialized_observer_weights(monkeypatch):
+    texts = [
+        "cats chase mice", "cats chase birds", "dogs chase cats", "cats sleep",
+        "birds fly high", "birds eat seeds", "fish swim deep", "dogs sleep",
+    ] * 20
+    plain = HierarchicalNextUnitModel(max_order=3).fit(texts)
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_validation_class_choice",
+        lambda _self: (None, 0.0),
+    )
+    class_enabled = HierarchicalNextUnitModel(max_order=3, class_nodes=True).fit(texts)
+    assert class_enabled.class_lambda == 0.0
+    assert not class_enabled.class_node_registry
+    plain_weights = {order: plain.observer.get_weight(node.id)
+                     for order, node in plain.word_level_nodes.items()}
+    class_weights = {order: class_enabled.observer.get_weight(node.id)
+                     for order, node in class_enabled.word_level_nodes.items()}
+    assert class_weights == pytest.approx(plain_weights)
+    assert any(weight != 1.0 for weight in class_weights.values())
+
+
+def test_partial_fit_does_not_reset_active_class_observer_weights_to_one(monkeypatch):
+    texts = ( ["cat sleeps"] * 3 + ["cat purrs"] * 3
+             + ["dog sleeps"] * 3 + ["dog purrs"] * 3
+             + ["bird runs"] * 3 + ["bird flies"] * 3
+             + ["fish runs"] * 3 + ["fish flies"] * 3 )
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_validation_class_choice",
+        lambda _self: (0.9, 0.5),
+    )
+    model = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
+    assert model.class_lambda > 0.0
+    assert model.class_node_registry
+    captured = {}
+
+    def capture_weights(_documents, *, character=False, **_kwargs):
+        if not character:
+            captured.update({order: model.observer.get_weight(node.id)
+                             for order, node in model.word_level_nodes.items()})
+        return {"unit": "character" if character else "word", "training_events": 0}
+
+    monkeypatch.setattr(model, "train_observer_weights", capture_weights)
+    model.partial_fit(["horse sleeps", "horse purrs"])
+    model._set_pattern_observer_reliability()
+    expected = {order: model.observer.get_weight(node.id)
+                for order, node in model.word_level_nodes.items()}
+    assert captured == pytest.approx(expected)
+    assert any(weight != 1.0 for weight in captured.values())
 
 
 def test_class_validation_clusters_once_per_threshold(monkeypatch):
