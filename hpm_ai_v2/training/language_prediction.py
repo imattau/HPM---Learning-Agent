@@ -851,21 +851,32 @@ class HierarchicalNextUnitModel:
         best_seen_delta = None
         scored_candidates = []
         candidate_diagnostics = []
+        # Candidate lambdas share the same word distribution and (for a given
+        # tau) the same pooled class distribution. Reusing both avoids
+        # rebuilding tables and recursively rescoring every validation event
+        # six times per clustering threshold.
+        counts: dict[tuple[str, ...], Counter] = defaultdict(Counter)
+        for context, targets in train_tables.items():
+            mapped_context = tuple(self._map(word) for word in context)
+            for target, count in targets.items():
+                counts[mapped_context][self._map(target)] += count
+        pooled_by_tau: dict[float | None, dict[tuple[str, ...], Counter]] = {}
+        probability_cache_by_tau: dict[
+            float | None, dict[tuple[tuple[str, ...], str, bool], float]
+        ] = {}
         for tau, lam in candidates:
             labels = labels_by_tau.get(tau, {}) if lam > 0 else {}
-            pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
-            for context, targets in train_tables.items():
-                class_context = self._abstract_prediction_slot(context, labels)
-                if context and class_context != context:
-                    for target, count in targets.items():
-                        pooled[class_context][self._map(target)] += count
-            counts: dict[tuple[str, ...], Counter] = defaultdict(Counter)
-            for context, targets in train_tables.items():
-                mapped_context = tuple(self._map(word) for word in context)
-                for target, count in targets.items():
-                    counts[mapped_context][self._map(target)] += count
-
-            probability_cache: dict[tuple[tuple[str, ...], str, bool], float] = {}
+            if tau not in pooled_by_tau:
+                pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
+                for context, targets in train_tables.items():
+                    class_context = self._abstract_prediction_slot(context, labels)
+                    if context and class_context != context:
+                        for target, count in targets.items():
+                            pooled[class_context][self._map(target)] += count
+                pooled_by_tau[tau] = pooled
+                probability_cache_by_tau[tau] = {}
+            pooled = pooled_by_tau[tau]
+            probability_cache = probability_cache_by_tau[tau]
 
             def dist(context: tuple[str, ...], target: str, class_mode: bool = False) -> float:
                 """Return one target probability without materializing |vocab| values.
