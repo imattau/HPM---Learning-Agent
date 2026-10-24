@@ -385,6 +385,23 @@ def test_checkpoint_roundtrip_preserves_word_and_character_predictions(tmp_path)
     }
 
 
+def test_character_evaluation_reuses_top_prediction_for_repeated_contexts(monkeypatch):
+    model = HierarchicalNextUnitModel(max_order=3).fit(["ab" * 80, "ba" * 80])
+    original = model._char_probability
+    calls = 0
+
+    def counted(context, target, vocab_size):
+        nonlocal calls
+        calls += 1
+        return original(context, target, vocab_size)
+
+    monkeypatch.setattr(model, "_char_probability", counted)
+    metrics = model.evaluate_characters(["ab" * 160])
+    # Every event still gets a likelihood score, but repeated contexts reuse
+    # the top-character ranking rather than rescoring all candidates.
+    assert calls < metrics["characters"] * 2
+
+
 def test_observer_weights_context_levels_and_changes_predictions():
     texts = ["cats chase mice", "cats chase birds", "dogs chase cats", "cats sleep"]
     hpm = HierarchicalNextUnitModel(max_order=3, alpha=10).fit(texts)
@@ -732,7 +749,7 @@ def test_pilot_persists_checkpoint_and_terminal_status(tmp_path):
     assert "training-only leave-one-event-out loss" in checkpoint.training_manifest["objective"]
 
 
-def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path):
+def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path, monkeypatch):
     corpus = tmp_path / "fallback-corpus.jsonl"
     corpus.write_text("\n".join(
         json.dumps({"source_id": f"d{i}",
@@ -740,10 +757,22 @@ def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path):
                             f"{('runs', 'sleeps', 'jumps')[i % 3]} in garden"})
         for i in range(48)
     ), encoding="utf-8")
+    initialize_calls = 0
+    original_initialize = HierarchicalNextUnitModel._fit_pattern_observer
+
+    def counted_initialize(self, **kwargs):
+        nonlocal initialize_calls
+        initialize_calls += 1
+        return original_initialize(self, **kwargs)
+
+    monkeypatch.setattr(HierarchicalNextUnitModel, "_fit_pattern_observer", counted_initialize)
     plain = run_pilot(corpus, tmp_path / "plain", seed=17, max_order=2)
     candidate = run_pilot(corpus, tmp_path / "candidate", seed=17,
                           max_order=2, class_nodes=True)
 
+    # The class fallback reuses the existing graph and only resets Observer
+    # reliability weights; it must not initialize the forest a second time.
+    assert initialize_calls == 2
     assert candidate["class_node_training"]["selected_lambda"] == 0.0
     assert candidate["observer_weights"]["word_context_orders"] == \
         plain["observer_weights"]["word_context_orders"]

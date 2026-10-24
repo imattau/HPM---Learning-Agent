@@ -1252,6 +1252,12 @@ class HierarchicalNextUnitModel:
         self, *, progress_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self._initialize_pattern_observer(progress_callback=progress_callback)
+        self._set_pattern_observer_reliability()
+
+    def _set_pattern_observer_reliability(self) -> None:
+        """Update level weights on the existing graph without rebuilding it."""
+        if self.observer is None:
+            raise RuntimeError("pattern Observer must be initialized before setting reliability")
         for registry, counts_table in ((self.word_level_nodes, self.counts),
                                         (self.char_level_nodes, self.char_counts)):
             outcomes = [[0, 0] for _ in range(self.max_order)]
@@ -1899,6 +1905,7 @@ class HierarchicalNextUnitModel:
         """Held-out next-character score from the same encoder-free learner."""
         vocab_size = len(self.char_vocab)
         nll = correct = count = 0
+        top_character_by_context: dict[tuple[str, ...], str | None] = {}
         for text in documents:
             for sentence in split_sentences(text):
                 seq = [BOUNDARY] * (self.max_order - 1) + list(sentence.lower()) + [BOUNDARY]
@@ -1909,15 +1916,21 @@ class HierarchicalNextUnitModel:
                     context = tuple(ch if ch in self.char_vocab else UNK for ch in context)
                     p = self._char_probability(context, target, vocab_size)
                     nll -= math.log(max(p, 1e-12))
-                    candidates = set()
-                    probe = context
-                    while True:
-                        candidates.update(ch for ch, _ in self.char_counts.get(probe, Counter()).most_common(1))
-                        if not probe:
-                            break
-                        probe = probe[1:]
-                    ranked = sorted(candidates, key=lambda ch: self._char_probability(context, ch, vocab_size), reverse=True)
-                    correct += int(bool(ranked) and ranked[0] == target)
+                    if context not in top_character_by_context:
+                        candidates = set()
+                        probe = context
+                        while True:
+                            candidates.update(ch for ch, _ in self.char_counts.get(probe, Counter()).most_common(1))
+                            if not probe:
+                                break
+                            probe = probe[1:]
+                        ranked = sorted(
+                            candidates,
+                            key=lambda ch: self._char_probability(context, ch, vocab_size),
+                            reverse=True,
+                        )
+                        top_character_by_context[context] = ranked[0] if ranked else None
+                    correct += int(top_character_by_context[context] == target)
                     count += 1
         mean = nll / max(count, 1)
         return {"characters": count, "cross_entropy_nats": mean, "perplexity": math.exp(mean),
@@ -2548,7 +2561,10 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
     # selection is unresolved. If validation rejects every class, restore the
     # ordinary HFN Observer initialization before the shared training pass.
     if class_nodes and model.class_lambda <= 0.0:
-        model._fit_pattern_observer()
+        # fit() initialized the complete graph and Observer already. Class
+        # fallback only reset level weights to 1.0; restore the reliability
+        # estimates in place instead of registering the full HFN graph again.
+        model._set_pattern_observer_reliability()
     training_groups = sorted({row.get("group_id", row["id"]) for row in split["train"]})
     model.training_manifest = {
         "corpora": [str(path) for path in corpus_paths], "seed": seed,
