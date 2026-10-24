@@ -14,7 +14,7 @@ from hpm_ai_v2.chat.feedback import (
     THUMBS, Ledger, apply_entry, correction_entry, find_answer_node, preference_entry,
 )
 from hpm_ai_v2.chat.planner import GroundedPlanner
-from hpm_ai_v2.chat.realizers import SchemaRealizer
+from hpm_ai_v2.chat.realizers import PlanBoundRealizer
 from hpm_ai_v2.chat.schema import Reply, TurnEvent
 from hpm_ai_v2.chat.state import ConversationState
 from hpm_ai_v2.chat.verifier import GroundingVerifier
@@ -49,7 +49,7 @@ class ChatSession:
             # expand_evidence=False gives the trainer's own single-sentence or top-three evidence.
             planner = ExpandingPlanner(trainer) if expand_evidence else GroundedPlanner(trainer)
         self.planner = planner
-        self.realizer = SchemaRealizer()
+        self.realizer = PlanBoundRealizer()
         self.verifier = GroundingVerifier(trainer.sources)
 
     def send(
@@ -86,12 +86,18 @@ class ChatSession:
         if not verified:
             plan = replace(plan, act="abstain", claims=(), reason="grounding_verification_failed")
         stage("realize")
+        realization = self.realizer.realize_with_map(plan)
+        verified = verified and self.verifier.verify_realization(plan, realization)
+        if not verified and plan.act == "answer":
+            plan = replace(plan, act="abstain", claims=(), reason="realization_verification_failed")
+            realization = self.realizer.realize_with_map(plan)
         reply = Reply(
             turn_id=turn_id,
-            text=self.realizer.realize(plan),
+            text=realization.text,
             plan=plan,
             realizer=self.realizer.name,
             verified=verified,
+            sentence_map=realization.sentences,
         )
         citations = tuple(citation for claim in plan.claims for citation in claim.citations)
         source_id = citations[0].source_id if citations else None

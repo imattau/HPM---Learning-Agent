@@ -47,6 +47,7 @@ class Reply:
     plan: ResponsePlan
     realizer: str
     verified: bool
+    sentence_map: tuple["RealizedSentence", ...] = ()
 
     @property
     def abstained(self) -> bool:
@@ -55,6 +56,21 @@ class Reply:
     @property
     def citations(self) -> tuple[Citation, ...]:
         return tuple(c for claim in self.plan.claims for c in claim.citations)
+
+
+@dataclass(frozen=True)
+class RealizedSentence:
+    """One emitted factual sentence and the source claims that support it."""
+
+    text: str
+    claim_ids: tuple[str, ...]
+    citation_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Realization:
+    text: str
+    sentences: tuple[RealizedSentence, ...]
 
 
 @dataclass(frozen=True)

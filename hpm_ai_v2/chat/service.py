@@ -59,7 +59,7 @@ class ChatService:
         return {
             "user_id": self.user_id,
             "source_count": len(self.trainer.sources),
-            "realizer": "schema-extractive",
+            "realizer": "plan-bound-extractive",
             "abstention": self._abstention_note(),
             **self.info,
         }

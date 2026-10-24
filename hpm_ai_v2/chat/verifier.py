@@ -23,3 +23,32 @@ class GroundingVerifier:
                 if citation.text != claim.text:
                     return False
         return True
+
+    def verify_realization(self, plan, realization) -> bool:
+        """Require every factual output sentence to map to an exact planned claim."""
+        if not self.verify(plan):
+            return False
+        if plan.act != "answer":
+            return not realization.sentences
+        if len(realization.sentences) != len(plan.claims):
+            return False
+
+        claims = {claim.claim_id: claim for claim in plan.claims}
+        seen = set()
+        for index, sentence in enumerate(realization.sentences, start=1):
+            if len(sentence.claim_ids) != 1:
+                return False
+            claim_id = sentence.claim_ids[0]
+            if claim_id != plan.claims[index - 1].claim_id:
+                return False
+            claim = claims.get(claim_id)
+            if claim is None or claim_id in seen or sentence.text != claim.text:
+                return False
+            seen.add(claim_id)
+            expected_ids = {f"citation-{index}-{i}" for i in range(1, len(claim.citations) + 1)}
+            if not sentence.citation_ids or set(sentence.citation_ids) != expected_ids:
+                return False
+            rendered = f'“{sentence.text}” [{index}]'
+            if rendered not in realization.text:
+                return False
+        return seen == set(claims)
