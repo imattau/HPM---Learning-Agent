@@ -43,7 +43,8 @@ class NGramBaseline:
         return self
 
     def predict_proba(self, context):
-        mapped = tuple(word if self.word_counts.get(word, 0) >= self.min_word_count else UNK
+        mapped = tuple(word if word in (BOUNDARY, UNK)
+                       or self.word_counts.get(word, 0) >= self.min_word_count else UNK
                        for word in context)
         key = mapped[-(self.order - 1):] if self.order > 1 else ()
         while key not in self.counts and key:

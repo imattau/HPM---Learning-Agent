@@ -114,9 +114,14 @@ def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
     assert candidate.class_lambda == 0.0
     assert candidate.class_selection["selection_reason"].startswith("no-class fallback")
     flat = NGramBaseline(order=3, alpha=.1, smoothing="interpolated").fit(texts)
-    assert candidate.predict_proba(["the", "b0"]) == pytest.approx(
-        flat.predict_proba(["the", "b0"])
-    )
+    contexts = {()}
+    for text in texts[:32]:
+        sequence = [BOUNDARY, BOUNDARY] + tokenize(text) + [BOUNDARY]
+        contexts.update(tuple(sequence[max(0, i - 2):i]) for i in range(2, len(sequence)))
+    for context in contexts:
+        hpm_probs = dict(zip(candidate.vocab, candidate.predict_proba(context)))
+        flat_probs = dict(zip(flat.vocab, flat.predict_proba(context)))
+        assert hpm_probs == pytest.approx(flat_probs)
 
 
 def test_sentence_boundaries_reset_context_and_create_linked_nodes():
