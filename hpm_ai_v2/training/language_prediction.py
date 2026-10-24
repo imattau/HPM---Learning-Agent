@@ -341,6 +341,7 @@ class HierarchicalNextUnitModel:
         self._spelling_oov_candidate_cache: dict[tuple, tuple[str, ...]] = {}
         self._spelling_known_candidate_cache: dict[tuple, tuple[str, ...]] = {}
         self.training_manifest: dict | None = None
+        self.internal_observer_calibration: dict | None = None
         # Exact-text identity lets checkpoint continuation ignore epoch replay
         # instead of treating already-seen examples as independent evidence.
         self._training_document_hashes: set[str] = set()
@@ -351,6 +352,7 @@ class HierarchicalNextUnitModel:
     def fit(
         self, documents: Iterable[str], workers: int = 1, *,
         progress_callback: Callable[[dict], None] | None = None,
+        _skip_observer_validation_calibration: bool = False,
     ) -> "HierarchicalNextUnitModel":
         if workers < 1:
             raise ValueError("workers must be at least 1")
@@ -361,6 +363,82 @@ class HierarchicalNextUnitModel:
         self._candidate_cache.clear()
         self._character_word_prior_cache = None
         texts = list(documents)
+        if self.class_nodes_enabled and not _skip_observer_validation_calibration:
+            # Keep a document-grouped calibration slice out of the initial
+            # counts, tune Observer reliability on genuinely unseen documents,
+            # then add those documents through the stable-membership
+            # continuation path and restore the calibrated weights.
+            text_groups: dict[str, list[str]] = defaultdict(list)
+            for text in texts:
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                text_groups[digest].append(text)
+            ordered_groups = sorted(
+                text_groups.items(),
+                key=lambda item: hashlib.sha256(
+                    f"observer-calibration-v1:{item[0]}".encode("utf-8")
+                ).digest(),
+            )
+            if len(ordered_groups) >= 10:
+                calibration_group_count = max(1, round(len(ordered_groups) * 0.1))
+                fit_groups = ordered_groups[:-calibration_group_count]
+                calibration_groups = ordered_groups[-calibration_group_count:]
+                fit_documents = [text for _, group in fit_groups for text in group]
+                calibration_documents = [text for _, group in calibration_groups for text in group]
+                if fit_documents and calibration_documents:
+                    report("internal_observer_calibration", state="fit_partition",
+                           fit_documents=len(fit_documents),
+                           calibration_documents=len(calibration_documents),
+                           calibration_groups=len(calibration_groups))
+                    self.fit(
+                        fit_documents, workers=workers,
+                        progress_callback=progress_callback,
+                        _skip_observer_validation_calibration=True,
+                    )
+                    calibration = self.tune_observer_weights(calibration_documents)
+                    calibrated_weights = {
+                        order: self.observer.get_weight(node.id)
+                        for order, node in self.word_level_nodes.items()
+                    }
+                    if progress_callback:
+                        progress_callback({
+                            "fit_stage": "internal_observer_calibration",
+                            "state": "complete",
+                            "fit_documents": len(fit_documents),
+                            "calibration_documents": len(calibration_documents),
+                            "validation_cross_entropy_before": calibration[
+                                "validation_cross_entropy_before"
+                            ],
+                            "validation_cross_entropy_after": calibration[
+                                "validation_cross_entropy_after"
+                            ],
+                            "selected_weights": {
+                                str(order): weight
+                                for order, weight in calibrated_weights.items()
+                            },
+                        })
+                    self.partial_fit(
+                        calibration_documents, workers=workers,
+                        _preserve_batch_frequency=True,
+                    )
+                    for order, node in self.word_level_nodes.items():
+                        if order in calibrated_weights:
+                            self.observer.set_weight(node.id, calibrated_weights[order])
+                    self.internal_observer_calibration = {
+                        "fit_documents": len(fit_documents),
+                        "calibration_documents": len(calibration_documents),
+                        "calibration_groups": len(calibration_groups),
+                        "validation_cross_entropy_before": calibration[
+                            "validation_cross_entropy_before"
+                        ],
+                        "validation_cross_entropy_after": calibration[
+                            "validation_cross_entropy_after"
+                        ],
+                        "selected_weights": {
+                            str(order): weight
+                            for order, weight in calibrated_weights.items()
+                        },
+                    }
+                    return self
         self._training_document_hashes = {
             hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
         }
@@ -478,6 +556,7 @@ class HierarchicalNextUnitModel:
         observer_replay_documents: Iterable[str] = (),
         min_word_count: int | None = None,
         progress_callback: Callable[[dict], None] | None = None,
+        _preserve_batch_frequency: bool = False,
     ) -> "HierarchicalNextUnitModel":
         """Continue the count learner with new training documents.
 
@@ -502,11 +581,13 @@ class HierarchicalNextUnitModel:
             return self
         supplied_hashes = [hashlib.sha256(text.encode("utf-8")).hexdigest()
                            for text in supplied_texts]
-        seen_hashes = set(self._training_document_hashes)
+        previous_hashes = set(self._training_document_hashes)
+        seen_hashes = set(previous_hashes)
         texts = []
         new_hashes = []
         for text, digest in zip(supplied_texts, supplied_hashes):
-            if digest not in seen_hashes:
+            if (digest not in seen_hashes
+                    or (_preserve_batch_frequency and digest not in previous_hashes)):
                 texts.append(text)
                 new_hashes.append(digest)
                 seen_hashes.add(digest)
@@ -1725,25 +1806,32 @@ class HierarchicalNextUnitModel:
         vocabulary = self.char_vocab if character else self.vocab
         alpha = self.char_alpha if character else self.alpha
         level_nodes = self.char_level_nodes if character else self.word_level_nodes
-        if not level_nodes or self.observer is None:
+        flat_class_fallback = not character and self.class_nodes_enabled and self.class_lambda <= 0.0
+        if flat_class_fallback:
+            # The class-enabled learner explicitly compares against the flat
+            # interpolated n-gram. If no class earns its place, use that expert
+            # directly while retaining the trained Observer weights in state.
+            probability = self._count_probability_for_context(context, target)
+        elif not level_nodes or self.observer is None:
             if character:
                 return self._char_distribution(context).get(target, 0.0)
             return self._distribution_for_context(context).get(target, 0.0)
-        unigram = counts_table.get((), Counter())
-        unigram_total = sum(unigram.values())
-        probability = (unigram.get(target, 0) + alpha) / (unigram_total + alpha * len(vocabulary))
-        unigram_weight = self.observer.get_weight(level_nodes[0].id)
-        probability = unigram_weight * probability + (1.0 - unigram_weight) / len(vocabulary)
-        for order in range(1, min(len(context), self.max_order - 1) + 1):
-            counts = counts_table.get(context[-order:], Counter())
-            total = sum(counts.values())
-            if not total:
-                continue
-            observer_weight = self.observer.get_weight(level_nodes[order].id)
-            evidence_mass = total / (total + alpha)
-            local_mass = observer_weight * evidence_mass
-            probability = (local_mass * counts.get(target, 0) / total
-                           + (1.0 - local_mass) * probability)
+        else:
+            unigram = counts_table.get((), Counter())
+            unigram_total = sum(unigram.values())
+            probability = (unigram.get(target, 0) + alpha) / (unigram_total + alpha * len(vocabulary))
+            unigram_weight = self.observer.get_weight(level_nodes[0].id)
+            probability = unigram_weight * probability + (1.0 - unigram_weight) / len(vocabulary)
+            for order in range(1, min(len(context), self.max_order - 1) + 1):
+                counts = counts_table.get(context[-order:], Counter())
+                total = sum(counts.values())
+                if not total:
+                    continue
+                observer_weight = self.observer.get_weight(level_nodes[order].id)
+                evidence_mass = total / (total + alpha)
+                local_mass = observer_weight * evidence_mass
+                probability = (local_mass * counts.get(target, 0) / total
+                               + (1.0 - local_mass) * probability)
         if not character and apply_class_mix and self.class_lambda > 0:
             class_context = self._abstract_prediction_slot(context, self.class_labels)
             if class_context != context and class_context in self.class_context_nodes:
@@ -2327,6 +2415,20 @@ class HierarchicalNextUnitModel:
         return (local_mass * counts.get(target, 0) / total
                 + (1.0 - local_mass) * base)
 
+    def _count_probability_for_context(self, context: tuple[str, ...], target: str) -> float:
+        """Raw interpolated-count probability used by the exact flat fallback."""
+        if not context:
+            counts = self.counts.get((), Counter())
+            denominator = sum(counts.values()) + self.alpha * len(self.vocab)
+            return (counts.get(target, 0) + self.alpha) / denominator
+        base = self._count_probability_for_context(context[1:], target)
+        counts = self.counts.get(context, Counter())
+        total = sum(counts.values())
+        if not total:
+            return base
+        mass = total / (total + self.alpha)
+        return mass * counts.get(target, 0) / total + (1.0 - mass) * base
+
     def evaluate(self, documents: Iterable[str], *, include_surface: bool = True) -> dict:
         nll, surface_nll, correct, top5, count = 0.0, 0.0, 0, 0, 0
         surface_correct = surface_top5 = known_correct = known_top5 = 0
@@ -2595,13 +2697,10 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
         (row["text"] for row in split["train"]), workers=workers,
         progress_callback=fit_progress,
     )
-    # Class-enabled fitting temporarily uses flat word weights while class
-    # selection is unresolved. If validation rejects every class, restore the
-    # ordinary HFN Observer initialization before the shared training pass.
-    if class_nodes and model.class_lambda <= 0.0:
-        # fit() initialized the complete graph and Observer already. Class
-        # fallback only reset level weights to 1.0; restore the reliability
-        # estimates in place instead of registering the full HFN graph again.
+    # Small class-enabled runs may not have enough distinct documents for an
+    # internal calibration split; keep the legacy training path for those.
+    if (class_nodes and model.class_lambda <= 0.0
+            and model.internal_observer_calibration is None):
         model._set_pattern_observer_reliability()
     training_groups = sorted({row.get("group_id", row["id"]) for row in split["train"]})
     model.training_manifest = {
@@ -2617,13 +2716,23 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
     }
     if class_nodes:
         model.training_manifest["class_nodes_enabled"] = True
+    if model.internal_observer_calibration is not None:
+        model.training_manifest["internal_observer_calibration"] = \
+            model.internal_observer_calibration
     train_texts = [row["text"] for row in split["train"]]
     status("observer_training", "running", training_documents=len(train_texts), workers=1)
-    word_observer_training = model.train_observer_weights(
-        train_texts,
-        progress_callback=lambda details: status(
-            "observer_training", "running", training_documents=len(train_texts), **details),
-    )
+    if model.internal_observer_calibration is not None:
+        word_observer_training = {
+            "unit": "word",
+            "objective": "heldout_document_validation_next_unit_cross_entropy",
+            **model.internal_observer_calibration,
+        }
+    else:
+        word_observer_training = model.train_observer_weights(
+            train_texts,
+            progress_callback=lambda details: status(
+                "observer_training", "running", training_documents=len(train_texts), **details),
+        )
     character_observer_training = model.train_observer_weights(
         train_texts, character=True,
         progress_callback=lambda details: status(

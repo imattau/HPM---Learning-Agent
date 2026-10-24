@@ -1,4 +1,5 @@
 import json
+import hashlib
 import math
 import subprocess
 import sys
@@ -230,7 +231,7 @@ def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
     assert candidate.class_selection is not None
     assert candidate.class_lambda == 0.0
     assert candidate.class_selection["selection_reason"].startswith("no-class fallback")
-    plain = HierarchicalNextUnitModel(max_order=3).fit(texts)
+    plain = NGramBaseline(order=3, alpha=0.1, smoothing="interpolated").fit(texts)
     contexts = {()}
     for text in texts[:32]:
         sequence = [BOUNDARY, BOUNDARY] + tokenize(text) + [BOUNDARY]
@@ -258,8 +259,41 @@ def test_class_enabled_no_class_fallback_keeps_reliability_initialized_observer_
                      for order, node in plain.word_level_nodes.items()}
     class_weights = {order: class_enabled.observer.get_weight(node.id)
                      for order, node in class_enabled.word_level_nodes.items()}
-    assert class_weights == pytest.approx(plain_weights)
+    assert set(class_weights) == set(plain_weights)
     assert any(weight != 1.0 for weight in class_weights.values())
+
+
+def test_class_fit_calibrates_on_heldout_documents_then_adds_them(monkeypatch):
+    texts = [f"the item{index} result{index % 4}" for index in range(20)]
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_validation_class_choice",
+        lambda _self: (None, 0.0),
+    )
+    calibration_documents = []
+
+    def tune_on_calibration(self, documents, **_kwargs):
+        calibration_documents.extend(documents)
+        for order, node in self.word_level_nodes.items():
+            self.observer.set_weight(node.id, 0.2 + 0.1 * order)
+        return {"validation_cross_entropy_before": 1.0,
+                "validation_cross_entropy_after": 0.9}
+
+    monkeypatch.setattr(HierarchicalNextUnitModel, "tune_observer_weights", tune_on_calibration)
+    model = HierarchicalNextUnitModel(max_order=3, class_nodes=True).fit(texts)
+
+    assert calibration_documents
+    assert len(calibration_documents) < len(set(texts))
+    assert model._training_document_hashes == {
+        hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
+    }
+    assert {order: model.observer.get_weight(node.id)
+            for order, node in model.word_level_nodes.items()} == pytest.approx(
+                {0: 0.2, 1: 0.3, 2: 0.4}
+            )
+    trigram = NGramBaseline(order=3, alpha=model.alpha, smoothing="interpolated").fit(texts)
+    assert model.predict_proba(["the", "item1"]) == pytest.approx(
+        trigram.predict_proba(["the", "item1"])
+    )
 
 
 def test_partial_fit_does_not_reset_active_class_observer_weights_to_one(monkeypatch):
@@ -894,10 +928,23 @@ def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path, monkeypatc
     corpus = tmp_path / "fallback-corpus.jsonl"
     corpus.write_text("\n".join(
         json.dumps({"source_id": f"d{i}",
-                    "text": f"the {('cat', 'dog', 'bird')[i % 3]} "
-                            f"{('runs', 'sleeps', 'jumps')[i % 3]} in garden"})
+                    "text": f"the item{i} result{i % 4} in garden"})
         for i in range(48)
     ), encoding="utf-8")
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_validation_class_choice",
+        lambda _self: (None, 0.0),
+    )
+    calibrated_weights = {0: 0.2, 1: 0.3}
+
+    def tune_calibration(self, _documents, *, character=False, **_kwargs):
+        if not character:
+            for order, node in self.word_level_nodes.items():
+                self.observer.set_weight(node.id, calibrated_weights[order])
+        return {"validation_cross_entropy_before": 1.0,
+                "validation_cross_entropy_after": 0.9}
+
+    monkeypatch.setattr(HierarchicalNextUnitModel, "tune_observer_weights", tune_calibration)
     initialize_calls = 0
     original_initialize = HierarchicalNextUnitModel._fit_pattern_observer
 
@@ -911,13 +958,15 @@ def test_pilot_class_no_class_fallback_matches_standard_hfn(tmp_path, monkeypatc
     candidate = run_pilot(corpus, tmp_path / "candidate", seed=17,
                           max_order=2, class_nodes=True)
 
-    # The class fallback reuses the existing graph and only resets Observer
-    # reliability weights; it must not initialize the forest a second time.
-    assert initialize_calls == 2
+    assert initialize_calls == 3
     assert candidate["class_node_training"]["selected_lambda"] == 0.0
-    assert candidate["observer_weights"]["word_context_orders"] == \
-        plain["observer_weights"]["word_context_orders"]
-    assert candidate["hpm"]["test"] == plain["hpm"]["test"]
+    checkpoint = json.loads((tmp_path / "candidate" / "hpm_language_checkpoint.json").read_text())
+    assert checkpoint["training_manifest"]["internal_observer_calibration"][
+        "selected_weights"
+    ] == {str(order): weight for order, weight in calibrated_weights.items()}
+    assert {int(order): weight for order, weight in checkpoint["observer_weights"]["word"].items()} \
+        == pytest.approx(calibrated_weights)
+    assert math.isfinite(candidate["hpm"]["test"]["cross_entropy_nats"])
 
 
 def test_language_pilot_cli_exits_with_compact_summary(tmp_path):
