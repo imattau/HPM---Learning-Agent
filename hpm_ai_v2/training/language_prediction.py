@@ -871,20 +871,37 @@ class HierarchicalNextUnitModel:
                 for target, count in targets.items():
                     counts[mapped_context][self._map(target)] += count
 
-            def dist(context: tuple[str, ...], class_mode: bool = False) -> dict[str, float]:
+            probability_cache: dict[tuple[tuple[str, ...], str, bool], float] = {}
+
+            def dist(context: tuple[str, ...], target: str, class_mode: bool = False) -> float:
+                """Return one target probability without materializing |vocab| values.
+
+                Validation only scores observed targets. Building a dense
+                vocabulary distribution for every context/event made class
+                selection scale as O(events * vocabulary * candidates), even
+                though the recursive backoff needs only the requested target.
+                """
+                key = (context, target, class_mode)
+                cached = probability_cache.get(key)
+                if cached is not None:
+                    return cached
                 table = pooled if class_mode else counts
                 if not context:
                     base_counts = counts.get((), Counter())
                     den = sum(base_counts.values()) + self.alpha * len(self.vocab)
-                    return {word: (base_counts.get(word, 0) + self.alpha) / den for word in self.vocab}
-                base = dist(context[1:], class_mode)
-                local = table.get(context, Counter())
-                total = sum(local.values())
-                if not total:
-                    return base
-                mass = total / (total + self.alpha)
-                return {word: mass * local.get(word, 0) / total + (1.0 - mass) * base[word]
-                        for word in self.vocab}
+                    probability = (base_counts.get(target, 0) + self.alpha) / den
+                else:
+                    base = dist(context[1:], target, class_mode)
+                    local = table.get(context, Counter())
+                    total = sum(local.values())
+                    if not total:
+                        probability = base
+                    else:
+                        mass = total / (total + self.alpha)
+                        probability = (mass * local.get(target, 0) / total
+                                       + (1.0 - mass) * base)
+                probability_cache[key] = probability
+                return probability
 
             loss, observations = 0.0, 0
             seen_loss, seen_plain_loss, seen_observations = 0.0, 0.0, 0
@@ -908,22 +925,22 @@ class HierarchicalNextUnitModel:
                 is_seen_pair = bool(raw_context and (raw_context[-1], target) not in held_pairs)
                 context = tuple(self._map(word) for word in raw_context)
                 target = self._map(target)
-                plain = dist(context)
+                plain = dist(context, target)
                 class_context = self._abstract_prediction_slot(raw_context, labels)
                 if class_context != raw_context and class_context in pooled:
-                    class_dist = dist(class_context, True)
+                    class_probability = dist(class_context, target, True)
                     # Validate the same direct expert blend used by inference.
-                    probability = (1.0 - lam) * plain[target] + lam * class_dist[target]
+                    probability = (1.0 - lam) * plain + lam * class_probability
                 else:
-                    probability = plain[target]
+                    probability = plain
                 loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
                 observations += validation_weight * frequency
                 if is_seen_pair:
                     seen_loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
-                    seen_plain_loss -= validation_weight * frequency * math.log(max(plain[target], 1e-12))
+                    seen_plain_loss -= validation_weight * frequency * math.log(max(plain, 1e-12))
                     seen_observations += validation_weight * frequency
                 pair_improvements[(raw_context[-1], target)].append(
-                    math.log(max(probability, 1e-12) / max(plain[target], 1e-12)))
+                    math.log(max(probability, 1e-12) / max(plain, 1e-12)))
                 pair_losses[(raw_context[-1], target)].append(-math.log(max(probability, 1e-12)))
             score = loss / max(observations, 1)
             if tau is None:
