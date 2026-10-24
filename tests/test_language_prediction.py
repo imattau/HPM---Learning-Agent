@@ -10,6 +10,7 @@ import pytest
 
 from hpm_ai_v2.training.language_prediction import (
     BOUNDARY,
+    CLASS_RESERVED_UNSEEN_MASS,
     HierarchicalNextUnitModel,
     read_jsonl,
     split_documents,
@@ -128,8 +129,8 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
     observer_training = model.train_observer_weights(texts, passes=1, max_events=256)
     assert observer_training["training_events"] > 0
     assert model.class_context_nodes[class_context].relation_type == "next_unit_given_class_context"
-    # A class expert must contribute its direct probability to unseen targets;
-    # seen-mass conservation silently erased that signal as word counts grew.
+    # A validated class expert receives a small probability reserve when the
+    # plain exact-context distribution leaves too little mass for unseen words.
     model.class_context_counts[class_context]["runs"] += 10
     class_context_node.metadata["target_counts"]["runs"] = (
         class_context_node.metadata["target_counts"].get("runs", 0) + 10
@@ -137,8 +138,23 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
     plain = np.asarray([model._weighted_probability(context, word, apply_class_mix=False)
                         for word in model.vocab])
     class_distribution = model._class_distribution_for_context(class_context)
-    expected = ((1.0 - model.class_lambda) * plain
-                + model.class_lambda * np.asarray([class_distribution[word] for word in model.vocab]))
+    seen = set(model.counts.get(context, Counter()))
+    plain_seen_mass = sum(plain[model.word_to_index[word]] for word in seen)
+    class_seen_mass = sum(class_distribution[word] for word in seen)
+    remaining = 1.0 - plain_seen_mass
+    class_unseen_mass = 1.0 - class_seen_mass
+    reserved = max(remaining, CLASS_RESERVED_UNSEEN_MASS
+                   * model.class_lambda)
+    expected = np.asarray([
+        plain[index] * (1.0 - reserved) / plain_seen_mass if word in seen else
+        reserved * (
+            (1.0 - model.class_lambda) * (
+                plain[index] / remaining if remaining > 1e-12 else
+                class_distribution[word] / class_unseen_mass
+            ) + model.class_lambda * class_distribution[word] / class_unseen_mass
+        )
+        for index, word in enumerate(model.vocab)
+    ])
     actual = model.predict_proba(context)
     assert actual == pytest.approx(expected)
     assert actual.sum() == pytest.approx(1.0)
@@ -182,27 +198,41 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     model._initialize_pattern_observer()
     monkeypatch.setattr(language_prediction, "CLASS_MIX_CACHE_MAX_ENTRIES", 2)
 
-    # The target-only class path used by next-unit scoring must equal the
-    # former dense mixture for every observed context/target pair.
+    # Target scoring and dense prediction must share the same seen-mass-safe
+    # class distribution.
     for word in ("cat", "dog", "bird", "fish"):
         context = (word,)
         class_context = model._abstract_prediction_slot(context, model.class_labels)
         assert class_context in model.class_context_nodes
         dense_class = model._class_distribution_for_context(class_context)
+        seen = set(model.counts.get((context[-1],), Counter()))
+        plain = {target: model._weighted_probability(
+            context, target, apply_character_mix=False, apply_class_mix=False,
+        ) for target in model.vocab}
+        plain_seen_mass = sum(plain[target] for target in seen)
+        class_unseen_mass = 1.0 - sum(dense_class[target] for target in seen)
+        remaining = 1.0 - plain_seen_mass
+        reserved = max(remaining, CLASS_RESERVED_UNSEEN_MASS
+                       * model.class_lambda)
         for target in model.vocab:
-            plain = model._weighted_probability(
-                context, target, apply_character_mix=False, apply_class_mix=False,
+            expected = (
+                plain[target] * (1.0 - reserved) / plain_seen_mass
+                if target in seen else
+                reserved * (
+                    (1.0 - model.class_lambda) * (
+                        plain[target] / remaining if remaining > 1e-12 else
+                        dense_class[target] / class_unseen_mass
+                    ) + model.class_lambda * dense_class[target] / class_unseen_mass
+                )
             )
-            expected = ((1.0 - model.class_lambda) * plain
-                        + model.class_lambda * dense_class[target])
             assert model._weighted_probability(context, target) == pytest.approx(expected)
 
     expected = model.predict_proba(["cat"])
     for word in ("dog", "bird", "fish"):
         model.predict_proba([word])
-    assert len(model._class_mix_probability_cache) == 2
+    assert len(model._class_mix_distribution_cache) == 2
     assert model.predict_proba(["cat"]) == pytest.approx(expected)
-    assert len(model._class_mix_probability_cache) == 2
+    assert len(model._class_mix_distribution_cache) == 2
 
 
 def test_fit_reports_progress_through_hfn_and_observer_construction():
@@ -265,10 +295,28 @@ def test_class_enabled_no_class_fallback_keeps_reliability_initialized_observer_
 
 def test_class_fit_calibrates_on_heldout_documents_then_adds_them(monkeypatch):
     texts = [f"the item{index} result{index % 4}" for index in range(20)]
-    monkeypatch.setattr(
-        HierarchicalNextUnitModel, "_validation_class_choice",
-        lambda _self: (None, 0.0),
-    )
+    class_validation_seen = []
+    class_reinforcement_seen = []
+
+    def no_classes_on_document_holdout(self):
+        class_validation_seen.extend(self._class_validation_documents or [])
+        fit_hashes = self._training_document_hashes
+        assert not ({hashlib.sha256(text.encode()).hexdigest()
+                     for text in class_validation_seen} & fit_hashes)
+        self.class_lambdas = {}
+        return None, 0.0
+
+    monkeypatch.setattr(HierarchicalNextUnitModel, "_validation_class_choice",
+                        no_classes_on_document_holdout)
+    reinforce = HierarchicalNextUnitModel._reinforce_class_observer_weights
+
+    def capture_class_reinforcement(self, documents):
+        documents = list(documents)
+        class_reinforcement_seen.extend(documents)
+        return reinforce(self, documents)
+
+    monkeypatch.setattr(HierarchicalNextUnitModel, "_reinforce_class_observer_weights",
+                        capture_class_reinforcement)
     calibration_documents = []
 
     def tune_on_calibration(self, documents, **_kwargs):
@@ -282,6 +330,11 @@ def test_class_fit_calibrates_on_heldout_documents_then_adds_them(monkeypatch):
     model = HierarchicalNextUnitModel(max_order=3, class_nodes=True).fit(texts)
 
     assert calibration_documents
+    assert class_validation_seen
+    assert class_reinforcement_seen
+    assert set(class_reinforcement_seen).isdisjoint(class_validation_seen)
+    assert set(class_reinforcement_seen).isdisjoint(calibration_documents)
+    assert set(class_validation_seen).isdisjoint(calibration_documents)
     assert len(calibration_documents) < len(set(texts))
     assert model._training_document_hashes == {
         hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
@@ -343,9 +396,10 @@ def test_class_validation_clusters_once_per_threshold(monkeypatch):
         return original(profiles, tau)
 
     monkeypatch.setattr(model, "_average_link_clusters", counted)
+    model._class_validation_documents = ["cat chirps", "dog chirps", "bird purrs", "fish purrs"]
     model._validation_class_choice()
 
-    assert Counter(calls) == Counter({0.7: 1, 0.8: 1, 0.9: 1})
+    assert Counter(calls) == Counter({0.7: 1, 0.8: 1, 0.9: 1, 0.95: 1, 0.98: 1})
 
 
 def test_class_profiles_keep_high_entropy_words_when_they_have_multiple_features():
@@ -368,11 +422,114 @@ def test_class_validation_scores_high_entropy_profile_contexts(monkeypatch):
     monkeypatch.setattr(model, "_profiles_from_counts", lambda _counts: {
         "the": np.array([1.0, 0.0]),
     })
+    model._class_validation_documents = [f"the novel{index}" for index in range(12)]
 
     model._validation_class_choice()
 
     assert model.class_selection["held_pairs"] > 0
-    assert model.class_selection["no_class_validation_cross_entropy_nats"] > 0.0
+    assert model.class_selection["validation_method"] == \
+        "source_grouped_document_holdout_unseen_adjacent_pairs"
+    assert model.class_selection["unseen_validation_events"] > 0
+
+
+def test_each_class_must_earn_weight_on_heldout_unseen_pairs(monkeypatch):
+    training = [
+        text
+        for index in range(6)
+        for _ in range(10)
+        for text in (f"cat{index} runs", f"cat{index} sleeps")
+    ] + ["cat0 purrs"] * 10
+    model = HierarchicalNextUnitModel(max_order=2).fit(training)
+    model.class_nodes_enabled = True
+    model._class_validation_documents = [f"cat{index} purrs" for index in range(1, 6)]
+    monkeypatch.setattr(model, "_profiles_from_counts", lambda _counts: {
+        **{f"cat{index}": np.array([1.0, 0.0]) for index in range(6)},
+        **{f"noise{index}": np.array([0.0, 1.0]) for index in range(6)},
+    })
+
+    tau, _weight = model._validation_class_choice()
+
+    assert tau is not None
+    assert model.class_selection["selection_reason"] == \
+        "per-class held-out unseen-pair reinforcement"
+    quality = {row["class_id"]: row for row in model.class_selection["class_quality"]}
+    earned = [row for row in quality.values() if row["selected_weight"] > 0]
+    rejected = [row for row in quality.values() if row["selected_weight"] == 0]
+    assert len(earned) == 1
+    assert earned[0]["members"] == 6
+    assert earned[0]["cohesion"] == pytest.approx(1.0)
+    assert earned[0]["validation_unseen_pairs"] == 5
+    assert rejected
+    assert all("insufficient held-out unseen-pair evidence" == row["selection_reason"]
+               for row in rejected)
+
+
+def test_class_generalization_scores_unseen_pairs_against_matched_observer():
+    model = HierarchicalNextUnitModel(max_order=2).fit([
+        *(["cat0 purrs"] * 10), *(["cat1 meows"] * 10),
+        *(["dog0 growls"] * 10), *(["dog1 barks"] * 10),
+    ])
+    model.class_nodes_enabled = True
+    model.class_lambda = 0.5
+    model.class_lambdas = {"class0": 0.5}
+    model.class_labels = {"cat1": "class0", "dog1": "class0"}
+    model.class_context_nodes[("class0",)] = None
+    model.class_context_counts[("class0",)] = Counter({"purrs": 10})
+
+    result = model.evaluate_class_generalization(
+        ["cat1 purrs", "dog1 purrs"], group_ids=["conversation-a", "conversation-b"]
+    )
+
+    assert result["comparison"].startswith("same word Observer weights")
+    unseen = result["unseen_pairs"]
+    assert unseen["events"] == 2
+    assert unseen["distinct_unseen_adjacent_pairs"] == 2
+    assert unseen["source_groups"] == 2
+    assert unseen["paired_class_minus_plain_delta_nats_per_event"] < 0.0
+    seen = result["seen_pairs"]
+    assert seen["events"] == 2
+    assert seen["paired_class_minus_plain_delta_nats_per_event"] == pytest.approx(0.0)
+
+
+def test_class_weights_are_observer_state_and_survive_partial_fit_and_reload(tmp_path, monkeypatch):
+    texts = [
+        f"{noun} {verb} {obj} detail{index}"
+        for index, (noun, verb, obj) in enumerate((
+            ("cat", "chases", "mice"), ("cat", "likes", "fish"),
+            ("dog", "chases", "birds"), ("dog", "likes", "fish"),
+            ("bird", "eats", "seeds"), ("bird", "likes", "fruit"),
+            ("fish", "eats", "flakes"), ("fish", "likes", "plants"),
+            ("cat", "chases", "birds"), ("dog", "chases", "mice"),
+            ("bird", "eats", "fruit"), ("fish", "eats", "seeds"),
+        ))
+    ]
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_profiles_from_counts",
+        lambda _self, _counts: {
+            "cat": np.array([1.0, 0.0]), "dog": np.array([0.98, 0.02]),
+            "bird": np.array([0.0, 1.0]), "fish": np.array([0.02, 0.98]),
+        },
+    )
+    monkeypatch.setattr(
+        HierarchicalNextUnitModel, "_validation_class_choice",
+        lambda _self: (0.9, 0.5),
+    )
+    model = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
+
+    assert len(model.class_node_registry) == 2
+    assert all(model.observer._get_state(class_id) is not None
+               for class_id in model.class_node_registry)
+    weights_before = {class_id: model.observer.get_weight(class_id)
+                      for class_id in model.class_node_registry}
+    checkpoint = tmp_path / "class-observer.json"
+    model.save(checkpoint)
+    restored = HierarchicalNextUnitModel.load(checkpoint)
+    assert {class_id: restored.observer.get_weight(class_id)
+            for class_id in restored.class_node_registry} == pytest.approx(weights_before)
+
+    restored.partial_fit(["horse runs quickly"])
+    assert {class_id: restored.observer.get_weight(class_id)
+            for class_id in restored.class_node_registry} == pytest.approx(weights_before)
 
 
 def test_no_class_fallback_restores_ordinary_observer_training_state():

@@ -33,6 +33,11 @@ SPELL_EOW = "</w>"
 SPELL_UNK = "<unk-char>"
 MAX_FIT_WORKERS = 4
 CLASS_MAX_SEEN_REGRESSION_NATS = 0.05
+CLASS_RESERVED_UNSEEN_MASS = 0.04
+CLASS_MAX_MEMBERS = 64
+CLASS_MIN_COHESION = 0.10
+CLASS_MIN_VALIDATION_PAIRS = 1
+CLASS_LAMBDA_GRID = (0.025, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 1.0)
 CHARACTER_WORD_MIX_CANDIDATES = (0.0, 0.025, 0.05, 0.1, 0.2, 0.35, 0.5)
 CLASS_MIX_CACHE_MAX_ENTRIES = 32
 
@@ -301,6 +306,7 @@ class HierarchicalNextUnitModel:
         self.class_profile_limit = int(class_profile_limit)
         self.class_follower_limit = int(class_follower_limit)
         self.class_labels: dict[str, str] = {}
+        self.class_lambdas: dict[str, float] = {}
         self.class_profiles: dict[str, np.ndarray] = {}
         self.class_profile_variances: dict[str, np.ndarray] = {}
         self.class_profile_features: list[str] = []
@@ -342,6 +348,7 @@ class HierarchicalNextUnitModel:
         self._spelling_known_candidate_cache: dict[tuple, tuple[str, ...]] = {}
         self.training_manifest: dict | None = None
         self.internal_observer_calibration: dict | None = None
+        self._class_validation_documents: list[str] | None = None
         # Exact-text identity lets checkpoint continuation ignore epoch replay
         # instead of treating already-seen examples as independent evidence.
         self._training_document_hashes: set[str] = set()
@@ -362,6 +369,8 @@ class HierarchicalNextUnitModel:
 
         self._candidate_cache.clear()
         self._character_word_prior_cache = None
+        if hasattr(self, "_class_mix_distribution_cache"):
+            self._class_mix_distribution_cache.clear()
         texts = list(documents)
         if self.class_nodes_enabled and not _skip_observer_validation_calibration:
             # Keep a document-grouped calibration slice out of the initial
@@ -380,31 +389,169 @@ class HierarchicalNextUnitModel:
             )
             if len(ordered_groups) >= 10:
                 calibration_group_count = max(1, round(len(ordered_groups) * 0.1))
-                fit_groups = ordered_groups[:-calibration_group_count]
-                calibration_groups = ordered_groups[-calibration_group_count:]
+                # Build a document-heldout class-validation set around whole
+                # adjacent-pair occurrences. A random document split can
+                # contain zero unseen pairs on restricted grammars (as in the
+                # composition testbed), while hashing edges out of count
+                # tables leaks the surrounding document. Instead, select
+                # pairs first, then keep every document containing a selected
+                # pair out of the fit partition. Profiles only see fit docs.
+                pair_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+                pair_followers: dict[str, set[str]] = defaultdict(set)
+                for group_id, group_texts in text_groups.items():
+                    for text in group_texts:
+                        for sentence in split_sentences(text):
+                            sequence = tokenize(sentence) + [BOUNDARY]
+                            for left, right in zip(sequence, sequence[1:]):
+                                pair_groups[(left, right)].add(group_id)
+                                pair_followers[left].add(right)
+                # Prioritize candidate edges whose left word has a genuine
+                # follower profile. Holding out a one-outcome context cannot
+                # validate a learned distributional class and wastes scarce
+                # document holdout capacity on structural boilerplate.
+                candidate_pairs = [
+                    pair for pair in pair_groups
+                    if len(pair_followers[pair[0]]) >= 2
+                ]
+                ranked_pairs = sorted(
+                    candidate_pairs or pair_groups,
+                    key=lambda pair: (
+                        len(pair_groups[pair]),
+                        hashlib.sha256(
+                            f"class-pair-validation-v1:{pair[0]}\0{pair[1]}".encode("utf-8")
+                        ).digest(),
+                    ),
+                )
+                target_pair_count = max(1, round(len(ranked_pairs) * 0.1))
+                max_validation_groups = max(1, int(len(ordered_groups) * 0.2))
+                selected_pairs: set[tuple[str, str]] = set()
+                selected_group_ids: set[str] = set()
+                selected_left_tokens: set[str] = set()
+                for pair in ranked_pairs:
+                    # Spread held-out edges across different context words
+                    # before taking a second edge from the same context. This
+                    # gives each candidate class member a chance to provide
+                    # independent validation evidence.
+                    if pair[0] in selected_left_tokens:
+                        continue
+                    proposed_groups = selected_group_ids | pair_groups[pair]
+                    if len(proposed_groups) > max_validation_groups:
+                        continue
+                    selected_pairs.add(pair)
+                    selected_left_tokens.add(pair[0])
+                    selected_group_ids = proposed_groups
+                    if len(selected_pairs) >= target_pair_count:
+                        break
+                if len(selected_pairs) < target_pair_count:
+                    for pair in ranked_pairs:
+                        # Keep the holdout spread across contexts even when
+                        # the document cap prevents the first pass from
+                        # reaching its target. Holding every follower of one
+                        # word can erase the very profile needed to evaluate
+                        # that word's class abstraction.
+                        if pair in selected_pairs or pair[0] in selected_left_tokens:
+                            continue
+                        proposed_groups = selected_group_ids | pair_groups[pair]
+                        if len(proposed_groups) > max_validation_groups:
+                            continue
+                        selected_pairs.add(pair)
+                        selected_left_tokens.add(pair[0])
+                        selected_group_ids = proposed_groups
+                        if len(selected_pairs) >= target_pair_count:
+                            break
+                # Include a little ordinary document-heldout data when the
+                # pair-selected groups alone are smaller than a 10% slice.
+                ordinary_target = max(1, round(len(ordered_groups) * 0.1))
+                for group_id, _group in ordered_groups:
+                    if len(selected_group_ids) >= ordinary_target:
+                        break
+                    selected_group_ids.add(group_id)
+                class_validation_groups = [
+                    item for item in ordered_groups if item[0] in selected_group_ids
+                ]
+                remaining_groups = [
+                    item for item in ordered_groups if item[0] not in selected_group_ids
+                ]
+                # Reserve independent document groups for order-level
+                # calibration and class reinforcement. Reusing the
+                # pair-holdout documents for reinforcement would make the
+                # class's final weight adapt to the same outcomes that chose
+                # its tau/lambda in _validation_class_choice.
+                max_calibration_groups = max(0, len(remaining_groups) - 2)
+                if max_calibration_groups >= 2:
+                    calibration_group_count = min(
+                        max(2, calibration_group_count), max_calibration_groups
+                    )
+                else:
+                    calibration_group_count = 0
+                calibration_groups = (
+                    remaining_groups[-calibration_group_count:]
+                    if calibration_group_count else []
+                )
+                fit_groups = (
+                    remaining_groups[:-calibration_group_count]
+                    if calibration_group_count else remaining_groups
+                )
+                if len(fit_groups) < 2:
+                    fit_groups, class_validation_groups, calibration_groups = [], [], []
                 fit_documents = [text for _, group in fit_groups for text in group]
-                calibration_documents = [text for _, group in calibration_groups for text in group]
-                if fit_documents and calibration_documents:
+                class_validation_documents = [
+                    text for _, group in class_validation_groups for text in group
+                ]
+                order_calibration_groups = calibration_groups[::2]
+                class_reinforcement_groups = calibration_groups[1::2]
+                calibration_documents = [
+                    text for _, group in order_calibration_groups for text in group
+                ]
+                class_reinforcement_documents = [
+                    text for _, group in class_reinforcement_groups for text in group
+                ]
+                if (fit_documents and calibration_documents
+                        and class_reinforcement_documents and class_validation_documents):
+                    self._class_validation_documents = class_validation_documents
                     report("internal_observer_calibration", state="fit_partition",
                            fit_documents=len(fit_documents),
                            calibration_documents=len(calibration_documents),
-                           calibration_groups=len(calibration_groups))
-                    self.fit(
-                        fit_documents, workers=workers,
-                        progress_callback=progress_callback,
-                        _skip_observer_validation_calibration=True,
-                    )
+                           calibration_groups=len(order_calibration_groups),
+                           class_reinforcement_documents=len(class_reinforcement_documents),
+                           class_reinforcement_groups=len(class_reinforcement_groups),
+                           class_validation_documents=len(class_validation_documents),
+                           class_validation_groups=len(class_validation_groups),
+                           selected_validation_pairs=len(selected_pairs))
+                    # Establish the word-level experts before selecting class
+                    # weights. Class selection must score the same Observer-
+                    # weighted predictor that will be used after fitting.
+                    self.class_nodes_enabled = False
+                    self.fit(fit_documents, workers=workers,
+                             progress_callback=progress_callback,
+                             _skip_observer_validation_calibration=True)
+                    self.class_nodes_enabled = True
                     calibration = self.tune_observer_weights(calibration_documents)
                     calibrated_weights = {
                         order: self.observer.get_weight(node.id)
                         for order, node in self.word_level_nodes.items()
                     }
+                    self._fit_class_nodes_from_counts(refit=True)
+                    if any(self.class_lambdas.values()):
+                        self._build_hfn_nodes(progress_callback=progress_callback)
+                        self._fit_pattern_observer(progress_callback=progress_callback)
+                        for order, node in self.word_level_nodes.items():
+                            if order in calibrated_weights:
+                                self.observer.set_weight(node.id, calibrated_weights[order])
+                    # Reinforce class nodes on a separate document group from
+                    # both class selection and word-order calibration. Score
+                    # these unseen class events before returning them to the
+                    # training counts below.
+                    class_calibration = self._reinforce_class_observer_weights(
+                        class_reinforcement_documents
+                    )
                     if progress_callback:
                         progress_callback({
                             "fit_stage": "internal_observer_calibration",
                             "state": "complete",
                             "fit_documents": len(fit_documents),
                             "calibration_documents": len(calibration_documents),
+                            "class_reinforcement_documents": len(class_reinforcement_documents),
                             "validation_cross_entropy_before": calibration[
                                 "validation_cross_entropy_before"
                             ],
@@ -415,18 +562,36 @@ class HierarchicalNextUnitModel:
                                 str(order): weight
                                 for order, weight in calibrated_weights.items()
                             },
+                            "class_observer_training": class_calibration,
                         })
                     self.partial_fit(
-                        calibration_documents, workers=workers,
+                        [*class_validation_documents, *calibration_documents,
+                         *class_reinforcement_documents], workers=workers,
                         _preserve_batch_frequency=True,
                     )
+                    class_refit = None
+                    if self.class_tau is not None and any(self.class_lambdas.values()):
+                        class_refit = self._refit_selected_classes_on_full_training_counts()
+                        self._build_hfn_nodes(progress_callback=progress_callback)
+                        self._fit_pattern_observer(progress_callback=progress_callback)
+                        for order, node in self.word_level_nodes.items():
+                            if order in calibrated_weights:
+                                self.observer.set_weight(node.id, calibrated_weights[order])
+                        for class_id, weight in self.class_lambdas.items():
+                            if class_id in self.class_node_registry:
+                                self.observer.set_weight(class_id, weight)
                     for order, node in self.word_level_nodes.items():
                         if order in calibrated_weights:
                             self.observer.set_weight(node.id, calibrated_weights[order])
                     self.internal_observer_calibration = {
                         "fit_documents": len(fit_documents),
                         "calibration_documents": len(calibration_documents),
-                        "calibration_groups": len(calibration_groups),
+                        "calibration_groups": len(order_calibration_groups),
+                        "class_reinforcement_documents": len(class_reinforcement_documents),
+                        "class_reinforcement_groups": len(class_reinforcement_groups),
+                        "class_validation_documents": len(class_validation_documents),
+                        "class_validation_groups": len(class_validation_groups),
+                        "selected_validation_pairs": len(selected_pairs),
                         "validation_cross_entropy_before": calibration[
                             "validation_cross_entropy_before"
                         ],
@@ -437,7 +602,10 @@ class HierarchicalNextUnitModel:
                             str(order): weight
                             for order, weight in calibrated_weights.items()
                         },
+                        "class_observer_training": class_calibration,
+                        "class_final_refit": class_refit,
                     }
+                    self._class_validation_documents = None
                     return self
         self._training_document_hashes = {
             hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
@@ -554,6 +722,7 @@ class HierarchicalNextUnitModel:
     def partial_fit(
         self, documents: Iterable[str], workers: int = 1, *,
         observer_replay_documents: Iterable[str] = (),
+        class_validation_documents: Iterable[str] = (),
         min_word_count: int | None = None,
         progress_callback: Callable[[dict], None] | None = None,
         _preserve_batch_frequency: bool = False,
@@ -576,12 +745,17 @@ class HierarchicalNextUnitModel:
                 "checkpoint lacks raw lexical context counts; refit from source training data before continuing"
             )
         supplied_texts = list(documents)
+        class_validation_texts = [text for text in class_validation_documents if text.strip()]
         replay_texts = [text for text in observer_replay_documents if text.strip()]
         if not supplied_texts:
             return self
         supplied_hashes = [hashlib.sha256(text.encode("utf-8")).hexdigest()
                            for text in supplied_texts]
         previous_hashes = set(self._training_document_hashes)
+        validation_hashes = {hashlib.sha256(text.encode("utf-8")).hexdigest()
+                             for text in class_validation_texts}
+        if validation_hashes & (set(supplied_hashes) | previous_hashes):
+            raise ValueError("class validation documents must be held out from all HFN training data")
         seen_hashes = set(previous_hashes)
         texts = []
         new_hashes = []
@@ -600,6 +774,12 @@ class HierarchicalNextUnitModel:
                 progress_callback({"stage": "replay_skipped", "documents": len(supplied_texts),
                                    "new_documents": 0, "hfn_nodes": len(self.nodes)})
             return self
+        if hasattr(self, "_class_mix_distribution_cache"):
+            self._class_mix_distribution_cache.clear()
+        previous_class_weights = {
+            class_id: self.observer.get_weight(class_id)
+            for class_id in self.class_node_registry if self.observer is not None
+        }
         def progress(stage: str, **details) -> None:
             if progress_callback:
                 progress_callback({"stage": stage, "documents": len(texts), **details})
@@ -650,6 +830,9 @@ class HierarchicalNextUnitModel:
         self._build_hfn_nodes()
         progress("recompute_observer_reliability", hfn_nodes=len(self.nodes))
         self._fit_pattern_observer()
+        for class_id, weight in previous_class_weights.items():
+            if class_id in self.class_node_registry:
+                self.observer.set_weight(class_id, weight)
         progress("train_observer_weights", objective="training_leave_one_event_out_next_unit_cross_entropy")
         word_training = self.train_observer_weights(
             [*texts, *replay_texts], character=False,
@@ -659,6 +842,14 @@ class HierarchicalNextUnitModel:
             [*texts, *replay_texts], character=True,
             progress_callback=lambda details: progress("train_observer_weights", **details),
         )
+        class_validation_training = (
+            self._reinforce_class_observer_weights(class_validation_texts)
+            if class_validation_texts else {"events": 0, "updated_classes": 0, "weights": {}}
+        )
+        if class_validation_texts:
+            for class_id, weight in class_validation_training["weights"].items():
+                self.class_lambdas[class_id] = 0.0 if weight < 0.005 else weight
+            self.class_lambda = max(self.class_lambdas.values(), default=0.0)
         if self.training_manifest is not None:
             batches_manifest = self.training_manifest.setdefault("incremental_training_batches", [])
             batches_manifest.append({
@@ -668,6 +859,7 @@ class HierarchicalNextUnitModel:
                 "characters": sum(map(len, texts)),
                 "text_sha256": hashlib.sha256("\n".join(sorted(texts)).encode()).hexdigest(),
                 "observer_training": {"word": word_training, "character": character_training},
+                "class_observer_validation": class_validation_training,
             })
             if len(texts) != len(supplied_texts):
                 replay_batches = self.training_manifest.setdefault("replay_training_batches", [])
@@ -767,11 +959,26 @@ class HierarchicalNextUnitModel:
         return projected
 
     def _profiles_from_counts(self, raw_counts: dict) -> dict[str, np.ndarray]:
-        """IDF-weighted positive PMI of each word's observed followers."""
+        """IDF-weighted follower profiles conditioned on the preceding role cue.
+
+        When the forest has at least a two-token context, the profile feature
+        is ``(word_before_context_word, next_word)``. This prevents a word
+        used in distinct positions (for example a subject noun before a verb
+        and an object noun before sentence end) from having its role signals
+        collapsed into one unconditional follower vector.
+        """
         followers: dict[str, Counter] = defaultdict(Counter)
         for context, targets in raw_counts.items():
-            if len(context) == 1 and context[0] not in (BOUNDARY, UNK):
-                followers[context[0]].update(targets)
+            if len(context) == 2 and context[-1] not in (BOUNDARY, UNK):
+                role_cue = context[-2]
+                for target, count in targets.items():
+                    followers[context[-1]][f"{role_cue}\0{target}"] += count
+        # Preserve order-2 models' original behavior, where there is no
+        # preceding role cue available to condition the follower profile.
+        if not followers:
+            for context, targets in raw_counts.items():
+                if len(context) == 1 and context[0] not in (BOUNDARY, UNK):
+                    followers[context[0]].update(targets)
         eligible = {word: counts for word, counts in followers.items()
                     if sum(counts.values()) >= self.class_min_observations}
         if len(eligible) > self.class_profile_limit:
@@ -855,222 +1062,433 @@ class HierarchicalNextUnitModel:
         return (*context[:-1], labels.get(context[-1], context[-1]))
 
     def _validation_class_choice(self) -> tuple[float | None, float]:
-        """Select tau/lambda from pair-held-out and ordinary held-out events."""
-        contexts = sorted(context for context in self.raw_word_context_counts
-                          if len(context) == max(0, self.max_order - 1))
-        if not contexts:
+        """Select coherent classes on document-heldout unseen word pairs only."""
+        documents = self._class_validation_documents or []
+        if not documents or self.max_order < 2:
+            self.class_lambdas = {}
+            self.class_selection = {
+                "selection_reason": "no-class fallback: document-heldout validation unavailable",
+                "validation_method": "source_grouped_document_holdout_unseen_adjacent_pairs",
+                "held_pairs": 0,
+                "candidate_diagnostics": [],
+            }
             return None, 0.0
-        unique_edges = sorted((context, target) for context in contexts
-                              for target, count in self.raw_word_context_counts[context].items()
-                              if count > 0)
-        pairs = sorted({(context[-1], target) for context, target in unique_edges if context})
-        if not pairs or len(unique_edges) < 4:
-            return None, 0.0
-        held_pairs = {pair for index, pair in enumerate(pairs)
-                      if int.from_bytes(hashlib.sha256(f"pair:{pair}".encode()).digest()[:4], "big") % 10 == 0}
-        if not held_pairs:
-            held_pairs = {pairs[0]}
-        ordinary = [edge for edge in unique_edges if edge[1] and
-                    (not edge[0] or (edge[0][-1], edge[1]) not in held_pairs)
-                    and self.raw_word_context_counts[edge[0]][edge[1]] >= 2]
-        held_ordinary = {edge for edge in ordinary
-                         if int.from_bytes(hashlib.sha256(f"ordinary:{edge}".encode()).digest()[:4], "big") % 7 == 0}
-        ordinary_validation_counts = {
-            edge: min(max(1, int(round(self.raw_word_context_counts[edge[0]][edge[1]] * 0.1))),
-                      self.raw_word_context_counts[edge[0]][edge[1]] - 1)
-            for edge in held_ordinary
-        }
-        validation = []
-        for context, target in unique_edges:
-            edge = (context, target)
-            if context and (context[-1], target) in held_pairs:
-                validation.append((context, target, self.raw_word_context_counts[context][target], 1.0))
-            elif edge in ordinary_validation_counts:
-                validation.append((context, target, ordinary_validation_counts[edge], 1.0))
-        if not validation:
-            return None, 0.0
-        train_tables: dict[tuple[str, ...], Counter] = defaultdict(Counter)
-        for context, targets in self.raw_word_context_counts.items():
-            for target, count in targets.items():
-                edge = (context, target)
-                held_count = count if (context and (context[-1], target) in held_pairs) else 0
-                if len(context) == self.max_order - 1:
-                    held_count = max(held_count, ordinary_validation_counts.get(edge, 0))
-                if count > held_count:
-                    train_tables[context][target] += count - held_count
+
+        # Validation counts are built from complete held-out documents; the
+        # fit count tables and follower profiles below never contain these
+        # documents. Hash-edge holdout from the training counts rewarded
+        # memorized adjacency statistics and is intentionally removed.
+        validation_counts: dict[tuple[str, ...], Counter] = defaultdict(Counter)
+        for text in documents:
+            for sentence in split_sentences(text):
+                sequence = tokenize(sentence) + [BOUNDARY]
+                for index, target in enumerate(sequence):
+                    context = tuple(sequence[max(0, index - self.max_order + 1):index])
+                    validation_counts[context][target] += 1
+        train_tables = self.raw_word_context_counts
         profiles = self._profiles_from_counts(train_tables)
-        if not profiles:
+        train_pairs = {
+            (context[-1], target)
+            for context, targets in train_tables.items() if len(context) == 1
+            for target, count in targets.items() if count > 0
+        }
+        validation_events = []
+        for context, targets in validation_counts.items():
+            if not context:
+                continue
+            for target, count in targets.items():
+                pair = (context[-1], target)
+                validation_events.append((context, target, count, pair not in train_pairs))
+        unseen_events = [event for event in validation_events
+                         if event[3] and event[0][-1] in profiles]
+        if not unseen_events:
+            self.class_lambdas = {}
+            self.class_selection = {
+                "selection_reason": "no-class fallback: no held-out unseen pairs with learned profiles",
+                "validation_method": "source_grouped_document_holdout_unseen_adjacent_pairs",
+                "held_pairs": 0,
+                "validation_events": len(validation_events),
+                "candidate_diagnostics": [],
+            }
             return None, 0.0
-        candidates = [(None, 0.0)]
-        # Favor coarse, reusable classes and keep lambda within the seen-pair
-        # trust region observed in the frozen composition gates.
-        candidates.extend((tau, lam) for tau in (0.7, 0.8, 0.9)
-                          for lam in (0.025, 0.05, 0.1, 0.2, 0.35, 0.5))
-        # Cluster membership depends on tau, not lambda. Reuse each clustering
-        # across all six mixture strengths; otherwise the expensive pairwise
-        # distance/linkage pass is needlessly repeated for every candidate.
-        labels_by_tau: dict[float, dict[str, str]] = {}
-        for tau in (0.7, 0.8, 0.9):
-            labels: dict[str, str] = {}
-            for index, members in enumerate(
-                group for group in self._average_link_clusters(profiles, tau)
-                if len(group) > 1
-            ):
-                label = f"validation_class_{index}"
-                labels.update({word: label for word in members})
-            labels_by_tau[tau] = labels
-        best = (float("inf"), None, 0.0)
-        no_class_score = None
-        best_pair_improvements: dict[tuple[str, str], list[float]] = {}
-        best_seen_delta = None
-        scored_candidates = []
+
+        # Train profiles are high-dimensional and are not retained after this
+        # fit. Keep candidate cluster analysis cached by tau.
+        thresholds = (0.7, 0.8, 0.9, 0.95, 0.98)
         candidate_diagnostics = []
-        # Candidate lambdas share the same word distribution and (for a given
-        # tau) the same pooled class distribution. Reusing both avoids
-        # rebuilding tables and recursively rescoring every validation event
-        # six times per clustering threshold.
-        counts: dict[tuple[str, ...], Counter] = defaultdict(Counter)
+        candidates = []
+        no_class_pair_losses: dict[tuple[str, str], list[float]] = defaultdict(list)
+
+        mapped_counts: dict[tuple[str, ...], Counter] = defaultdict(Counter)
         for context, targets in train_tables.items():
             mapped_context = tuple(self._map(word) for word in context)
             for target, count in targets.items():
-                counts[mapped_context][self._map(target)] += count
-        pooled_by_tau: dict[float | None, dict[tuple[str, ...], Counter]] = {}
-        probability_cache_by_tau: dict[
-            float | None, dict[tuple[tuple[str, ...], str, bool], float]
-        ] = {}
-        for tau, lam in candidates:
-            labels = labels_by_tau.get(tau, {}) if lam > 0 else {}
-            if tau not in pooled_by_tau:
-                pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
-                for context, targets in train_tables.items():
-                    class_context = self._abstract_prediction_slot(context, labels)
-                    if context and class_context != context:
-                        for target, count in targets.items():
-                            pooled[class_context][self._map(target)] += count
-                pooled_by_tau[tau] = pooled
-                probability_cache_by_tau[tau] = {}
-            pooled = pooled_by_tau[tau]
-            probability_cache = probability_cache_by_tau[tau]
+                mapped_counts[mapped_context][self._map(target)] += count
 
-            def dist(context: tuple[str, ...], target: str, class_mode: bool = False) -> float:
-                """Return one target probability without materializing |vocab| values.
-
-                Validation only scores observed targets. Building a dense
-                vocabulary distribution for every context/event made class
-                selection scale as O(events * vocabulary * candidates), even
-                though the recursive backoff needs only the requested target.
-                """
-                key = (context, target, class_mode)
-                cached = probability_cache.get(key)
-                if cached is not None:
-                    return cached
-                table = pooled if class_mode else counts
+        def make_dist(tables, cache, *, observer_weighted=False):
+            def dist(context, target):
+                key = (context, target)
+                if key in cache:
+                    return cache[key]
                 if not context:
-                    base_counts = counts.get((), Counter())
-                    den = sum(base_counts.values()) + self.alpha * len(self.vocab)
-                    probability = (base_counts.get(target, 0) + self.alpha) / den
+                    unigram = mapped_counts.get((), Counter())
+                    total = sum(unigram.values())
+                    value = (unigram.get(target, 0) + self.alpha) / (
+                        total + self.alpha * len(self.vocab)
+                    )
+                    if observer_weighted and self.observer is not None:
+                        weight = self.observer.get_weight(self.word_level_nodes[0].id)
+                        value = weight * value + (1.0 - weight) / len(self.vocab)
                 else:
-                    base = dist(context[1:], target, class_mode)
-                    local = table.get(context, Counter())
+                    base = dist(context[1:], target)
+                    local = tables.get(context, Counter())
                     total = sum(local.values())
                     if not total:
-                        probability = base
+                        value = base
                     else:
                         mass = total / (total + self.alpha)
-                        probability = (mass * local.get(target, 0) / total
-                                       + (1.0 - mass) * base)
-                probability_cache[key] = probability
-                return probability
+                        if observer_weighted and self.observer is not None:
+                            order = min(len(context), self.max_order - 1)
+                            mass *= self.observer.get_weight(self.word_level_nodes[order].id)
+                        value = mass * local.get(target, 0) / total + (1.0 - mass) * base
+                cache[key] = value
+                return value
+            return dist
 
-            loss, observations = 0.0, 0
-            seen_loss, seen_plain_loss, seen_observations = 0.0, 0.0, 0
-            pair_improvements: dict[tuple[str, str], list[float]] = defaultdict(list)
-            pair_losses: dict[tuple[str, str], list[float]] = defaultdict(list)
-            for raw_context, target, frequency, validation_weight in validation:
-                # Pair holdout is meaningful for class selection only where the
-                # context word itself has a learned follower profile.
-                if not raw_context or raw_context[-1] not in profiles:
+        def mix_probability(context, target, class_context, lam, class_dist):
+            """Use class mass only to refine the exact context's backoff mass.
+
+            Pair targets already observed after the word keep their plain
+            probability. The class expert redistributes only the remaining
+            probability among unseen targets, so class induction cannot erase
+            a learned edge. This is the same rule used at inference.
+            """
+            seen_targets = set()
+            if context:
+                for order in range(len(context), 0, -1):
+                    local = mapped_counts.get(context[-order:], Counter())
+                    if local:
+                        seen_targets = set(local)
+                        break
+            plain = no_class_dist(context, target)
+            if not seen_targets:
+                return plain
+            key = (context, class_context, tuple(sorted(seen_targets)))
+            stats = mix_cache.get(key)
+            if stats is None:
+                plain_seen_mass = sum(no_class_dist(context, word) for word in seen_targets)
+                class_seen_mass = sum(class_dist(class_context, word) for word in seen_targets)
+                stats = (plain_seen_mass, max(0.0, 1.0 - plain_seen_mass),
+                         max(0.0, 1.0 - class_seen_mass))
+                mix_cache[key] = stats
+            plain_seen_mass, plain_unseen_mass, class_unseen_mass = stats
+            if class_unseen_mass <= 1e-12:
+                return plain
+            reserved_unseen_mass = max(
+                plain_unseen_mass, CLASS_RESERVED_UNSEEN_MASS * lam,
+            )
+            if target in seen_targets:
+                if reserved_unseen_mass <= plain_unseen_mass or plain_seen_mass <= 0.0:
+                    return plain
+                return plain * (1.0 - reserved_unseen_mass) / plain_seen_mass
+            base_component = (plain / plain_unseen_mass if plain_unseen_mass > 1e-12
+                              else class_dist(class_context, target) / class_unseen_mass)
+            class_component = class_dist(class_context, target) / class_unseen_mass
+            return reserved_unseen_mass * (
+                (1.0 - lam) * base_component + lam * class_component
+            )
+
+        # The plain expert must match actual inference, including Observer
+        # reliability weights. The class expert remains an interpolated
+        # pooled-count distribution, mixed by its own Observer weight.
+        no_class_dist = make_dist(mapped_counts, {}, observer_weighted=True)
+        for context, target, count, _unseen in unseen_events:
+            mapped_context = tuple(self._map(word) for word in context)
+            mapped_target = self._map(target)
+            pair = (context[-1], target)
+            no_class_pair_losses[pair].extend(
+                [-math.log(max(no_class_dist(mapped_context, mapped_target), 1e-12))] * count
+            )
+        no_class_pair_means = np.asarray([
+            float(np.mean(losses)) for losses in no_class_pair_losses.values()
+        ])
+        no_class_se = (float(np.std(no_class_pair_means, ddof=1) / math.sqrt(len(no_class_pair_means)))
+                       if len(no_class_pair_means) > 1 else float("inf"))
+
+        for tau in thresholds:
+            raw_clusters = self._average_link_clusters(profiles, tau)
+            kept_clusters = []
+            for members in raw_clusters:
+                if len(members) < 2 or len(members) > CLASS_MAX_MEMBERS:
                     continue
-                is_seen_pair = bool(raw_context and (raw_context[-1], target) not in held_pairs)
-                context = tuple(self._map(word) for word in raw_context)
-                target = self._map(target)
-                plain = dist(context, target)
-                class_context = self._abstract_prediction_slot(raw_context, labels)
-                if class_context != raw_context and class_context in pooled:
-                    class_probability = dist(class_context, target, True)
-                    # Validate the same direct expert blend used by inference.
-                    probability = (1.0 - lam) * plain + lam * class_probability
+                matrix = np.asarray([profiles[word] for word in members], dtype=float)
+                norms = np.linalg.norm(matrix, axis=1)
+                matrix = matrix / np.maximum(norms[:, None], 1e-12)
+                centroid = matrix.mean(axis=0)
+                centroid_norm = float(np.linalg.norm(centroid))
+                cohesion = (float(np.mean(matrix @ centroid / max(centroid_norm, 1e-12)))
+                            if centroid_norm else 0.0)
+                if cohesion >= CLASS_MIN_COHESION:
+                    kept_clusters.append((members, cohesion))
+
+            labels = {}
+            class_members = {}
+            class_cohesion = {}
+            for index, (members, cohesion) in enumerate(kept_clusters):
+                class_id = f"language_class_{index:06d}"
+                labels.update({word: class_id for word in members})
+                class_members[class_id] = members
+                class_cohesion[class_id] = cohesion
+
+            pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
+            for context, targets in train_tables.items():
+                class_context = self._abstract_prediction_slot(context, labels)
+                if context and class_context != context:
+                    for target, count in targets.items():
+                        pooled[class_context][self._map(target)] += count
+            class_dist = make_dist(pooled, {})
+            mix_cache = {}
+
+            class_lambdas = {}
+            class_diagnostics = []
+            for class_id, members in class_members.items():
+                events = [event for event in unseen_events if labels.get(event[0][-1]) == class_id]
+                pairs = sorted({(event[0][-1], event[1]) for event in events})
+                if len(pairs) < CLASS_MIN_VALIDATION_PAIRS:
+                    # An explicit zero distinguishes a rejected/unvalidated
+                    # class from a legacy class whose weight should inherit
+                    # the global compatibility default.
+                    class_lambdas[class_id] = 0.0
+                    class_diagnostics.append({
+                        "class_id": class_id, "members": len(members),
+                        "example_members": members[:12], "cohesion": class_cohesion[class_id],
+                        "validation_unseen_pairs": len(pairs), "selected_weight": 0.0,
+                        "selection_reason": "insufficient held-out unseen-pair evidence",
+                    })
+                    continue
+                per_lambda: dict[float, dict[tuple[str, str], list[float]]] = {
+                    lam: defaultdict(list) for lam in (0.0, *CLASS_LAMBDA_GRID)
+                }
+                per_seen_lambda: dict[float, dict[tuple[str, str], list[float]]] = {
+                    lam: defaultdict(list) for lam in (0.0, *CLASS_LAMBDA_GRID)
+                }
+                for raw_context, raw_target, count, _ in events:
+                    context = tuple(self._map(word) for word in raw_context)
+                    target = self._map(raw_target)
+                    plain = no_class_dist(context, target)
+                    abstract = self._abstract_prediction_slot(raw_context, labels)
+                    class_probability = class_dist(abstract, target)
+                    pair = (raw_context[-1], raw_target)
+                    for lam, pair_losses in per_lambda.items():
+                        mixture = mix_probability(context, target, abstract, lam, class_dist)
+                        pair_losses[pair].extend(
+                            [-math.log(max(mixture, 1e-12))] * count
+                        )
+                seen_events = [
+                    event for event in validation_events
+                    if not event[3] and event[0]
+                    and labels.get(event[0][-1]) == class_id
+                ]
+                for raw_context, raw_target, count, _ in seen_events:
+                    context = tuple(self._map(word) for word in raw_context)
+                    target = self._map(raw_target)
+                    plain = no_class_dist(context, target)
+                    abstract = self._abstract_prediction_slot(raw_context, labels)
+                    class_probability = class_dist(abstract, target)
+                    pair = (raw_context[-1], raw_target)
+                    for lam, pair_losses in per_seen_lambda.items():
+                        mixture = mix_probability(context, target, abstract, lam, class_dist)
+                        pair_losses[pair].extend(
+                            [-math.log(max(mixture, 1e-12))] * count
+                        )
+                means = {
+                    lam: np.asarray([float(np.mean(losses)) for losses in pair_losses.values()])
+                    for lam, pair_losses in per_lambda.items()
+                }
+                losses = {lam: float(values.mean()) for lam, values in means.items()}
+                seen_means = {
+                    lam: np.asarray([float(np.mean(values)) for values in pair_losses.values()])
+                    for lam, pair_losses in per_seen_lambda.items()
+                }
+                plain_seen_loss = float(seen_means[0.0].mean()) if len(seen_means[0.0]) else 0.0
+                seen_deltas_by_lambda = {
+                    lam: (float(values.mean()) - plain_seen_loss if len(values) else 0.0)
+                    for lam, values in seen_means.items()
+                }
+                eligible_lambdas = [
+                    lam for lam in losses
+                    if seen_deltas_by_lambda[lam] <= CLASS_MAX_SEEN_REGRESSION_NATS
+                ]
+                best_lam = min(eligible_lambdas, key=losses.get) if eligible_lambdas else 0.0
+                best_values = means[best_lam]
+                best_se = (float(np.std(best_values, ddof=1) / math.sqrt(len(best_values)))
+                           if len(best_values) > 1 else 0.0)
+                if losses[0.0] - losses[best_lam] <= best_se:
+                    best_lam = 0.0
                 else:
-                    probability = plain
-                loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
-                observations += validation_weight * frequency
-                if is_seen_pair:
-                    seen_loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
-                    seen_plain_loss -= validation_weight * frequency * math.log(max(plain, 1e-12))
-                    seen_observations += validation_weight * frequency
-                pair_improvements[(raw_context[-1], target)].append(
-                    math.log(max(probability, 1e-12) / max(plain, 1e-12)))
-                pair_losses[(raw_context[-1], target)].append(-math.log(max(probability, 1e-12)))
-            score = loss / max(observations, 1)
-            if tau is None:
-                no_class_score = score
-            seen_delta = ((seen_loss - seen_plain_loss) / seen_observations
-                          if seen_observations else 0.0)
-            if tau is not None and seen_delta > CLASS_MAX_SEEN_REGRESSION_NATS:
-                continue
-            edge_losses = np.asarray([float(np.mean(values)) for values in pair_losses.values()])
-            candidate_se = (float(np.std(edge_losses, ddof=1) / math.sqrt(len(edge_losses)))
-                            if len(edge_losses) > 1 else float("inf"))
-            scored_candidates.append((score, candidate_se, tau, lam,
-                                      pair_improvements, seen_delta,
-                                      len({label for label in labels.values()})))
-            candidate_diagnostics.append({"tau": tau, "lambda": lam,
-                                          "validation_cross_entropy_nats": score,
-                                          "edge_standard_error_nats": candidate_se,
-                                          "seen_pair_loss_delta_nats": seen_delta,
-                                          "class_count": len({label for label in labels.values()})})
-            if score < best[0] - 1e-12:
-                best = (score, tau, lam)
-                best_pair_improvements = pair_improvements
-                best_seen_delta = seen_delta
-        # Within one standard error of the best validation risk, prefer the
-        # weakest class mix to limit seen-context disruption and variance.
-        if scored_candidates:
-            min_score = min(row[0] for row in scored_candidates)
-            best_row = min(scored_candidates, key=lambda row: row[0])
-            threshold = min_score + best_row[1]
-            selected_row = min((row for row in scored_candidates if row[0] <= threshold),
-                               key=lambda row: (row[6], row[3], row[0]))
-            best = (selected_row[0], selected_row[2], selected_row[3])
-            best_pair_improvements = selected_row[4]
-            best_seen_delta = selected_row[5]
-        pair_deltas = np.asarray([float(np.mean(values)) for values in best_pair_improvements.values()])
-        validation_se = (float(np.std(pair_deltas, ddof=1) / math.sqrt(len(pair_deltas)))
-                         if len(pair_deltas) > 1 else float("inf"))
-        self.class_selection = {"validation_cross_entropy_nats": best[0],
-                                "best_candidate_tau": best[1],
-                                "best_candidate_lambda": best[2],
-                                "no_class_validation_cross_entropy_nats": no_class_score,
-                                "validation_gain_nats": (no_class_score - best[0]
-                                                          if no_class_score is not None else None),
-                                "held_pairs": len(held_pairs),
-                                "ordinary_held_events": len(held_ordinary),
-                                "paired_edge_standard_error_nats": validation_se,
-                                "selected_seen_pair_loss_delta_nats": best_seen_delta,
-                                "candidate_diagnostics": candidate_diagnostics}
-        # Use a one-standard-error rule over distinct held adjacent pairs to
-        # avoid selecting classes on a small, noisy validation advantage.
-        if best[1] is None:
-            self.class_selection["selection_reason"] = "no-class fallback: simplest candidate within one standard error"
-            self.class_selection["selected_validation_cross_entropy_nats"] = no_class_score
+                    # One-standard-error selection favors the lightest mix
+                    # whose held-out risk is statistically indistinguishable
+                    # from the minimum.
+                    cutoff = losses[best_lam] + best_se
+                    best_lam = min(
+                        lam for lam in eligible_lambdas if losses[lam] <= cutoff
+                    )
+                if len(pairs) == 1:
+                    # A single held-out edge cannot estimate class-level
+                    # variance. Keep its influence deliberately small; the
+                    # aggregate edge-level gate below still has to establish
+                    # a reliable gain for the complete clustering.
+                    best_lam = min(best_lam, 0.5)
+                class_lambdas[class_id] = best_lam
+                class_diagnostics.append({
+                    "class_id": class_id, "members": len(members),
+                    "example_members": members[:12], "cohesion": class_cohesion[class_id],
+                    "validation_unseen_pairs": len(pairs),
+                    "validation_events": sum(event[2] for event in events),
+                    "selected_weight": best_lam,
+                    "validation_seen_pairs": len(seen_means[0.0]),
+                    "validation_seen_pair_loss_delta_nats": seen_deltas_by_lambda[best_lam],
+                    "validation_gain_nats": losses[0.0] - losses[best_lam],
+                    "paired_edge_standard_error_nats": best_se if len(pairs) > 1 else None,
+                    "selection_reason": "held-out unseen-pair improvement" if best_lam else
+                        "no reliable held-out unseen-pair improvement",
+                })
+
+            # A class can improve its withheld combinations while blurring
+            # already learned pairs. Let each class earn its own seen-pair
+            # safety decision before judging the remaining classes globally.
+            seen_events_by_class: dict[str, list[tuple[float, int]]] = defaultdict(list)
+            for raw_context, raw_target, count, is_unseen in validation_events:
+                if is_unseen or not raw_context:
+                    continue
+                class_id = labels.get(raw_context[-1])
+                lam = class_lambdas.get(class_id, 0.0)
+                if not lam:
+                    continue
+                context = tuple(self._map(word) for word in raw_context)
+                target = self._map(raw_target)
+                plain = no_class_dist(context, target)
+                abstract = self._abstract_prediction_slot(raw_context, labels)
+                class_probability = class_dist(abstract, target)
+                mixture = mix_probability(context, target, abstract, lam, class_dist)
+                loss_delta = math.log(max(plain, 1e-12) / max(mixture, 1e-12))
+                seen_events_by_class[class_id].append((loss_delta, count))
+            for diagnostic in class_diagnostics:
+                class_id = diagnostic["class_id"]
+                seen_rows = seen_events_by_class.get(class_id, [])
+                if not seen_rows:
+                    diagnostic["validation_seen_pairs"] = 0
+                    continue
+                seen_delta = sum(delta * count for delta, count in seen_rows) / sum(
+                    count for _delta, count in seen_rows
+                )
+                diagnostic["validation_seen_pairs"] = len(seen_rows)
+                diagnostic["validation_seen_pair_loss_delta_nats"] = seen_delta
+                if (class_lambdas.get(class_id, 0.0) > 0.0
+                        and seen_delta > CLASS_MAX_SEEN_REGRESSION_NATS):
+                    class_lambdas[class_id] = 0.0
+                    diagnostic["selected_weight"] = 0.0
+                    diagnostic["selection_reason"] = "class harms held-out seen pairs"
+
+            # Estimate aggregate unseen-pair gain and seen-pair harm for the
+            # candidate partition. A class is active only with its own
+            # evidence; global tau is chosen on pooled held-out unseen pairs.
+            unseen_deltas: dict[tuple[str, str], list[float]] = defaultdict(list)
+            seen_deltas: list[float] = []
+            for raw_context, raw_target, count, is_unseen in validation_events:
+                if not raw_context:
+                    continue
+                class_id = labels.get(raw_context[-1])
+                lam = class_lambdas.get(class_id, 0.0)
+                if not lam:
+                    continue
+                context = tuple(self._map(word) for word in raw_context)
+                target = self._map(raw_target)
+                plain = no_class_dist(context, target)
+                abstract = self._abstract_prediction_slot(raw_context, labels)
+                mixture = mix_probability(context, target, abstract, lam, class_dist)
+                delta = math.log(max(plain, 1e-12) / max(mixture, 1e-12))
+                if is_unseen:
+                    # Improvement is positive when the class mixture assigns
+                    # greater likelihood to the held-out target.
+                    unseen_deltas[(raw_context[-1], raw_target)].extend([-delta] * count)
+                else:
+                    # Loss delta is mixture minus plain, so positive values
+                    # indicate seen-pair harm and trigger the safety bound.
+                    seen_deltas.extend([delta] * count)
+            edge_gains = np.asarray([float(np.mean(values)) for values in unseen_deltas.values()])
+            gain = float(edge_gains.mean()) if len(edge_gains) else 0.0
+            gain_se = (float(np.std(edge_gains, ddof=1) / math.sqrt(len(edge_gains)))
+                       if len(edge_gains) > 1 else float("inf"))
+            seen_delta = float(np.mean(seen_deltas)) if seen_deltas else 0.0
+            rejected_for_seen_harm = seen_delta > CLASS_MAX_SEEN_REGRESSION_NATS
+            if rejected_for_seen_harm or gain <= gain_se:
+                class_lambdas = {}
+            candidates.append({"tau": tau, "gain": gain, "gain_se": gain_se,
+                               "seen_pair_loss_delta_nats": seen_delta,
+                               "class_lambdas": class_lambdas,
+                               "class_diagnostics": class_diagnostics,
+                               "class_count": sum(value > 0.0
+                                                  for value in class_lambdas.values())})
+            candidate_diagnostics.append({
+                "tau": tau, "unseen_pair_gain_nats": gain,
+                "paired_edge_standard_error_nats": gain_se,
+                "seen_pair_loss_delta_nats": seen_delta,
+                "active_class_count": sum(value > 0.0 for value in class_lambdas.values()),
+                "rejected_for_seen_pair_harm": rejected_for_seen_harm,
+                "rejection_reason": (
+                    "seen-pair loss exceeded safety bound" if rejected_for_seen_harm else
+                    "unseen-pair gain did not exceed its paired standard error"
+                    if gain <= gain_se else None
+                ),
+                "class_quality": class_diagnostics,
+            })
+            if (rejected_for_seen_harm or gain <= gain_se or not class_lambdas):
+                candidates.pop()
+
+        if candidates:
+            # Each active class has already earned a per-class held-out gain,
+            # and the complete candidate has passed the paired-edge and
+            # seen-pair gates. Prefer the validated partition that retains the
+            # most independently useful class nodes; aggregate gain breaks
+            # ties between equally expressive candidates.
+            selected = max(candidates, key=lambda row: (
+                row["class_count"], row["gain"], -float(row["tau"]),
+            ))
+        else:
+            selected = {"tau": None, "gain": 0.0, "gain_se": no_class_se,
+                        "seen_pair_loss_delta_nats": 0.0,
+                        "class_lambdas": {}, "class_diagnostics": [], "class_count": 0}
+        if selected["gain"] <= selected["gain_se"] or not selected["class_lambdas"]:
+            self.class_lambdas = {}
+            self.class_selection = {
+                "validation_method": "source_grouped_document_holdout_unseen_adjacent_pairs",
+                "selection_reason": "no-class fallback: no reliable held-out unseen-pair gain",
+                "held_pairs": len({(event[0][-1], event[1]) for event in unseen_events}),
+                "validation_events": len(validation_events),
+                "unseen_validation_events": sum(event[2] for event in unseen_events),
+                "unseen_pair_gain_nats": selected["gain"],
+                "paired_edge_standard_error_nats": selected["gain_se"],
+                "candidate_diagnostics": candidate_diagnostics,
+            }
             return None, 0.0
-        if no_class_score is not None and no_class_score - best[0] <= validation_se:
-            self.class_selection["selection_reason"] = "no-class fallback: best gain within one paired-edge standard error"
-            self.class_selection["selected_validation_cross_entropy_nats"] = no_class_score
-            return None, 0.0
-        self.class_selection["selection_reason"] = "best validation score"
-        self.class_selection["selected_validation_cross_entropy_nats"] = best[0]
-        return best[1], best[2]
+        self.class_lambdas = dict(selected["class_lambdas"])
+        self.class_lambda = max(self.class_lambdas.values(), default=0.0)
+        self.class_selection = {
+            "validation_method": "source_grouped_document_holdout_unseen_adjacent_pairs",
+            "selection_reason": "per-class held-out unseen-pair reinforcement",
+            "held_pairs": len({(event[0][-1], event[1]) for event in unseen_events}),
+            "validation_events": len(validation_events),
+            "unseen_validation_events": sum(event[2] for event in unseen_events),
+            "selected_tau": selected["tau"],
+            "selected_lambda_by_class": self.class_lambdas,
+            "selected_validation_gain_nats": selected["gain"],
+            "paired_edge_standard_error_nats": selected["gain_se"],
+            "selected_seen_pair_loss_delta_nats": selected["seen_pair_loss_delta_nats"],
+            "class_quality": selected["class_diagnostics"],
+            "candidate_diagnostics": candidate_diagnostics,
+        }
+        return selected["tau"], max(self.class_lambdas.values(), default=0.0)
 
     def _fit_class_nodes_from_counts(self, *, refit: bool) -> None:
         """Induce/freeze classes, refresh compact projections, and pool counts."""
@@ -1080,8 +1498,27 @@ class HierarchicalNextUnitModel:
             profiles = self._profiles_from_counts(self.raw_word_context_counts)
             clusters = self._average_link_clusters(profiles, self.class_tau)
             self.class_labels = {}
-            for index, members in enumerate(group for group in clusters if len(group) > 1):
+            valid_clusters = []
+            for members in clusters:
+                if len(members) < 2 or len(members) > CLASS_MAX_MEMBERS:
+                    continue
+                matrix = np.asarray([profiles[word] for word in members], dtype=float)
+                norms = np.linalg.norm(matrix, axis=1)
+                matrix = matrix / np.maximum(norms[:, None], 1e-12)
+                centroid = matrix.mean(axis=0)
+                centroid_norm = float(np.linalg.norm(centroid))
+                cohesion = (float(np.mean(matrix @ centroid / max(centroid_norm, 1e-12)))
+                            if centroid_norm else 0.0)
+                if cohesion >= CLASS_MIN_COHESION:
+                    valid_clusters.append(members)
+            for index, members in enumerate(valid_clusters):
                 class_id = f"language_class_{index:06d}"
+                if class_id not in self.class_lambdas and self.class_lambda > 0:
+                    # Compatibility for callers that inject a class-choice
+                    # policy. Normal training always records per-class values.
+                    self.class_lambdas[class_id] = self.class_lambda
+                if self.class_lambdas.get(class_id, 0.0) <= 0:
+                    continue
                 self.class_labels.update({word: class_id for word in members})
             self._class_membership_frozen = True
         # The full follower vectors are transient clustering inputs. Persisting
@@ -1102,7 +1539,7 @@ class HierarchicalNextUnitModel:
             self.class_profiles[class_id] = projected.mean(axis=0)
             self.class_profile_variances[class_id] = projected.var(axis=0) + 0.05 ** 2
         self.class_context_counts = defaultdict(Counter)
-        if not self.class_labels or self.class_lambda <= 0:
+        if not self.class_labels or not any(self.class_lambdas.values()):
             return
         for raw_context, targets in self.raw_word_context_counts.items():
             if not raw_context:
@@ -1112,6 +1549,74 @@ class HierarchicalNextUnitModel:
                 continue
             for target, count in targets.items():
                 self.class_context_counts[class_context][self._map(target)] += count
+
+    def _refit_selected_classes_on_full_training_counts(self) -> dict:
+        """Refit selected class profiles on all initial-fit documents.
+
+        Selection and lambda tuning use document-heldout pairs. After that
+        choice is frozen, the reserved fit documents return to the training
+        counts and class profiles are recomputed on the complete training
+        partition, as in ordinary train/validation refit. Active weights are
+        transferred by member overlap; classes with no earned weight stay at
+        zero. Subsequent ``partial_fit`` calls still preserve membership.
+        """
+        prior_labels = dict(self.class_labels)
+        prior_weights = dict(self.class_lambdas)
+        profiles = self._profiles_from_counts(self.raw_word_context_counts)
+        clusters = self._average_link_clusters(profiles, self.class_tau)
+        self.class_labels = {}
+        self.class_lambdas = {}
+        valid_clusters = []
+        for members in clusters:
+            if len(members) < 2 or len(members) > CLASS_MAX_MEMBERS:
+                continue
+            matrix = np.asarray([profiles[word] for word in members], dtype=float)
+            matrix /= np.maximum(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-12)
+            centroid = matrix.mean(axis=0)
+            norm = float(np.linalg.norm(centroid))
+            cohesion = float(np.mean(matrix @ centroid / max(norm, 1e-12))) if norm else 0.0
+            if cohesion >= CLASS_MIN_COHESION:
+                valid_clusters.append(members)
+        for index, members in enumerate(valid_clusters):
+            class_id = f"language_class_{index:06d}"
+            inherited = [prior_weights.get(prior_labels[word], 0.0)
+                         for word in members if word in prior_labels]
+            weight = sum(inherited) / len(members) if inherited else 0.0
+            self.class_lambdas[class_id] = weight
+            if weight > 0.0:
+                self.class_labels.update({word: class_id for word in members})
+        self.class_lambda = max(self.class_lambdas.values(), default=0.0)
+        self._class_membership_frozen = True
+        self.class_profile_features = list(self._current_profile_features)
+        self.class_profiles = {}
+        self.class_profile_variances = {}
+        for class_id in sorted(set(self.class_labels.values())):
+            members = sorted(word for word, label in self.class_labels.items()
+                             if label == class_id)
+            projected = np.asarray([
+                self._project_follower_profile(
+                    profiles.get(word, np.zeros(len(self.class_profile_features))),
+                    self.class_profile_features,
+                ) for word in members
+            ])
+            self.class_profiles[class_id] = projected.mean(axis=0)
+            self.class_profile_variances[class_id] = projected.var(axis=0) + 0.05 ** 2
+        self.class_context_counts = defaultdict(Counter)
+        for raw_context, targets in self.raw_word_context_counts.items():
+            if not raw_context:
+                continue
+            class_context = self._abstract_prediction_slot(raw_context, self.class_labels)
+            if class_context == raw_context:
+                continue
+            for target, count in targets.items():
+                self.class_context_counts[class_context][self._map(target)] += count
+        return {
+            "method": "full_training_profile_refit_after_heldout_selection",
+            "classes": len(valid_clusters),
+            "active_classes": len(set(self.class_labels.values())),
+            "members": len(self.class_labels),
+            "selected_tau": self.class_tau,
+        }
 
     def _build_hfn_nodes(
         self, *, progress_callback: Callable[[dict], None] | None = None,
@@ -1123,6 +1628,7 @@ class HierarchicalNextUnitModel:
 
         self.nodes.clear()
         self._class_mix_probability_cache = OrderedDict()
+        self._class_mix_distribution_cache = OrderedDict()
         self.class_node_registry.clear()
         self.char_nodes.clear()
         self.word_nodes.clear()
@@ -1180,6 +1686,10 @@ class HierarchicalNextUnitModel:
             node.metadata = {"type": "word_class", "members": members,
                              "follower_profile_dimensions": len(self.class_profile_features),
                              "follower_profile_feature_count": len(self.class_profile_features),
+                             "initial_observer_weight": self.class_lambdas.get(class_id, 0.0),
+                             "cohesion": next((row.get("cohesion") for row in
+                                               (self.class_selection or {}).get("class_quality", [])
+                                               if row.get("class_id") == class_id), None),
                              "projected_profile_mean": mu.tolist(),
                              "projected_profile_variance": profile_variance.tolist()}
             for word in members:
@@ -1327,6 +1837,10 @@ class HierarchicalNextUnitModel:
                                  beta_loss=0.0, residual_surprise_threshold=float("inf"))
         for node in levels:
             self.observer.register(node, initial_weight=0.5)
+        for class_id, node in self.class_node_registry.items():
+            self.observer.register(
+                node, initial_weight=self.class_lambdas.get(class_id, self.class_lambda)
+            )
         for word, node in self.word_nodes.items():
             if word not in (BOUNDARY, UNK):
                 self.word_level_nodes[0].add_child(node, relation="weights_word_pattern")
@@ -1343,6 +1857,69 @@ class HierarchicalNextUnitModel:
                 node, relation="weights_character_context")
         for node in self.sentence_nodes.values():
             self.word_level_nodes[self.max_order - 1].add_child(node, relation="weights_sentence_pattern")
+
+    def _reinforce_class_observer_weights(self, documents: Iterable[str]) -> dict:
+        """Prequentially reinforce classes on heldout unseen adjacent pairs.
+
+        Each target is scored before its class weight changes. The class expert
+        receives positive reinforcement when its likelihood beats the exact
+        word-context expert and a penalty otherwise. Validation documents are
+        never added to the count tables until this pass has completed.
+        """
+        if not self.class_node_registry or self.observer is None:
+            return {"events": 0, "updated_classes": 0, "weights": {}}
+        train_pairs = {
+            (context[-1], target)
+            for context, targets in self.raw_word_context_counts.items()
+            if len(context) == 1 for target, count in targets.items() if count > 0
+        }
+        before = {class_id: self.observer.get_weight(class_id)
+                  for class_id in self.class_node_registry}
+        events = 0
+        for text in documents:
+            for sentence in split_sentences(text):
+                sequence = tokenize(sentence) + [BOUNDARY]
+                for index, raw_target in enumerate(sequence):
+                    raw_context = tuple(sequence[max(0, index - self.max_order + 1):index])
+                    if not raw_context:
+                        continue
+                    class_id = self.class_labels.get(raw_context[-1])
+                    if class_id not in self.class_node_registry:
+                        continue
+                    if (raw_context[-1], raw_target) in train_pairs:
+                        continue
+                    mapped_context = tuple(self._map(word) for word in raw_context)
+                    target = self._map(raw_target)
+                    abstract = self._abstract_prediction_slot(raw_context, self.class_labels)
+                    class_context = tuple(
+                        token if token == class_id else self._map(token) for token in abstract
+                    )
+                    plain_probability = self._weighted_probability(
+                        mapped_context, target, apply_class_mix=False
+                    )
+                    class_probability = self._class_probability_for_context(class_context, target)
+                    if class_probability > plain_probability:
+                        self.observer.boost_id(class_id, gain=0.1)
+                    else:
+                        self.observer.penalize_id(class_id, penalty=0.02)
+                    events += 1
+        weights = {class_id: self.observer.get_weight(class_id)
+                   for class_id in self.class_node_registry}
+        dropped = []
+        for class_id, weight in list(weights.items()):
+            if weight < 0.005:
+                self.observer.set_weight(class_id, 0.0)
+                weights[class_id] = 0.0
+                dropped.append(class_id)
+            self.class_lambdas[class_id] = weights[class_id]
+        self.class_lambda = max(self.class_lambdas.values(), default=0.0)
+        return {
+            "events": events,
+            "updated_classes": sum(abs(weights[key] - before[key]) > 1e-12 for key in weights),
+            "weights_before": before,
+            "weights": weights,
+            "dropped_classes": dropped,
+        }
 
     def _fit_pattern_observer(
         self, *, progress_callback: Callable[[dict], None] | None = None,
@@ -1833,25 +2410,9 @@ class HierarchicalNextUnitModel:
                 probability = (local_mass * counts.get(target, 0) / total
                                + (1.0 - local_mass) * probability)
         if not character and apply_class_mix and self.class_lambda > 0:
-            class_context = self._abstract_prediction_slot(context, self.class_labels)
-            if class_context != context and class_context in self.class_context_nodes:
-                weight_key = tuple(self.observer.get_weight(node.id)
-                                   for _, node in sorted(level_nodes.items()))
-                cache_key = (context, target, weight_key, self.class_lambda, self.alpha)
-                cache = getattr(self, "_class_mix_probability_cache", None)
-                if cache is None:
-                    cache = self._class_mix_probability_cache = OrderedDict()
-                mixed_probability = cache.get(cache_key)
-                if mixed_probability is None:
-                    class_probability = self._class_probability_for_context(class_context, target)
-                    mixed_probability = ((1.0 - self.class_lambda) * probability
-                                         + self.class_lambda * class_probability)
-                    cache[cache_key] = mixed_probability
-                    while len(cache) > CLASS_MIX_CACHE_MAX_ENTRIES:
-                        cache.popitem(last=False)
-                else:
-                    cache.move_to_end(cache_key)
-                probability = mixed_probability
+            class_distribution = self._class_mixed_distribution(context)
+            if class_distribution is not None:
+                probability = class_distribution.get(target, probability)
         if not character and apply_character_mix and self.character_word_mix > 0.0:
             if target == BOUNDARY:
                 return probability
@@ -2357,6 +2918,93 @@ class HierarchicalNextUnitModel:
                 "rolled_back_on_full_validation": rolled_back,
                 "passes": max(1, passes)}
 
+    def _class_mixed_distribution(
+        self, context: tuple[str, ...], *, plain_distribution: dict[str, float] | None = None,
+    ) -> dict[str, float] | None:
+        """Apply a class prior only over probability mass reserved for unseen edges.
+
+        The exact context retains its learned target probabilities. The class
+        node redistributes only the remaining mass across unseen targets.
+        This protects observed word pairs while allowing the hierarchy to
+        rank plausible but unobserved followers.
+        """
+        class_context = self._abstract_prediction_slot(context, self.class_labels)
+        if class_context == context or class_context not in self.class_context_nodes:
+            return None
+        class_id = class_context[-1]
+        weight = (self.observer.get_weight(class_id)
+                  if self.observer is not None and class_id in self.class_node_registry
+                  else self.class_lambdas.get(class_id, self.class_lambda))
+        if weight <= 0.0:
+            return None
+        if self.observer is not None and plain_distribution is None:
+            order_weights = tuple(
+                self.observer.get_weight(node.id)
+                for _, node in sorted(self.word_level_nodes.items())
+            )
+        else:
+            order_weights = ()
+        mode = "count" if plain_distribution is not None else "observer"
+        cache_key = (mode, context, class_context, weight, order_weights, self.alpha)
+        cache = getattr(self, "_class_mix_distribution_cache", None)
+        if cache is None:
+            cache = self._class_mix_distribution_cache = OrderedDict()
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.move_to_end(cache_key)
+            return cached
+        if plain_distribution is None:
+            plain_distribution = {
+                word: self._weighted_probability(
+                    context, word, apply_class_mix=False, apply_character_mix=False,
+                ) for word in self.vocab
+            }
+        seen_targets = set()
+        if context:
+            for order in range(len(context), 0, -1):
+                local = self.counts.get(context[-order:], Counter())
+                if local:
+                    seen_targets = set(local)
+                    break
+        if not seen_targets:
+            return None
+        seen_mass = sum(plain_distribution.get(word, 0.0) for word in seen_targets)
+        plain_unseen_mass = max(0.0, 1.0 - seen_mass)
+        class_distribution = self._class_distribution_for_context(class_context)
+        class_unseen_mass = max(
+            0.0, 1.0 - sum(class_distribution.get(word, 0.0) for word in seen_targets)
+        )
+        if class_unseen_mass <= 1e-12:
+            return plain_distribution
+        reserved_unseen_mass = max(
+            plain_unseen_mass, CLASS_RESERVED_UNSEEN_MASS * weight,
+        )
+        if reserved_unseen_mass > plain_unseen_mass and seen_mass <= 0.0:
+            return plain_distribution
+        mixed = {}
+        for word in self.vocab:
+            if word in seen_targets:
+                mixed[word] = (
+                    plain_distribution.get(word, 0.0)
+                    * (1.0 - reserved_unseen_mass) / seen_mass
+                    if reserved_unseen_mass > plain_unseen_mass else
+                    plain_distribution.get(word, 0.0)
+                )
+            else:
+                base_component = (
+                    plain_distribution.get(word, 0.0) / plain_unseen_mass
+                    if plain_unseen_mass > 1e-12 else
+                    class_distribution.get(word, 0.0) / class_unseen_mass
+                )
+                class_component = class_distribution.get(word, 0.0) / class_unseen_mass
+                mixed[word] = reserved_unseen_mass * (
+                    (1.0 - weight) * base_component + weight * class_component
+                )
+        cache[cache_key] = mixed
+        while len(cache) > CLASS_MIX_CACHE_MAX_ENTRIES:
+            cache.popitem(last=False)
+        return mixed
+
     def _distribution_for_context(self, context: tuple[str, ...]) -> dict[str, float]:
         """Sparse additive-smoothed interpolation with suffix backoff."""
         if not context:
@@ -2372,14 +3020,8 @@ class HierarchicalNextUnitModel:
         else:
             plain = {word: local_mass * counts.get(word, 0) / total + (1.0 - local_mass) * base[word]
                      for word in self.vocab}
-        class_context = self._abstract_prediction_slot(context, self.class_labels)
-        if (class_context == context or self.class_lambda <= 0
-                or class_context not in self.class_context_nodes):
-            return plain
-        class_dist = self._class_distribution_for_context(class_context)
-        lam = self.class_lambda
-        return {word: (1.0 - lam) * plain[word] + lam * class_dist[word]
-                for word in self.vocab}
+        mixed = self._class_mixed_distribution(context, plain_distribution=plain)
+        return plain if mixed is None else mixed
 
     def _class_distribution_for_context(self, context: tuple[str, ...]) -> dict[str, float]:
         """Smoothed distribution backed off through pooled class contexts."""
@@ -2428,6 +3070,97 @@ class HierarchicalNextUnitModel:
             return base
         mass = total / (total + self.alpha)
         return mass * counts.get(target, 0) / total + (1.0 - mass) * base
+
+    def evaluate_class_generalization(
+        self, documents: Iterable[str], *, group_ids: Iterable[str] | None = None,
+        bootstrap_samples: int = 1000,
+    ) -> dict:
+        """Compare class-on/off loss on test pairs unseen in HFN training.
+
+        Both predictions use this checkpoint's identical word Observer state;
+        only class mixing changes. Confidence intervals resample independent
+        source groups, not tokens. A pair is unseen when its adjacent
+        ``(previous_word, target_word)`` combination is absent from training.
+        """
+        documents = list(documents)
+        if group_ids is None:
+            groups = [str(index) for index in range(len(documents))]
+        else:
+            groups = list(group_ids)
+            if len(groups) != len(documents):
+                raise ValueError("group_ids must contain one identifier per document")
+        if bootstrap_samples < 0:
+            raise ValueError("bootstrap_samples must be nonnegative")
+        trained_pairs = {
+            (context[-1], target)
+            for context, targets in self.raw_word_context_counts.items()
+            if len(context) == 1 for target, count in targets.items() if count > 0
+        }
+        # group -> split -> [plain NLL, class NLL, events, distinct pairs]
+        grouped: dict[str, dict[str, list]] = defaultdict(lambda: {
+            "unseen": [0.0, 0.0, 0, set()],
+            "seen": [0.0, 0.0, 0, set()],
+        })
+        totals = {"unseen": [0.0, 0.0, 0, set()], "seen": [0.0, 0.0, 0, set()]}
+        for text, group in zip(documents, groups):
+            for sentence in split_sentences(text):
+                sequence = tokenize(sentence) + [BOUNDARY]
+                for index, target in enumerate(sequence):
+                    raw_context = tuple(sequence[max(0, index - self.max_order + 1):index])
+                    if not raw_context:
+                        continue
+                    pair = (raw_context[-1], target)
+                    split_name = "unseen" if pair not in trained_pairs else "seen"
+                    context = tuple(self._map(word) for word in raw_context)
+                    mapped_target = self._map(target)
+                    plain_probability = self._weighted_probability(
+                        context, mapped_target, apply_class_mix=False,
+                        apply_character_mix=False,
+                    )
+                    class_probability = self._weighted_probability(
+                        context, mapped_target, apply_character_mix=False,
+                    )
+                    plain_nll = -math.log(max(plain_probability, 1e-300))
+                    class_nll = -math.log(max(class_probability, 1e-300))
+                    for bucket in (grouped[group][split_name], totals[split_name]):
+                        bucket[0] += plain_nll
+                        bucket[1] += class_nll
+                        bucket[2] += 1
+                        bucket[3].add(pair)
+
+        def summarize(split_name: str) -> dict:
+            total_plain, total_class, count, pairs = totals[split_name]
+            group_deltas = []
+            for values in grouped.values():
+                p_nll, c_nll, events, _pairs = values[split_name]
+                if events:
+                    group_deltas.append((c_nll - p_nll) / events)
+            interval = None
+            mean_delta = float(np.mean(group_deltas)) if group_deltas else None
+            if group_deltas and bootstrap_samples:
+                rng = np.random.default_rng(20261025)
+                samples = [float(np.mean(rng.choice(group_deltas, size=len(group_deltas), replace=True)))
+                           for _ in range(bootstrap_samples)]
+                interval = [float(np.quantile(samples, 0.025)),
+                            float(np.quantile(samples, 0.975))]
+            return {
+                "events": count,
+                "distinct_adjacent_pairs": len(pairs),
+                **({"distinct_unseen_adjacent_pairs": len(pairs)}
+                   if split_name == "unseen" else {}),
+                "plain_cross_entropy_nats": total_plain / count if count else None,
+                "class_cross_entropy_nats": total_class / count if count else None,
+                "paired_class_minus_plain_delta_nats_per_event": mean_delta,
+                "source_group_bootstrap_95ci": interval,
+                "source_groups": len(group_deltas),
+            }
+
+        return {
+            "comparison": "same word Observer weights; class mixing is the only predictor difference",
+            "pair_definition": "adjacent raw-token pair absent from training bigram counts",
+            "unseen_pairs": summarize("unseen"),
+            "seen_pairs": summarize("seen"),
+        }
 
     def evaluate(self, documents: Iterable[str], *, include_surface: bool = True) -> dict:
         nll, surface_nll, correct, top5, count = 0.0, 0.0, 0, 0, 0
@@ -2540,12 +3273,15 @@ class HierarchicalNextUnitModel:
                                 for order, node in self.word_level_nodes.items()} if self.observer else {},
                        "character": {str(order): self.observer.get_weight(node.id)
                                      for order, node in self.char_level_nodes.items()} if self.observer else {},
+                       "classes": {class_id: self.observer.get_weight(class_id)
+                                   for class_id in self.class_node_registry} if self.observer else {},
                    },
                    "training_manifest": self.training_manifest}
         if self.class_nodes_enabled:
             payload["class_nodes_enabled"] = True
             payload["class_tau"] = self.class_tau
             payload["class_lambda"] = self.class_lambda
+            payload["class_lambdas"] = self.class_lambdas
             payload["class_min_observations"] = self.class_min_observations
             payload["class_profile_limit"] = self.class_profile_limit
             payload["class_follower_limit"] = self.class_follower_limit
@@ -2584,6 +3320,14 @@ class HierarchicalNextUnitModel:
                     class_profile_limit=int(payload.get("class_profile_limit", 1500)),
                     class_follower_limit=int(payload.get("class_follower_limit", 2048)))
         model.class_labels = {str(key): str(value) for key, value in payload.get("class_labels", {}).items()}
+        model.class_lambdas = {str(key): float(value)
+                               for key, value in payload.get("class_lambdas", {}).items()}
+        if not model.class_lambdas and model.class_lambda > 0.0:
+            # Older opt-in checkpoints used one global mixture coefficient.
+            model.class_lambdas = {
+                class_id: model.class_lambda
+                for class_id in set(model.class_labels.values())
+            }
         model.class_profile_features = [str(value) for value in payload.get("class_profile_features", [])]
         model.class_profiles = {str(key): np.asarray(value, dtype=float)
                                 for key, value in payload.get("class_profiles", {}).items()}
@@ -2648,6 +3392,9 @@ class HierarchicalNextUnitModel:
                 node = registry.get(int(order))
                 if node is not None:
                     model.observer.set_weight(node.id, weight)
+        for class_id, weight in payload.get("observer_weights", {}).get("classes", {}).items():
+            if class_id in model.class_node_registry:
+                model.observer.set_weight(class_id, float(weight))
         return model
 
 
@@ -2894,6 +3641,15 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
     result["hpm"]["test"] = metric_results["hpm_test"]
     result["character_model"]["test"] = metric_results["character_test"]
     result["interpolated_ngram_control"]["test"] = metric_results["interpolated_test"]
+    if class_nodes:
+        test_texts = [row["text"] for row in test_rows]
+        test_groups = [row.get("group_id", row["id"]) for row in test_rows]
+        result["class_node_training"]["source_grouped_test_pair_generalization"] = \
+            model.evaluate_class_generalization(test_texts, group_ids=test_groups)
+        result["class_node_training"]["checkpoint_pair_generalization_matches"] = (
+            result["class_node_training"]["source_grouped_test_pair_generalization"]
+            == restored.evaluate_class_generalization(test_texts, group_ids=test_groups)
+        )
     hpm_test = result["hpm"]["test"]
     control_test = result["interpolated_ngram_control"]["test"]
     result["comparison_to_interpolated_ngram"] = {
