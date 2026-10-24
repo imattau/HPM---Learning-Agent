@@ -728,6 +728,7 @@ class HierarchicalNextUnitModel:
                           for lam in (0.25, 0.5, 0.75))
         best = (float("inf"), None, 0.0)
         no_class_score = None
+        best_pair_improvements: dict[tuple[str, str], list[float]] = {}
         for tau, lam in candidates:
             labels = {}
             if tau is not None and lam > 0:
@@ -763,6 +764,7 @@ class HierarchicalNextUnitModel:
                         for word in self.vocab}
 
             loss, observations = 0.0, 0
+            pair_improvements: dict[tuple[str, str], list[float]] = defaultdict(list)
             for raw_context, target, frequency, validation_weight in validation:
                 # Pair holdout is meaningful for class selection only where the
                 # context word itself has a learned follower profile.
@@ -789,22 +791,30 @@ class HierarchicalNextUnitModel:
                     probability = plain[target]
                 loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
                 observations += validation_weight * frequency
+                pair_improvements[(raw_context[-1], target)].append(
+                    math.log(max(probability, 1e-12) / max(plain[target], 1e-12)))
             score = loss / max(observations, 1)
             if tau is None:
                 no_class_score = score
             if score < best[0] - 1e-12:
                 best = (score, tau, lam)
+                best_pair_improvements = pair_improvements
+        pair_deltas = np.asarray([float(np.mean(values)) for values in best_pair_improvements.values()])
+        validation_se = (float(np.std(pair_deltas, ddof=1) / math.sqrt(len(pair_deltas)))
+                         if len(pair_deltas) > 1 else float("inf"))
         self.class_selection = {"validation_cross_entropy_nats": best[0],
+                                "best_candidate_tau": best[1],
+                                "best_candidate_lambda": best[2],
                                 "no_class_validation_cross_entropy_nats": no_class_score,
                                 "validation_gain_nats": (no_class_score - best[0]
                                                           if no_class_score is not None else None),
                                 "held_pairs": len(held_pairs),
-                                "ordinary_held_events": len(held_ordinary)}
-        # The validation slice is small and class search is a multiple-choice
-        # procedure. Require a clear gain before paying the complexity cost;
-        # the no-class expert remains the fallback for weak/ambiguous evidence.
-        if best[1] is not None and no_class_score is not None and no_class_score - best[0] < 1.0:
-            self.class_selection["selection_reason"] = "no-class fallback: validation gain below 1.0 nat/event"
+                                "ordinary_held_events": len(held_ordinary),
+                                "paired_edge_standard_error_nats": validation_se}
+        # Use a one-standard-error rule over distinct held adjacent pairs to
+        # avoid selecting classes on a small, noisy validation advantage.
+        if best[1] is not None and no_class_score is not None and no_class_score - best[0] <= validation_se:
+            self.class_selection["selection_reason"] = "no-class fallback: best gain within one paired-edge standard error"
             self.class_selection["selected_validation_cross_entropy_nats"] = no_class_score
             return None, 0.0
         self.class_selection["selection_reason"] = "best validation score"
@@ -850,6 +860,8 @@ class HierarchicalNextUnitModel:
         self.phrase_nodes.clear()
         self.char_context_nodes.clear()
         self.sentence_nodes.clear()
+        follower_profiles = (self._profiles_from_counts(self.raw_word_context_counts)
+                             if self.class_nodes_enabled else {})
         for ch in self.char_vocab:
             if len(ch) != 1:
                 continue
@@ -859,30 +871,41 @@ class HierarchicalNextUnitModel:
             self.char_nodes[ch] = self.nodes[node.id] = node
         for word in self.vocab:
             count = self.word_counts.get(word, 0)
-            node = HFN(np.array([float(len(word)), math.log1p(count), 0.0, 0.0]),
-                       np.array([1e-6, 1.0 / (count + 1), 1e-6, 1e-6]),
+            profile = follower_profiles.get(word)
+            if profile is not None:
+                word_mu = self._class_profile_summary(profile)
+                word_sigma = np.full(4, 0.05 ** 2)
+            else:
+                word_mu = np.array([float(len(word)), math.log1p(count), 0.0, 0.0])
+                word_sigma = np.array([1e-6, 1.0 / (count + 1), 1e-6, 1e-6])
+            node = HFN(word_mu, word_sigma,
                        id=self._safe_id("word_", word), use_diag=True)
             node.metadata = {"type": "word", "value": word}
+            if profile is not None:
+                node.metadata["follower_profile"] = profile.tolist()
+                node.metadata["follower_profile_dimensions"] = int(profile.size)
             if word not in (BOUNDARY, UNK):
                 for char_node in (self.char_nodes[c] for c in word if c in self.char_nodes):
                     node.add_child(char_node, relation="character_sequence")
             self.word_nodes[word] = self.nodes[node.id] = node
-        current_profiles = self._profiles_from_counts(self.raw_word_context_counts)
         for class_id, profile in self.class_profiles.items():
             members = sorted(word for word, label in self.class_labels.items() if label == class_id)
             if len(members) < 2:
                 continue
             summary_members = np.asarray([self._class_profile_summary(
-                current_profiles.get(word, np.zeros_like(profile))) for word in members])
+                follower_profiles.get(word, np.zeros_like(profile))) for word in members])
             mu = summary_members.mean(axis=0)
-            # Preserve exact, high-dimensional profile moments as metadata: the
-            # shared language Forest is D=4, so registered HFN Gaussians must be D=4.
-            sigma = np.maximum(summary_members.var(axis=0), 0.05 ** 2)
+            # The Forest's Gaussian space is D=4. Keep that shared summary in
+            # the HFN Gaussian and the exact high-dimensional moments in metadata.
+            summary_variance = summary_members.var(axis=0)
+            sigma = summary_variance + 0.05 ** 2
             node = HFN(mu, sigma, id=class_id, use_diag=True)
             node.metadata = {"type": "word_class", "members": members,
                              "follower_profile_mean": profile.tolist(),
                              "follower_profile_variance": self.class_profile_variances[class_id].tolist(),
-                             "follower_profile_dimensions": int(profile.size)}
+                             "follower_profile_dimensions": int(profile.size),
+                             "summary_profile_mean": mu.tolist(),
+                             "summary_profile_variance": summary_variance.tolist()}
             for word in members:
                 if word in self.word_nodes:
                     node.add_child(self.word_nodes[word], relation="member")

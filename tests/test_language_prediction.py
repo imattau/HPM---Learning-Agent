@@ -69,11 +69,17 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
     assert all(len(node.metadata["members"]) >= 2 for node in model.class_node_registry.values())
     assert all(child.metadata["type"] == "word"
                for node in model.class_node_registry.values() for child in node.children())
+    assert all(child.metadata.get("follower_profile")
+               for node in model.class_node_registry.values() for child in node.children())
     assert all(any(child.id == node.id for child in model.pattern_forest.active_nodes())
                for node in model.class_node_registry.values())
     for node in model.class_node_registry.values():
         assert node.metadata["follower_profile_dimensions"] > 0
         assert len(node.metadata["follower_profile_mean"]) == node.metadata["follower_profile_dimensions"]
+        assert node.mu == pytest.approx(node.metadata["summary_profile_mean"])
+        assert node.sigma == pytest.approx(
+            np.asarray(node.metadata["summary_profile_variance"]) + .05 ** 2
+        )
     before_members = dict(model.class_labels)
     model.partial_fit(["horse sleeps", "horse sleeps"])
     assert model.class_labels == before_members
