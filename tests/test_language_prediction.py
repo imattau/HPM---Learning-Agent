@@ -170,6 +170,29 @@ def test_split_keeps_conversation_groups_together():
         )
 
 
+@pytest.mark.parametrize("groups_per_type,expected_groups", [
+    (3, {"train": 2, "validation": 2, "test": 2}),
+    (5, {"train": 6, "validation": 2, "test": 2}),
+])
+def test_small_mixed_source_split_stratifies_independent_source_types(groups_per_type, expected_groups):
+    rows = [
+        {"id": f"{source_type}-{index}-{part}", "group_id": f"{source_type}-{index}",
+         "source_type": source_type, "text": f"{source_type} source {index} part {part}"}
+        for source_type in ("book", "website")
+        for index in range(groups_per_type)
+        for part in range(2)
+    ]
+    split = split_documents(rows, seed=17)
+    assert split == split_documents(rows, seed=17)
+    group_sets = {name: {row["group_id"] for row in values} for name, values in split.items()}
+    assert not (group_sets["train"] & group_sets["validation"]
+                or group_sets["train"] & group_sets["test"]
+                or group_sets["validation"] & group_sets["test"])
+    for name in ("train", "validation", "test"):
+        assert {row["source_type"] for row in split[name]} == {"book", "website"}
+    assert {name: len(groups) for name, groups in group_sets.items()} == expected_groups
+
+
 def test_chunked_huggingface_articles_stay_in_one_language_split(tmp_path):
     corpus = tmp_path / "wiki.jsonl"
     rows = []

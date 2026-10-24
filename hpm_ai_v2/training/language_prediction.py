@@ -207,7 +207,44 @@ def read_jsonl(path: str | Path) -> list[dict]:
 
 
 def split_documents(rows: list[dict], seed: int = 17) -> dict[str, list[dict]]:
-    """Stable source-level 80/10/10 split; no sentences from a source leak."""
+    """Stable source-level split; small mixed-source corpora are stratified.
+
+    With at most twelve independent sources, a plain 80/10/10 hash can leave
+    a whole source type out of validation. When every source type has at least
+    three groups, allocate each type approximately 60/20/20 by group so train,
+    validation and test all cover the same source types. Larger corpora retain
+    the usual 80/10/10 split. No rows from one source group are separated.
+    """
+    group_rows: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        group_rows[str(row.get("group_id", row["id"]))].append(row)
+    group_types = {
+        group: {str(row.get("source_type", "unknown")) for row in group_members}
+        for group, group_members in group_rows.items()
+    }
+    source_groups: dict[str, list[str]] = defaultdict(list)
+    for group, types in group_types.items():
+        if len(types) != 1:
+            source_groups.clear()
+            break
+        source_groups[next(iter(types))].append(group)
+    if (1 < len(source_groups) and len(group_rows) <= 12
+            and all(len(groups) >= 3 for groups in source_groups.values())):
+        buckets: dict[str, list[dict]] = {"train": [], "validation": [], "test": []}
+        for source_type, groups in sorted(source_groups.items()):
+            ordered = sorted(groups, key=lambda group: hashlib.sha256(
+                f"{seed}:{source_type}:{group}".encode()).digest())
+            train_count = max(1, int(0.6 * len(ordered)))
+            validation_count = max(1, int(0.2 * len(ordered)))
+            assignments = {
+                "train": ordered[:train_count],
+                "validation": ordered[train_count:train_count + validation_count],
+                "test": ordered[train_count + validation_count:],
+            }
+            for name, assigned_groups in assignments.items():
+                buckets[name].extend(row for group in assigned_groups for row in group_rows[group])
+        return buckets
+
     buckets: dict[str, list[dict]] = {"train": [], "validation": [], "test": []}
     for row in rows:
         digest = hashlib.sha256(f"{seed}:{row.get('group_id', row['id'])}".encode()).digest()
