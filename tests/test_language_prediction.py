@@ -181,6 +181,21 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     model._initialize_pattern_observer()
     monkeypatch.setattr(language_prediction, "CLASS_MIX_CACHE_MAX_ENTRIES", 2)
 
+    # The target-only class path used by next-unit scoring must equal the
+    # former dense mixture for every observed context/target pair.
+    for word in ("cat", "dog", "bird", "fish"):
+        context = (word,)
+        class_context = model._abstract_prediction_slot(context, model.class_labels)
+        assert class_context in model.class_context_nodes
+        dense_class = model._class_distribution_for_context(class_context)
+        for target in model.vocab:
+            plain = model._weighted_probability(
+                context, target, apply_character_mix=False, apply_class_mix=False,
+            )
+            expected = ((1.0 - model.class_lambda) * plain
+                        + model.class_lambda * dense_class[target])
+            assert model._weighted_probability(context, target) == pytest.approx(expected)
+
     expected = model.predict_proba(["cat"])
     for word in ("dog", "bird", "fish"):
         model.predict_proba([word])

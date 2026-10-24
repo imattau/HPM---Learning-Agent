@@ -1766,25 +1766,21 @@ class HierarchicalNextUnitModel:
             if class_context != context and class_context in self.class_context_nodes:
                 weight_key = tuple(self.observer.get_weight(node.id)
                                    for _, node in sorted(level_nodes.items()))
-                cache_key = (context, weight_key, self.class_lambda, self.alpha)
+                cache_key = (context, target, weight_key, self.class_lambda, self.alpha)
                 cache = getattr(self, "_class_mix_probability_cache", None)
                 if cache is None:
                     cache = self._class_mix_probability_cache = OrderedDict()
-                mixed = cache.get(cache_key)
-                if mixed is None:
-                    plain = {word: self._weighted_probability(
-                        context, word, apply_character_mix=False, apply_class_mix=False)
-                             for word in self.vocab}
-                    class_dist = self._class_distribution_for_context(class_context)
-                    lam = self.class_lambda
-                    mixed = {word: (1.0 - lam) * plain[word] + lam * class_dist[word]
-                             for word in self.vocab}
-                    cache[cache_key] = mixed
+                mixed_probability = cache.get(cache_key)
+                if mixed_probability is None:
+                    class_probability = self._class_probability_for_context(class_context, target)
+                    mixed_probability = ((1.0 - self.class_lambda) * probability
+                                         + self.class_lambda * class_probability)
+                    cache[cache_key] = mixed_probability
                     while len(cache) > CLASS_MIX_CACHE_MAX_ENTRIES:
                         cache.popitem(last=False)
                 else:
                     cache.move_to_end(cache_key)
-                probability = mixed.get(target, probability)
+                probability = mixed_probability
         if not character and apply_character_mix and self.character_word_mix > 0.0:
             if target == BOUNDARY:
                 return probability
@@ -2330,6 +2326,23 @@ class HierarchicalNextUnitModel:
         local_mass = total / (total + self.alpha)
         return {word: local_mass * counts.get(word, 0) / total + (1.0 - local_mass) * base[word]
                 for word in self.vocab}
+
+    def _class_probability_for_context(self, context: tuple[str, ...], target: str) -> float:
+        """Return one pooled-class target probability without building a dense vocabulary map."""
+        if not context:
+            counts = self.counts.get((), Counter())
+            denom = sum(counts.values()) + self.alpha * len(self.vocab)
+            return (counts.get(target, 0) + self.alpha) / denom
+        base = self._class_probability_for_context(context[1:], target)
+        node = self.class_context_nodes.get(context)
+        counts = (node.metadata.get("target_counts", {})
+                  if node is not None else self.class_context_counts.get(context, Counter()))
+        total = sum(counts.values())
+        if not total:
+            return base
+        local_mass = total / (total + self.alpha)
+        return (local_mass * counts.get(target, 0) / total
+                + (1.0 - local_mass) * base)
 
     def evaluate(self, documents: Iterable[str], *, include_surface: bool = True) -> dict:
         nll, surface_nll, correct, top5, count = 0.0, 0.0, 0, 0, 0
