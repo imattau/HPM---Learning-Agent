@@ -799,6 +799,19 @@ class HierarchicalNextUnitModel:
         # trust region observed in the frozen composition gates.
         candidates.extend((tau, lam) for tau in (0.7, 0.8, 0.9)
                           for lam in (0.025, 0.05, 0.1, 0.2, 0.35, 0.5))
+        # Cluster membership depends on tau, not lambda. Reuse each clustering
+        # across all six mixture strengths; otherwise the expensive pairwise
+        # distance/linkage pass is needlessly repeated for every candidate.
+        labels_by_tau: dict[float, dict[str, str]] = {}
+        for tau in (0.7, 0.8, 0.9):
+            labels: dict[str, str] = {}
+            for index, members in enumerate(
+                group for group in self._average_link_clusters(profiles, tau)
+                if len(group) > 1
+            ):
+                label = f"validation_class_{index}"
+                labels.update({word: label for word in members})
+            labels_by_tau[tau] = labels
         best = (float("inf"), None, 0.0)
         no_class_score = None
         best_pair_improvements: dict[tuple[str, str], list[float]] = {}
@@ -806,12 +819,7 @@ class HierarchicalNextUnitModel:
         scored_candidates = []
         candidate_diagnostics = []
         for tau, lam in candidates:
-            labels = {}
-            if tau is not None and lam > 0:
-                for index, members in enumerate(group for group in self._average_link_clusters(profiles, tau)
-                                                if len(group) > 1):
-                    label = f"validation_class_{index}"
-                    labels.update({word: label for word in members})
+            labels = labels_by_tau.get(tau, {}) if lam > 0 else {}
             pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
             for context, targets in train_tables.items():
                 class_context = self._abstract_prediction_slot(context, labels)

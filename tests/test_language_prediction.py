@@ -168,6 +168,29 @@ def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
         assert hpm_probs == pytest.approx(flat_probs)
 
 
+def test_class_validation_clusters_once_per_threshold(monkeypatch):
+    texts = [sentence for _ in range(20) for sentence in (
+        "cat sleeps", "cat purrs", "dog sleeps", "dog purrs",
+        "bird runs", "bird flies", "fish runs", "fish flies",
+    )]
+    model = HierarchicalNextUnitModel(max_order=2).fit(texts)
+    monkeypatch.setattr(model, "_profiles_from_counts", lambda _counts: {
+        "cat": np.array([1.0, 0.0]), "dog": np.array([0.95, 0.05]),
+        "bird": np.array([0.0, 1.0]), "fish": np.array([0.05, 0.95]),
+    })
+    original = model._average_link_clusters
+    calls = []
+
+    def counted(profiles, tau):
+        calls.append(tau)
+        return original(profiles, tau)
+
+    monkeypatch.setattr(model, "_average_link_clusters", counted)
+    model._validation_class_choice()
+
+    assert Counter(calls) == Counter({0.7: 1, 0.8: 1, 0.9: 1})
+
+
 def test_no_class_fallback_restores_ordinary_observer_training_state():
     texts = [f"the {noun} {verb}" for noun in ("cat", "dog", "bird")
              for verb in ("runs", "sleeps", "jumps")]
