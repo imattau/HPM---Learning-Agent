@@ -149,6 +149,28 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
     assert restored.predict_proba(["cat"]) == pytest.approx(model.predict_proba(["cat"]))
 
 
+def test_class_mix_probability_cache_is_bounded_without_changing_predictions(monkeypatch):
+    import hpm_ai_v2.training.language_prediction as language_prediction
+
+    texts = (['cat sleeps'] * 3 + ['cat purrs'] * 3
+             + ['dog sleeps'] * 3 + ['dog purrs'] * 3
+             + ['bird runs'] * 3 + ['bird flies'] * 3
+             + ['fish runs'] * 3 + ['fish flies'] * 3)
+    model = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
+    monkeypatch.setattr(model, "_validation_class_choice", lambda: (0.9, 0.5))
+    model._fit_class_nodes_from_counts(refit=True)
+    model._build_hfn_nodes()
+    model._initialize_pattern_observer()
+    monkeypatch.setattr(language_prediction, "CLASS_MIX_CACHE_MAX_ENTRIES", 2)
+
+    expected = model.predict_proba(["cat"])
+    for word in ("dog", "bird", "fish"):
+        model.predict_proba([word])
+    assert len(model._class_mix_probability_cache) == 2
+    assert model.predict_proba(["cat"]) == pytest.approx(expected)
+    assert len(model._class_mix_probability_cache) == 2
+
+
 def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
     texts = []
     for repeat in range(60):

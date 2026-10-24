@@ -14,7 +14,7 @@ import multiprocessing
 import re
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, OrderedDict
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -34,6 +34,7 @@ SPELL_UNK = "<unk-char>"
 MAX_FIT_WORKERS = 4
 CLASS_MAX_SEEN_REGRESSION_NATS = 0.05
 CHARACTER_WORD_MIX_CANDIDATES = (0.0, 0.025, 0.05, 0.1, 0.2, 0.35, 0.5)
+CLASS_MIX_CACHE_MAX_ENTRIES = 32
 
 _SWEEP_MODEL = None
 _SWEEP_TEXTS = None
@@ -990,7 +991,7 @@ class HierarchicalNextUnitModel:
 
     def _build_hfn_nodes(self) -> None:
         self.nodes.clear()
-        self._class_mix_probability_cache = {}
+        self._class_mix_probability_cache = OrderedDict()
         self.class_node_registry.clear()
         self.char_nodes.clear()
         self.word_nodes.clear()
@@ -1665,7 +1666,7 @@ class HierarchicalNextUnitModel:
                 cache_key = (context, weight_key, self.class_lambda, self.alpha)
                 cache = getattr(self, "_class_mix_probability_cache", None)
                 if cache is None:
-                    cache = self._class_mix_probability_cache = {}
+                    cache = self._class_mix_probability_cache = OrderedDict()
                 mixed = cache.get(cache_key)
                 if mixed is None:
                     plain = {word: self._weighted_probability(
@@ -1676,6 +1677,10 @@ class HierarchicalNextUnitModel:
                     mixed = {word: (1.0 - lam) * plain[word] + lam * class_dist[word]
                              for word in self.vocab}
                     cache[cache_key] = mixed
+                    while len(cache) > CLASS_MIX_CACHE_MAX_ENTRIES:
+                        cache.popitem(last=False)
+                else:
+                    cache.move_to_end(cache_key)
                 probability = mixed.get(target, probability)
         if not character and apply_character_mix and self.character_word_mix > 0.0:
             if target == BOUNDARY:
