@@ -314,6 +314,33 @@ def test_class_validation_clusters_once_per_threshold(monkeypatch):
     assert Counter(calls) == Counter({0.7: 1, 0.8: 1, 0.9: 1})
 
 
+def test_class_profiles_keep_high_entropy_words_when_they_have_multiple_features():
+    model = HierarchicalNextUnitModel(max_order=2, class_min_observations=2)
+    raw_counts = {
+        ("common",): Counter({f"f{index}": 10 for index in range(6)}),
+        ("peer_a",): Counter({"f0": 10, "f1": 10}),
+        ("peer_b",): Counter({"f2": 10, "f3": 10}),
+    }
+
+    profiles = model._profiles_from_counts(raw_counts)
+
+    assert "common" in profiles
+    assert np.count_nonzero(profiles["common"]) >= 2
+
+
+def test_class_validation_scores_high_entropy_profile_contexts(monkeypatch):
+    texts = [f"the w{index}" for _ in range(20) for index in range(10)]
+    model = HierarchicalNextUnitModel(max_order=2).fit(texts)
+    monkeypatch.setattr(model, "_profiles_from_counts", lambda _counts: {
+        "the": np.array([1.0, 0.0]),
+    })
+
+    model._validation_class_choice()
+
+    assert model.class_selection["held_pairs"] > 0
+    assert model.class_selection["no_class_validation_cross_entropy_nats"] > 0.0
+
+
 def test_no_class_fallback_restores_ordinary_observer_training_state():
     texts = [f"the {noun} {verb}" for noun in ("cat", "dog", "bird")
              for verb in ("runs", "sleeps", "jumps")]

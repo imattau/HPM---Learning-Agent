@@ -696,13 +696,6 @@ class HierarchicalNextUnitModel:
         if len(eligible) > self.class_profile_limit:
             eligible = dict(sorted(eligible.items(), key=lambda item: (-sum(item[1].values()), item[0]))[
                             :self.class_profile_limit])
-        # Classes summarize predictable follower roles. A word with dozens of
-        # unrelated followers is better retained as an exact context than
-        # forced into a broad class (common articles are the typical case).
-        eligible = {word: counts for word, counts in eligible.items()
-                    if -sum((count / sum(counts.values())) *
-                            math.log(count / sum(counts.values())) for count in counts.values())
-                    <= math.log(5.0)}
         if not eligible:
             self._current_profile_features = []
             return {}
@@ -917,16 +910,6 @@ class HierarchicalNextUnitModel:
                 # context word itself has a learned follower profile.
                 if not raw_context or raw_context[-1] not in profiles:
                     continue
-                follower_counts = train_tables.get((raw_context[-1],), Counter())
-                follower_total = sum(follower_counts.values())
-                if follower_total:
-                    follower_probs = np.asarray(list(follower_counts.values()), dtype=float) / follower_total
-                    entropy = -float(np.sum(follower_probs * np.log(follower_probs)))
-                    # Broad function-word contexts are poor evidence for
-                    # lexical compositional classes; keep ordinary validation
-                    # from selecting a class only because it smooths articles.
-                    if entropy > math.log(5.0):
-                        continue
                 is_seen_pair = bool(raw_context and (raw_context[-1], target) not in held_pairs)
                 context = tuple(self._map(word) for word in raw_context)
                 target = self._map(target)
