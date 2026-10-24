@@ -86,6 +86,19 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
         assert node.sigma == pytest.approx(
             np.var([child.mu for child in children], axis=0) + .05 ** 2
         )
+    # A class expert must contribute its direct probability to unseen targets;
+    # seen-mass conservation silently erased that signal as word counts grew.
+    context = ("cat",)
+    class_context = tuple(model.class_labels.get(word, word) for word in context)
+    model.class_context_counts[class_context]["runs"] += 10
+    plain = np.asarray([model._weighted_probability(context, word, apply_class_mix=False)
+                        for word in model.vocab])
+    class_distribution = model._class_distribution_for_context(class_context)
+    expected = ((1.0 - model.class_lambda) * plain
+                + model.class_lambda * np.asarray([class_distribution[word] for word in model.vocab]))
+    actual = model.predict_proba(context)
+    assert actual == pytest.approx(expected)
+    assert actual.sum() == pytest.approx(1.0)
     before_members = dict(model.class_labels)
     model.partial_fit(["horse sleeps", "horse sleeps"])
     assert model.class_labels == before_members

@@ -32,6 +32,7 @@ SPELL_BOW = "<bow>"
 SPELL_EOW = "</w>"
 SPELL_UNK = "<unk-char>"
 MAX_FIT_WORKERS = 4
+CLASS_MAX_SEEN_REGRESSION_NATS = 0.05
 CHARACTER_WORD_MIX_CANDIDATES = (0.0, 0.025, 0.05, 0.1, 0.2, 0.35, 0.5)
 
 _SWEEP_MODEL = None
@@ -712,33 +713,47 @@ class HierarchicalNextUnitModel:
         if not held_pairs:
             held_pairs = {pairs[0]}
         ordinary = [edge for edge in unique_edges if edge[1] and
-                    (not edge[0] or (edge[0][-1], edge[1]) not in held_pairs)]
-        held_ordinary = {edge for index, edge in enumerate(ordinary)
+                    (not edge[0] or (edge[0][-1], edge[1]) not in held_pairs)
+                    and self.raw_word_context_counts[edge[0]][edge[1]] >= 2]
+        held_ordinary = {edge for edge in ordinary
                          if int.from_bytes(hashlib.sha256(f"ordinary:{edge}".encode()).digest()[:4], "big") % 7 == 0}
-        validation = [(context, target, self.raw_word_context_counts[context][target],
-                       1.0)
-                      for context, target in unique_edges
-                      if ((context and (context[-1], target) in held_pairs) or
-                          (context, target) in held_ordinary)]
+        ordinary_validation_counts = {
+            edge: min(max(1, int(round(self.raw_word_context_counts[edge[0]][edge[1]] * 0.1))),
+                      self.raw_word_context_counts[edge[0]][edge[1]] - 1)
+            for edge in held_ordinary
+        }
+        validation = []
+        for context, target in unique_edges:
+            edge = (context, target)
+            if context and (context[-1], target) in held_pairs:
+                validation.append((context, target, self.raw_word_context_counts[context][target], 1.0))
+            elif edge in ordinary_validation_counts:
+                validation.append((context, target, ordinary_validation_counts[edge], 1.0))
         if not validation:
             return None, 0.0
         train_tables: dict[tuple[str, ...], Counter] = defaultdict(Counter)
         for context, targets in self.raw_word_context_counts.items():
             for target, count in targets.items():
                 edge = (context, target)
-                held = ((context and (context[-1], target) in held_pairs) or
-                        (edge in held_ordinary and len(context) == self.max_order - 1))
-                if not held:
-                    train_tables[context][target] += count
+                held_count = count if (context and (context[-1], target) in held_pairs) else 0
+                if len(context) == self.max_order - 1:
+                    held_count = max(held_count, ordinary_validation_counts.get(edge, 0))
+                if count > held_count:
+                    train_tables[context][target] += count - held_count
         profiles = self._profiles_from_counts(train_tables)
         if not profiles:
             return None, 0.0
         candidates = [(None, 0.0)]
-        candidates.extend((tau, lam) for tau in (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
-                          for lam in (0.25, 0.5, 0.75))
+        # Favor coarse, reusable classes and keep lambda within the seen-pair
+        # trust region observed in the frozen composition gates.
+        candidates.extend((tau, lam) for tau in (0.7, 0.8, 0.9)
+                          for lam in (0.025, 0.05, 0.1, 0.2, 0.35, 0.5))
         best = (float("inf"), None, 0.0)
         no_class_score = None
         best_pair_improvements: dict[tuple[str, str], list[float]] = {}
+        best_seen_delta = None
+        scored_candidates = []
+        candidate_diagnostics = []
         for tau, lam in candidates:
             labels = {}
             if tau is not None and lam > 0:
@@ -774,7 +789,9 @@ class HierarchicalNextUnitModel:
                         for word in self.vocab}
 
             loss, observations = 0.0, 0
+            seen_loss, seen_plain_loss, seen_observations = 0.0, 0.0, 0
             pair_improvements: dict[tuple[str, str], list[float]] = defaultdict(list)
+            pair_losses: dict[tuple[str, str], list[float]] = defaultdict(list)
             for raw_context, target, frequency, validation_weight in validation:
                 # Pair holdout is meaningful for class selection only where the
                 # context word itself has a learned follower profile.
@@ -790,25 +807,59 @@ class HierarchicalNextUnitModel:
                     # from selecting a class only because it smooths articles.
                     if entropy > math.log(5.0):
                         continue
+                is_seen_pair = bool(raw_context and (raw_context[-1], target) not in held_pairs)
                 context = tuple(self._map(word) for word in raw_context)
                 target = self._map(target)
                 plain = dist(context)
                 class_context = tuple(labels.get(word, word) for word in raw_context)
                 if class_context != raw_context and class_context in pooled:
                     class_dist = dist(class_context, True)
+                    # Validate the same direct expert blend used by inference.
                     probability = (1.0 - lam) * plain[target] + lam * class_dist[target]
                 else:
                     probability = plain[target]
                 loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
                 observations += validation_weight * frequency
+                if is_seen_pair:
+                    seen_loss -= validation_weight * frequency * math.log(max(probability, 1e-12))
+                    seen_plain_loss -= validation_weight * frequency * math.log(max(plain[target], 1e-12))
+                    seen_observations += validation_weight * frequency
                 pair_improvements[(raw_context[-1], target)].append(
                     math.log(max(probability, 1e-12) / max(plain[target], 1e-12)))
+                pair_losses[(raw_context[-1], target)].append(-math.log(max(probability, 1e-12)))
             score = loss / max(observations, 1)
             if tau is None:
                 no_class_score = score
+            seen_delta = ((seen_loss - seen_plain_loss) / seen_observations
+                          if seen_observations else 0.0)
+            if tau is not None and seen_delta > CLASS_MAX_SEEN_REGRESSION_NATS:
+                continue
+            edge_losses = np.asarray([float(np.mean(values)) for values in pair_losses.values()])
+            candidate_se = (float(np.std(edge_losses, ddof=1) / math.sqrt(len(edge_losses)))
+                            if len(edge_losses) > 1 else float("inf"))
+            scored_candidates.append((score, candidate_se, tau, lam,
+                                      pair_improvements, seen_delta,
+                                      len({label for label in labels.values()})))
+            candidate_diagnostics.append({"tau": tau, "lambda": lam,
+                                          "validation_cross_entropy_nats": score,
+                                          "edge_standard_error_nats": candidate_se,
+                                          "seen_pair_loss_delta_nats": seen_delta,
+                                          "class_count": len({label for label in labels.values()})})
             if score < best[0] - 1e-12:
                 best = (score, tau, lam)
                 best_pair_improvements = pair_improvements
+                best_seen_delta = seen_delta
+        # Within one standard error of the best validation risk, prefer the
+        # weakest class mix to limit seen-context disruption and variance.
+        if scored_candidates:
+            min_score = min(row[0] for row in scored_candidates)
+            best_row = min(scored_candidates, key=lambda row: row[0])
+            threshold = min_score + best_row[1]
+            selected_row = min((row for row in scored_candidates if row[0] <= threshold),
+                               key=lambda row: (row[6], row[3], row[0]))
+            best = (selected_row[0], selected_row[2], selected_row[3])
+            best_pair_improvements = selected_row[4]
+            best_seen_delta = selected_row[5]
         pair_deltas = np.asarray([float(np.mean(values)) for values in best_pair_improvements.values()])
         validation_se = (float(np.std(pair_deltas, ddof=1) / math.sqrt(len(pair_deltas)))
                          if len(pair_deltas) > 1 else float("inf"))
@@ -820,10 +871,16 @@ class HierarchicalNextUnitModel:
                                                           if no_class_score is not None else None),
                                 "held_pairs": len(held_pairs),
                                 "ordinary_held_events": len(held_ordinary),
-                                "paired_edge_standard_error_nats": validation_se}
+                                "paired_edge_standard_error_nats": validation_se,
+                                "selected_seen_pair_loss_delta_nats": best_seen_delta,
+                                "candidate_diagnostics": candidate_diagnostics}
         # Use a one-standard-error rule over distinct held adjacent pairs to
         # avoid selecting classes on a small, noisy validation advantage.
-        if best[1] is not None and no_class_score is not None and no_class_score - best[0] <= validation_se:
+        if best[1] is None:
+            self.class_selection["selection_reason"] = "no-class fallback: simplest candidate within one standard error"
+            self.class_selection["selected_validation_cross_entropy_nats"] = no_class_score
+            return None, 0.0
+        if no_class_score is not None and no_class_score - best[0] <= validation_se:
             self.class_selection["selection_reason"] = "no-class fallback: best gain within one paired-edge standard error"
             self.class_selection["selected_validation_cross_entropy_nats"] = no_class_score
             return None, 0.0
@@ -1497,19 +1554,8 @@ class HierarchicalNextUnitModel:
                         context, word, apply_character_mix=False, apply_class_mix=False)
                              for word in self.vocab}
                     class_dist = self._class_distribution_for_context(class_context)
-                    seen = set(self.counts.get(context, Counter()))
-                    seen_mass = sum(plain[word] for word in seen)
-                    residual = max(0.0, 1.0 - seen_mass)
-                    unseen = [word for word in self.vocab if word not in seen]
-                    class_mass = sum(class_dist[word] for word in unseen)
-                    if class_mass <= 0:
-                        adjusted = plain
-                    else:
-                        adjusted = {word: (plain[word] if word in seen else
-                                           residual * class_dist[word] / class_mass)
-                                    for word in self.vocab}
                     lam = self.class_lambda
-                    mixed = {word: (1.0 - lam) * plain[word] + lam * adjusted[word]
+                    mixed = {word: (1.0 - lam) * plain[word] + lam * class_dist[word]
                              for word in self.vocab}
                     cache[cache_key] = mixed
                 probability = mixed.get(target, probability)
@@ -2017,16 +2063,6 @@ class HierarchicalNextUnitModel:
         if not class_counts or class_context == context or self.class_lambda <= 0:
             return plain
         class_dist = self._class_distribution_for_context(class_context)
-        seen = set(counts)
-        seen_mass = sum(plain[word] for word in seen)
-        residual = max(0.0, 1.0 - seen_mass)
-        unseen = [word for word in self.vocab if word not in seen]
-        class_mass = sum(class_dist[word] for word in unseen)
-        if class_mass <= 0:
-            return plain
-        class_dist = {word: (plain[word] if word in seen else
-                             residual * class_dist[word] / class_mass)
-                      for word in self.vocab}
         lam = self.class_lambda
         return {word: (1.0 - lam) * plain[word] + lam * class_dist[word]
                 for word in self.vocab}
