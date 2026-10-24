@@ -254,6 +254,8 @@ class HierarchicalNextUnitModel:
         self.class_labels: dict[str, str] = {}
         self.class_profiles: dict[str, np.ndarray] = {}
         self.class_profile_variances: dict[str, np.ndarray] = {}
+        self.class_profile_features: list[str] = []
+        self._current_profile_features: list[str] = []
         self.class_context_counts: dict[tuple[str, ...], Counter[str]] = defaultdict(Counter)
         self.class_node_registry: dict[str, HFN] = {}
         self._class_membership_frozen = False
@@ -595,15 +597,21 @@ class HierarchicalNextUnitModel:
         return prefix + hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
-    def _class_profile_summary(profile: np.ndarray) -> np.ndarray:
-        """Four-dimensional Forest-compatible summary of a sparse follower profile."""
-        mass = float(profile.sum())
-        if mass <= 0:
-            return np.zeros(4, dtype=float)
-        normalized = profile / mass
-        entropy = -float(np.sum(normalized[normalized > 0] * np.log(normalized[normalized > 0])))
-        return np.asarray([entropy, math.log1p(mass), float(np.max(profile)),
-                          float(np.count_nonzero(profile))], dtype=float)
+    def _project_follower_profile(profile: np.ndarray, features: list[str]) -> np.ndarray:
+        """Deterministically embed follower profiles into the Forest's D=4 space.
+
+        A signed feature hash makes projection stable for a token across training
+        rounds and independent of the current vocabulary's ordering.
+        """
+        projected = np.zeros(4, dtype=float)
+        for feature, value in zip(features, profile):
+            if value == 0:
+                continue
+            digest = hashlib.sha256(f"hpm-language-profile-projection-v1:{feature}".encode()).digest()
+            bucket = int.from_bytes(digest[:4], "big") % len(projected)
+            sign = 1.0 if digest[4] & 1 else -1.0
+            projected[bucket] += sign * float(value)
+        return projected
 
     def _profiles_from_counts(self, raw_counts: dict) -> dict[str, np.ndarray]:
         """IDF-weighted positive PMI of each word's observed followers."""
@@ -624,6 +632,7 @@ class HierarchicalNextUnitModel:
                             math.log(count / sum(counts.values())) for count in counts.values())
                     <= math.log(5.0)}
         if not eligible:
+            self._current_profile_features = []
             return {}
         follower_totals = Counter()
         for counts in eligible.values():
@@ -631,6 +640,7 @@ class HierarchicalNextUnitModel:
         target_vocab = [word for word, _ in sorted(follower_totals.items(),
                                                     key=lambda item: (-item[1], item[0]))[
                         :self.class_follower_limit]]
+        self._current_profile_features = list(target_vocab)
         target_index = {word: index for index, word in enumerate(target_vocab)}
         global_counts = Counter()
         for counts in eligible.values():
@@ -827,6 +837,7 @@ class HierarchicalNextUnitModel:
         if refit:
             self.class_tau, self.class_lambda = self._validation_class_choice()
             profiles = self._profiles_from_counts(self.raw_word_context_counts)
+            self.class_profile_features = list(self._current_profile_features)
             clusters = self._average_link_clusters(profiles, self.class_tau)
             self.class_labels = {}
             self.class_profiles = {}
@@ -873,7 +884,7 @@ class HierarchicalNextUnitModel:
             count = self.word_counts.get(word, 0)
             profile = follower_profiles.get(word)
             if profile is not None:
-                word_mu = self._class_profile_summary(profile)
+                word_mu = self._project_follower_profile(profile, self._current_profile_features)
                 word_sigma = np.full(4, 0.05 ** 2)
             else:
                 word_mu = np.array([float(len(word)), math.log1p(count), 0.0, 0.0])
@@ -884,6 +895,7 @@ class HierarchicalNextUnitModel:
             if profile is not None:
                 node.metadata["follower_profile"] = profile.tolist()
                 node.metadata["follower_profile_dimensions"] = int(profile.size)
+                node.metadata["follower_profile_features"] = list(self._current_profile_features)
             if word not in (BOUNDARY, UNK):
                 for char_node in (self.char_nodes[c] for c in word if c in self.char_nodes):
                     node.add_child(char_node, relation="character_sequence")
@@ -892,20 +904,20 @@ class HierarchicalNextUnitModel:
             members = sorted(word for word, label in self.class_labels.items() if label == class_id)
             if len(members) < 2:
                 continue
-            summary_members = np.asarray([self._class_profile_summary(
-                follower_profiles.get(word, np.zeros_like(profile))) for word in members])
-            mu = summary_members.mean(axis=0)
-            # The Forest's Gaussian space is D=4. Keep that shared summary in
-            # the HFN Gaussian and the exact high-dimensional moments in metadata.
-            summary_variance = summary_members.var(axis=0)
-            sigma = summary_variance + 0.05 ** 2
+            member_profiles = np.asarray([self._project_follower_profile(
+                follower_profiles.get(word, np.zeros_like(profile)), self._current_profile_features)
+                                          for word in members])
+            mu = member_profiles.mean(axis=0)
+            profile_variance = member_profiles.var(axis=0)
+            sigma = profile_variance + 0.05 ** 2
             node = HFN(mu, sigma, id=class_id, use_diag=True)
             node.metadata = {"type": "word_class", "members": members,
                              "follower_profile_mean": profile.tolist(),
                              "follower_profile_variance": self.class_profile_variances[class_id].tolist(),
                              "follower_profile_dimensions": int(profile.size),
-                             "summary_profile_mean": mu.tolist(),
-                             "summary_profile_variance": summary_variance.tolist()}
+                             "follower_profile_features": list(self.class_profile_features),
+                             "projected_profile_mean": mu.tolist(),
+                             "projected_profile_variance": profile_variance.tolist()}
             for word in members:
                 if word in self.word_nodes:
                     node.add_child(self.word_nodes[word], relation="member")
@@ -2155,6 +2167,7 @@ class HierarchicalNextUnitModel:
             payload["class_profile_limit"] = self.class_profile_limit
             payload["class_follower_limit"] = self.class_follower_limit
             payload["class_labels"] = self.class_labels
+            payload["class_profile_features"] = self.class_profile_features
             payload["class_profiles"] = {key: value.tolist() for key, value in self.class_profiles.items()}
             payload["class_profile_variances"] = {
                 key: value.tolist() for key, value in self.class_profile_variances.items()
@@ -2188,6 +2201,7 @@ class HierarchicalNextUnitModel:
                     class_profile_limit=int(payload.get("class_profile_limit", 1500)),
                     class_follower_limit=int(payload.get("class_follower_limit", 2048)))
         model.class_labels = {str(key): str(value) for key, value in payload.get("class_labels", {}).items()}
+        model.class_profile_features = [str(value) for value in payload.get("class_profile_features", [])]
         model.class_profiles = {str(key): np.asarray(value, dtype=float)
                                 for key, value in payload.get("class_profiles", {}).items()}
         model.class_profile_variances = {str(key): np.asarray(value, dtype=float)
@@ -2237,6 +2251,11 @@ class HierarchicalNextUnitModel:
         model._training_document_hashes = set(payload.get("training_document_hashes", []))
         model._rebuild_spelling_char_model()
         if model.class_nodes_enabled:
+            if not model.class_profile_features and model.class_profiles:
+                model._profiles_from_counts(model.raw_word_context_counts)
+                if all(len(profile) == len(model._current_profile_features)
+                       for profile in model.class_profiles.values()):
+                    model.class_profile_features = list(model._current_profile_features)
             model._fit_class_nodes_from_counts(refit=False)
         model._build_hfn_nodes()
         model._initialize_pattern_observer()

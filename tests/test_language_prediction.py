@@ -59,6 +59,7 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
     member_profiles = np.asarray([profiles["cat"], profiles["dog"]])
     model.class_profiles = {class_id: member_profiles.mean(axis=0)}
     model.class_profile_variances = {class_id: member_profiles.var(axis=0) + .05 ** 2}
+    model.class_profile_features = list(model._current_profile_features)
     model.class_lambda = .5
     model._class_membership_frozen = True
     model._fit_class_nodes_from_counts(refit=False)
@@ -71,14 +72,19 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
                for node in model.class_node_registry.values() for child in node.children())
     assert all(child.metadata.get("follower_profile")
                for node in model.class_node_registry.values() for child in node.children())
+    assert all(child.mu == pytest.approx(HierarchicalNextUnitModel._project_follower_profile(
+        np.asarray(child.metadata["follower_profile"]),
+        child.metadata["follower_profile_features"],
+    )) for node in model.class_node_registry.values() for child in node.children())
     assert all(any(child.id == node.id for child in model.pattern_forest.active_nodes())
                for node in model.class_node_registry.values())
     for node in model.class_node_registry.values():
         assert node.metadata["follower_profile_dimensions"] > 0
         assert len(node.metadata["follower_profile_mean"]) == node.metadata["follower_profile_dimensions"]
-        assert node.mu == pytest.approx(node.metadata["summary_profile_mean"])
+        children = node.children()
+        assert node.mu == pytest.approx(np.mean([child.mu for child in children], axis=0))
         assert node.sigma == pytest.approx(
-            np.asarray(node.metadata["summary_profile_variance"]) + .05 ** 2
+            np.var([child.mu for child in children], axis=0) + .05 ** 2
         )
     before_members = dict(model.class_labels)
     model.partial_fit(["horse sleeps", "horse sleeps"])
@@ -89,6 +95,7 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
     restored = HierarchicalNextUnitModel.load(checkpoint)
     assert restored.class_labels == model.class_labels
     assert restored.class_lambda == model.class_lambda
+    assert restored.class_profile_features == model.class_profile_features
     assert restored.class_selection == model.class_selection
     assert restored.predict_proba(["cat"]) == pytest.approx(model.predict_proba(["cat"]))
 
