@@ -784,6 +784,7 @@ def test_l5_learning_rate_is_selected_on_validation_only():
     )
     assert selected["selection_split"] == "validation"
     assert selected["selected_eta"] in {0.0001, 0.001}
+    assert {item["fixed_share"] for item in selected["sweep"]} == {0.0, 0.02}
     assert selected["selected_prequential_cross_entropy_nats"] == min(
         item["prequential_cross_entropy_nats"] for item in selected["sweep"]
     )
