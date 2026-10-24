@@ -734,6 +734,19 @@ class HierarchicalNextUnitModel:
             grouped[int(label)].append(word)
         return sorted((sorted(group) for group in grouped.values()), key=lambda group: group[0])
 
+    @staticmethod
+    def _abstract_prediction_slot(context: tuple[str, ...], labels: dict[str, str]) -> tuple[str, ...]:
+        """Replace only the immediately preceding unit by its learned class.
+
+        Follower profiles are learned for P(next_unit | word), so their class
+        membership applies to the context's final position. Applying the same
+        global label to older context slots would treat a word as
+        interchangeable in roles for which it was never evaluated.
+        """
+        if not context:
+            return ()
+        return (*context[:-1], labels.get(context[-1], context[-1]))
+
     def _validation_class_choice(self) -> tuple[float | None, float]:
         """Select tau/lambda from pair-held-out and ordinary held-out events."""
         contexts = sorted(context for context in self.raw_word_context_counts
@@ -801,7 +814,7 @@ class HierarchicalNextUnitModel:
                     labels.update({word: label for word in members})
             pooled: dict[tuple[str, ...], Counter] = defaultdict(Counter)
             for context, targets in train_tables.items():
-                class_context = tuple(labels.get(word, word) for word in context)
+                class_context = self._abstract_prediction_slot(context, labels)
                 if context and class_context != context:
                     for target, count in targets.items():
                         pooled[class_context][self._map(target)] += count
@@ -849,7 +862,7 @@ class HierarchicalNextUnitModel:
                 context = tuple(self._map(word) for word in raw_context)
                 target = self._map(target)
                 plain = dist(context)
-                class_context = tuple(labels.get(word, word) for word in raw_context)
+                class_context = self._abstract_prediction_slot(raw_context, labels)
                 if class_context != raw_context and class_context in pooled:
                     class_dist = dist(class_context, True)
                     # Validate the same direct expert blend used by inference.
@@ -950,7 +963,7 @@ class HierarchicalNextUnitModel:
         for raw_context, targets in self.raw_word_context_counts.items():
             if not raw_context:
                 continue
-            class_context = tuple(self.class_labels.get(word, word) for word in raw_context)
+            class_context = self._abstract_prediction_slot(raw_context, self.class_labels)
             if class_context == raw_context:
                 continue
             for target, count in targets.items():
@@ -1021,6 +1034,7 @@ class HierarchicalNextUnitModel:
             node.relation_type = "distributional_substitution_class"
             node.relation_params = {"profile": "idf_weighted_positive_pmi_of_followers",
                                    "cluster_threshold": self.class_tau,
+                                   "substitution_slot": "immediately_preceding_unit",
                                    "member_count": len(member_nodes)}
             node.add_relation(inputs=member_nodes)
             self.class_node_registry[class_id] = self.nodes[class_id] = node
@@ -1084,7 +1098,9 @@ class HierarchicalNextUnitModel:
                     context_nodes.append(child)
             node.relation_type = "next_unit_given_class_context"
             node.relation_params = {"context_order": len(context),
-                                   "context_slots": list(range(len(context)))}
+                                   "context_slots": list(range(len(context))),
+                                   "abstracted_slots": [index for index, token in enumerate(context)
+                                                        if token in self.class_node_registry]}
             node.add_relation(
                 inputs=context_nodes,
                 outputs=[self.word_nodes[target] for target in targets if target in self.word_nodes],
@@ -1622,7 +1638,7 @@ class HierarchicalNextUnitModel:
             probability = (local_mass * counts.get(target, 0) / total
                            + (1.0 - local_mass) * probability)
         if not character and apply_class_mix and self.class_lambda > 0:
-            class_context = tuple(self.class_labels.get(word, word) for word in context)
+            class_context = self._abstract_prediction_slot(context, self.class_labels)
             if class_context != context and class_context in self.class_context_nodes:
                 weight_key = tuple(self.observer.get_weight(node.id)
                                    for _, node in sorted(level_nodes.items()))
@@ -2140,7 +2156,7 @@ class HierarchicalNextUnitModel:
         else:
             plain = {word: local_mass * counts.get(word, 0) / total + (1.0 - local_mass) * base[word]
                      for word in self.vocab}
-        class_context = tuple(self.class_labels.get(word, word) for word in context)
+        class_context = self._abstract_prediction_slot(context, self.class_labels)
         if (class_context == context or self.class_lambda <= 0
                 or class_context not in self.class_context_nodes):
             return plain

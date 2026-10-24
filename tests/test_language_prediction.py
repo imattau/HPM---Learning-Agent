@@ -42,34 +42,38 @@ def test_hierarchy_and_predictive_sigma_are_learned_from_counts():
     assert BOUNDARY in model.vocab
 
 
-def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path):
+def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monkeypatch):
     # Two subject words share the same follower class; the other nouns follow
     # a distinct verb, making profile clustering deterministic in this corpus.
     texts = (["cat sleeps"] * 3 + ["cat purrs"] * 3 + ["dog sleeps"] * 3 + ["dog purrs"] * 3
              + ["bird runs"] * 3 + ["bird flies"] * 3 + ["fish runs"] * 3 + ["fish flies"] * 3)
     model = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
-    # Exercise clustering independently of selector choice, then install a
-    # known same-followers class to verify HFN structure and checkpointing.
+    # Exercise clustering independently of selector choice. Every cluster
+    # must be registered, and only the immediately preceding context slot is
+    # abstracted by follower-profile classes.
+    monkeypatch.setattr(model, "_validation_class_choice", lambda: (0.9, 0.5))
+    model._fit_class_nodes_from_counts(refit=True)
+    model._build_hfn_nodes()
+    model._initialize_pattern_observer()
+    assert len(model.class_labels) > 2
+    assert len(set(model.class_labels.values())) >= 2
     clusters = HierarchicalNextUnitModel._average_link_clusters(
         {"cat": np.array([1.0, 0.0]), "dog": np.array([0.95, 0.05]),
          "bird": np.array([0.0, 1.0])}, 0.2)
     assert any(set(group) == {"cat", "dog"} for group in clusters)
-    profiles = model._profiles_from_counts(model.raw_word_context_counts)
-    class_id = "language_class_test"
-    model.class_labels = {"cat": class_id, "dog": class_id}
-    member_profiles = np.asarray([profiles["cat"], profiles["dog"]])
-    model.class_profiles = {class_id: member_profiles.mean(axis=0)}
-    model.class_profile_variances = {class_id: member_profiles.var(axis=0) + .05 ** 2}
-    model.class_profile_features = list(model._current_profile_features)
-    model.class_lambda = .5
-    model._class_membership_frozen = True
-    model._fit_class_nodes_from_counts(refit=False)
-    model._build_hfn_nodes()
-    model._initialize_pattern_observer()
+    class_id = model.class_labels["cat"]
+    assert model.class_labels["dog"] == class_id
+    assert model.class_labels["bird"] == model.class_labels["fish"]
+    assert model.class_labels["bird"] != class_id
+    assert model.class_lambda == .5
+    assert model._abstract_prediction_slot(("the", "cat"), model.class_labels) == ("the", class_id)
+    assert model._abstract_prediction_slot(("cat", "sleeps"), model.class_labels) == ("cat", "sleeps")
     assert model.class_nodes_enabled
     assert model.class_node_registry
     assert all(len(node.metadata["members"]) >= 2 for node in model.class_node_registry.values())
     assert all(node.relation_type == "distributional_substitution_class"
+               for node in model.class_node_registry.values())
+    assert all(node.relation_params["substitution_slot"] == "immediately_preceding_unit"
                for node in model.class_node_registry.values())
     assert all({node.id for node in group.inputs}
                == {model.word_nodes[word].id for word in group.metadata["members"]}
