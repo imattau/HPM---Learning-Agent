@@ -1,0 +1,781 @@
+{
+  "protocol": "same source-grouped corpus and tokenizer; no test tuning",
+  "corpus": "data/pretraining/new_sources_round1.jsonl",
+  "seed": 17,
+  "split_documents": {
+    "train": 238,
+    "validation": 95,
+    "test": 52
+  },
+  "split_sha256": {
+    "train": "232bfa40eae9002a5093c46620f3bfb57c6f29d3face3013878c9d41c9697079",
+    "validation": "6a9bcca0b5a26bae4e4128e9a95baf0843bc54c2bf45b8f27b5b697e40a69a61",
+    "test": "933c5926c5c47c5888d02f2cc93b59dcd2e500a13273892853871de0cfce40f7"
+  },
+  "hfn_saved_run": {
+    "metrics_path": "hpm_ai_v2/experiments/results/2026-10-25-language-class-nodes-book-python-v1/metrics.json",
+    "min_word_count": 1,
+    "vocabulary_size": 10947,
+    "saved_test": {
+      "tokens": 63350,
+      "cross_entropy_nats": 4.810007420668872,
+      "perplexity": 122.7325282713381,
+      "target_space": "vocabulary_mapped",
+      "top1_accuracy": 0.20209944751381215,
+      "top5_accuracy": 0.4419415943172849,
+      "surface_top1_accuracy": 0.20195737963693766,
+      "surface_top5_accuracy": 0.3852880820836622,
+      "known_word_top1_accuracy": 0.1620871495975576,
+      "known_word_top5_accuracy": 0.3519659542973448,
+      "known_word_tokens": 54045,
+      "oov_word_tokens": 3655,
+      "oov_word_rate": 0.06334488734835356,
+      "sigma_surprisal_spearman": 0.1808252839276548,
+      "sigma_calibration_deciles": [
+        {
+          "bin": 1,
+          "tokens": 6335,
+          "mean_sigma": 0.0,
+          "mean_surprisal_nats": 4.947547577714879
+        },
+        {
+          "bin": 2,
+          "tokens": 6335,
+          "mean_sigma": 0.0,
+          "mean_surprisal_nats": 4.864067533498671
+        },
+        {
+          "bin": 3,
+          "tokens": 6335,
+          "mean_sigma": 1.441199684293593e-10,
+          "mean_surprisal_nats": 4.958438730365777
+        },
+        {
+          "bin": 4,
+          "tokens": 6335,
+          "mean_sigma": 0.018445766216466437,
+          "mean_surprisal_nats": 3.2416753127799915
+        },
+        {
+          "bin": 5,
+          "tokens": 6335,
+          "mean_sigma": 0.4997913355874606,
+          "mean_surprisal_nats": 3.4499067431164048
+        },
+        {
+          "bin": 6,
+          "tokens": 6335,
+          "mean_sigma": 0.7454839087988769,
+          "mean_surprisal_nats": 4.328711060104632
+        },
+        {
+          "bin": 7,
+          "tokens": 6335,
+          "mean_sigma": 0.8731554332198894,
+          "mean_surprisal_nats": 4.822063678796022
+        },
+        {
+          "bin": 8,
+          "tokens": 6335,
+          "mean_sigma": 0.9397074304913264,
+          "mean_surprisal_nats": 5.196422718859806
+        },
+        {
+          "bin": 9,
+          "tokens": 6335,
+          "mean_sigma": 0.972727292116512,
+          "mean_surprisal_nats": 5.763093628584471
+        },
+        {
+          "bin": 10,
+          "tokens": 6335,
+          "mean_sigma": 0.9823952128252618,
+          "mean_surprisal_nats": 6.528147222866572
+        }
+      ],
+      "surface_cross_entropy_nats": 5.977462140742619,
+      "surface_perplexity": 394.43806854189694,
+      "surface_target_space": "exact_surface_word_and_eos"
+    },
+    "reloaded_checkpoint_test": {
+      "tokens": 63350,
+      "cross_entropy_nats": 4.953141564935693,
+      "perplexity": 141.6191716262654
+    },
+    "reloaded_minus_saved_cross_entropy_nats": 0.14313414426682147,
+    "saved_metric_reproduced_from_checkpoint": false,
+    "class_selection": {
+      "validation_cross_entropy_nats": 5.860664711410435,
+      "best_candidate_tau": null,
+      "best_candidate_lambda": 0.0,
+      "no_class_validation_cross_entropy_nats": 5.860664711410435,
+      "validation_gain_nats": 0.0,
+      "held_pairs": 8667,
+      "ordinary_held_events": 3706,
+      "paired_edge_standard_error_nats": 0.0,
+      "selected_seen_pair_loss_delta_nats": 0.0,
+      "candidate_diagnostics": [
+        {
+          "tau": null,
+          "lambda": 0.0,
+          "validation_cross_entropy_nats": 5.860664711410435,
+          "edge_standard_error_nats": 0.5361432782311328,
+          "seen_pair_loss_delta_nats": 0.0,
+          "class_count": 0
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.025,
+          "validation_cross_entropy_nats": 5.6386795551449875,
+          "edge_standard_error_nats": 0.5293730477020072,
+          "seen_pair_loss_delta_nats": 0.00015853683360717092,
+          "class_count": 32
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.05,
+          "validation_cross_entropy_nats": 5.601130700932068,
+          "edge_standard_error_nats": 0.5287303575965896,
+          "seen_pair_loss_delta_nats": 0.0003349776638590368,
+          "class_count": 32
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.1,
+          "validation_cross_entropy_nats": 5.562603717151777,
+          "edge_standard_error_nats": 0.5282538050193039,
+          "seen_pair_loss_delta_nats": 0.0007402504838456048,
+          "class_count": 32
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.2,
+          "validation_cross_entropy_nats": 5.5250279846889,
+          "edge_standard_error_nats": 0.5281015532798725,
+          "seen_pair_loss_delta_nats": 0.001754676266560661,
+          "class_count": 32
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.35,
+          "validation_cross_entropy_nats": 5.498255080647495,
+          "edge_standard_error_nats": 0.5284476159266127,
+          "seen_pair_loss_delta_nats": 0.003783313997164313,
+          "class_count": 32
+        },
+        {
+          "tau": 0.7,
+          "lambda": 0.5,
+          "validation_cross_entropy_nats": 5.485605417480168,
+          "edge_standard_error_nats": 0.5291013836283244,
+          "seen_pair_loss_delta_nats": 0.006463466519446048,
+          "class_count": 32
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.025,
+          "validation_cross_entropy_nats": 5.638997158894376,
+          "edge_standard_error_nats": 0.5291226777697156,
+          "seen_pair_loss_delta_nats": 0.0003223843299983384,
+          "class_count": 33
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.05,
+          "validation_cross_entropy_nats": 5.600486581869698,
+          "edge_standard_error_nats": 0.5283586040526829,
+          "seen_pair_loss_delta_nats": 0.0006646104245236424,
+          "class_count": 33
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.1,
+          "validation_cross_entropy_nats": 5.561197651208943,
+          "edge_standard_error_nats": 0.5277919561567515,
+          "seen_pair_loss_delta_nats": 0.0014074873569405748,
+          "class_count": 33
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.2,
+          "validation_cross_entropy_nats": 5.523924605369309,
+          "edge_standard_error_nats": 0.5276456708369405,
+          "seen_pair_loss_delta_nats": 0.003122943003247217,
+          "class_count": 33
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.35,
+          "validation_cross_entropy_nats": 5.499536255912628,
+          "edge_standard_error_nats": 0.5281668998150093,
+          "seen_pair_loss_delta_nats": 0.006276127583902951,
+          "class_count": 33
+        },
+        {
+          "tau": 0.8,
+          "lambda": 0.5,
+          "validation_cross_entropy_nats": 5.490829327831318,
+          "edge_standard_error_nats": 0.5291341952050437,
+          "seen_pair_loss_delta_nats": 0.010185472366406954,
+          "class_count": 33
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.025,
+          "validation_cross_entropy_nats": 5.603011148280222,
+          "edge_standard_error_nats": 0.5258645208769426,
+          "seen_pair_loss_delta_nats": 0.000854224072787239,
+          "class_count": 30
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.05,
+          "validation_cross_entropy_nats": 5.5571199450033,
+          "edge_standard_error_nats": 0.5246004894004556,
+          "seen_pair_loss_delta_nats": 0.0017365183982755317,
+          "class_count": 30
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.1,
+          "validation_cross_entropy_nats": 5.510723514156225,
+          "edge_standard_error_nats": 0.523621102378168,
+          "seen_pair_loss_delta_nats": 0.0035852879659183526,
+          "class_count": 30
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.2,
+          "validation_cross_entropy_nats": 5.468010574360357,
+          "edge_standard_error_nats": 0.5232683796630848,
+          "seen_pair_loss_delta_nats": 0.00762390807411287,
+          "class_count": 30
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.35,
+          "validation_cross_entropy_nats": 5.44288899730252,
+          "edge_standard_error_nats": 0.5239969212980333,
+          "seen_pair_loss_delta_nats": 0.014583529500284997,
+          "class_count": 30
+        },
+        {
+          "tau": 0.9,
+          "lambda": 0.5,
+          "validation_cross_entropy_nats": 5.438105750158562,
+          "edge_standard_error_nats": 0.5255519168129781,
+          "seen_pair_loss_delta_nats": 0.022777214706700636,
+          "class_count": 30
+        }
+      ],
+      "selection_reason": "no-class fallback: simplest candidate within one standard error",
+      "selected_validation_cross_entropy_nats": 5.860664711410435
+    }
+  },
+  "interpolated_trigram": {
+    "selected_alpha": 100.0,
+    "validation_sweep": {
+      "0.1": 8.568708329838865,
+      "1.0": 7.336341991405092,
+      "10.0": 6.336279576929073,
+      "30.0": 6.104059608100213,
+      "100.0": 6.082889730478609,
+      "200.0": 6.165211454142398,
+      "300.0": 6.238461947407215
+    },
+    "test": 5.587504354866472
+  },
+  "kneser_ney_trigram": {
+    "selected_discount": 0.95,
+    "selected_unknown_continuation_prior": 10000.0,
+    "validation_sweep": {
+      "discount=0.4;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.824980244904073,
+        "perplexity": 920.5582181555426,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.4;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.873415075159941,
+        "perplexity": 355.46083527087615,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.4;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.752435833637752,
+        "perplexity": 314.95690931339936,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.4;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.681913582886647,
+        "perplexity": 293.5105496416236,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.4;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.664230164928177,
+        "perplexity": 288.3659014607668,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.4;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.663438569046388,
+        "perplexity": 288.13772252539013,
+        "order": 3,
+        "discount": 0.4,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.675575485897163,
+        "perplexity": 792.8035698923991,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.6952012701398855,
+        "perplexity": 297.43665267867374,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.574297744350497,
+        "perplexity": 263.56440104197856,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.5040965007982505,
+        "perplexity": 245.69636889314512,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.486781980367764,
+        "perplexity": 241.4788714312571,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.55;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.486637522100626,
+        "perplexity": 241.44399033143185,
+        "order": 3,
+        "discount": 0.55,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.605147972447081,
+        "perplexity": 738.8891963652986,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.609663613261727,
+        "perplexity": 273.05237135768346,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.488821866650971,
+        "perplexity": 241.9719636237886,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.418883127026971,
+        "perplexity": 225.62698504390536,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.401871463252931,
+        "perplexity": 221.8211581421761,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.65;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.402261490260108,
+        "perplexity": 221.90769125864415,
+        "order": 3,
+        "discount": 0.65,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.5533459364293,
+        "perplexity": 701.5877188600113,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.5449208037911015,
+        "perplexity": 255.93430841368152,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.424156847007808,
+        "perplexity": 226.82002168867086,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.354549445159958,
+        "perplexity": 211.56863160451766,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.337921706426893,
+        "perplexity": 208.07980966650126,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.75;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.338993790420836,
+        "perplexity": 208.30300832238262,
+        "order": 3,
+        "discount": 0.75,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.52094235576108,
+        "perplexity": 679.2181489853459,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.501203252161592,
+        "perplexity": 244.98653556612715,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.38054912532792,
+        "perplexity": 217.14148057939545,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.311411191973274,
+        "perplexity": 202.635984987526,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.295330872231192,
+        "perplexity": 199.40359216422453,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.85;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.297384967145432,
+        "perplexity": 199.81360702933006,
+        "order": 3,
+        "discount": 0.85,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.519694240465017,
+        "perplexity": 678.3709352444303,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.489913372989902,
+        "perplexity": 242.23622174940093,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.36946731500163,
+        "perplexity": 214.74844395661523,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.3012245360046455,
+        "perplexity": 200.5822798743534,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.286200094175044,
+        "perplexity": 197.5911692283183,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.95;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.290182448474291,
+        "perplexity": 198.3796161661066,
+        "order": 3,
+        "discount": 0.95,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=0.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 6.5461312608453595,
+        "perplexity": 696.5442066039893,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 0.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=100.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.512642830604893,
+        "perplexity": 247.8051695112825,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 100.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=1000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.3924170903607695,
+        "perplexity": 219.73386078924656,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 1000.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=5000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.3251309536110005,
+        "perplexity": 205.43526119265098,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 5000.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=10000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.311253643861026,
+        "perplexity": 202.6040625853407,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 10000.0,
+        "min_word_count": 1
+      },
+      "discount=0.99;unk_prior=20000.0": {
+        "tokens": 104860,
+        "cross_entropy_nats": 5.317385258676417,
+        "perplexity": 203.85016907553398,
+        "order": 3,
+        "discount": 0.99,
+        "unknown_continuation_prior": 20000.0,
+        "min_word_count": 1
+      }
+    },
+    "test": {
+      "tokens": 63350,
+      "cross_entropy_nats": 4.686842472384642,
+      "perplexity": 108.5100149475276,
+      "order": 3,
+      "discount": 0.95,
+      "unknown_continuation_prior": 10000.0,
+      "min_word_count": 1
+    }
+  },
+  "neural_feedforward_trigram": {
+    "architecture": "2-token embeddings -> tanh hidden -> softmax",
+    "epochs_requested": 4,
+    "selected_epoch": 2,
+    "history": [
+      {
+        "epoch": 1,
+        "training_cross_entropy_nats": 5.467343601334095,
+        "validation_cross_entropy_nats": 5.752292952022774
+      },
+      {
+        "epoch": 2,
+        "training_cross_entropy_nats": 4.761149846725194,
+        "validation_cross_entropy_nats": 5.7515711537758945
+      },
+      {
+        "epoch": 3,
+        "training_cross_entropy_nats": 4.521855008300946,
+        "validation_cross_entropy_nats": 5.85461626013749
+      }
+    ],
+    "test": {
+      "tokens": 63350,
+      "cross_entropy_nats": 5.368380660845148,
+      "perplexity": 214.5152134108128,
+      "vocabulary_size": 10947,
+      "context_size": 2,
+      "embedding_dim": 24,
+      "hidden_dim": 48,
+      "min_word_count": 1
+    }
+  },
+  "paired_document_bootstrap": {
+    "hfn_minus_kneser_ney": {
+      "mean_delta_nats_left_minus_right": 0.2662990925508637,
+      "bootstrap_95pct_ci": [
+        0.23857837529193177,
+        0.2971769619037216
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "hfn_minus_neural": {
+      "mean_delta_nats_left_minus_right": -0.4152390959094534,
+      "bootstrap_95pct_ci": [
+        -0.5241860311367917,
+        -0.3236661131060014
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "hfn_minus_interpolated": {
+      "mean_delta_nats_left_minus_right": -0.6343627899305269,
+      "bootstrap_95pct_ci": [
+        -0.6809275163222309,
+        -0.5901981499945473
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "kneser_ney_minus_interpolated": {
+      "mean_delta_nats_left_minus_right": -0.9006618824813907,
+      "bootstrap_95pct_ci": [
+        -0.9577747348138662,
+        -0.8501607255857285
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "neural_minus_interpolated": {
+      "mean_delta_nats_left_minus_right": -0.2191236940210734,
+      "bootstrap_95pct_ci": [
+        -0.27888820345494586,
+        -0.14480728107218077
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "neural_minus_kneser_ney": {
+      "mean_delta_nats_left_minus_right": 0.6815381884603174,
+      "bootstrap_95pct_ci": [
+        0.5810018330383745,
+        0.8085572776079892
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    }
+  },
+  "limitations": [
+    "The neural baseline is a small feed-forward 2-token model, not a recurrent or transformer LM.",
+    "Vocabulary and rare-word cutoff match the saved HFN run; all scores include EOS targets.",
+    "The saved HFN aggregate CE does not reproduce when its checkpoint is reloaded and scored on the reconstructed source-grouped test set; both values are reported, and CIs use the reloaded model predictions."
+  ],
+  "elapsed_seconds": 122.32229868999275
+}

@@ -1,0 +1,9 @@
+{
+  "case_count": 24,
+  "seed": 6247,
+  "rating_scale": "1=not useful, 2=slightly useful, 3=moderately useful, 4=very useful, 5=extremely useful",
+  "private_key_path": "/tmp/hpm-planbound-realizer-heldout-key.json",
+  "task_type_counts": {
+    "grounded_qa": 24
+  }
+}
