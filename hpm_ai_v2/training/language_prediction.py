@@ -216,9 +216,19 @@ def split_documents(rows: list[dict], seed: int = 17) -> dict[str, list[dict]]:
     validation and test all cover the same source types. Larger corpora retain
     the usual 80/10/10 split. No rows from one source group are separated.
     """
+    def source_group(row: dict) -> str:
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        source_path = row.get("source_path") or metadata.get("source_path")
+        source_url = row.get("source_url") or metadata.get("source_url")
+        if source_path:
+            return f"source_path:{source_path}"
+        if source_url:
+            return f"source_url:{source_url}"
+        return str(row.get("group_id", row["id"]))
+
     group_rows: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
-        group_rows[str(row.get("group_id", row["id"]))].append(row)
+        group_rows[source_group(row)].append(row)
     group_types = {
         group: {str(row.get("source_type", "unknown")) for row in group_members}
         for group, group_members in group_rows.items()
@@ -248,7 +258,7 @@ def split_documents(rows: list[dict], seed: int = 17) -> dict[str, list[dict]]:
 
     buckets: dict[str, list[dict]] = {"train": [], "validation": [], "test": []}
     for row in rows:
-        digest = hashlib.sha256(f"{seed}:{row.get('group_id', row['id'])}".encode()).digest()
+        digest = hashlib.sha256(f"{seed}:{source_group(row)}".encode()).digest()
         value = int.from_bytes(digest[:8], "big") / 2**64
         name = "train" if value < .8 else "validation" if value < .9 else "test"
         buckets[name].append(row)
@@ -256,7 +266,7 @@ def split_documents(rows: list[dict], seed: int = 17) -> dict[str, list[dict]]:
     if any(not buckets[name] for name in buckets):
         groups: dict[str, list[dict]] = defaultdict(list)
         for row in rows:
-            groups[row.get("group_id", row["id"])].append(row)
+            groups[source_group(row)].append(row)
         ordered_groups = sorted(groups.items(), key=lambda item: hashlib.sha256(f"{seed}:{item[0]}".encode()).digest())
         n = len(ordered_groups)
         a, b = max(1, int(n * .8)), max(2, int(n * .9))

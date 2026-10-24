@@ -278,6 +278,37 @@ def test_split_keeps_conversation_groups_together():
         )
 
 
+def test_split_keeps_all_documents_from_one_source_file_together():
+    rows = [
+        {"id": f"{source_type}-{source}-{part}",
+         "group_id": f"record-{source_type}-{source}-{part}",
+         "source_type": source_type,
+         "metadata": {"source_path": f"{source_type}/source-{source}.jsonl"},
+         "text": f"{source_type} source {source} record {part}"}
+        for source_type in ("code", "text", "wiki")
+        for source in range(5)
+        for part in range(2)
+    ]
+    split = split_documents(rows, seed=31)
+    source_to_split = {
+        row["metadata"]["source_path"]: name
+        for name, items in split.items()
+        for row in items
+    }
+    assert len(source_to_split) == 15
+    for row in rows:
+        assert source_to_split[row["metadata"]["source_path"]] == next(
+            name for name, items in split.items() if any(item["id"] == row["id"] for item in items)
+        )
+    source_sets = {
+        name: {row["metadata"]["source_path"] for row in items}
+        for name, items in split.items()
+    }
+    assert not (source_sets["train"] & source_sets["validation"]
+                or source_sets["train"] & source_sets["test"]
+                or source_sets["validation"] & source_sets["test"])
+
+
 @pytest.mark.parametrize("groups_per_type,expected_groups", [
     (3, {"train": 2, "validation": 2, "test": 2}),
     (5, {"train": 6, "validation": 2, "test": 2}),
