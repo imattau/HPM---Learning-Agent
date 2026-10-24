@@ -948,23 +948,34 @@ class HierarchicalNextUnitModel:
         return best[1], best[2]
 
     def _fit_class_nodes_from_counts(self, *, refit: bool) -> None:
-        """Induce/freeze classes, then pool raw follower counts at class contexts."""
+        """Induce/freeze classes, refresh compact projections, and pool counts."""
         profiles = self._profiles_from_counts(self.raw_word_context_counts)
         if refit:
             self.class_tau, self.class_lambda = self._validation_class_choice()
             profiles = self._profiles_from_counts(self.raw_word_context_counts)
-            self.class_profile_features = list(self._current_profile_features)
             clusters = self._average_link_clusters(profiles, self.class_tau)
             self.class_labels = {}
-            self.class_profiles = {}
-            self.class_profile_variances = {}
             for index, members in enumerate(group for group in clusters if len(group) > 1):
                 class_id = f"language_class_{index:06d}"
-                member_profiles = np.asarray([profiles[word] for word in members])
-                self.class_profiles[class_id] = member_profiles.mean(axis=0)
-                self.class_profile_variances[class_id] = member_profiles.var(axis=0) + 0.05 ** 2
                 self.class_labels.update({word: class_id for word in members})
             self._class_membership_frozen = True
+        # The full follower vectors are transient clustering inputs. Persisting
+        # one mean and variance vector per class duplicates thousands of
+        # dimensions even though HFN nodes use only the stable four-dimensional
+        # projection. Recompute that compact summary after load and partial_fit.
+        self.class_profile_features = list(self._current_profile_features)
+        self.class_profiles = {}
+        self.class_profile_variances = {}
+        for class_id in sorted(set(self.class_labels.values())):
+            members = sorted(word for word, label in self.class_labels.items() if label == class_id)
+            projected = np.asarray([
+                self._project_follower_profile(
+                    profiles.get(word, np.zeros(len(self.class_profile_features))),
+                    self.class_profile_features,
+                ) for word in members
+            ])
+            self.class_profiles[class_id] = projected.mean(axis=0)
+            self.class_profile_variances[class_id] = projected.var(axis=0) + 0.05 ** 2
         self.class_context_counts = defaultdict(Counter)
         if not self.class_labels or self.class_lambda <= 0:
             return
@@ -1010,32 +1021,33 @@ class HierarchicalNextUnitModel:
                        id=self._safe_id("word_", word), use_diag=True)
             node.metadata = {"type": "word", "value": word}
             if profile is not None:
-                node.metadata["follower_profile"] = profile.tolist()
                 node.metadata["follower_profile_dimensions"] = int(profile.size)
-                node.metadata["follower_profile_features"] = list(self._current_profile_features)
+                node.metadata["follower_profile_nonzero_features"] = int(np.count_nonzero(profile))
             if word not in (BOUNDARY, UNK):
                 for char_node in (self.char_nodes[c] for c in word if c in self.char_nodes):
                     node.add_child(char_node, relation="character_sequence")
             self.word_nodes[word] = self.nodes[node.id] = node
-        for class_id, profile in self.class_profiles.items():
+        for class_id in self.class_profiles:
             members = sorted(word for word, label in self.class_labels.items() if label == class_id)
             if len(members) < 2:
                 continue
-            member_profiles = np.asarray([self._project_follower_profile(
-                follower_profiles.get(word, np.zeros_like(profile)), self._current_profile_features)
-                                          for word in members])
+            member_nodes = [self.word_nodes[word] for word in members if word in self.word_nodes]
+            if len(member_nodes) < 2:
+                continue
+            member_profiles = np.asarray([member.mu for member in member_nodes])
             mu = member_profiles.mean(axis=0)
             profile_variance = member_profiles.var(axis=0)
             sigma = profile_variance + 0.05 ** 2
+            # Refresh the persisted summaries from the actual HFN members. This
+            # also handles members omitted from the current mapped vocabulary.
+            self.class_profiles[class_id] = mu.copy()
+            self.class_profile_variances[class_id] = sigma.copy()
             node = HFN(mu, sigma, id=class_id, use_diag=True)
             node.metadata = {"type": "word_class", "members": members,
-                             "follower_profile_mean": profile.tolist(),
-                             "follower_profile_variance": self.class_profile_variances[class_id].tolist(),
-                             "follower_profile_dimensions": int(profile.size),
-                             "follower_profile_features": list(self.class_profile_features),
+                             "follower_profile_dimensions": len(self.class_profile_features),
+                             "follower_profile_feature_count": len(self.class_profile_features),
                              "projected_profile_mean": mu.tolist(),
                              "projected_profile_variance": profile_variance.tolist()}
-            member_nodes = [self.word_nodes[word] for word in members if word in self.word_nodes]
             for word in members:
                 if word in self.word_nodes:
                     node.add_child(self.word_nodes[word], relation="member")

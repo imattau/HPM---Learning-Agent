@@ -80,17 +80,17 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
                for group in model.class_node_registry.values())
     assert all(child.metadata["type"] == "word"
                for node in model.class_node_registry.values() for child in node.children())
-    assert all(child.metadata.get("follower_profile")
+    assert all(child.metadata["follower_profile_dimensions"] > 0
                for node in model.class_node_registry.values() for child in node.children())
-    assert all(child.mu == pytest.approx(HierarchicalNextUnitModel._project_follower_profile(
-        np.asarray(child.metadata["follower_profile"]),
-        child.metadata["follower_profile_features"],
-    )) for node in model.class_node_registry.values() for child in node.children())
+    assert all("follower_profile" not in child.metadata
+               for node in model.class_node_registry.values() for child in node.children())
     assert all(any(child.id == node.id for child in model.pattern_forest.active_nodes())
                for node in model.class_node_registry.values())
     for node in model.class_node_registry.values():
         assert node.metadata["follower_profile_dimensions"] > 0
-        assert len(node.metadata["follower_profile_mean"]) == node.metadata["follower_profile_dimensions"]
+        assert node.metadata["follower_profile_feature_count"] == node.metadata["follower_profile_dimensions"]
+        assert len(node.metadata["projected_profile_mean"]) == 4
+        assert len(node.metadata["projected_profile_variance"]) == 4
         children = node.children()
         assert node.mu == pytest.approx(np.mean([child.mu for child in children], axis=0))
         assert node.sigma == pytest.approx(
@@ -126,9 +126,14 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
     before_members = dict(model.class_labels)
     model.partial_fit(["horse sleeps", "horse sleeps"])
     assert model.class_labels == before_members
+    assert all(profile.shape == (4,) for profile in model.class_profiles.values())
+    assert all(variance.shape == (4,) for variance in model.class_profile_variances.values())
 
     checkpoint = tmp_path / "class-nodes.json"
     model.save(checkpoint)
+    payload = json.loads(checkpoint.read_text())
+    assert all(len(profile) == 4 for profile in payload["class_profiles"].values())
+    assert all(len(variance) == 4 for variance in payload["class_profile_variances"].values())
     restored = HierarchicalNextUnitModel.load(checkpoint)
     assert restored.class_labels == model.class_labels
     assert restored.class_lambda == model.class_lambda
