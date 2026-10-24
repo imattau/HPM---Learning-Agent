@@ -42,6 +42,24 @@ def test_hierarchy_and_predictive_sigma_are_learned_from_counts():
     assert BOUNDARY in model.vocab
 
 
+def test_leave_one_out_reliability_preserves_modal_tie_breaking_with_cached_rank():
+    from hpm_ai_v2.training.language_prediction import HierarchicalNextUnitModel
+
+    cases = [
+        (Counter({"a": 5, "b": 2, "c": 1}), {"a": True, "b": False, "c": False}),
+        (Counter({"a": 3, "b": 2}), {"a": False, "b": False}),
+        (Counter({"a": 2, "b": 2}), {"a": False, "b": False}),
+        (Counter({"a": 1}), {"a": False}),
+    ]
+    for counts, expected in cases:
+        ordered = sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        for target, result in expected.items():
+            assert HierarchicalNextUnitModel._leave_one_out_correct(
+                counts, target, ordered=ordered,
+            ) is result
+            assert HierarchicalNextUnitModel._leave_one_out_correct(counts, target) is result
+
+
 def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monkeypatch):
     # Two subject words share the same follower class; the other nouns follow
     # a distinct verb, making profile clustering deterministic in this corpus.

@@ -1292,9 +1292,16 @@ class HierarchicalNextUnitModel:
                 order = len(context)
                 if order >= self.max_order:
                     continue
+                # Rank targets once per context. Sorting inside the target
+                # loop made this O(V^2 log V) for a context with V followers,
+                # which could stall incremental Observer refresh on large
+                # vocabularies.
+                ordered_targets = sorted(
+                    counts.items(), key=lambda item: (item[1], item[0]), reverse=True,
+                )
                 for target, frequency in counts.items():
                     outcomes[order][1] += frequency
-                    if self._leave_one_out_correct(counts, target):
+                    if self._leave_one_out_correct(counts, target, ordered=ordered_targets):
                         outcomes[order][0] += frequency
             for order, (correct, total) in enumerate(outcomes):
                 # Smoothed empirical reliability keeps unseen levels usable.
@@ -1302,11 +1309,14 @@ class HierarchicalNextUnitModel:
                 self.observer.set_weight(registry[order].id, reliability)
 
     @staticmethod
-    def _leave_one_out_correct(counts: Counter[str], target: str) -> bool:
+    def _leave_one_out_correct(
+        counts: Counter[str], target: str, *, ordered: list[tuple[str, int]] | None = None,
+    ) -> bool:
         """Whether the modal prediction remains correct after removing this event."""
         if not counts:
             return False
-        ordered = sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        if ordered is None:
+            ordered = sorted(counts.items(), key=lambda item: (item[1], item[0]), reverse=True)
         winner, winner_count = ordered[0]
         if winner != target:
             return False
