@@ -1908,9 +1908,9 @@ class HierarchicalNextUnitModel:
             ) / (total + order_alpha * vocabulary_size)
         return result
 
-    def _new_l5_mixer(self, eta: float) -> PrequentialL5Mixer:
+    def _new_l5_mixer(self, eta: float, fixed_share: float = 0.0) -> PrequentialL5Mixer:
         names = ("observer", *(f"word_order_{order}" for order in range(self.max_order)))
-        mixer = PrequentialL5Mixer(names, eta=eta)
+        mixer = PrequentialL5Mixer(names, eta=eta, fixed_share=fixed_share)
         # Keep most initial mass on the already calibrated predictor; L5 must
         # earn a shift toward raw order experts from prequential evidence.
         mixer.log_weights["observer"] = math.log(0.8)
@@ -1921,7 +1921,7 @@ class HierarchicalNextUnitModel:
 
     def fit_l5_meta(
         self, validation_documents: Iterable[str], *, eta: float = 0.1,
-        order_alpha: float = 0.1,
+        order_alpha: float = 0.1, fixed_share: float = 0.0,
     ) -> dict:
         """Calibrate L5 over word-order experts on validation, prequentially.
 
@@ -1931,7 +1931,7 @@ class HierarchicalNextUnitModel:
         """
         if not math.isfinite(order_alpha) or order_alpha <= 0:
             raise ValueError("order_alpha must be finite and positive")
-        mixer = self._new_l5_mixer(eta)
+        mixer = self._new_l5_mixer(eta, fixed_share=fixed_share)
         nll = count = 0
         documents = list(validation_documents)
         if not any(tokenize(sentence) for text in documents for sentence in split_sentences(text)):
@@ -2004,32 +2004,46 @@ class HierarchicalNextUnitModel:
         self, validation_documents: Iterable[str], *,
         eta_candidates: Iterable[float] = (0.0001, 0.0003, 0.001, 0.003, 0.01),
         order_alpha_candidates: Iterable[float] = (0.1, 1.0, 10.0),
+        fixed_share_candidates: Iterable[float] = (0.0, 0.02),
     ) -> dict:
-        """Select the L5 update rate by validation prequential log loss only."""
+        """Select L5 update settings by validation prequential log loss only.
+
+        The fixed-share candidate set includes the legacy no-share behavior and
+        a small share rate. Direct mixer construction and ``fit_l5_meta`` keep
+        fixed share disabled unless it is explicitly requested.
+        """
         documents = list(validation_documents)
         candidates = tuple(sorted(set(float(value) for value in eta_candidates)))
         alpha_candidates = tuple(sorted(set(float(value) for value in order_alpha_candidates)))
+        share_candidates = tuple(sorted(set(float(value) for value in fixed_share_candidates)))
         if not candidates or any(not math.isfinite(value) or value <= 0 for value in candidates):
             raise ValueError("eta_candidates must contain finite positive values")
         if not alpha_candidates or any(not math.isfinite(value) or value <= 0 for value in alpha_candidates):
             raise ValueError("order_alpha_candidates must contain finite positive values")
+        if not share_candidates or any(not math.isfinite(value) or not 0.0 <= value < 1.0
+                                       for value in share_candidates):
+            raise ValueError("fixed_share_candidates must contain finite values in [0, 1)")
         fixed_loss = self.score_cross_entropy(documents)
         sweep = []
         best = None
         for eta in candidates:
             for order_alpha in alpha_candidates:
-                result = self.fit_l5_meta(documents, eta=eta, order_alpha=order_alpha)
-                item = {"eta": eta, "order_alpha": order_alpha,
+                for fixed_share in share_candidates:
+                    result = self.fit_l5_meta(documents, eta=eta, order_alpha=order_alpha,
+                                              fixed_share=fixed_share)
+                    item = {"eta": eta, "order_alpha": order_alpha,
+                        "fixed_share": fixed_share,
                         "prequential_cross_entropy_nats": result["prequential_cross_entropy_nats"],
                         "weights": result["weights"]}
-                sweep.append(item)
-                if best is None or item["prequential_cross_entropy_nats"] < best["prequential_cross_entropy_nats"]:
-                    best = item
-                    selected_state = result["state"]
+                    sweep.append(item)
+                    if best is None or item["prequential_cross_entropy_nats"] < best["prequential_cross_entropy_nats"]:
+                        best = item
+                        selected_state = result["state"]
         self.l5_language_state = selected_state
         return {"fixed_observer_validation_cross_entropy_nats": fixed_loss,
                 "selected_eta": best["eta"],
                 "selected_order_alpha": best["order_alpha"],
+                "selected_fixed_share": best["fixed_share"],
                 "selected_prequential_cross_entropy_nats": best["prequential_cross_entropy_nats"],
                 "sweep": sweep, "selected_state": selected_state,
                 "selection_split": "validation"}

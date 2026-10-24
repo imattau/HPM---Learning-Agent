@@ -14,7 +14,7 @@ class PrequentialL5Mixer:
     """Exponentially weighted online selector for normalized expert forecasts."""
 
     def __init__(self, experts: tuple[str, ...] | list[str], eta: float = 0.1,
-                 fixed_share: float = 0.02):
+                 fixed_share: float = 0.0):
         names = tuple(str(name) for name in experts)
         if not names or len(set(names)) != len(names):
             raise ValueError("experts must be a nonempty sequence of unique names")

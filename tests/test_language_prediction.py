@@ -813,7 +813,7 @@ def test_prequential_l5_fixed_share_is_opt_in_and_checkpointed():
     restored_legacy = PrequentialL5Mixer.from_state_dict(legacy.state_dict())
     assert restored_legacy.fixed_share == 0.0
 
-    assert PrequentialL5Mixer(["recent", "stable"]).fixed_share == .02
+    assert PrequentialL5Mixer(["recent", "stable"]).fixed_share == 0.0
 
     mixer = PrequentialL5Mixer(["recent", "stable"], eta=.4, fixed_share=.05)
     for _ in range(100):
@@ -822,3 +822,21 @@ def test_prequential_l5_fixed_share_is_opt_in_and_checkpointed():
     restored = PrequentialL5Mixer.from_state_dict(mixer.state_dict())
     assert restored.fixed_share == .05
     assert restored.weights() == pytest.approx(mixer.weights())
+
+
+def test_l5_fixed_share_is_tunable_but_preserves_legacy_default():
+    model = HierarchicalNextUnitModel(max_order=2).fit([
+        "red birds fly south", "blue birds fly north", "small birds sing",
+    ])
+    docs = ["red birds fly south", "blue birds fly north"]
+    legacy = model.tune_l5_meta(docs, eta_candidates=(0.001,),
+                                order_alpha_candidates=(0.1,),
+                                fixed_share_candidates=(0.0,))
+    assert legacy["selected_fixed_share"] == 0.0
+    assert model.l5_language_state["fixed_share"] == 0.0
+
+    explicit = model.tune_l5_meta(docs, eta_candidates=(0.001,),
+                                  order_alpha_candidates=(0.1,),
+                                  fixed_share_candidates=(0.0, 0.02))
+    assert explicit["selected_fixed_share"] in {0.0, 0.02}
+    assert model.l5_language_state["fixed_share"] == explicit["selected_fixed_share"]
