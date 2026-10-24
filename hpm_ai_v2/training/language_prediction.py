@@ -338,9 +338,16 @@ class HierarchicalNextUnitModel:
         self.l5_language_state: dict | None = None
         self.l5_calibration_document_hashes: set[str] = set()
 
-    def fit(self, documents: Iterable[str], workers: int = 1) -> "HierarchicalNextUnitModel":
+    def fit(
+        self, documents: Iterable[str], workers: int = 1, *,
+        progress_callback: Callable[[dict], None] | None = None,
+    ) -> "HierarchicalNextUnitModel":
         if workers < 1:
             raise ValueError("workers must be at least 1")
+        def report(stage: str, **details) -> None:
+            if progress_callback:
+                progress_callback({"fit_stage": stage, **details})
+
         self._candidate_cache.clear()
         self._character_word_prior_cache = None
         texts = list(documents)
@@ -356,16 +363,26 @@ class HierarchicalNextUnitModel:
         # in bounded processes for larger corpora, then merge deterministically
         # in this process before mutating the shared HFN graph.
         batches = list(_batches(texts))
+        report("counting_documents", state="running", documents=len(texts),
+               batches=len(batches), workers=workers)
         use_processes = (workers > 1 and len(texts) >= 32
                          and sum(map(len, texts)) >= 20_000
                          and "fork" in multiprocessing.get_all_start_methods())
         if use_processes:
             with ProcessPoolExecutor(max_workers=min(workers, len(batches), MAX_FIT_WORKERS),
                                      mp_context=multiprocessing.get_context("fork")) as pool:
-                raw_results = list(pool.map(_count_raw_text_batch, batches,
-                                            [self.max_order] * len(batches)))
+                raw_results = []
+                for index, result in enumerate(pool.map(
+                        _count_raw_text_batch, batches, [self.max_order] * len(batches)), 1):
+                    raw_results.append(result)
+                    report("counting_documents", state="running", completed_batches=index,
+                           total_batches=len(batches), workers=workers)
         else:
-            raw_results = [_count_raw_text_batch(batch, self.max_order) for batch in batches]
+            raw_results = []
+            for index, batch in enumerate(batches, 1):
+                raw_results.append(_count_raw_text_batch(batch, self.max_order))
+                report("counting_documents", state="running", completed_batches=index,
+                       total_batches=len(batches), workers=workers)
         sentence_docs = [sentences for tokenized, _, _ in raw_results for sentences in tokenized]
         self.word_counts = Counter()
         self.char_counts = defaultdict(Counter)
@@ -389,11 +406,22 @@ class HierarchicalNextUnitModel:
                 if sentence_text:
                     self.sentence_counts[sentence_text] += 1
         self._rebuild_mapped_word_counts()
+        report("count_tables", state="complete", vocabulary=len(self.vocab),
+               word_contexts=len(self.raw_word_context_counts),
+               character_contexts=len(self.char_counts))
         if self.class_nodes_enabled:
+            report("class_validation", state="running", words=len(self.word_counts))
             self._fit_class_nodes_from_counts(refit=True)
+            report("class_validation", state="complete", selected_tau=self.class_tau,
+                   selected_lambda=self.class_lambda,
+                   classes=len(set(self.class_labels.values())))
         self._rebuild_spelling_char_model()
-        self._build_hfn_nodes()
-        self._fit_pattern_observer()
+        report("hfn_node_build", state="running")
+        self._build_hfn_nodes(progress_callback=progress_callback)
+        report("observer_initialization", state="running", hfn_nodes=len(self.nodes))
+        self._fit_pattern_observer(progress_callback=progress_callback)
+        report("observer_initialization", state="complete", hfn_nodes=len(self.nodes),
+               forest_nodes=len(self.pattern_forest) if self.pattern_forest else 0)
         if self.class_nodes_enabled:
             for node in self.word_level_nodes.values():
                 self.observer.set_weight(node.id, 1.0)
@@ -989,7 +1017,14 @@ class HierarchicalNextUnitModel:
             for target, count in targets.items():
                 self.class_context_counts[class_context][self._map(target)] += count
 
-    def _build_hfn_nodes(self) -> None:
+    def _build_hfn_nodes(
+        self, *, progress_callback: Callable[[dict], None] | None = None,
+    ) -> None:
+        def report(stage: str, **details) -> None:
+            if progress_callback:
+                progress_callback({"fit_stage": "hfn_node_build", "node_stage": stage,
+                                   **details})
+
         self.nodes.clear()
         self._class_mix_probability_cache = OrderedDict()
         self.class_node_registry.clear()
@@ -1009,6 +1044,7 @@ class HierarchicalNextUnitModel:
                        np.full(4, 1e-6), id=self._safe_id("char_", ch), use_diag=True)
             node.metadata = {"type": "character", "value": ch}
             self.char_nodes[ch] = self.nodes[node.id] = node
+        report("characters", state="complete", nodes=len(self.char_nodes))
         for word in self.vocab:
             count = self.word_counts.get(word, 0)
             profile = follower_profiles.get(word)
@@ -1028,6 +1064,7 @@ class HierarchicalNextUnitModel:
                 for char_node in (self.char_nodes[c] for c in word if c in self.char_nodes):
                     node.add_child(char_node, relation="character_sequence")
             self.word_nodes[word] = self.nodes[node.id] = node
+        report("words", state="complete", nodes=len(self.word_nodes))
         for class_id in self.class_profiles:
             members = sorted(word for word, label in self.class_labels.items() if label == class_id)
             if len(members) < 2:
@@ -1059,6 +1096,7 @@ class HierarchicalNextUnitModel:
                                    "member_count": len(member_nodes)}
             node.add_relation(inputs=member_nodes)
             self.class_node_registry[class_id] = self.nodes[class_id] = node
+        report("classes", state="complete", nodes=len(self.class_node_registry))
         for context, targets in self.char_counts.items():
             total = sum(targets.values())
             entropy = -sum((n / total) * math.log(n / total) for n in targets.values()) if total else 0.0
@@ -1073,6 +1111,7 @@ class HierarchicalNextUnitModel:
                 if char in self.char_nodes:
                     node.add_child(self.char_nodes[char], relation="character_context")
             self.char_context_nodes[context] = self.nodes[node.id] = node
+        report("character_contexts", state="complete", nodes=len(self.char_context_nodes))
         for context, targets in self.counts.items():
             total = sum(targets.values())
             entropy = -sum((n / total) * math.log(n / total) for n in targets.values()) if total else 0.0
@@ -1091,6 +1130,7 @@ class HierarchicalNextUnitModel:
             self.context_nodes[context] = self.nodes[node.id] = node
             if context:
                 self.phrase_nodes[context] = node
+        report("word_contexts", state="complete", nodes=len(self.context_nodes))
         # A pooled class context is itself a predictive HFN pattern. It links
         # the abstract class nodes and any exact word nodes in its slot, and
         # stores pooled follower sufficient statistics on the node. The
@@ -1127,6 +1167,7 @@ class HierarchicalNextUnitModel:
                 outputs=[self.word_nodes[target] for target in targets if target in self.word_nodes],
             )
             self.class_context_nodes[context] = self.nodes[node.id] = node
+        report("class_contexts", state="complete", nodes=len(self.class_context_nodes))
         for sentence, count in self.sentence_counts.items():
             words = tokenize(sentence)
             node = HFN(np.array([float(len(words)), math.log1p(count), 0.0, 0.0]),
@@ -1143,8 +1184,12 @@ class HierarchicalNextUnitModel:
                         node.add_child(phrase, relation="sentence_phrase")
                         seen_contexts.add(phrase.id)
             self.sentence_nodes[sentence] = self.nodes[node.id] = node
+        report("sentences", state="complete", nodes=len(self.sentence_nodes),
+               total_nodes=len(self.nodes))
 
-    def _initialize_pattern_observer(self) -> None:
+    def _initialize_pattern_observer(
+        self, *, progress_callback: Callable[[dict], None] | None = None,
+    ) -> None:
         """Create HFN Observer level nodes over the registered language graph.
 
         Compact fixed-width level nodes carry Observer state. The full
@@ -1166,6 +1211,10 @@ class HierarchicalNextUnitModel:
         # One full HFN Gaussian reduction keeps large corpus restoration and
         # fitting bounded; separate registrations would each rescan the graph.
         registered_nodes = [*self.nodes.values(), *levels]
+        if progress_callback:
+            progress_callback({"fit_stage": "observer_initialization",
+                               "observer_stage": "registering_patterns", "state": "running",
+                               "hfn_nodes": len(self.nodes)})
         if hasattr(self.pattern_forest, "register_many"):
             self.pattern_forest.register_many(registered_nodes)
         else:  # Compatibility with the pre-batched Forest shipped in clean releases.
@@ -1174,6 +1223,10 @@ class HierarchicalNextUnitModel:
                     raise ValueError(f"node {node.id!r} is not compatible with the language Forest")
                 self.pattern_forest._registry.setdefault(node.id, node)
             self.pattern_forest.rebuild_index()
+        if progress_callback:
+            progress_callback({"fit_stage": "observer_initialization",
+                               "observer_stage": "patterns_registered", "state": "complete",
+                               "forest_nodes": len(self.pattern_forest)})
         self.observer = Observer(self.pattern_forest, alpha_gain=0.1, w_init=0.5,
                                  beta_loss=0.0, residual_surprise_threshold=float("inf"))
         for node in levels:
@@ -1195,8 +1248,10 @@ class HierarchicalNextUnitModel:
         for node in self.sentence_nodes.values():
             self.word_level_nodes[self.max_order - 1].add_child(node, relation="weights_sentence_pattern")
 
-    def _fit_pattern_observer(self) -> None:
-        self._initialize_pattern_observer()
+    def _fit_pattern_observer(
+        self, *, progress_callback: Callable[[dict], None] | None = None,
+    ) -> None:
+        self._initialize_pattern_observer(progress_callback=progress_callback)
         for registry, counts_table in ((self.word_level_nodes, self.counts),
                                         (self.char_level_nodes, self.char_counts)):
             outcomes = [[0, 0] for _ in range(self.max_order)]
@@ -2480,9 +2535,14 @@ def run_pilot(corpus: str | Path | list[str | Path], output_dir: str | Path, see
     status("read_corpora", "complete", source_rows=len(rows),
            split_documents={name: len(items) for name, items in split.items()})
     status("fit", "running", source_rows=len(rows), split_documents={name: len(items) for name, items in split.items()})
+    def fit_progress(details: dict) -> None:
+        fit_state = details.pop("state", "running")
+        status("fit", fit_state, **details)
+
     model = HierarchicalNextUnitModel(max_order=max_order, min_word_count=min_word_count,
                                       class_nodes=class_nodes).fit(
         (row["text"] for row in split["train"]), workers=workers,
+        progress_callback=fit_progress,
     )
     # Class-enabled fitting temporarily uses flat word weights while class
     # selection is unresolved. If validation rejects every class, restore the

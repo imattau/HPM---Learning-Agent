@@ -171,6 +171,19 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     assert len(model._class_mix_probability_cache) == 2
 
 
+def test_fit_reports_progress_through_hfn_and_observer_construction():
+    events = []
+    HierarchicalNextUnitModel(max_order=2).fit(
+        ["the cat sleeps", "the dog runs"], progress_callback=events.append,
+    )
+    completed = {(event.get("fit_stage"), event.get("node_stage"), event.get("observer_stage"))
+                 for event in events if event.get("state") == "complete"}
+    assert ("count_tables", None, None) in completed
+    assert ("hfn_node_build", "word_contexts", None) in completed
+    assert ("observer_initialization", None, "patterns_registered") in completed
+    assert ("observer_initialization", None, None) in completed
+
+
 def test_class_nodes_are_off_by_default_and_validation_can_select_no_classes():
     texts = []
     for repeat in range(60):
