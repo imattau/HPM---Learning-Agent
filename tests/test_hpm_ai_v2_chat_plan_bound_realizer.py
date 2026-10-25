@@ -55,8 +55,20 @@ def test_language_model_ranks_fixed_attributions_without_rewriting_claims():
 
     realization = PlanBoundRealizer(phrase_scorer=scorer).realize_with_map(plan)
 
-    assert len(scored) == 6  # three fixed, safe choices for each source position
+    assert len(scored) == 8  # three attributions and a direct form per claim
     assert realization.text.startswith("According to the source:")
+    assert [sentence.text for sentence in realization.sentences] == [claim.text for claim in plan.claims]
+    assert verifier.verify_realization(plan, realization)
+
+
+def test_language_model_can_choose_direct_cited_claim_without_changing_it():
+    plan = _plan()
+    verifier = GroundingVerifier({"source": _Source(plan.claims[0].text + " " + plan.claims[1].text)})
+    realization = PlanBoundRealizer(
+        phrase_scorer=lambda candidate: 0.0 if candidate.startswith("“") else 1.0
+    ).realize_with_map(plan)
+
+    assert realization.text.startswith("“Water evaporates from the surface.” [1]")
     assert [sentence.text for sentence in realization.sentences] == [claim.text for claim in plan.claims]
     assert verifier.verify_realization(plan, realization)
 

@@ -41,9 +41,9 @@ class SchemaRealizer:
 class PlanBoundRealizer:
     """Render every planned claim verbatim and retain its citation mapping.
 
-    An optional language-model scorer may rank a small set of fixed, equivalent
-    source-attribution phrases. It never rewrites claims, chooses evidence, or
-    changes citations. The default remains the deterministic rule-based form.
+    An optional language-model scorer may rank fixed source-attribution phrases
+    and a direct cited-claim form. It never rewrites claims, chooses evidence,
+    or changes citations. The default remains the deterministic rule-based form.
     """
 
     name = "plan-bound-extractive"
@@ -52,13 +52,18 @@ class PlanBoundRealizer:
         self.phrase_scorer = phrase_scorer
         self.name = "plan-bound-lm-ranked" if phrase_scorer is not None else "plan-bound-extractive"
 
-    def _ranked_prefix(self, claim_text: str, candidates: tuple[str, ...]) -> str:
+    def _ranked_line(self, claim_text: str, index: int,
+                     prefixes: tuple[str, ...]) -> str:
+        """Rank source-attribution lines plus a direct cited-claim option."""
+        direct = f'“{claim_text}” [{index}]'
         if self.phrase_scorer is None:
-            return candidates[0]
-        ranked = []
-        for index, prefix in enumerate(candidates):
-            score = float(self.phrase_scorer(f'{prefix} “{claim_text}”'))
-            ranked.append((score, index, prefix))
+            return f'{prefixes[0]} “{claim_text}” [{index}]'
+        candidates = tuple(f'{prefix} “{claim_text}” [{index}]' for prefix in prefixes)
+        candidates += (direct,)
+        ranked = [
+            (float(self.phrase_scorer(candidate)), candidate_index, candidate)
+            for candidate_index, candidate in enumerate(candidates)
+        ]
         return min(ranked)[2]
 
     def realize_with_map(self, plan: ResponsePlan) -> Realization:
@@ -70,7 +75,7 @@ class PlanBoundRealizer:
         sentences = []
         references = []
         prior_source_ids: set[str] = set()
-        prefixes = []
+        rendered = []
         for index, claim in enumerate(plan.claims, start=1):
             citation_ids = tuple(f"citation-{index}-{i}" for i, _ in enumerate(claim.citations, start=1))
             source_ids = {citation.source_id for citation in claim.citations}
@@ -92,7 +97,7 @@ class PlanBoundRealizer:
                     "A separate source reports:",
                     "A different source says:",
                 )
-            prefixes.append(self._ranked_prefix(claim.text, candidates).removesuffix(":").rstrip())
+            rendered.append(self._ranked_line(claim.text, index, candidates))
             prior_source_ids.update(source_ids)
             sentences.append(RealizedSentence(
                 text=claim.text, claim_ids=(claim.claim_id,), citation_ids=citation_ids,
@@ -102,8 +107,6 @@ class PlanBoundRealizer:
                 f"characters {citation.start}–{citation.end})"
                 for citation in claim.citations
             ))
-        rendered = [f'{prefixes[i - 1]}: “{sentence.text}” [{i}]'
-                    for i, sentence in enumerate(sentences, start=1)]
         if plan.fmt in {"summarize", "outline"}:
             heading = "Summary" if plan.fmt == "summarize" else "Outline"
             if plan.format_style == "bullets":

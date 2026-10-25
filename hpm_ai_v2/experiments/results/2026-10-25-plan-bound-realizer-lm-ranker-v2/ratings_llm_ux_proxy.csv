@@ -1,0 +1,25 @@
+case_id,rater_id,usefulness_a,usefulness_b,preferred,comment
+case-0001,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0002,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0003,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0004,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0005,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0006,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0007,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0008,codex_llm_ux_proxy_v1,2,2,tie,Neither answer describes the requested stages.
+case-0009,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about vaccines, not rainfall."
+case-0010,codex_llm_ux_proxy_v1,2,2,tie,Both include an irrelevant vaccine claim and only a partial subduction answer.
+case-0011,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0012,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0013,codex_llm_ux_proxy_v1,3,3,tie,Both omit what memory cells are.
+case-0014,codex_llm_ux_proxy_v1,3,3,tie,Both explain plate movement but omit the requested speed.
+case-0015,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0016,codex_llm_ux_proxy_v1,2,2,tie,Both state which cells make lactic acid but do not define fermentation.
+case-0017,codex_llm_ux_proxy_v1,4,4,tie,Both contain the same claims and citations; only attribution wording differs.
+case-0018,codex_llm_ux_proxy_v1,2,2,tie,Both discuss transpiration and rainfall but miss the photosynthesis comparison.
+case-0019,codex_llm_ux_proxy_v1,1,1,tie,Both fail to state where photosynthesis and respiration occur.
+case-0020,codex_llm_ux_proxy_v1,2,2,tie,Both discuss photosynthesis but omit how respiration releases energy.
+case-0021,codex_llm_ux_proxy_v1,3,3,tie,Both cover heat moving plates but omit its role in evaporation.
+case-0022,codex_llm_ux_proxy_v1,5,5,tie,Both abstain appropriately because the supplied material lacks the answer.
+case-0023,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about rainfall, not the Roman Empire."
+case-0024,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about neurons, not the Olympic host country."

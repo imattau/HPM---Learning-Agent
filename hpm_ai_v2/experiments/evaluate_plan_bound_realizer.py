@@ -223,7 +223,7 @@ def run(*, output_dir: Path, private_key: Path, seed: int = 6247,
         "ranker_checkpoint": str(ranker_checkpoint) if ranker_checkpoint else None,
         "ranker_max_order": language_model.max_order if language_model else None,
         "ranker_strategy": (
-            "minimum surface cross-entropy among fixed source-attribution phrases; claim text and citations remain unchanged"
+            "minimum surface cross-entropy among fixed source-attribution phrases and a direct cited-claim form; claim text and citations remain unchanged"
             if language_model else None
         ),
         "blinded_usefulness": "pending independent ratings",
