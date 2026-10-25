@@ -1,0 +1,76 @@
+{
+  "stage": "source-only-hfn-pretraining",
+  "corpus_files": [
+    "/tmp/hpm-memory-sample-uawhbvf9.jsonl"
+  ],
+  "source_documents": 100,
+  "characters": 54304,
+  "source_type_counts": {
+    "conversation": 100
+  },
+  "license_counts": {
+    "apache-2.0": 100
+  },
+  "metadata_coverage": 1.0,
+  "hf_dataset_ids": [
+    "OpenAssistant/oasst1"
+  ],
+  "vocabulary_size": 1794,
+  "encoder": "tfidf",
+  "embedding_model": null,
+  "fact_nodes_before_supervision": 0,
+  "fit_episode_count": 0,
+  "checkpoint_bytes": 8923745,
+  "agent_state_bytes": 100006,
+  "forest_node_count": 3622,
+  "pattern_count": 3622,
+  "pattern_index_loaded_object_count": 0,
+  "compact_pattern_reference_count": 3622,
+  "pattern_relation_type_counts": {
+    "character": 67,
+    "paragraph": 204,
+    "passage": 100,
+    "proposition": 163,
+    "sentence": 629,
+    "spelling": 1765,
+    "term": 694
+  },
+  "shared_term_node_count": 694,
+  "shared_term_sentence_links": 3836,
+  "shared_term_sentence_index_links": 3836,
+  "checkpoint_shared_term_links_verified": true,
+  "checkpoint_shared_term_link_mismatch_count": 0,
+  "hot_cap": 10000,
+  "shared_term_reuse_ratio": 5.919753086419753,
+  "observer_compressed_node_count": 0,
+  "checkpoint": "/tmp/hpm-memory-profile-final100",
+  "memory_profile": {
+    "measurement": "sampled process RSS every 100 ms; vector-index bytes sum NumPy array sizes",
+    "elapsed_seconds": 5.556710528995609,
+    "peak_process_rss_bytes": 556498944,
+    "process_rss_after_pretraining_bytes": 556978176,
+    "forest_vector_index_nodes": 3622,
+    "forest_vector_index_bytes": 53141984,
+    "forest_hot_node_count": 3622,
+    "pattern_index_loaded_object_count": 0,
+    "term_index_terms": 1270,
+    "term_index_links": 4458
+  },
+  "profile_input": {
+    "corpus": "data/pretraining/oasst1_train_en_1000.jsonl",
+    "row_count": 100,
+    "sample_sha256": "98212c3df803a5b4a010b7633913da7028be10af23b6160e6d6fef23ba7aee53",
+    "max_rows": 100,
+    "hot_cap": 10000,
+    "max_vocab": 20000
+  },
+  "code_provenance": {
+    "git_head": "9e621c51eace7d78fe074e1226d78b891570ccbe",
+    "files_sha256": {
+      "hpm_ai_v2/experiments/profile_pretrain_memory.py": "d644096d151ead8bcea45b54817f78a1165789c0e512e63c06c4640e1fb99c0c",
+      "hpm_ai_v2/training/pretrain_hfn_corpus.py": "febdd5434dde66ceef6e809c8bb176b404d17b8ba87ce69949b8813b95cf3f33",
+      "hpm_ai_v2/agents/base_agent.py": "09c0f8a6be86fc50ef92455d4bee28606aa52ed7645d7b08c421599ec63a9fed",
+      "hfn/tiered_forest.py": "aff645fa187e1a7cf0387e3e523951fa27dd7e7e27497ada23286efbb8c6c4c0"
+    }
+  }
+}
