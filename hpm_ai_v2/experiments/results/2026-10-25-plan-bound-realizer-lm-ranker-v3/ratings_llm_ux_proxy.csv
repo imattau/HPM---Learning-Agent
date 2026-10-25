@@ -1,0 +1,25 @@
+case_id,rater_id,usefulness_a,usefulness_b,preferred,comment
+case-0001,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0002,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0003,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0004,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0005,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0006,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0007,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0008,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0009,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0010,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0011,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0012,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0013,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0014,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0015,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0016,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0017,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0018,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0019,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0020,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0021,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0022,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0023,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.
+case-0024,codex_llm_ux_proxy_v2,3,3,tie,Both answers preserve the same verified claims and cited evidence; attribution phrasing alone does not change expected task usefulness.

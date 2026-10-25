@@ -61,14 +61,14 @@ def test_language_model_ranks_fixed_attributions_without_rewriting_claims():
     assert verifier.verify_realization(plan, realization)
 
 
-def test_language_model_can_choose_direct_cited_claim_without_changing_it():
+def test_language_model_can_choose_unquoted_direct_cited_claim_without_changing_it():
     plan = _plan()
     verifier = GroundingVerifier({"source": _Source(plan.claims[0].text + " " + plan.claims[1].text)})
     realization = PlanBoundRealizer(
-        phrase_scorer=lambda candidate: 0.0 if candidate.startswith("“") else 1.0
+        phrase_scorer=lambda candidate: 0.0 if candidate.startswith("Water evaporates") else 1.0
     ).realize_with_map(plan)
 
-    assert realization.text.startswith("“Water evaporates from the surface.” [1]")
+    assert realization.text.startswith("Water evaporates from the surface. [1]")
     assert [sentence.text for sentence in realization.sentences] == [claim.text for claim in plan.claims]
     assert verifier.verify_realization(plan, realization)
 

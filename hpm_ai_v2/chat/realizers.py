@@ -55,7 +55,7 @@ class PlanBoundRealizer:
     def _ranked_line(self, claim_text: str, index: int,
                      prefixes: tuple[str, ...]) -> str:
         """Rank source-attribution lines plus a direct cited-claim option."""
-        direct = f'“{claim_text}” [{index}]'
+        direct = f'{claim_text} [{index}]'
         if self.phrase_scorer is None:
             return f'{prefixes[0]} “{claim_text}” [{index}]'
         candidates = tuple(f'{prefix} “{claim_text}” [{index}]' for prefix in prefixes)

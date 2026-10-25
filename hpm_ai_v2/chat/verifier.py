@@ -48,7 +48,10 @@ class GroundingVerifier:
             expected_ids = {f"citation-{index}-{i}" for i in range(1, len(claim.citations) + 1)}
             if not sentence.citation_ids or set(sentence.citation_ids) != expected_ids:
                 return False
-            rendered = f'“{sentence.text}” [{index}]'
-            if rendered not in realization.text:
+            rendered_forms = (
+                f'{sentence.text} [{index}]',
+                f'“{sentence.text}” [{index}]',
+            )
+            if not any(rendered in realization.text for rendered in rendered_forms):
                 return False
         return seen == set(claims)
