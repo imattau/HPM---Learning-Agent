@@ -1,6 +1,12 @@
 import json
 
-from hpm_ai_v2.experiments.profile_pretrain_memory import _bounded_input, profile
+import pytest
+
+from hpm_ai_v2.experiments.profile_pretrain_memory import (
+    RSSLimitExceeded,
+    _bounded_input,
+    profile,
+)
 
 
 def test_bounded_input_hashes_only_the_selected_rows(tmp_path):
@@ -37,3 +43,19 @@ def test_profile_reports_retained_indexes_and_peak_process_memory(tmp_path):
     assert memory["pattern_index_loaded_object_count"] == 0
     assert memory["peak_process_rss_bytes"] > 0
     assert report["checkpoint_shared_term_links_verified"] is True
+
+
+def test_profile_rss_limit_aborts_and_removes_partial_checkpoint(tmp_path):
+    corpus = tmp_path / "sources.jsonl"
+    corpus.write_text(json.dumps({
+        "kind": "source", "source_id": "source", "text": "A small text for profiling.",
+        "title": "Test", "metadata": {"source_type": "book", "license": "Public domain"},
+    }) + "\n", encoding="utf-8")
+    output_dir = tmp_path / "limited-checkpoint"
+
+    with pytest.raises(RSSLimitExceeded) as caught:
+        profile(corpus, output_dir, max_rows=1, max_rss_gib=0.01)
+
+    assert not output_dir.exists()
+    assert caught.value.report["profile_status"] == "aborted_rss_limit"
+    assert caught.value.report["memory_profile"]["peak_process_rss_bytes"] > 0
