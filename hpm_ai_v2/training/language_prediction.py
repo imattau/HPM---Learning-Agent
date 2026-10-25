@@ -35,6 +35,7 @@ CLASS_MIN_VALIDATION_PAIRS = 1
 CLASS_LAMBDA_GRID = (0.025, 0.05, 0.1, 0.2, 0.35, 0.5, 0.7, 1.0)
 CHARACTER_WORD_MIX_CANDIDATES = (0.0, 0.025, 0.05, 0.1, 0.2, 0.35, 0.5)
 CLASS_MIX_CACHE_MAX_ENTRIES = 32
+CLASS_MIX_MASS_CACHE_MAX_ENTRIES = 4096
 
 from hpm_ai_v2.training.language_constants import BOUNDARY, TOKEN_RE, UNK
 from hpm_ai_v2.training.language_corpus import (
@@ -93,6 +94,7 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
         self.word_nodes: dict[str, HFN] = {}
         self.context_nodes: dict[tuple[str, ...], HFN] = {}
         self.class_context_nodes: dict[tuple[str, ...], HFN] = {}
+        self._class_mix_mass_cache: OrderedDict[tuple, tuple[float, float, float]] = OrderedDict()
         self.phrase_nodes: dict[tuple[str, ...], HFN] = {}
         self.sentence_nodes: dict[str, HFN] = {}
         self.sentence_counts: Counter[str] = Counter()
@@ -133,6 +135,7 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
 
         self._candidate_cache.clear()
         self._character_word_prior_cache = None
+        self._class_mix_mass_cache.clear()
         if hasattr(self, "_class_mix_distribution_cache"):
             self._class_mix_distribution_cache.clear()
         texts = list(documents)
@@ -540,6 +543,7 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
             return self
         if hasattr(self, "_class_mix_distribution_cache"):
             self._class_mix_distribution_cache.clear()
+        self._class_mix_mass_cache.clear()
         previous_class_weights = {
             class_id: self.observer.get_weight(class_id)
             for class_id in self.class_node_registry if self.observer is not None
@@ -589,6 +593,7 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
         self._rebuild_spelling_char_model()
         self._candidate_cache.clear()
         self._character_word_prior_cache = None
+        self._class_mix_mass_cache.clear()
         progress("rebuild_hfn_graph", raw_contexts=len(self.raw_word_context_counts),
                  mapped_contexts=len(self.counts))
         self._build_hfn_nodes()
@@ -1393,6 +1398,7 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
         self.nodes.clear()
         self._class_mix_probability_cache = OrderedDict()
         self._class_mix_distribution_cache = OrderedDict()
+        self._class_mix_mass_cache.clear()
         self.class_node_registry.clear()
         self.char_nodes.clear()
         self.word_nodes.clear()
@@ -2174,9 +2180,9 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
                 probability = (local_mass * counts.get(target, 0) / total
                                + (1.0 - local_mass) * probability)
         if not character and apply_class_mix and self.class_lambda > 0:
-            class_distribution = self._class_mixed_distribution(context)
-            if class_distribution is not None:
-                probability = class_distribution.get(target, probability)
+            class_probability = self._class_mixed_probability(context, target, probability)
+            if class_probability is not None:
+                probability = class_probability
         if not character and apply_character_mix and self.character_word_mix > 0.0:
             if target == BOUNDARY:
                 return probability
@@ -2190,6 +2196,82 @@ class HierarchicalNextUnitModel(_LanguageL5Mixin):
             probability = ((1.0 - self.character_word_mix) * probability
                            + self.character_word_mix * (1.0 - eos_probability) * spelling_probability)
         return probability
+
+    def _class_mixed_probability(
+        self, context: tuple[str, ...], target: str, plain_probability: float,
+    ) -> float | None:
+        """Score one class-mixed target without materializing a vocabulary map.
+
+        Class mixing reserves probability mass for unseen continuations while
+        preserving the base predictor on observed continuations. Only the mass
+        of the observed set under the plain and class experts is needed for a
+        single target. Computing those sums scales with observed followers,
+        rather than vocabulary size, and avoids allocating a dense class map
+        for every token in a corpus evaluation.
+        """
+        class_context = self._abstract_prediction_slot(context, self.class_labels)
+        if class_context == context or class_context not in self.class_context_nodes:
+            return None
+        class_id = class_context[-1]
+        weight = (self.observer.get_weight(class_id)
+                  if self.observer is not None and class_id in self.class_node_registry
+                  else self.class_lambdas.get(class_id, self.class_lambda))
+        if weight <= 0.0:
+            return None
+
+        seen_targets = set()
+        for order in range(len(context), 0, -1):
+            local = self.counts.get(context[-order:], Counter())
+            if local:
+                seen_targets = set(local)
+                break
+        if not seen_targets:
+            return None
+
+        order_weights = (tuple(self.observer.get_weight(node.id)
+                               for _, node in sorted(self.word_level_nodes.items()))
+                         if self.observer is not None else ())
+        key = (context, class_context, weight, order_weights, self.alpha)
+        cached = self._class_mix_mass_cache.get(key)
+        if cached is None:
+            plain_seen_mass = sum(
+                self._weighted_probability(
+                    context, word, apply_class_mix=False, apply_character_mix=False,
+                ) for word in seen_targets
+            )
+            class_seen_mass = sum(
+                self._class_probability_for_context(class_context, word)
+                for word in seen_targets
+            )
+            cached = (plain_seen_mass, max(0.0, 1.0 - plain_seen_mass),
+                      max(0.0, 1.0 - class_seen_mass))
+            self._class_mix_mass_cache[key] = cached
+            while len(self._class_mix_mass_cache) > CLASS_MIX_MASS_CACHE_MAX_ENTRIES:
+                self._class_mix_mass_cache.popitem(last=False)
+        else:
+            self._class_mix_mass_cache.move_to_end(key)
+
+        plain_seen_mass, plain_unseen_mass, class_unseen_mass = cached
+        if class_unseen_mass <= 1e-12:
+            return plain_probability
+        reserved_unseen_mass = max(
+            plain_unseen_mass, CLASS_RESERVED_UNSEEN_MASS * weight,
+        )
+        if target in seen_targets:
+            if reserved_unseen_mass > plain_unseen_mass and plain_seen_mass > 0.0:
+                return plain_probability * (1.0 - reserved_unseen_mass) / plain_seen_mass
+            return plain_probability
+        if reserved_unseen_mass > plain_unseen_mass and plain_seen_mass <= 0.0:
+            return plain_probability
+        class_probability = self._class_probability_for_context(class_context, target)
+        if plain_unseen_mass > 1e-12:
+            plain_component = plain_probability / plain_unseen_mass
+        else:
+            plain_component = class_probability / class_unseen_mass
+        class_component = class_probability / class_unseen_mass
+        return reserved_unseen_mass * (
+            (1.0 - weight) * plain_component + weight * class_component
+        )
 
     def _character_word_prior(self) -> dict[str, float]:
         """Compose a normalized word-form prior from the character HFN model."""

@@ -196,7 +196,7 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     model._fit_class_nodes_from_counts(refit=True)
     model._build_hfn_nodes()
     model._initialize_pattern_observer()
-    monkeypatch.setattr(language_prediction, "CLASS_MIX_CACHE_MAX_ENTRIES", 2)
+    monkeypatch.setattr(language_prediction, "CLASS_MIX_MASS_CACHE_MAX_ENTRIES", 2)
 
     # Target scoring and dense prediction must share the same seen-mass-safe
     # class distribution.
@@ -230,9 +230,38 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     expected = model.predict_proba(["cat"])
     for word in ("dog", "bird", "fish"):
         model.predict_proba([word])
-    assert len(model._class_mix_distribution_cache) == 2
+    assert len(model._class_mix_mass_cache) == 2
     assert model.predict_proba(["cat"]) == pytest.approx(expected)
-    assert len(model._class_mix_distribution_cache) == 2
+    assert len(model._class_mix_mass_cache) == 2
+
+
+def test_class_target_scoring_matches_dense_distribution_without_building_it(monkeypatch):
+    texts = (['cat sleeps'] * 3 + ['cat purrs'] * 3
+             + ['dog sleeps'] * 3 + ['dog purrs'] * 3
+             + ['bird runs'] * 3 + ['bird flies'] * 3
+             + ['fish runs'] * 3 + ['fish flies'] * 3)
+    model = HierarchicalNextUnitModel(max_order=2, class_nodes=True).fit(texts)
+    monkeypatch.setattr(model, "_validation_class_choice", lambda: (0.9, 0.5))
+    model._fit_class_nodes_from_counts(refit=True)
+    model._build_hfn_nodes()
+    model._initialize_pattern_observer()
+    context = ("cat",)
+    plain = {word: model._weighted_probability(
+        context, word, apply_class_mix=False, apply_character_mix=False,
+    ) for word in model.vocab}
+    dense = model._class_mixed_distribution(context, plain_distribution=plain)
+    assert dense is not None
+    for target in model.vocab:
+        assert model._weighted_probability(
+            context, target, apply_character_mix=False,
+        ) == pytest.approx(dense[target])
+
+    model._class_mix_mass_cache.clear()
+    monkeypatch.setattr(
+        model, "_class_mixed_distribution",
+        lambda *_args, **_kwargs: pytest.fail("single-target scoring built a dense distribution"),
+    )
+    assert model._weighted_probability(context, "runs", apply_character_mix=False) >= 0.0
 
 
 def test_fit_reports_progress_through_hfn_and_observer_construction():
