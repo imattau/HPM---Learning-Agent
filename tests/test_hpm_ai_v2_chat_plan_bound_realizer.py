@@ -41,3 +41,20 @@ def test_realization_verification_rejects_unmapped_or_changed_factual_text():
     assert not verifier.verify_realization(plan, replace(realization, sentences=(changed, *realization.sentences[1:])))
     unmapped = replace(realization.sentences[1], claim_ids=())
     assert not verifier.verify_realization(plan, replace(realization, sentences=(realization.sentences[0], unmapped)))
+
+
+def test_language_model_ranks_fixed_attributions_without_rewriting_claims():
+    plan = _plan()
+    verifier = GroundingVerifier({"source": _Source(plan.claims[0].text + " " + plan.claims[1].text)})
+    scored = []
+
+    def scorer(candidate):
+        scored.append(candidate)
+        return 0.0 if candidate.startswith("According to the source:") else 1.0
+
+    realization = PlanBoundRealizer(phrase_scorer=scorer).realize_with_map(plan)
+
+    assert len(scored) == 6  # three fixed, safe choices for each source position
+    assert realization.text.startswith("According to the source:")
+    assert [sentence.text for sentence in realization.sentences] == [claim.text for claim in plan.claims]
+    assert verifier.verify_realization(plan, realization)

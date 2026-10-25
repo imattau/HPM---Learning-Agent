@@ -1,6 +1,8 @@
 """Extractive realization for source-backed claims."""
 from __future__ import annotations
 
+from typing import Callable
+
 from hpm_ai_v2.chat.schema import Realization, RealizedSentence, ResponsePlan
 from hpm_ai_v2.chat.procedures import render_schema
 
@@ -37,9 +39,27 @@ class SchemaRealizer:
 
 
 class PlanBoundRealizer:
-    """Render every planned claim verbatim and retain its citation mapping."""
+    """Render every planned claim verbatim and retain its citation mapping.
+
+    An optional language-model scorer may rank a small set of fixed, equivalent
+    source-attribution phrases. It never rewrites claims, chooses evidence, or
+    changes citations. The default remains the deterministic rule-based form.
+    """
 
     name = "plan-bound-extractive"
+
+    def __init__(self, phrase_scorer: Callable[[str], float] | None = None):
+        self.phrase_scorer = phrase_scorer
+        self.name = "plan-bound-lm-ranked" if phrase_scorer is not None else "plan-bound-extractive"
+
+    def _ranked_prefix(self, claim_text: str, candidates: tuple[str, ...]) -> str:
+        if self.phrase_scorer is None:
+            return candidates[0]
+        ranked = []
+        for index, prefix in enumerate(candidates):
+            score = float(self.phrase_scorer(f'{prefix} “{claim_text}”'))
+            ranked.append((score, index, prefix))
+        return min(ranked)[2]
 
     def realize_with_map(self, plan: ResponsePlan) -> Realization:
         if plan.act == "clarify":
@@ -55,11 +75,24 @@ class PlanBoundRealizer:
             citation_ids = tuple(f"citation-{index}-{i}" for i, _ in enumerate(claim.citations, start=1))
             source_ids = {citation.source_id for citation in claim.citations}
             if index == 1:
-                prefixes.append("The cited material states")
+                candidates = (
+                    "The cited material states:",
+                    "The source states:",
+                    "According to the source:",
+                )
             elif source_ids & prior_source_ids:
-                prefixes.append("The same source also states")
+                candidates = (
+                    "The same source also states:",
+                    "The same source also notes:",
+                    "The source adds:",
+                )
             else:
-                prefixes.append("Another cited source states")
+                candidates = (
+                    "Another cited source states:",
+                    "A separate source reports:",
+                    "A different source says:",
+                )
+            prefixes.append(self._ranked_prefix(claim.text, candidates).removesuffix(":").rstrip())
             prior_source_ids.update(source_ids)
             sentences.append(RealizedSentence(
                 text=claim.text, claim_ids=(claim.claim_id,), citation_ids=citation_ids,
