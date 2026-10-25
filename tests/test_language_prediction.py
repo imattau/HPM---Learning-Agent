@@ -185,7 +185,7 @@ def test_class_nodes_cluster_members_pool_contexts_and_round_trip(tmp_path, monk
 
 
 def test_class_mix_probability_cache_is_bounded_without_changing_predictions(monkeypatch):
-    import hpm_ai_v2.training.language_prediction as language_prediction
+    import hpm_ai_v2.training.language_class_nodes as language_class_nodes
 
     texts = (['cat sleeps'] * 3 + ['cat purrs'] * 3
              + ['dog sleeps'] * 3 + ['dog purrs'] * 3
@@ -196,7 +196,7 @@ def test_class_mix_probability_cache_is_bounded_without_changing_predictions(mon
     model._fit_class_nodes_from_counts(refit=True)
     model._build_hfn_nodes()
     model._initialize_pattern_observer()
-    monkeypatch.setattr(language_prediction, "CLASS_MIX_MASS_CACHE_MAX_ENTRIES", 2)
+    monkeypatch.setattr(language_class_nodes, "CLASS_MIX_MASS_CACHE_MAX_ENTRIES", 2)
 
     # Target scoring and dense prediction must share the same seen-mass-safe
     # class distribution.
