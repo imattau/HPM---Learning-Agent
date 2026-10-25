@@ -70,12 +70,14 @@ def run(*, output_dir: Path, private_key: Path, seed: int = 6247,
     rating_rows = []
     with __import__("tempfile").TemporaryDirectory() as work:
         trainer = build_trainer(sources, work)
-        session = ChatSession(trainer, planner=ExpandingPlanner(trainer))
+        session = ChatSession(trainer, planner=ExpandingPlanner(trainer), realizer=realizer)
         for case in heldout:
             reply = session.send(case.question)
             plan = reply.plan
             plan_verified = session.verifier.verify(plan)
             bound = realizer.realize_with_map(plan)
+            if reply.realizer != realizer.name or reply.text != bound.text:
+                raise RuntimeError("ChatSession did not return the configured realizer output")
             bound_verified = plan_verified and session.verifier.verify_realization(plan, bound)
             rule_based = baseline_realizer.realize_with_map(plan) if language_model is not None else None
             rule_based_verified = (

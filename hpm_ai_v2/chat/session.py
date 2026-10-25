@@ -33,6 +33,7 @@ class ChatSession:
         state: ConversationState | None = None,
         ledger: Ledger | None = None,
         planner=None,
+        realizer=None,
         expand_evidence: bool = True,
     ):
         self.trainer = trainer
@@ -49,7 +50,7 @@ class ChatSession:
             # expand_evidence=False gives the trainer's own single-sentence or top-three evidence.
             planner = ExpandingPlanner(trainer) if expand_evidence else GroundedPlanner(trainer)
         self.planner = planner
-        self.realizer = PlanBoundRealizer()
+        self.realizer = PlanBoundRealizer() if realizer is None else realizer
         self.verifier = GroundingVerifier(trainer.sources)
 
     def send(
