@@ -1,0 +1,25 @@
+case_id,rater_id,usefulness_a,usefulness_b,preferred,comment
+case-0001,codex_llm_ux_proxy_v1,4,5,B,Both answer correctly; B is more direct.
+case-0002,codex_llm_ux_proxy_v1,5,4,A,Both answer correctly; A avoids unnecessary quotation framing.
+case-0003,codex_llm_ux_proxy_v1,5,4,A,Both answer correctly; A is more natural and direct.
+case-0004,codex_llm_ux_proxy_v1,5,4,A,Both answer correctly; A is more direct.
+case-0005,codex_llm_ux_proxy_v1,5,4,A,Both answer correctly; A is more direct.
+case-0006,codex_llm_ux_proxy_v1,5,3,A,A answers cleanly; B adds a redundant definition label and framing.
+case-0007,codex_llm_ux_proxy_v1,3,5,B,B covers both firing and impulse transmission; A answers only transmission.
+case-0008,codex_llm_ux_proxy_v1,2,2,tie,Neither describes the stages requested.
+case-0009,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about vaccines, not rainfall."
+case-0010,codex_llm_ux_proxy_v1,2,1,A,A includes one relevant subduction outcome but also an irrelevant claim; B is off-topic.
+case-0011,codex_llm_ux_proxy_v1,3,4,B,B includes a specific fact about the innate response.
+case-0012,codex_llm_ux_proxy_v1,3,5,B,B explains how the Calvin cycle uses the products of the light reactions.
+case-0013,codex_llm_ux_proxy_v1,3,2,A,Both omit what memory cells are; A is less awkward.
+case-0014,codex_llm_ux_proxy_v1,3,2,A,A gives the plate-moving mechanism but misses speed; B is less complete.
+case-0015,codex_llm_ux_proxy_v1,4,3,A,A addresses both products and starch storage; B addresses only products.
+case-0016,codex_llm_ux_proxy_v1,2,3,B,Both omit a definition of fermentation; B states the lactic-acid fact directly.
+case-0017,codex_llm_ux_proxy_v1,3,5,B,B covers both groundwater and runoff; A covers runoff only.
+case-0018,codex_llm_ux_proxy_v1,2,1,A,A gives one relevant fact; B adds unrelated rainfall details and misses photosynthesis.
+case-0019,codex_llm_ux_proxy_v1,1,1,tie,Neither identifies where either process occurs; A adds irrelevant facts.
+case-0020,codex_llm_ux_proxy_v1,2,3,B,Both are incomplete; B adds a relevant detail about light reactions.
+case-0021,codex_llm_ux_proxy_v1,3,2,A,A explains heat moving plates but misses evaporation; B misses both requested roles.
+case-0022,codex_llm_ux_proxy_v1,5,5,tie,Both abstain appropriately because the supplied material lacks the answer.
+case-0023,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about rainfall, not the Roman Empire."
+case-0024,codex_llm_ux_proxy_v1,1,1,tie,"Both answer about neurons, not the Olympic host country."

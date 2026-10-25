@@ -117,6 +117,17 @@ def run(*, output: Path, neural_epochs: int = 4, neural_batch_size: int = 128):
         [row["cross_entropy_nats"] for row in hfn_doc_scores],
         weights=[row["tokens"] for row in hfn_doc_scores],
     ))
+    # A class-enabled checkpoint that selected no classes intentionally falls
+    # back to the flat count expert. Score the stored Observer weights as a
+    # separate diagnostic, without presenting that counterfactual as the
+    # checkpoint's actual prediction path.
+    observer_weighted_model = HierarchicalNextUnitModel.load(checkpoint_path)
+    observer_weighted_model.class_nodes_enabled = False
+    observer_weighted_doc_scores = _score_docs(observer_weighted_model, test)
+    observer_weighted_ce = float(np.average(
+        [row["cross_entropy_nats"] for row in observer_weighted_doc_scores],
+        weights=[row["tokens"] for row in observer_weighted_doc_scores],
+    ))
     hfn_report_delta = hfn_recomputed - expected_hfn["cross_entropy_nats"]
     min_word_count = int(hfn_report["min_word_count"])
     ngram = NGramBaseline(order=3, alpha=.1, smoothing="interpolated",
@@ -185,6 +196,15 @@ def run(*, output: Path, neural_epochs: int = 4, neural_batch_size: int = 128):
                           "reloaded_minus_saved_cross_entropy_nats": hfn_report_delta,
                           "saved_metric_reproduced_from_checkpoint": abs(hfn_report_delta) <= 1e-10,
                           "class_selection": hfn_report["class_node_training"]["selection"]},
+        "hfn_observer_weighted_no_class_counterfactual": {
+            "cross_entropy_nats": observer_weighted_ce,
+            "perplexity": math.exp(observer_weighted_ce),
+            "test_tokens": sum(row["tokens"] for row in observer_weighted_doc_scores),
+            "interpretation": (
+                "diagnostic only: class-node fallback is disabled so the saved per-order "
+                "Observer weights are used; this is not the class-enabled checkpoint path"
+            ),
+        },
         "interpolated_trigram": {"selected_alpha": ngram_alpha,
                                  "validation_sweep": ngram_val,
                                  "test": ngram_test},
@@ -199,6 +219,8 @@ def run(*, output: Path, neural_epochs: int = 4, neural_batch_size: int = 128):
                                        "test": neural_test},
         "paired_document_bootstrap": {
             "hfn_minus_kneser_ney": _bootstrap_delta(hfn_doc_scores, kn_doc_scores),
+            "hfn_observer_weighted_no_class_minus_kneser_ney": _bootstrap_delta(
+                observer_weighted_doc_scores, kn_doc_scores),
             "hfn_minus_neural": _bootstrap_delta(hfn_doc_scores, neural_doc_scores),
             "hfn_minus_interpolated": _bootstrap_delta(hfn_doc_scores, ngram_doc_scores),
             "kneser_ney_minus_interpolated": _bootstrap_delta(kn_doc_scores, ngram_doc_scores),

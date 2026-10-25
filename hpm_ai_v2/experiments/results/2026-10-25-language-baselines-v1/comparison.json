@@ -272,6 +272,12 @@
       "selected_validation_cross_entropy_nats": 5.860664711410435
     }
   },
+  "hfn_observer_weighted_no_class_counterfactual": {
+    "cross_entropy_nats": 4.810007420668713,
+    "perplexity": 122.73252827131859,
+    "test_tokens": 63350,
+    "interpretation": "diagnostic only: class-node fallback is disabled so the saved per-order Observer weights are used; this is not the class-enabled checkpoint path"
+  },
   "interpolated_trigram": {
     "selected_alpha": 100.0,
     "validation_sweep": {
@@ -685,24 +691,24 @@
     "history": [
       {
         "epoch": 1,
-        "training_cross_entropy_nats": 5.467343601334095,
-        "validation_cross_entropy_nats": 5.752292952022774
+        "training_cross_entropy_nats": 5.467343612779631,
+        "validation_cross_entropy_nats": 5.752292988569982
       },
       {
         "epoch": 2,
-        "training_cross_entropy_nats": 4.761149846725194,
-        "validation_cross_entropy_nats": 5.7515711537758945
+        "training_cross_entropy_nats": 4.761149853642454,
+        "validation_cross_entropy_nats": 5.75157118415687
       },
       {
         "epoch": 3,
-        "training_cross_entropy_nats": 4.521855008300946,
-        "validation_cross_entropy_nats": 5.85461626013749
+        "training_cross_entropy_nats": 4.521855023755119,
+        "validation_cross_entropy_nats": 5.854616248405278
       }
     ],
     "test": {
       "tokens": 63350,
-      "cross_entropy_nats": 5.368380660845148,
-      "perplexity": 214.5152134108128,
+      "cross_entropy_nats": 5.368380690531742,
+      "perplexity": 214.51521977903906,
       "vocabulary_size": 10947,
       "context_size": 2,
       "embedding_dim": 24,
@@ -721,11 +727,21 @@
       "documents": 52,
       "replicates": 5000
     },
-    "hfn_minus_neural": {
-      "mean_delta_nats_left_minus_right": -0.4152390959094534,
+    "hfn_observer_weighted_no_class_minus_kneser_ney": {
+      "mean_delta_nats_left_minus_right": 0.1231649482838828,
       "bootstrap_95pct_ci": [
-        -0.5241860311367917,
-        -0.3236661131060014
+        0.06709704499161162,
+        0.1951542061652146
+      ],
+      "resampling_unit": "source-grouped document",
+      "documents": 52,
+      "replicates": 5000
+    },
+    "hfn_minus_neural": {
+      "mean_delta_nats_left_minus_right": -0.41523912559604786,
+      "bootstrap_95pct_ci": [
+        -0.5241860642580802,
+        -0.32366614309447755
       ],
       "resampling_unit": "source-grouped document",
       "documents": 52,
@@ -752,20 +768,20 @@
       "replicates": 5000
     },
     "neural_minus_interpolated": {
-      "mean_delta_nats_left_minus_right": -0.2191236940210734,
+      "mean_delta_nats_left_minus_right": -0.219123664334479,
       "bootstrap_95pct_ci": [
-        -0.27888820345494586,
-        -0.14480728107218077
+        -0.2788881661112962,
+        -0.14480723637508328
       ],
       "resampling_unit": "source-grouped document",
       "documents": 52,
       "replicates": 5000
     },
     "neural_minus_kneser_ney": {
-      "mean_delta_nats_left_minus_right": 0.6815381884603174,
+      "mean_delta_nats_left_minus_right": 0.6815382181469117,
       "bootstrap_95pct_ci": [
-        0.5810018330383745,
-        0.8085572776079892
+        0.5810018614258874,
+        0.8085573119919065
       ],
       "resampling_unit": "source-grouped document",
       "documents": 52,
@@ -777,5 +793,5 @@
     "Vocabulary and rare-word cutoff match the saved HFN run; all scores include EOS targets.",
     "The saved HFN aggregate CE does not reproduce when its checkpoint is reloaded and scored on the reconstructed source-grouped test set; both values are reported, and CIs use the reloaded model predictions."
   ],
-  "elapsed_seconds": 122.32229868999275
+  "elapsed_seconds": 166.78001799499907
 }
