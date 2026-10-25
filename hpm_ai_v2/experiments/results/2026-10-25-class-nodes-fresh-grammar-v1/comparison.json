@@ -1,0 +1,314 @@
+{
+  "protocol": "independent synthetic role grammar; no existing gates changed; training-only class validation; train/test disjoint at verb-object pair level",
+  "grammar": {
+    "subjects": [
+      "alice",
+      "bruno",
+      "cora",
+      "drew"
+    ],
+    "food_objects": [
+      "apple",
+      "pear",
+      "peach",
+      "plum"
+    ],
+    "sports_objects": [
+      "ball",
+      "disc",
+      "bat",
+      "frisbee"
+    ],
+    "verbs": {
+      "eats": [
+        "apple",
+        "pear",
+        "peach",
+        "plum"
+      ],
+      "likes": [
+        "apple",
+        "pear",
+        "peach",
+        "plum"
+      ],
+      "buys": [
+        "apple",
+        "pear",
+        "peach",
+        "plum"
+      ],
+      "kicks": [
+        "ball",
+        "disc",
+        "bat",
+        "frisbee"
+      ],
+      "throws": [
+        "ball",
+        "disc",
+        "bat",
+        "frisbee"
+      ],
+      "carries": [
+        "apple",
+        "pear",
+        "peach",
+        "plum",
+        "ball",
+        "disc",
+        "bat",
+        "frisbee"
+      ]
+    },
+    "overlapping_verb": "carries",
+    "cross_domain_noise": {
+      "eats": [
+        "ball"
+      ],
+      "likes": [
+        "disc"
+      ],
+      "buys": [
+        "bat"
+      ],
+      "kicks": [
+        "apple"
+      ],
+      "throws": [
+        "peach"
+      ],
+      "carries": []
+    }
+  },
+  "training_documents": 188,
+  "test_documents": 28,
+  "heldout_verb_object_pairs": [
+    [
+      "buys",
+      "peach"
+    ],
+    [
+      "carries",
+      "frisbee"
+    ],
+    [
+      "carries",
+      "plum"
+    ],
+    [
+      "eats",
+      "apple"
+    ],
+    [
+      "kicks",
+      "ball"
+    ],
+    [
+      "likes",
+      "pear"
+    ],
+    [
+      "throws",
+      "disc"
+    ]
+  ],
+  "selected_tau": 0.7,
+  "maximum_selected_class_lambda": 1.0,
+  "active_class_count": 3,
+  "active_class_sizes": {
+    "language_class_000000": 4,
+    "language_class_000002": 4,
+    "language_class_000003": 2
+  },
+  "final_class_members_after_refit": {
+    "language_class_000000": [
+      "alice",
+      "bruno",
+      "cora",
+      "drew"
+    ],
+    "language_class_000002": [
+      "buys",
+      "carries",
+      "eats",
+      "likes"
+    ],
+    "language_class_000003": [
+      "kicks",
+      "throws"
+    ]
+  },
+  "class_quality": [
+    {
+      "class_id": "language_class_000000",
+      "members": 4,
+      "example_members": [
+        "alice",
+        "bruno",
+        "cora",
+        "drew"
+      ],
+      "cohesion": 0.9433281286906058,
+      "validation_unseen_pairs": 2,
+      "validation_events": 14,
+      "selected_weight": 1.0,
+      "validation_seen_pairs": 18,
+      "validation_seen_pair_loss_delta_nats": 0.03836947070040859,
+      "validation_gain_nats": 6.472057777809329,
+      "paired_edge_standard_error_nats": 0.0004604164545773947,
+      "selection_reason": "held-out unseen-pair improvement"
+    },
+    {
+      "class_id": "language_class_000001",
+      "members": 8,
+      "example_members": [
+        "apple",
+        "ball",
+        "bat",
+        "disc",
+        "frisbee",
+        "peach",
+        "pear",
+        "plum"
+      ],
+      "cohesion": 0.9986699278819064,
+      "validation_unseen_pairs": 0,
+      "selected_weight": 0.0,
+      "selection_reason": "insufficient held-out unseen-pair evidence",
+      "validation_seen_pairs": 0
+    },
+    {
+      "class_id": "language_class_000002",
+      "members": 3,
+      "example_members": [
+        "buys",
+        "eats",
+        "likes"
+      ],
+      "cohesion": 0.8811048455845265,
+      "validation_unseen_pairs": 3,
+      "validation_events": 12,
+      "selected_weight": 0.35,
+      "validation_seen_pairs": 3,
+      "validation_seen_pair_loss_delta_nats": 0.008944855712213989,
+      "validation_gain_nats": 0.6799065916622649,
+      "paired_edge_standard_error_nats": 0.17311005555245765,
+      "selection_reason": "held-out unseen-pair improvement"
+    },
+    {
+      "class_id": "language_class_000003",
+      "members": 3,
+      "example_members": [
+        "carries",
+        "kicks",
+        "throws"
+      ],
+      "cohesion": 0.827279121756547,
+      "validation_unseen_pairs": 2,
+      "validation_events": 8,
+      "selected_weight": 1.0,
+      "validation_seen_pairs": 3,
+      "validation_seen_pair_loss_delta_nats": 0.03453567142962625,
+      "validation_gain_nats": 4.2020409372415415,
+      "paired_edge_standard_error_nats": 0.04748354527822895,
+      "selection_reason": "held-out unseen-pair improvement"
+    }
+  ],
+  "class_quality_scope": "selection-stage clusters; final memberships are listed separately after full-data refit",
+  "unseen_pair_comparison": {
+    "comparison": "same word Observer weights; class mixing is the only predictor difference",
+    "pair_definition": "adjacent raw-token pair absent from training bigram counts",
+    "unseen_pairs": {
+      "events": 28,
+      "distinct_adjacent_pairs": 7,
+      "distinct_unseen_adjacent_pairs": 7,
+      "plain_cross_entropy_nats": 9.70556495620911,
+      "class_cross_entropy_nats": 5.159896671213377,
+      "paired_class_minus_plain_delta_nats_per_event": -4.545668284995729,
+      "source_group_bootstrap_95ci": [
+        -4.545668284995729,
+        -4.545668284995729
+      ],
+      "source_groups": 4
+    },
+    "seen_pairs": {
+      "events": 112,
+      "distinct_adjacent_pairs": 36,
+      "plain_cross_entropy_nats": 0.936551361052569,
+      "class_cross_entropy_nats": 0.9463142485483608,
+      "paired_class_minus_plain_delta_nats_per_event": 0.00976288749579116,
+      "source_group_bootstrap_95ci": [
+        0.00976288749579116,
+        0.00976288749579116
+      ],
+      "source_groups": 4
+    }
+  },
+  "unseen_pair_breakdown": [
+    {
+      "verb": "buys",
+      "object": "peach",
+      "events": 4,
+      "plain_cross_entropy_nats": 9.332823456190702,
+      "class_cross_entropy_nats": 5.199832531298739,
+      "class_minus_plain_delta_nats_per_event": -4.132990924891963
+    },
+    {
+      "verb": "carries",
+      "object": "frisbee",
+      "events": 4,
+      "plain_cross_entropy_nats": 10.427286361312003,
+      "class_cross_entropy_nats": 8.712478296647282,
+      "class_minus_plain_delta_nats_per_event": -1.7148080646647212
+    },
+    {
+      "verb": "carries",
+      "object": "plum",
+      "events": 4,
+      "plain_cross_entropy_nats": 10.02389379280581,
+      "class_cross_entropy_nats": 4.536144680732824,
+      "class_minus_plain_delta_nats_per_event": -5.4877491120729855
+    },
+    {
+      "verb": "eats",
+      "object": "apple",
+      "events": 4,
+      "plain_cross_entropy_nats": 9.332823456190702,
+      "class_cross_entropy_nats": 5.20023048142605,
+      "class_minus_plain_delta_nats_per_event": -4.132592974764653
+    },
+    {
+      "verb": "kicks",
+      "object": "ball",
+      "events": 4,
+      "plain_cross_entropy_nats": 9.667873217465374,
+      "class_cross_entropy_nats": 3.6317416410218764,
+      "class_minus_plain_delta_nats_per_event": -6.0361315764434975
+    },
+    {
+      "verb": "likes",
+      "object": "pear",
+      "events": 4,
+      "plain_cross_entropy_nats": 9.486381192033793,
+      "class_cross_entropy_nats": 5.207107426345006,
+      "class_minus_plain_delta_nats_per_event": -4.279273765688787
+    },
+    {
+      "verb": "throws",
+      "object": "disc",
+      "events": 4,
+      "plain_cross_entropy_nats": 9.667873217465374,
+      "class_cross_entropy_nats": 3.6317416410218764,
+      "class_minus_plain_delta_nats_per_event": -6.0361315764434975
+    }
+  ],
+  "bootstrap_samples": 2000,
+  "bootstrap_groups": 4,
+  "elapsed_seconds": 0.228,
+  "limitations": [
+    "Synthetic grammar is diagnostic, not evidence of broad language generalization.",
+    "Only four independent subject groups are available for bootstrap resampling.",
+    "The overlap case tests one hard single-membership cluster, not soft membership."
+  ]
+}
