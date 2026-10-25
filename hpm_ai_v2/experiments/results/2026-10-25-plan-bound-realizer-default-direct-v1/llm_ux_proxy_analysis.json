@@ -1,0 +1,50 @@
+{
+  "rating_count": 24,
+  "case_count_rated": 24,
+  "rater_count": 1,
+  "per_system": {
+    "HPM plan-bound realizer": {
+      "ratings": 24,
+      "mean_usefulness_1_to_5": 3.4166666666666665,
+      "useful_or_very_useful_rate": 0.75,
+      "preference_wins": 9
+    },
+    "legacy extractive realizer": {
+      "ratings": 24,
+      "mean_usefulness_1_to_5": 2.6666666666666665,
+      "useful_or_very_useful_rate": 0.4166666666666667,
+      "preference_wins": 0
+    }
+  },
+  "per_task_type": {
+    "grounded_qa": {
+      "HPM plan-bound realizer": {
+        "ratings": 24,
+        "mean_usefulness_1_to_5": 3.4166666666666665,
+        "useful_or_very_useful_rate": 0.75
+      },
+      "legacy extractive realizer": {
+        "ratings": 24,
+        "mean_usefulness_1_to_5": 2.6666666666666665,
+        "useful_or_very_useful_rate": 0.4166666666666667
+      }
+    }
+  },
+  "pairwise_preference": {
+    "hpm_wins": 9,
+    "baseline_wins": 0,
+    "ties": 15
+  },
+  "per_rater": {
+    "codex_llm_ux_proxy_v3": {
+      "rated_pairs": 24,
+      "hpm_useful_rate": 0.75,
+      "baseline_useful_rate": 0.4166666666666667,
+      "hpm_minus_baseline": 0.3333333333333333
+    }
+  },
+  "interpretation_limit": "Descriptive ratings reflect this packet and these raters; repeated ratings are clustered by person and do not establish population-wide preference.",
+  "assessment_type": "LLM-as-judge UX proxy",
+  "counts_toward_blinded_human_usefulness_gate": false,
+  "assessment_note": "One Codex heuristic rater scored 24 cases before consulting the A/B key. These scores provide a rough comparison only and do not constitute human evidence."
+}

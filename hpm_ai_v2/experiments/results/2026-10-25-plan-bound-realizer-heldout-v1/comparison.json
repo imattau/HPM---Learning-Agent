@@ -26,7 +26,7 @@
     "unsupported_sentence_rate": 0.0,
     "verified_answer_plans": 24
   },
-  "blinded_usefulness": "pending independent ratings",
+  "blinded_usefulness": "one human rater completed 24 cases; HPM mean 1.92/5 vs legacy extractive 2.83/5; legacy extractive preferred in 21 cases, HPM in 0, ties in 3. See human_usefulness_analysis.json.",
   "paired_cases": [
     {
       "question_id": "H1",
@@ -352,5 +352,6 @@
         "This binding can excite the next neuron or inhibit it."
       ]
     }
-  ]
+  ],
+  "human_usefulness_analysis": "human_usefulness_analysis.json"
 }

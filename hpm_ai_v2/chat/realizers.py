@@ -57,7 +57,7 @@ class PlanBoundRealizer:
         """Rank source-attribution lines plus a direct cited-claim option."""
         direct = f'{claim_text} [{index}]'
         if self.phrase_scorer is None:
-            return f'{prefixes[0]} “{claim_text}” [{index}]'
+            return direct
         candidates = tuple(f'{prefix} “{claim_text}” [{index}]' for prefix in prefixes)
         candidates += (direct,)
         ranked = [

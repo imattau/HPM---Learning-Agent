@@ -26,6 +26,7 @@ def test_each_rendered_claim_has_a_sentence_to_claim_and_citation_mapping():
     verifier = GroundingVerifier({"source": _Source(plan.claims[0].text + " " + plan.claims[1].text)})
 
     assert verifier.verify_realization(plan, realization)
+    assert realization.text.startswith("Water evaporates from the surface. [1]")
     assert len(realization.sentences) == 2
     assert [item.text for item in realization.sentences] == [claim.text for claim in plan.claims]
     assert all(item.claim_ids and item.citation_ids for item in realization.sentences)

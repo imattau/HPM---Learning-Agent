@@ -1,0 +1,70 @@
+{
+  "rating_count": 24,
+  "case_count_rated": 24,
+  "rater_count": 1,
+  "per_system": {
+    "HPM plan-bound realizer": {
+      "ratings": 24,
+      "mean_usefulness_1_to_5": 1.9166666666666667,
+      "useful_or_very_useful_rate": 0.0,
+      "preference_wins": 0
+    },
+    "Legacy extractive realizer": {
+      "ratings": 24,
+      "mean_usefulness_1_to_5": 2.8333333333333335,
+      "useful_or_very_useful_rate": 0.3333333333333333,
+      "preference_wins": 21
+    }
+  },
+  "per_task_type": {
+    "grounded_qa": {
+      "HPM plan-bound realizer": {
+        "ratings": 24,
+        "mean_usefulness_1_to_5": 1.9166666666666667,
+        "useful_or_very_useful_rate": 0.0
+      },
+      "Legacy extractive realizer": {
+        "ratings": 24,
+        "mean_usefulness_1_to_5": 2.8333333333333335,
+        "useful_or_very_useful_rate": 0.3333333333333333
+      }
+    }
+  },
+  "pairwise_preference": {
+    "hpm_wins": 0,
+    "baseline_wins": 21,
+    "ties": 3
+  },
+  "per_rater": {
+    "human-rater-01": {
+      "rated_pairs": 24,
+      "hpm_useful_rate": 0.0,
+      "baseline_useful_rate": 0.3333333333333333,
+      "hpm_minus_baseline": -0.3333333333333333,
+      "eligible_for_user_gate": true,
+      "passes_user_gate": false
+    }
+  },
+  "user_acceptance_gate": {
+    "minimum_ratings_per_user": 5,
+    "eligible_users": 1,
+    "users_passing_both_thresholds": 0,
+    "passing_user_rate": 0.0,
+    "passing_user_rate_wilson_ci95": [
+      0.0,
+      0.7934506856227626
+    ],
+    "user_level_summary": {
+      "eligible_raters": 1,
+      "mean_hpm_useful_rate": 0.0,
+      "mean_hpm_useful_rate_cluster_bootstrap_ci95": null,
+      "mean_baseline_useful_rate": 0.3333333333333333,
+      "mean_baseline_useful_rate_cluster_bootstrap_ci95": null,
+      "mean_hpm_minus_baseline": -0.3333333333333333,
+      "mean_hpm_minus_baseline_cluster_bootstrap_ci95": null
+    },
+    "threshold": "at least 80% of eligible raters must give HPM >=80% useful ratings and HPM may be at most 10 percentage points below the baseline",
+    "passed": false
+  },
+  "interpretation_limit": "Descriptive ratings reflect this packet and these raters; repeated ratings are clustered by person and do not establish population-wide preference."
+}

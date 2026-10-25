@@ -1,0 +1,397 @@
+{
+  "evaluation_set": "/home/lostcause/workspace/HPM---Learning-Agent/hpm_ai_v2/training/eval_sets/coverage_v1.jsonl",
+  "heldout_question_count": 24,
+  "comparison_baseline": "legacy extractive realizer",
+  "same_response_plan_for_both_realizers": true,
+  "plan_bound_realizer": {
+    "cases": 24,
+    "planned_claims": 37,
+    "returned_claims": 37,
+    "claim_coverage": 1.0,
+    "factual_sentences": 37,
+    "citation_faithful_sentences": 37,
+    "citation_faithfulness": 1.0,
+    "unsupported_sentences": 0,
+    "unsupported_sentence_rate": 0.0,
+    "verified_answer_plans": 24
+  },
+  "baseline_realizer": {
+    "cases": 24,
+    "planned_claims": 37,
+    "returned_claims": 23,
+    "claim_coverage": 0.6216216216216216,
+    "factual_sentences": 23,
+    "citation_faithful_sentences": 23,
+    "citation_faithfulness": 1.0,
+    "unsupported_sentences": 0,
+    "unsupported_sentence_rate": 0.0,
+    "verified_answer_plans": 24
+  },
+  "ranker_checkpoint": null,
+  "ranker_max_order": null,
+  "ranker_strategy": null,
+  "blinded_usefulness": "LLM UX proxy completed; new independent human ratings pending",
+  "paired_cases": [
+    {
+      "question_id": "H1",
+      "question": "Which part of the cell hosts respiration?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "It takes place mainly in the mitochondria of the cell. [1]\n\nSources:\n[1] Cellular respiration (resp, characters 64–118)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "It takes place mainly in the mitochondria of the cell.\n\nSource: Cellular respiration (resp, characters 64–118).",
+      "plan_bound_claims": [
+        "It takes place mainly in the mitochondria of the cell."
+      ]
+    },
+    {
+      "question_id": "H2",
+      "question": "What forms at divergent boundaries?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "At divergent boundaries plates move apart and new crust forms from rising magma. [1]\n\nSources:\n[1] Plate tectonics (tect, characters 298–378)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "At divergent boundaries plates move apart and new crust forms from rising magma.\n\nSource: Plate tectonics (tect, characters 298–378).",
+      "plan_bound_claims": [
+        "At divergent boundaries plates move apart and new crust forms from rising magma."
+      ]
+    },
+    {
+      "question_id": "H3",
+      "question": "What does myelin do?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "The axon of many neurons is wrapped in myelin, which speeds up the impulse. [1]\n\nSources:\n[1] Neurons (neuro, characters 250–325)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "The axon of many neurons is wrapped in myelin, which speeds up the impulse.\n\nSource: Neurons (neuro, characters 250–325).",
+      "plan_bound_claims": [
+        "The axon of many neurons is wrapped in myelin, which speeds up the impulse."
+      ]
+    },
+    {
+      "question_id": "H4",
+      "question": "What do vaccines expose the immune system to?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form. [1]\n\nSources:\n[1] The immune system (immune, characters 607–710)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form.\n\nSource: The immune system (immune, characters 607–710).",
+      "plan_bound_claims": [
+        "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form."
+      ]
+    },
+    {
+      "question_id": "H5",
+      "question": "Which gas is released when water molecules are split?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Oxygen is released as a by-product when water molecules are split. [1]\n\nSources:\n[1] Photosynthesis (photo, characters 314–380)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Oxygen is released as a by-product when water molecules are split.\n\nSource: Photosynthesis (photo, characters 314–380).",
+      "plan_bound_claims": [
+        "Oxygen is released as a by-product when water molecules are split."
+      ]
+    },
+    {
+      "question_id": "H6",
+      "question": "What is transpiration?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Definition: Plants also release water vapour into the air through transpiration. [1]\n\nSources:\n[1] The water cycle (water, characters 166–234)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Plants also release water vapour into the air through transpiration.\n\nSource: The water cycle (water, characters 166–234).",
+      "plan_bound_claims": [
+        "Plants also release water vapour into the air through transpiration."
+      ]
+    },
+    {
+      "question_id": "H7",
+      "question": "Explain how a neuron fires and sends an impulse.",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "A neuron receives signals through its dendrites and sends them along its axon. [1] When a neuron is stimulated enough, it fires an electrical impulse called an action potential. [2]\n\nSources:\n[1] Neurons (neuro, characters 76–154)\n[2] Neurons (neuro, characters 155–249)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "A neuron receives signals through its dendrites and sends them along its axon.\n\nSource: Neurons (neuro, characters 76–154).",
+      "plan_bound_claims": [
+        "A neuron receives signals through its dendrites and sends them along its axon.",
+        "When a neuron is stimulated enough, it fires an electrical impulse called an action potential."
+      ]
+    },
+    {
+      "question_id": "H8",
+      "question": "Describe the stages of cellular respiration.",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Cellular respiration releases energy from glucose using oxygen. [1]\n\nSources:\n[1] Cellular respiration (resp, characters 0–63)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Cellular respiration releases energy from glucose using oxygen.\n\nSource: Cellular respiration (resp, characters 0–63).",
+      "plan_bound_claims": [
+        "Cellular respiration releases energy from glucose using oxygen."
+      ]
+    },
+    {
+      "question_id": "H9",
+      "question": "How does rainfall form?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form. [1]\n\nSources:\n[1] The immune system (immune, characters 607–710)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form.\n\nSource: The immune system (immune, characters 607–710).",
+      "plan_bound_claims": [
+        "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form."
+      ]
+    },
+    {
+      "question_id": "H10",
+      "question": "How does subduction work?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form. [1] Subduction produces deep ocean trenches and volcanic arcs. [2]\n\nSources:\n[1] The immune system (immune, characters 607–710)\n[2] Plate tectonics (tect, characters 494–552)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form.\n\nSource: The immune system (immune, characters 607–710).",
+      "plan_bound_claims": [
+        "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form.",
+        "Subduction produces deep ocean trenches and volcanic arcs."
+      ]
+    },
+    {
+      "question_id": "H11",
+      "question": "How does the innate immune response protect the body?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "The immune system protects the body from infection by recognising and destroying pathogens. [1] The innate response is fast and attacks any pathogen in the same general way. [2]\n\nSources:\n[1] The immune system (immune, characters 0–91)\n[2] The immune system (immune, characters 92–169)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "The immune system protects the body from infection by recognising and destroying pathogens.\n\nSource: The immune system (immune, characters 0–91).",
+      "plan_bound_claims": [
+        "The immune system protects the body from infection by recognising and destroying pathogens.",
+        "The innate response is fast and attacks any pathogen in the same general way."
+      ]
+    },
+    {
+      "question_id": "H12",
+      "question": "How do the light reactions and the Calvin cycle fit together?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "The light-dependent reactions capture sunlight and produce ATP and NADPH. [1] The Calvin cycle then uses ATP and NADPH to fix carbon dioxide into glucose. [2]\n\nSources:\n[1] Photosynthesis (photo, characters 162–235)\n[2] Photosynthesis (photo, characters 236–312)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "The light-dependent reactions capture sunlight and produce ATP and NADPH.\n\nSource: Photosynthesis (photo, characters 162–235).",
+      "plan_bound_claims": [
+        "The light-dependent reactions capture sunlight and produce ATP and NADPH.",
+        "The Calvin cycle then uses ATP and NADPH to fix carbon dioxide into glucose."
+      ]
+    },
+    {
+      "question_id": "H13",
+      "question": "What are memory cells and how do vaccines use them?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Definition: Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form. [1]\n\nSources:\n[1] The immune system (immune, characters 607–710)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form.\n\nSource: The immune system (immune, characters 607–710).",
+      "plan_bound_claims": [
+        "Vaccines work by exposing the immune system to a harmless form of an antigen so that memory cells form."
+      ]
+    },
+    {
+      "question_id": "H14",
+      "question": "How fast do plates move and what moves them?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Definition: The plates float on the hot, slowly flowing mantle beneath them. [1] Heat from the Earth's interior drives convection currents in the mantle that move the plates. [2]\n\nSources:\n[1] Plate tectonics (tect, characters 92–156)\n[2] Plate tectonics (tect, characters 157–250)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "The plates float on the hot, slowly flowing mantle beneath them.\n\nSource: Plate tectonics (tect, characters 92–156).",
+      "plan_bound_claims": [
+        "The plates float on the hot, slowly flowing mantle beneath them.",
+        "Heat from the Earth's interior drives convection currents in the mantle that move the plates."
+      ]
+    },
+    {
+      "question_id": "H15",
+      "question": "What do the light-dependent reactions produce and what is stored as starch?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Definition: The light-dependent reactions capture sunlight and produce ATP and NADPH. [1] Plants store excess glucose as starch for later use. [2]\n\nSources:\n[1] Photosynthesis (photo, characters 162–235)\n[2] Photosynthesis (photo, characters 493–545)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "The light-dependent reactions capture sunlight and produce ATP and NADPH.\n\nSource: Photosynthesis (photo, characters 162–235).",
+      "plan_bound_claims": [
+        "The light-dependent reactions capture sunlight and produce ATP and NADPH.",
+        "Plants store excess glucose as starch for later use."
+      ]
+    },
+    {
+      "question_id": "H16",
+      "question": "What is fermentation and which cells make lactic acid?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "Definition: Muscle cells produce lactic acid during fermentation. [1]\n\nSources:\n[1] Cellular respiration (resp, characters 555–608)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Muscle cells produce lactic acid during fermentation.\n\nSource: Cellular respiration (resp, characters 555–608).",
+      "plan_bound_claims": [
+        "Muscle cells produce lactic acid during fermentation."
+      ]
+    },
+    {
+      "question_id": "H17",
+      "question": "What happens to water that soaks into the ground and to water that runs over the surface?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Definition: Some precipitation runs over the surface into streams and rivers, a process called runoff. [1] Other water soaks into the ground and becomes groundwater. [2]\n\nSources:\n[1] The water cycle (water, characters 356–446)\n[2] The water cycle (water, characters 447–505)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Some precipitation runs over the surface into streams and rivers, a process called runoff.\n\nSource: The water cycle (water, characters 356–446).",
+      "plan_bound_claims": [
+        "Some precipitation runs over the surface into streams and rivers, a process called runoff.",
+        "Other water soaks into the ground and becomes groundwater."
+      ]
+    },
+    {
+      "question_id": "H18",
+      "question": "How do transpiration and photosynthesis both involve plants and water?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 4,
+      "plan_bound_text": "Plants also release water vapour into the air through transpiration. [1] As the vapour rises it cools and condenses into clouds. [2] When cloud droplets grow heavy they fall as rain, snow or hail. [3] Some precipitation runs over the surface into streams and rivers, a process called runoff. [4]\n\nSources:\n[1] The water cycle (water, characters 166–234)\n[2] The water cycle (water, characters 235–290)\n[3] The water cycle (water, characters 291–354)\n[4] The water cycle (water, characters 356–446)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Plants also release water vapour into the air through transpiration.\n\nSource: The water cycle (water, characters 166–234).",
+      "plan_bound_claims": [
+        "Plants also release water vapour into the air through transpiration.",
+        "As the vapour rises it cools and condenses into clouds.",
+        "When cloud droplets grow heavy they fall as rain, snow or hail.",
+        "Some precipitation runs over the surface into streams and rivers, a process called runoff."
+      ]
+    },
+    {
+      "question_id": "H19",
+      "question": "Where do photosynthesis and respiration each happen in the cell?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 3,
+      "plan_bound_text": "Photosynthesis in algae and some bacteria also supplies most of the oxygen in the atmosphere. [1] Cellular respiration releases energy from glucose using oxygen. [2] Plates move only a few centimetres each year. [3]\n\nSources:\n[1] Photosynthesis (photo, characters 546–639)\n[2] Cellular respiration (resp, characters 0–63)\n[3] Plate tectonics (tect, characters 251–296)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Photosynthesis in algae and some bacteria also supplies most of the oxygen in the atmosphere.\n\nSource: Photosynthesis (photo, characters 546–639).",
+      "plan_bound_claims": [
+        "Photosynthesis in algae and some bacteria also supplies most of the oxygen in the atmosphere.",
+        "Cellular respiration releases energy from glucose using oxygen.",
+        "Plates move only a few centimetres each year."
+      ]
+    },
+    {
+      "question_id": "H20",
+      "question": "How is energy captured in photosynthesis and released in respiration?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Photosynthesis is the process plants use to convert light energy into chemical energy. [1] The light-dependent reactions capture sunlight and produce ATP and NADPH. [2]\n\nSources:\n[1] Photosynthesis (photo, characters 0–86)\n[2] Photosynthesis (photo, characters 162–235)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Photosynthesis is the process plants use to convert light energy into chemical energy.\n\nSource: Photosynthesis (photo, characters 0–86).",
+      "plan_bound_claims": [
+        "Photosynthesis is the process plants use to convert light energy into chemical energy.",
+        "The light-dependent reactions capture sunlight and produce ATP and NADPH."
+      ]
+    },
+    {
+      "question_id": "H21",
+      "question": "What role does heat play in evaporation and in moving the plates?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 2,
+      "plan_bound_text": "Plate tectonics is the theory that Earth's outer shell is divided into large moving plates. [1] Heat from the Earth's interior drives convection currents in the mantle that move the plates. [2]\n\nSources:\n[1] Plate tectonics (tect, characters 0–91)\n[2] Plate tectonics (tect, characters 157–250)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "Plate tectonics is the theory that Earth's outer shell is divided into large moving plates.\n\nSource: Plate tectonics (tect, characters 0–91).",
+      "plan_bound_claims": [
+        "Plate tectonics is the theory that Earth's outer shell is divided into large moving plates.",
+        "Heat from the Earth's interior drives convection currents in the mantle that move the plates."
+      ]
+    },
+    {
+      "question_id": "H22",
+      "question": "Who painted the Mona Lisa?",
+      "plan_act": "abstain",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 0,
+      "plan_bound_text": "I couldn't find an answer in the provided material.",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "I couldn't find an answer in the provided material.",
+      "plan_bound_claims": []
+    },
+    {
+      "question_id": "H23",
+      "question": "What year did the Roman empire fall?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "When cloud droplets grow heavy they fall as rain, snow or hail. [1]\n\nSources:\n[1] The water cycle (water, characters 291–354)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "When cloud droplets grow heavy they fall as rain, snow or hail.\n\nSource: The water cycle (water, characters 291–354).",
+      "plan_bound_claims": [
+        "When cloud droplets grow heavy they fall as rain, snow or hail."
+      ]
+    },
+    {
+      "question_id": "H24",
+      "question": "Which country hosts the Olympics next?",
+      "plan_act": "answer",
+      "plan_verified": true,
+      "plan_bound_verified": true,
+      "claim_count": 1,
+      "plan_bound_text": "This binding can excite the next neuron or inhibit it. [1]\n\nSources:\n[1] Neurons (neuro, characters 563–617)",
+      "rule_based_plan_bound_text": null,
+      "extractive_text": "This binding can excite the next neuron or inhibit it.\n\nSource: Neurons (neuro, characters 563–617).",
+      "plan_bound_claims": [
+        "This binding can excite the next neuron or inhibit it."
+      ]
+    }
+  ],
+  "legacy_extractive_realizer": {
+    "cases": 24,
+    "planned_claims": 37,
+    "returned_claims": 23,
+    "claim_coverage": 0.6216216216216216,
+    "factual_sentences": 23,
+    "citation_faithful_sentences": 23,
+    "citation_faithfulness": 1.0,
+    "unsupported_sentences": 0,
+    "unsupported_sentence_rate": 0.0,
+    "verified_answer_plans": 24
+  },
+  "llm_ux_proxy_analysis": "llm_ux_proxy_analysis.json"
+}
