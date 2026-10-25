@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import pickle
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
+
 from hpm_ai_v2.agents.reader_agent import ReaderAgent
+from hpm_ai_v2.agents.base_agent import LazyPatternMap
 from hpm_ai_v2.domains.ollama_embedding import OllamaEmbeddingTextDomainConfig
 from hpm_ai_v2.domains.text_domain import TextDomainConfig
 from hpm_ai_v2.training.study import (
@@ -20,7 +24,7 @@ from hpm_ai_v2.training.study import (
 def pretrain_corpus(
     corpus_paths: Iterable[str | Path], output_dir: str | Path,
     *, encoder: str = "tfidf", embedding_model: str = "qwen3-embedding:0.6b",
-    max_vocab: int = 20_000,
+    max_vocab: int = 20_000, hot_cap: int = 10_000,
 ) -> dict:
     sources_by_id = {}
     inputs = [Path(path) for path in corpus_paths]
@@ -56,8 +60,12 @@ def pretrain_corpus(
     checkpoint_dir.mkdir(parents=True, exist_ok=False)
     agent = ReaderAgent(
         config, dynamic_vocab=False, inject_blank_priors=False,
-        cold_dir=str(checkpoint_dir / "forest"),
+        cold_dir=str(checkpoint_dir / "forest"), hot_cap=hot_cap,
     )
+    # Corpus pretraining can create far more nodes than the hot forest holds.
+    # Keep IDs in the pattern index so that evicted nodes are not kept alive by
+    # a second, unbounded strong-reference map.
+    agent.patterns = LazyPatternMap(agent.forest, retain_resolved=False)
     trainer = SupervisedStudyTrainer(agent)
     trainer.ingest(sources)
     trainer.save_checkpoint(checkpoint_dir)
@@ -74,9 +82,32 @@ def pretrain_corpus(
         for pattern in agent.patterns.values()
     )
     shared_term_rows = [
-        sentence_ids for sentence_ids in getattr(agent, "term_sentences", {}).values()
+        (term, sentence_ids)
+        for term, sentence_ids in getattr(agent, "term_sentences", {}).items()
         if len(sentence_ids) >= 2
     ]
+    persisted_shared_term_links = 0
+    shared_term_link_mismatches = []
+    for term, sentence_ids in shared_term_rows:
+        node = agent.patterns.get(f"term_{term}")
+        if node is None:
+            shared_term_link_mismatches.append(term)
+            continue
+        node_path = agent.forest._cold_path(node.id)
+        try:
+            with np.load(node_path, allow_pickle=True) as data:
+                metadata = pickle.loads(data["metadata"].item())
+            child_ids = list(metadata.get("child_ids", ()))
+        except Exception:
+            child_ids = []
+        persisted_shared_term_links += len(child_ids)
+        if child_ids != list(sentence_ids):
+            shared_term_link_mismatches.append(term)
+    if shared_term_link_mismatches:
+        raise RuntimeError(
+            "checkpoint lost shared-term HFN child links for "
+            f"{len(shared_term_link_mismatches)} of {len(shared_term_rows)} terms"
+        )
     observer_compressed_count = sum(
         pattern.id.startswith("compressed(") for pattern in agent.patterns.values()
     )
@@ -108,12 +139,19 @@ def pretrain_corpus(
         "agent_state_bytes": (checkpoint_dir / "agent_state.pkl").stat().st_size,
         "forest_node_count": len(agent.forest),
         "pattern_count": pattern_count,
+        "pattern_index_loaded_object_count": len(agent.patterns.loaded_items()),
         "compact_pattern_reference_count": pattern_reference_count,
         "pattern_relation_type_counts": dict(sorted(relation_type_counts.items())),
         "shared_term_node_count": relation_type_counts.get("term", 0),
-        "shared_term_sentence_links": sum(map(len, shared_term_rows)),
+        "shared_term_sentence_links": persisted_shared_term_links,
+        "shared_term_sentence_index_links": sum(
+            len(sentence_ids) for _, sentence_ids in shared_term_rows
+        ),
+        "checkpoint_shared_term_links_verified": True,
+        "checkpoint_shared_term_link_mismatch_count": 0,
+        "hot_cap": hot_cap,
         "shared_term_reuse_ratio": (
-            sum(map(len, shared_term_rows)) / len(shared_term_rows)
+            persisted_shared_term_links / len(shared_term_rows)
             if shared_term_rows else 0.0
         ),
         "observer_compressed_node_count": observer_compressed_count,
@@ -130,12 +168,14 @@ def main() -> None:
     parser.add_argument("--corpus", action="append", type=Path, required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--max-vocab", type=int, default=20_000)
+    parser.add_argument("--hot-cap", type=int, default=10_000)
     parser.add_argument("--encoder", choices=("tfidf", "ollama_embedding"), default="tfidf")
     parser.add_argument("--embedding-model", default="qwen3-embedding:0.6b")
     args = parser.parse_args()
     print(json.dumps(pretrain_corpus(
         args.corpus, args.output_dir, max_vocab=args.max_vocab,
         encoder=args.encoder, embedding_model=args.embedding_model,
+        hot_cap=args.hot_cap,
     ), indent=2))
 
 

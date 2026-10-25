@@ -17,6 +17,7 @@ import pickle
 import random
 import shutil
 import time
+from collections.abc import Iterator
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -38,6 +39,104 @@ from hpm_ai_v2.utils.hfn_meta_controller import HFNMetaStrategyController
 
 if TYPE_CHECKING:
     from hpm_ai_v2.domains.base import DomainConfig
+
+
+class LazyPatternMap(dict):
+    """Dictionary-compatible pattern index that resolves cold HFN references on demand.
+
+    Large checkpoints store patterns as IDs into TieredForest. Resolving all IDs
+    during startup recursively materializes most of the graph and defeats the
+    forest's cold tier. Keep unresolved IDs in the index until callers access
+    their values.
+    """
+
+    def __init__(
+        self, forest: TieredForest, refs: dict[str, str] | None = None, *,
+        retain_resolved: bool = True,
+    ):
+        super().__init__()
+        self.forest = forest
+        self.pattern_refs = dict(refs or {})
+        # Checkpoint loading normally caches resolved entries for speed. Corpus
+        # pretraining can disable that cache so this index does not keep every
+        # observed HFN node alive after the forest evicts it to cold storage.
+        self.retain_resolved = bool(retain_resolved)
+
+    def __contains__(self, key: object) -> bool:
+        return dict.__contains__(self, key) or key in self.pattern_refs
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return dict.__getitem__(self, key)
+        except KeyError:
+            node_id = self.pattern_refs[key]
+            node = self.forest.get(node_id)
+            if node is None:
+                raise KeyError(key) from None
+            if self.retain_resolved:
+                dict.__setitem__(self, key, node)
+            return node
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.pattern_refs.pop(key, None)
+        node_id = getattr(value, "id", None)
+        if not self.retain_resolved and node_id is not None and node_id in self.forest:
+            self.pattern_refs[key] = node_id
+            dict.pop(self, key, None)
+            return
+        dict.__setitem__(self, key, value)
+
+    def __delitem__(self, key: str) -> None:
+        if key not in self:
+            raise KeyError(key)
+        dict.pop(self, key, None)
+        self.pattern_refs.pop(key, None)
+
+    def __iter__(self) -> Iterator[str]:
+        yield from dict.__iter__(self)
+        for key in self.pattern_refs:
+            if not dict.__contains__(self, key):
+                yield key
+
+    def __len__(self) -> int:
+        return len(set(dict.keys(self)).union(self.pattern_refs))
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> list[str]:
+        return list(iter(self))
+
+    def values(self) -> Iterator[Any]:
+        return (self[key] for key in self)
+
+    def items(self) -> Iterator[tuple[str, Any]]:
+        return ((key, self[key]) for key in self)
+
+    def items_for_prefix(self, prefix: str) -> Iterator[tuple[str, Any]]:
+        """Resolve only names beginning with ``prefix``."""
+        keys = dict.keys(self)
+        seen = set()
+        for key in keys:
+            if key.startswith(prefix):
+                seen.add(key)
+                yield key, self[key]
+        for key in self.pattern_refs:
+            if key.startswith(prefix) and key not in seen:
+                yield key, self[key]
+
+    def loaded_items(self):
+        """Return only already materialized entries without resolving cold IDs."""
+        return dict.items(self)
+
+    def unresolved_refs(self) -> dict[str, str]:
+        return {
+            key: node_id for key, node_id in self.pattern_refs.items()
+            if not dict.__contains__(self, key)
+        }
 
 
 class BaseHFNAgent:
@@ -799,7 +898,12 @@ class BaseHFNAgent:
         # their IDs here instead of pickling the dense HFN objects a second time.
         pattern_refs: dict[str, str] = {}
         inline_patterns: dict[str, Any] = {}
-        for name, pattern in self.patterns.items():
+        if isinstance(self.patterns, LazyPatternMap):
+            pattern_refs.update(self.patterns.unresolved_refs())
+            pattern_items = self.patterns.loaded_items()
+        else:
+            pattern_items = self.patterns.items()
+        for name, pattern in pattern_items:
             if isinstance(pattern, HFN) and pattern.id in self.forest:
                 pattern_refs[name] = pattern.id
             else:
@@ -834,11 +938,8 @@ class BaseHFNAgent:
             return
         with open(load_path, "rb") as f:
             state = pickle.load(f)
-        self.patterns = state.get("patterns", {})
-        for name, node_id in state.get("pattern_refs", {}).items():
-            node = self.forest.get(node_id)
-            if node is not None:
-                self.patterns[name] = node
+        self.patterns = LazyPatternMap(self.forest, state.get("pattern_refs", {}))
+        self.patterns.update(state.get("patterns", {}))
         
         # Meta stats recovery for dict-based controller
         if "meta_stats" in state and hasattr(self.meta, "_stats"):
