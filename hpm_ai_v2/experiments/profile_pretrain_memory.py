@@ -8,8 +8,9 @@ Example::
         --report /tmp/hpm-oasst-300-memory.json
 
 The profiler keeps process memory sampling separate from the training report,
-and reports the bytes held by TieredForest's all-node vector index.  It is a
-diagnostic tool; it does not impose a memory limit or change training behavior.
+and reports the bytes held by TieredForest's all-node vector index. An
+optional RSS ceiling interrupts the diagnostic run and removes its partial
+checkpoint; it does not change the training objective or model updates.
 """
 from __future__ import annotations
 

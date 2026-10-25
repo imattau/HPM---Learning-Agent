@@ -1,0 +1,34 @@
+{
+  "profile_status": "aborted_rss_limit",
+  "pretraining_report": null,
+  "memory_profile": {
+    "measurement": "sampled process RSS every 100 ms; vector-index bytes sum NumPy array sizes",
+    "elapsed_seconds": 44.510188444997766,
+    "peak_process_rss_bytes": 6453252096,
+    "rss_safety_limit_gib": 6.0,
+    "process_rss_at_capture_bytes": 6454484992,
+    "forest_vector_index_nodes": 22298,
+    "forest_vector_index_bytes": 1406201072,
+    "forest_hot_node_count": 10003,
+    "pattern_index_loaded_object_count": 0,
+    "term_index_terms": 4846,
+    "term_index_links": 46001
+  },
+  "profile_input": {
+    "corpus": "data/pretraining/oasst1_train_en_1000.jsonl",
+    "row_count": 1000,
+    "sample_sha256": "c9dfa6d1027cb3ab2d78d29e405d702c42fe334cf9df2e2c3015992a8bc2bbfa",
+    "max_rows": null,
+    "hot_cap": 10000,
+    "max_vocab": 20000
+  },
+  "code_provenance": {
+    "git_head": "f8e20addddca27a2fc8efcd92c6bb2b941c99bf1",
+    "files_sha256": {
+      "hpm_ai_v2/experiments/profile_pretrain_memory.py": "d45a38a7bee9d84038aaaa46b8b5e193a02ae5bf65b0dc4d9bf26875492f71c2",
+      "hpm_ai_v2/training/pretrain_hfn_corpus.py": "febdd5434dde66ceef6e809c8bb176b404d17b8ba87ce69949b8813b95cf3f33",
+      "hpm_ai_v2/agents/base_agent.py": "09c0f8a6be86fc50ef92455d4bee28606aa52ed7645d7b08c421599ec63a9fed",
+      "hfn/tiered_forest.py": "aff645fa187e1a7cf0387e3e523951fa27dd7e7e27497ada23286efbb8c6c4c0"
+    }
+  }
+}
